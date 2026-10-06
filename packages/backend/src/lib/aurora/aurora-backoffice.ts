@@ -355,7 +355,7 @@ export async function updateTenantStatus({
 }: {
   tenantId: string;
   status: ModelsTenantStatus;
-  /** Treat a 404 as success — for callers whose goal is the tenant being gone. */
+  /** Treat a 404 or 410 as success — for callers whose goal is the tenant being gone. */
   allowMissing?: boolean;
   /** Aborts the backoffice request. The caller owns the deadline. */
   signal?: AbortSignal;
@@ -372,7 +372,8 @@ export async function updateTenantStatus({
   });
 
   if (error) {
-    if (allowMissing && response?.status === 404) return;
+    // 410: Aurora has started deleting the tenant, which also leaves it gone.
+    if (allowMissing && (response?.status === 404 || response?.status === 410)) return;
     throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
       cause: error,
     });

@@ -369,6 +369,19 @@ describe('updateTenantStatus', () => {
     ).resolves.toBeUndefined();
   });
 
+  // Aurora answers 410 once tenant deletion has started. A re-driven teardown
+  // must get past the disable step to resume the DELETE.
+  it('treats a 410 as success when allowMissing is set', async () => {
+    mockSetTenantStatus.mockResolvedValue({
+      error: { message: 'Tenant is deleted' },
+      response: { status: 410 },
+    });
+
+    await expect(
+      updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED', allowMissing: true }),
+    ).resolves.toBeUndefined();
+  });
+
   it('still throws on a non-404 when allowMissing is set', async () => {
     mockSetTenantStatus.mockResolvedValue({
       error: { message: 'boom' },
