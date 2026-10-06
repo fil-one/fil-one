@@ -1,7 +1,7 @@
 import {
   createClient,
   createTenantV2,
-  createTenantToken,
+  createTenantTokenV2,
   getBucketStorageMetrics,
   getTenantV2,
   getTenantOperationMetrics,
@@ -13,6 +13,7 @@ import {
   type ModelOperationMetricsSample,
   type ModelStorageMetricsSample,
   type ModelsTenantStatus,
+  type RbacPortalPermission,
   type ModelsTenantWithMetricsBackofficeResponseV2,
 } from '@filone/aurora-backoffice-client';
 import { instrumentClient } from './aurora-api-metrics.ts';
@@ -190,6 +191,18 @@ export async function setupAuroraTenant({
   return { lastSetupStep };
 }
 
+// The portal calls the console makes with the tenant token: bucket and S3
+// access-key management. Nothing else.
+const TENANT_TOKEN_PERMISSIONS: RbacPortalPermission[] = [
+  'read:s3:access_keys',
+  'create:s3:access_keys',
+  'delete:s3:access_keys',
+  'read:s3:buckets',
+  'create:s3:buckets',
+  'update:s3:buckets',
+  'delete:s3:buckets',
+];
+
 export interface CreateAuroraTenantApiKeyOptions {
   tenantId: string;
   orgId: string;
@@ -210,11 +223,11 @@ export async function createAuroraTenantApiKey({
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error, response } = await createTenantToken({
+  const { data, error, response } = await createTenantTokenV2({
     client,
     signal,
     path: { partnerId, tenantId },
-    body: { name: `filone-${orgId}` },
+    body: { name: `filone-${orgId}`, permissions: TENANT_TOKEN_PERMISSIONS },
     throwOnError: false,
   });
 
