@@ -155,7 +155,7 @@ export function PaymentForm({
     <form onSubmit={handleSubmit}>
       <ModalHeader onClose={onClose}>Add payment method</ModalHeader>
       <ModalBody>
-        <p className="text-sm text-[#677183] mb-4">Pay as you go — $4.99/TB/month</p>
+        <p className="text-sm text-[#677183] mb-4">Pay as you go — $5.99/TB/month</p>
 
         {/* Security banner */}
         <div className="flex items-center gap-[10px] rounded-lg bg-[rgba(243,244,246,0.5)] p-[10px] mb-4">
@@ -236,7 +236,7 @@ export function PaymentForm({
           </div>
 
           <p className="text-center text-meta text-[#677183]">
-            Pay for the storage you use, $4.99/month minimum.
+            Pay for the storage you use, $5.99/month minimum.
             <br />
             Cancel anytime.
           </p>

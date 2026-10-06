@@ -236,7 +236,7 @@ export function DashboardPage() {
               <span className="font-medium text-zinc-900">Free trial</span>
               <span className="text-zinc-500">
                 {' '}
-                — Add a payment method to unlock unlimited storage at $4.99/TB
+                — Add a payment method to unlock unlimited storage at $5.99/TB
               </span>
             </p>
           </div>
