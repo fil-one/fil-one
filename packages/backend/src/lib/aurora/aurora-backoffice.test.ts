@@ -39,8 +39,8 @@ const mockGetTenant = vi.fn((_options: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/aurora-backoffice-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
-  createTenant: (options: Record<string, unknown>) => mockPostTenants(options),
-  listTenants: (options: Record<string, unknown>) => mockGetTenants(options),
+  createTenantV2: (options: Record<string, unknown>) => mockPostTenants(options),
+  listTenantsV2: (options: Record<string, unknown>) => mockGetTenants(options),
   getTenantStorageMetrics: (options: Record<string, unknown>) => mockGetStorage(options),
   getTenantOperationMetrics: (options: Record<string, unknown>) => mockGetOperations(options),
   setupS3Component: (options: Record<string, unknown>) => mockSetupS3Component(options),
@@ -72,7 +72,7 @@ describe('createAuroraTenant', () => {
     expect(result).toStrictEqual({ auroraTenantId: 'aurora-tenant-123' });
   });
 
-  it('calls postPartnersByPartnerIdTenants with correct parameters', async () => {
+  it('creates the tenant through the v2 endpoint', async () => {
     mockPostTenants.mockResolvedValue({ data: { id: 'new-tenant' }, error: undefined });
 
     await createAuroraTenant({ orgId: 'org-123', displayName: 'My Org' });

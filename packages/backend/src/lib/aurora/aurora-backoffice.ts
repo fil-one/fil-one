@@ -1,12 +1,12 @@
 import {
   createClient,
-  createTenant,
+  createTenantV2,
   createTenantToken,
   getBucketStorageMetrics,
   getTenant,
   getTenantOperationMetrics,
   getTenantStorageMetrics,
-  listTenants,
+  listTenantsV2,
   setTenantStatus,
   setupS3Component,
   type ModelsSetupStep,
@@ -66,7 +66,7 @@ export async function createAuroraTenant({
   const regionId = process.env.AURORA_REGION_ID!;
   const client = createBackofficeClient();
 
-  const { data, error, response } = await createTenant({
+  const { data, error, response } = await createTenantV2({
     client,
     signal,
     path: { partnerId },
@@ -116,7 +116,7 @@ async function findAuroraTenantByOrgId({
   orgId: string;
   signal?: AbortSignal;
 }): Promise<CreateAuroraTenantResult> {
-  const { data, error } = await listTenants({
+  const { data, error } = await listTenantsV2({
     client,
     signal,
     path: { partnerId },
