@@ -3,7 +3,7 @@ import {
   createTenantV2,
   createTenantToken,
   getBucketStorageMetrics,
-  getTenant,
+  getTenantV2,
   getTenantOperationMetrics,
   getTenantStorageMetrics,
   listTenantsV2,
@@ -13,7 +13,7 @@ import {
   type ModelOperationMetricsSample,
   type ModelStorageMetricsSample,
   type ModelsTenantStatus,
-  type ModelsTenantWithMetricsBackofficeResponse,
+  type ModelsTenantWithMetricsBackofficeResponseV2,
 } from '@filone/aurora-backoffice-client';
 import { instrumentClient } from './aurora-api-metrics.ts';
 import { getAuroraBackofficeSecrets } from '../auth-secrets.ts';
@@ -23,7 +23,7 @@ export type {
   ModelOperationMetricsSample,
   ModelStorageMetricsSample,
   ModelsTenantStatus,
-  ModelsTenantWithMetricsBackofficeResponse,
+  ModelsTenantWithMetricsBackofficeResponseV2,
 };
 
 export class DuplicateTokenNameError extends Error {
@@ -473,11 +473,11 @@ export async function getTenantInfo({
   tenantId: string;
   /** Aborts the backoffice request. The caller owns the deadline. */
   signal?: AbortSignal;
-}): Promise<ModelsTenantWithMetricsBackofficeResponse> {
+}): Promise<ModelsTenantWithMetricsBackofficeResponseV2> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error } = await getTenant({
+  const { data, error } = await getTenantV2({
     client,
     signal,
     path: { partnerId, tenantId },
@@ -517,7 +517,7 @@ export async function getTenantStatus({
     const partnerId = process.env.AURORA_PARTNER_ID!;
     const client = createBackofficeClient();
 
-    const { data, error, response } = await getTenant({
+    const { data, error, response } = await getTenantV2({
       client,
       signal,
       path: { partnerId, tenantId },

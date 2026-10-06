@@ -46,7 +46,7 @@ vi.mock('@filone/aurora-backoffice-client', () => ({
   setupS3Component: (options: Record<string, unknown>) => mockSetupS3Component(options),
   createTenantToken: (options: Record<string, unknown>) => mockPostTokens(options),
   setTenantStatus: (options: Record<string, unknown>) => mockSetTenantStatus(options),
-  getTenant: (options: Record<string, unknown>) => mockGetTenant(options),
+  getTenantV2: (options: Record<string, unknown>) => mockGetTenant(options),
   getBucketStorageMetrics: (options: Record<string, unknown>) =>
     mockGetBucketStorageMetrics(options),
 }));

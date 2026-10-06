@@ -794,12 +794,13 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('getTenantInfo', () => {
-    it('maps backoffice tenant info, applying defaults for missing fields', async () => {
+    it('maps backoffice tenant info, reading limits from the S3 component', async () => {
       mockGetTenantInfo.mockResolvedValue({
         bucketCount: 2,
-        bucketQuantityLimit: 50,
         keyCount: 3,
-        accessKeyQuantityLimit: 200,
+        components: {
+          s3: { properties: { limits: { bucketQuantityLimit: 50, accessKeyQuantityLimit: 200 } } },
+        },
         status: 'ACTIVE',
       });
 
