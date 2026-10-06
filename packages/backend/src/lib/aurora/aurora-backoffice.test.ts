@@ -123,6 +123,29 @@ describe('createAuroraTenant', () => {
     expect(result).toStrictEqual({ auroraTenantId: 'existing-tenant-id' });
   });
 
+  // Aurora caps pageSize at 20, so the lookup filters by name instead of
+  // scanning a page that may not hold the tenant.
+  it('looks up the existing tenant by org name on 409 Conflict', async () => {
+    mockPostTenants.mockResolvedValue({
+      data: undefined,
+      error: { message: 'Org already exists' },
+      response: { status: 409 },
+    });
+    mockGetTenants.mockResolvedValue({
+      data: { items: [{ id: 'existing-tenant-id', name: 'org-123' }] },
+      error: undefined,
+    });
+
+    await createAuroraTenant({ orgId: 'org-123', displayName: 'My Org' });
+
+    expect(mockGetTenants).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: { partnerId: 'test-partner' },
+        query: { orgName: 'org-123' },
+      }),
+    );
+  });
+
   it('throws when 409 but tenant not found in list', async () => {
     mockPostTenants.mockResolvedValue({
       data: undefined,
