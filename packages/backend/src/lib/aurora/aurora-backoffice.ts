@@ -121,8 +121,8 @@ async function findAuroraTenantByOrgId({
     client,
     signal,
     path: { partnerId },
-    // TODO: paginate through all pages instead of assuming ≤1000 tenants
-    query: { pageSize: 1000 },
+    // Aurora caps pageSize at 20; orgName matches the tenant name exactly.
+    query: { orgName: orgId },
     throwOnError: false,
   });
 
