@@ -971,6 +971,10 @@ describe('auroraOrchestrator signal forwarding', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   // Each case names the Aurora-facing mocks the method must reach; the test
   // checks every one of them received the caller's signal in its options.
   const cases: Array<{
@@ -1052,7 +1056,7 @@ describe('auroraOrchestrator signal forwarding', () => {
         vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'true');
         mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
         mockDeleteAuroraTenant.mockResolvedValue(undefined);
-        return auroraOrchestrator.deleteTenant('t', { signal }).finally(() => vi.unstubAllEnvs());
+        return auroraOrchestrator.deleteTenant('t', { signal });
       },
       mocks: [mockUpdateAuroraTenantStatusApi, mockDeleteAuroraTenant],
     },
