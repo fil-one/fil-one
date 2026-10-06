@@ -30,6 +30,7 @@ import {
   mapToModelsTenantStatus,
   updateTenantStatus as updateAuroraTenantStatusApi,
   getTenantInfo,
+  deleteAuroraTenant,
 } from '../aurora/aurora-backoffice.ts';
 import {
   getBucketStorageSamples,
@@ -124,8 +125,13 @@ export const auroraOrchestrator = {
           allowMissing: true,
           signal: opts?.signal,
         });
-        // TODO(FIL-919): delete the tenant once Aurora's Backoffice API exposes a
-        // DELETE. Until then buckets and objects survive the teardown.
+        // Disabling first cuts access even when Aurora refuses the DELETE (409:
+        // component setup incomplete, or another update in progress). The
+        // DELETE is live on Aurora's dev backoffice only, so production keeps
+        // the disable-only teardown until the flag is turned on there.
+        if (process.env.AURORA_TENANT_DELETE_ENABLED === 'true') {
+          await deleteAuroraTenant({ tenantId, signal: opts?.signal });
+        }
       },
       { ...TENANT_DELETE_RETRY, signal: opts?.signal },
     );
