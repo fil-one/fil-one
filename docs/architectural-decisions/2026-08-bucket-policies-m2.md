@@ -180,12 +180,15 @@ for an Owner carries every action; the one it writes for an Admin leaves out the
 two mutating data-protection actions, which an Owner can still grant them
 deliberately on a given bucket.
 
-The console writes these as statements labelled `filone-owners` and
-`filone-admins`, plus `filone-creator` for a Member who creates a bucket, and the
-fan-out finds them again by those labels. The labels are defaults, not a
-reserved namespace: a person may give any statement any label. The console only
-keeps the three it writes from being renamed, so the fan-out can still find
-them.
+The console labels the statements it writes `filone-owners` and `filone-admins`,
+plus `filone-creator` for a Member who creates a bucket, and the fan-out finds
+them again by those labels and rewrites them. The storage system reserves no
+label. It stores a `Sid` and never evaluates it. The console reserves the three
+labels for its own allow statements so that the fan-out never rewrites a
+statement a person wrote. Two checks enforce this. The policy write accepts each
+reserved label at most once per policy, and only on an Allow statement. The
+statement editor refuses a reserved label as the name of a statement a person
+adds or edits.
 
 The fan-out is the price of keeping roles out of the storage system, and it
 cannot be atomic. A promotion that fails halfway leaves the member unscoped on
