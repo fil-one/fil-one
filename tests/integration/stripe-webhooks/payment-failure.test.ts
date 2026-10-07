@@ -1,4 +1,5 @@
 import { describe, it, beforeAll, afterAll, expect } from 'vitest';
+import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import {
   createTestCustomer,
   attachDecliningCard,
@@ -10,6 +11,9 @@ import {
   pollForPaymentMethod,
   getBillingRecord,
   testOrgId,
+  getDynamoClient,
+  getBillingTableName,
+  pollUntil,
 } from './helpers.js';
 
 describe('Payment Failure (invoice.payment_failed)', () => {
@@ -52,5 +56,32 @@ describe('Payment Failure (invoice.payment_failed)', () => {
       paymentMethodExpYear: { N: expect.any(String) },
       paymentMethodExpMonth: { N: expect.any(String) },
     });
+  });
+
+  it('marks the event processed once the worker has handled it', async () => {
+    const invoiceId = await createAndFailInvoice(cusId);
+
+    // The worker writes the mark after the billing update. Without it, Stripe's
+    // later redeliveries of the event would be processed again.
+    const eventId = await pollUntil(async () => {
+      const { data } = await getStripeClient().events.list({
+        type: 'invoice.payment_failed',
+        limit: 20,
+      });
+      const event = data.find((e) => (e.data.object as { id?: string }).id === invoiceId);
+      return event?.id ?? null;
+    }, 30_000);
+
+    const mark = await pollUntil(async () => {
+      const { Item } = await getDynamoClient().send(
+        new GetItemCommand({
+          TableName: getBillingTableName(),
+          Key: { pk: { S: `WEBHOOK#${eventId}` }, sk: { S: 'EVENT' } },
+        }),
+      );
+      return Item ?? null;
+    }, 30_000);
+
+    expect(mark.eventType).toEqual({ S: 'invoice.payment_failed' });
   });
 });
