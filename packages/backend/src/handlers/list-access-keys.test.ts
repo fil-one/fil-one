@@ -149,7 +149,12 @@ describe('list-access-keys baseHandler', () => {
     const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
     const [listed] = JSON.parse(result.body!).keys;
-    expect(listed).toMatchObject({ id: 'key-9', principalId: 'user-1', region: 'us-east-9' });
+    expect(listed).toMatchObject({
+      id: 'key-9',
+      type: 'principal',
+      principalId: 'user-1',
+      region: 'us-east-9',
+    });
     expect(listed).not.toHaveProperty('permissions');
     expect(listed).not.toHaveProperty('bucketScope');
   });

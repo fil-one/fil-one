@@ -55,18 +55,18 @@ async function reachingBucket(
   keys: AccessKey[],
   { orgId, bucketName, region }: { orgId: string; bucketName: string; region?: string },
 ): Promise<AccessKey[]> {
-  if (!keys.some((key) => key.principalId)) return keys;
+  if (!keys.some((key) => key.type === 'principal')) return keys;
   const orchestrator =
     region && isSupportedRegion(region, process.env.FILONE_STAGE!)
       ? getOrchestratorForRegion(region)
       : undefined;
-  if (orchestrator?.accessModel !== 'iam') return keys.filter((key) => !key.principalId);
+  if (orchestrator?.accessModel !== 'iam') return keys.filter((key) => key.type !== 'principal');
   // Read path: never provisions.
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   const stored = tenantId ? await orchestrator.iam.getBucketPolicy(tenantId, bucketName) : null;
   return keys.filter(
     (key) =>
-      !key.principalId ||
+      key.type !== 'principal' ||
       (stored !== null && effectiveActions(stored.policy, key.principalId).length > 0),
   );
 }
