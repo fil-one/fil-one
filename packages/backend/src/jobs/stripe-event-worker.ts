@@ -415,15 +415,6 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
     },
   );
 
-  const latestInvoice = subscription.latest_invoice;
-  const attemptCount =
-    latestInvoice && typeof latestInvoice !== 'string' ? latestInvoice.attempt_count : undefined;
-  emitDunningEscalation({
-    stage: 'canceled',
-    reason: subscription.cancellation_details?.reason ?? 'unknown',
-    attemptCount: attemptCount ?? 0,
-  });
-
   // Write-lock the tenant on every orchestrator during grace period. A failure
   // fails the delivery, so SQS retries the event and parks it in the DLQ once
   // retries are spent; the daily grace-period-enforcer cron also attempts
@@ -433,6 +424,16 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
     assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'write-locked'));
     console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
   }
+
+  // Emitted once the delivery can no longer fail, so a retried event counts once.
+  const latestInvoice = subscription.latest_invoice;
+  const attemptCount =
+    latestInvoice && typeof latestInvoice !== 'string' ? latestInvoice.attempt_count : undefined;
+  emitDunningEscalation({
+    stage: 'canceled',
+    reason: subscription.cancellation_details?.reason ?? 'unknown',
+    attemptCount: attemptCount ?? 0,
+  });
 }
 
 async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
@@ -493,8 +494,6 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
     });
   }
 
-  emitInvoicePaid();
-
   // Re-enable the tenant on every orchestrator if recovering from
   // PastDue/GracePeriod. A failure fails the delivery, so SQS retries the event
   // and parks it in the DLQ once retries are spent. A refused write means the
@@ -503,6 +502,9 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
     assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'active'));
     console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
   }
+
+  // Emitted once the delivery can no longer fail, so a retried event counts once.
+  emitInvoicePaid();
 }
 
 async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {

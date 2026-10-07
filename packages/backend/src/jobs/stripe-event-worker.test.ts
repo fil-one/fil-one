@@ -1477,6 +1477,20 @@ describe('stripe-event-worker handler', () => {
       });
     });
 
+    it('does not emit stage=canceled from a delivery the write-lock fails', async () => {
+      // The failed delivery is retried; emitting here would count the
+      // cancellation once per attempt.
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
+        regionSyncFailure(new Error('Aurora API error')),
+      );
+
+      await expect(deliver()).rejects.toThrow();
+
+      expect(dunningEmissions()).toHaveLength(0);
+    });
+
     it('labels canceled by cancellation_requested when voluntary', async () => {
       setupStripeEvent(
         'customer.subscription.deleted',
@@ -1592,6 +1606,20 @@ describe('stripe-event-worker handler', () => {
           },
         ],
       });
+    });
+
+    it('does not emit from a delivery the re-activation fails', async () => {
+      // The failed delivery is retried; emitting here would count the payment
+      // once per attempt.
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
+        regionSyncFailure(new Error('Aurora API error')),
+      );
+
+      await expect(deliver()).rejects.toThrow();
+
+      expect(invoicePaidEmissions()).toHaveLength(0);
     });
 
     it('does not emit even when invoice.customer is null', async () => {
