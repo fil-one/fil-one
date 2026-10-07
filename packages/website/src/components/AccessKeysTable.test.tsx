@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { AccessKey } from '@filone/shared';
+import type { ServiceAccessKey } from '@filone/shared';
 import { AccessKeysTable } from './AccessKeysTable.js';
 import { ToastProvider } from './Toast/ToastProvider';
 
@@ -8,8 +8,9 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(<ToastProvider>{ui}</ToastProvider>);
 }
 
-function makeKey(overrides: Partial<AccessKey>): AccessKey {
+function makeKey(overrides: Partial<ServiceAccessKey>): ServiceAccessKey {
   return {
+    type: 'service',
     id: '1',
     keyName: 'Test Key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
