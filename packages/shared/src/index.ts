@@ -383,6 +383,8 @@ export type {
   BucketInfoPermission,
   GranularPermission,
   AccessKey,
+  ServiceAccessKey,
+  PrincipalAccessKey,
   ListAccessKeysResponse,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
-import type { AccessKey } from '@filone/shared';
+import type { ServiceAccessKey } from '@filone/shared';
 
 vi.mock('../lib/api.js', () => ({
   apiRequest: vi.fn(),
@@ -17,8 +17,9 @@ import { seedPermissions } from '../lib/test-permissions.js';
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function key(over: Partial<AccessKey> = {}): AccessKey {
+function key(over: Partial<ServiceAccessKey> = {}): ServiceAccessKey {
   return {
+    type: 'service',
     id: 'key-1',
     keyName: 'my key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',

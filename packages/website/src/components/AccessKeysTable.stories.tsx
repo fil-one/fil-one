@@ -16,6 +16,7 @@ type Story = StoryObj<typeof AccessKeysTable>;
 const mockKeys: AccessKey[] = [
   {
     id: '1',
+    type: 'service',
     keyName: 'Production API Key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
     createdAt: '2026-01-15T10:00:00Z',
@@ -27,6 +28,7 @@ const mockKeys: AccessKey[] = [
   },
   {
     id: '2',
+    type: 'service',
     keyName: 'Backup Read-Only',
     accessKeyId: 'ACCESS_KEY_09876EXAMPL',
     createdAt: '2026-02-20T08:00:00Z',
@@ -38,6 +40,7 @@ const mockKeys: AccessKey[] = [
   },
   {
     id: '3',
+    type: 'service',
     keyName: 'Deprecated Key',
     accessKeyId: 'ACCESS_KEY_00000EXAMPL',
     createdAt: '2025-06-01T12:00:00Z',
@@ -52,6 +55,7 @@ const mockKeys: AccessKey[] = [
 const keysWithBucketPermissions: AccessKey[] = [
   {
     id: '10',
+    type: 'service',
     keyName: 'Full Access Key',
     accessKeyId: 'ACCESS_KEY_FULL0EXAMPL',
     createdAt: '2026-03-10T10:00:00Z',
@@ -73,6 +77,7 @@ const keysWithBucketPermissions: AccessKey[] = [
   },
   {
     id: '11',
+    type: 'service',
     keyName: 'Bucket Info Reader',
     accessKeyId: 'ACCESS_KEY_INFO0EXAMPL',
     createdAt: '2026-03-12T09:00:00Z',

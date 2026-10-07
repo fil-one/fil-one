@@ -228,27 +228,13 @@ export const CreatePrincipalAccessKeySchema = z
 
 export type CreatePrincipalAccessKeyRequest = z.infer<typeof CreatePrincipalAccessKeySchema>;
 
-export interface AccessKey {
+interface AccessKeyBase {
   id: string;
   keyName: string;
   accessKeyId: string;
   createdAt: string;
   lastUsedAt?: string;
   status: AccessKeyStatus;
-  /**
-   * What the key carries. Absent on a principal-bound key, whose authority is
-   * whatever the bucket policies give its member at request time.
-   */
-  permissions?: AccessKeyPermission[];
-  granularPermissions?: GranularPermission[];
-  bucketScope?: AccessKeyBucketScope;
-  buckets?: string[];
-  /**
-   * The member this key is bound to, on a region serving the `iam` access
-   * model. Set on every key minted there; such a key holds no permissions or
-   * bucket list of its own.
-   */
-  principalId?: string;
   region?: S3Region;
   expiresAt?: string | null;
   /**
@@ -266,6 +252,28 @@ export interface AccessKey {
   rotatedAt?: string;
 }
 
+/** A key that carries its own permissions and bucket list. */
+export interface ServiceAccessKey extends AccessKeyBase {
+  type: 'service';
+  /** Absent on a recovered row, whose grant was never recorded. */
+  permissions?: AccessKeyPermission[];
+  granularPermissions?: GranularPermission[];
+  bucketScope?: AccessKeyBucketScope;
+  buckets?: string[];
+}
+
+/**
+ * A key bound to a member on a region serving the `iam` access model. It holds
+ * no permissions or bucket list; the bucket policies naming its member decide
+ * what it may do at request time.
+ */
+export interface PrincipalAccessKey extends AccessKeyBase {
+  type: 'principal';
+  principalId: string;
+}
+
+export type AccessKey = ServiceAccessKey | PrincipalAccessKey;
+
 export interface ListAccessKeysResponse {
   keys: AccessKey[];
 }
@@ -276,7 +284,7 @@ export interface CreateAccessKeyResponse {
   accessKeyId: string;
   secretAccessKey: string;
   createdAt: string;
-  /** Set when the key was bound to the caller's principal. See {@link AccessKey.principalId}. */
+  /** Set when the key was bound to the caller's principal. See {@link PrincipalAccessKey.principalId}. */
   principalId?: string;
 }
 
