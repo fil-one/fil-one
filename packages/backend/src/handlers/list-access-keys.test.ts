@@ -99,6 +99,7 @@ describe('list-access-keys baseHandler', () => {
       keys: [
         {
           id: 'key-1',
+          type: 'service',
           keyName: 'Production',
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
@@ -442,6 +443,7 @@ describe('list-access-keys baseHandler', () => {
       keys: [
         {
           id: 'key-1',
+          type: 'service',
           keyName: 'All Access',
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
@@ -453,6 +455,7 @@ describe('list-access-keys baseHandler', () => {
         },
         {
           id: 'key-2',
+          type: 'service',
           keyName: 'Scoped',
           accessKeyId: 'AKIA2222',
           createdAt: '2026-02-01T00:00:00Z',
