@@ -630,8 +630,8 @@ describe('stripe-event-worker handler', () => {
     });
 
     it('swallows a missing billing row, with a metric so it is not silent', async () => {
-      // The event carries a card's last four and expiry. A 500 would buy three
-      // days of Stripe retries and alert noise to redeliver that; post-verify
+      // The event carries a card's last four and expiry. A throw would buy
+      // retries and a DLQ entry to redeliver that; post-verify
       // the state is near-impossible and the metric is how anyone learns of it.
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       setupStripeEvent('customer.updated', mockCustomerObject());
@@ -675,8 +675,7 @@ describe('stripe-event-worker handler', () => {
     it('resolves the org from the billing row when the customer metadata carries none', async () => {
       // Nothing stamped metadata.orgId onto customers created before it, and
       // the re-key made no Stripe calls — so without this fallback every
-      // metadata write by the daily usage worker 500s and Stripe retries it
-      // until the endpoint is disabled.
+      // metadata write by the daily usage worker fails and ends up in the DLQ.
       setupStripeEvent(
         'customer.updated',
         mockCustomerObject({ metadata: { userId: MOCK_USER_ID } }),
@@ -701,10 +700,10 @@ describe('stripe-event-worker handler', () => {
       expect(legacyReads).toHaveLength(0);
     });
 
-    it('returns 200 for a customer no source can resolve to an org', async () => {
+    it('acknowledges a customer no source can resolve to an org', async () => {
       // The rows carrying no orgId were dispositioned by name before the
-      // re-key, so no retry converges on an answer: retrying would spend three
-      // days of redeliveries and then disable the endpoint.
+      // re-key, so no retry converges on an answer: retrying would spend every
+      // delivery and park the event in the DLQ.
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       setupStripeEvent(
         'customer.updated',
@@ -964,8 +963,9 @@ describe('stripe-event-worker handler', () => {
 
     it('fails the delivery when neither object names an org', async () => {
       // The org id is both the row's address and the tenant's name, so nothing
-      // can be written or locked. A 500 releases the idempotency claim and lets
-      // Stripe retry until the metadata is repaired.
+      // can be written or locked. The event stays unmarked, so it is retried and
+      // then parked in the DLQ, where it can be redriven once the metadata is
+      // repaired.
       setupStripeEvent(
         'customer.subscription.deleted',
         mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
@@ -1008,8 +1008,8 @@ describe('stripe-event-worker handler', () => {
         ).toBe(true);
       });
 
-      // Nothing can be resolved without it, but Stripe must not be asked to retry
-      // an event that will never succeed.
+      // Nothing can be resolved without it, and retrying an event that will
+      // never succeed only parks it in the DLQ.
       it('acknowledges when the subscription has no metadata.userId', async () => {
         setupStripeEvent('customer.subscription.deleted', mockSubscription({ metadata: {} }));
         setupDeletedCustomerRetrieve();
@@ -1097,9 +1097,8 @@ describe('stripe-event-worker handler', () => {
       expect(mockCustomersRetrieve).not.toHaveBeenCalled();
     });
 
-    // The old contract answered 500 so Stripe's retries would re-drive a failed
-    // region sync. The record and the sweeper own retries now, so the webhook
-    // always acknowledges — days of Stripe retries would disable the endpoint.
+    // The deletion record and the sweeper own retries, so the worker always
+    // acknowledges this event.
     it('acknowledges when customer.deleted has no userId in metadata', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject({ metadata: {} }));
       const error = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -1148,7 +1147,7 @@ describe('stripe-event-worker handler', () => {
   // 6. customer.subscription.trial_will_end
   // -----------------------------------------------------------------------
   describe('customer.subscription.trial_will_end', () => {
-    it('logs only, no UpdateItemCommand, idempotency claimed upfront', async () => {
+    it('logs only, no UpdateItemCommand, then marks the event processed', async () => {
       setupStripeEvent('customer.subscription.trial_will_end', mockSubscription());
 
       await deliver();

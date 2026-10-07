@@ -304,11 +304,11 @@ export class MissingOrgIdError extends Error {
  * name before the re-key (docs/BillingRekeyRunbook.md), so reaching this branch
  * means a Stripe object nobody has seen yet.
  *
- * It throws rather than logging and returning. The caller is a webhook handler:
- * a throw becomes a 500, which releases the idempotency claim and lets Stripe
- * retry — so once somebody repairs the object's metadata, the retries converge on
- * their own. Returning success would consume the event, and the status change it
- * carried would be gone with it.
+ * It throws rather than logging and returning. The caller is the Stripe event
+ * worker: a throw fails the delivery and leaves the event unmarked, so it is
+ * retried and then parked in the DLQ, to be redriven once somebody repairs the
+ * object's metadata. Returning success would consume the event, and the status
+ * change it carried would be gone with it.
  */
 export async function updateSubscriptionByUser(
   { orgId, userId }: { orgId?: string; userId?: string },

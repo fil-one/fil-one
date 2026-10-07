@@ -42,8 +42,6 @@ import {
   emitInvoicePaid,
 } from '../lib/stripe-webhook-metrics.ts';
 
-const LOG = '[stripe-event-worker]';
-
 const dynamo = getDynamoClient();
 
 export async function handler(event: SQSEvent): Promise<void> {
@@ -62,7 +60,7 @@ async function processRecord(stripeEvent: Stripe.Event): Promise<void> {
     new GetItemCommand({ TableName: tableName, Key: marshall(markKey), ConsistentRead: true }),
   );
   if (mark) {
-    console.warn(`${LOG} Already processed event`, { eventId: stripeEvent.id });
+    console.warn('[stripe-webhook] Already processed event:', stripeEvent.id);
     return;
   }
 
@@ -181,8 +179,8 @@ async function handleCustomerUpdated(customer: Stripe.Customer): Promise<void> {
   if (!orgId) {
     // Not a throw. The rows with no `orgId` were enumerated and dispositioned
     // by name before the re-key (docs/BillingRekeyRunbook.md), so no retry
-    // converges on an answer — Stripe would redeliver this for three days and
-    // then disable the endpoint over a card that no row can record.
+    // converges on an answer — a throw would spend every delivery and park the
+    // event in the DLQ over a card that no row can record.
     console.error('[stripe-webhook] customer.updated resolves to no org; payment method dropped', {
       customerId: customer.id,
       userId,
@@ -200,10 +198,10 @@ async function updatePaymentMethod(
   owner: { userId: string; orgId: string },
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
-  // A missing row is swallowed here rather than failing the webhook. The store
+  // A missing row is swallowed here rather than failing the delivery. The store
   // refuses to create one, and every other writer treats that refusal as an
   // error — but this one carries a card's last four digits and expiry, and a
-  // 500 buys three days of Stripe retries and alert noise to redeliver them.
+  // throw buys retries and a DLQ entry to redeliver them.
   // Post-verify the state is near-impossible; the metric is how anyone would
   // learn it happened at all.
   const { written } = await updateSubscriptionByUser(owner, {
@@ -290,7 +288,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Prom
   // subscription created before the metadata stamped an orgId names none, and
   // the org is the key the row is written under. Fetch the customer and resolve
   // against both — writing with no org resolves nothing and throws
-  // MissingOrgIdError, which Stripe would retry forever.
+  // MissingOrgIdError, which no retry can fix.
   const stripe = getStripeClient();
   const customer = await stripe.customers.retrieve(customerId);
   if ('deleted' in customer && customer.deleted) {

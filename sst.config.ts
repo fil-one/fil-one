@@ -1078,7 +1078,12 @@ export default $config({
     // orchestrator status sync. The worker does that processing. Events that
     // fail every delivery land in the DLQ, where they can be inspected and
     // redriven. See packages/backend/src/lib/stripe-event-queue.ts.
-    const stripeEventDlq = new sst.aws.Queue('StripeEventDlq', { fifo: true });
+    const stripeEventDlq = new sst.aws.Queue('StripeEventDlq', {
+      fifo: true,
+      // The SQS maximum, 14 days rather than the default 4. Stripe has its 200
+      // and will not redeliver, so an event parked here is the only copy left.
+      transform: { queue: { messageRetentionSeconds: 14 * 24 * 60 * 60 } },
+    });
 
     // FIFO so the message group (the Stripe customer) admits one in-flight
     // event per customer: a payment success cannot race the cancellation it
@@ -1093,8 +1098,8 @@ export default $config({
 
     const stripeEventWorker = createFn('StripeEventWorker', {
       handler: 'packages/backend/src/jobs/stripe-event-worker.handler',
-      // The resources the webhook linked while it processed events itself,
-      // plus the queue it consumes.
+      // Billing and user tables, Stripe secrets and orchestrator tokens, plus
+      // the queue it consumes.
       link: [...allResources, stripeEventQueue],
       environment: {
         ...orchestratorEnv,

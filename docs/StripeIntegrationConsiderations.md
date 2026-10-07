@@ -274,15 +274,15 @@ Radar prevents fraudulent payments. It does not verify identity. If identity ver
 Locking (`write-locked`, `disabled`) and unlocking (`active`) a tenant in response to billing
 changes propagates to **every region where the org has a provisioned tenant** — not just Aurora.
 All billing-driven status-change sites (grace-period enforcer, usage-reporting worker, Stripe
-webhook, subscription activation) go through the shared helper
+event worker, subscription activation) go through the shared helper
 `syncTenantStatusInProvisionedRegions`, so an account is locked/unlocked everywhere it exists.
 
 The retry budget for each region's probe + status update is the default several-retry policy for
-every caller. The Stripe webhook does not run this sync itself: it verifies the signature, enqueues
-the event on the `StripeEventQueue` FIFO queue and returns 200. The `StripeEventWorker` Lambda
-processes the event, including the sync. A failed sync fails the delivery, so SQS retries the
+every caller. The Stripe webhook verifies the signature, enqueues the event on the
+`StripeEventQueue` FIFO queue and returns 200; the `StripeEventWorker` Lambda processes the event,
+including the sync. A failed sync fails the delivery, so SQS retries the
 event (the sync is probe-first and idempotent) and moves it to `StripeEventDlq` once its retries are
-spent. The `grace-period-enforcer` cron also re-attempts locks. The `subscription-drift-checker`
+spent. `StripeEventDlq` keeps an event for 14 days. The `grace-period-enforcer` cron also re-attempts locks. The `subscription-drift-checker`
 cron (every 12h) is **observe-only** — it surfaces residual drift via logs/metrics for alerting,
 but does not itself reconcile.
 

@@ -206,8 +206,8 @@ describe('updateSubscriptionByUser', () => {
 
   it('throws when no org is named, rather than reporting success', async () => {
     // The key names the org and nothing else, so without one there is no row to
-    // address. The caller is a webhook handler: throwing becomes a 500, which
-    // releases the idempotency claim, so Stripe's retries converge once somebody
+    // address. The caller is the Stripe event worker: throwing fails the
+    // delivery and parks the event in the DLQ, to be redriven once somebody
     // repairs the object's metadata. Returning success consumes the event and
     // the status change it carried goes with it.
     ddbMock.on(UpdateItemCommand).resolves({});
