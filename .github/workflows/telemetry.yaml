@@ -52,7 +52,7 @@ jobs:
           fi
 
       - name: Export OpenTelemetry data
-        uses: paper2/github-actions-opentelemetry@78864c8924bb6f6507a2a5b1ed264697404588ca # v1.0.0
+        uses: paper2/github-actions-opentelemetry@cce01aab4e513c64cac26314e78dd354c88ba209 # v1.0.1
         env:
           WORKFLOW_RUN_ID: ${{ github.event.client_payload.run_id }}
           OTEL_SERVICE_NAME: filone-ci
