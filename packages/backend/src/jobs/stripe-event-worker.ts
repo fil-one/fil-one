@@ -81,7 +81,7 @@ async function processRecord(stripeEvent: Stripe.Event): Promise<void> {
   );
 }
 
-export async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
+async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
   switch (stripeEvent.type) {
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
