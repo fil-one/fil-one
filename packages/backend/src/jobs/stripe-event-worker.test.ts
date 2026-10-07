@@ -2,13 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
-  DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { buildEvent } from '../test/lambda-test-utilities.ts';
+import type { SQSEvent } from 'aws-lambda';
 import { type MetricEvent, reportMetric } from '../lib/metrics.ts';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -36,17 +35,14 @@ vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
     mockSyncTenantStatusInProvisionedRegions(...args),
 }));
 
-const mockConstructEvent = vi.fn();
 const mockCustomersRetrieve = vi.fn();
 const mockPaymentMethodsRetrieve = vi.fn();
 
 vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
-    webhooks: { constructEvent: mockConstructEvent },
     customers: { retrieve: mockCustomersRetrieve },
     paymentMethods: { retrieve: mockPaymentMethodsRetrieve },
   }),
-  getWebhookSecret: vi.fn().mockResolvedValue('whsec_test_fake'),
 }));
 
 const mockStartDeletion = vi.fn(async (_params: unknown) => undefined);
@@ -62,8 +58,7 @@ const reportMetricMock = vi.mocked(reportMetric);
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { handler } from './stripe-webhook.ts';
-import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.ts';
+import { handler } from './stripe-event-worker.ts';
 import { BILLING_IDENTITY_PROJECTION } from '../lib/subscription-store.ts';
 
 // ---------------------------------------------------------------------------
@@ -77,12 +72,11 @@ const MOCK_SUBSCRIPTION_ID = 'sub_test_456';
 const MOCK_EVENT_ID = 'evt_test_789';
 const MOCK_ORG_ID = 'test-org-uuid';
 
-function buildWebhookEvent(body: string, opts?: { isBase64Encoded?: boolean }) {
-  const evt = buildEvent();
-  evt.headers['stripe-signature'] = 'sig_test';
-  evt.body = opts?.isBase64Encoded ? Buffer.from(body).toString('base64') : body;
-  evt.isBase64Encoded = opts?.isBase64Encoded ?? false;
-  return evt;
+let currentEvent: unknown = {};
+
+/** Deliver the event set up by setupStripeEvent to the worker as one SQS record. */
+function deliver() {
+  return handler({ Records: [{ body: JSON.stringify(currentEvent) }] } as unknown as SQSEvent);
 }
 
 function mockSubscription(overrides?: Record<string, unknown>) {
@@ -128,11 +122,7 @@ function mockInvoiceForOrgSubscription(overrides?: Record<string, unknown>) {
 }
 
 function setupStripeEvent(type: string, object: unknown) {
-  mockConstructEvent.mockReturnValue({
-    id: MOCK_EVENT_ID,
-    type,
-    data: { object },
-  });
+  currentEvent = { id: MOCK_EVENT_ID, type, data: { object } };
 }
 
 function setupCustomerRetrieve(userId?: string, orgId?: string) {
@@ -239,7 +229,7 @@ function regionSyncFailure(cause: Error) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('stripe-webhook handler', () => {
+describe('stripe-event-worker handler', () => {
   function dunningEmissions(): MetricEvent[] {
     return reportMetricMock.mock.calls
       .map(([event]) => event)
@@ -250,9 +240,8 @@ describe('stripe-webhook handler', () => {
     ddbMock.reset();
     ddbMock.on(PutItemCommand).resolves({});
     ddbMock.on(UpdateItemCommand).resolves({});
-    ddbMock.on(DeleteItemCommand).resolves({});
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
-    mockConstructEvent.mockReset();
+    currentEvent = {};
     mockCustomersRetrieve.mockReset();
     mockPaymentMethodsRetrieve.mockReset();
     mockSyncTenantStatusInProvisionedRegions.mockReset();
@@ -262,78 +251,54 @@ describe('stripe-webhook handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 1. Signature verification
-  // -----------------------------------------------------------------------
-  describe('signature verification', () => {
-    it('returns 400 when stripe-signature header missing', async () => {
-      const evt = buildEvent();
-      // No stripe-signature header
-      const result = await handler(evt);
-      expect(result).toEqual({
-        statusCode: 400,
-        body: JSON.stringify({ message: 'Missing stripe-signature header' }),
-      });
-    });
-
-    it('returns 400 when constructEvent throws (invalid signature)', async () => {
-      mockConstructEvent.mockImplementation(() => {
-        throw new Error('Invalid signature');
-      });
-
-      const evt = buildWebhookEvent('{}');
-      const result = await handler(evt);
-      expect(result).toEqual({
-        statusCode: 400,
-        body: JSON.stringify({ message: 'Invalid signature' }),
-      });
-    });
-
-    it('decodes base64 body before verification', async () => {
-      const rawBody = JSON.stringify({ test: true });
-      setupStripeEvent('unknown.event', {});
-
-      const evt = buildWebhookEvent(rawBody, { isBase64Encoded: true });
-      await handler(evt);
-
-      expect(mockConstructEvent).toHaveBeenCalledWith(rawBody, 'sig_test', 'whsec_test_fake');
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 2. Idempotency
+  // 1. Idempotency: an event is marked processed once its handling succeeds
   // -----------------------------------------------------------------------
   describe('idempotency', () => {
-    it('returns 200 without processing when event already handled', async () => {
+    const MARK_KEY = { pk: { S: `WEBHOOK#${MOCK_EVENT_ID}` }, sk: { S: 'EVENT' } };
+
+    it('skips an event already marked processed', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
-      const condError = new Error('Conditional check failed');
-      (condError as { name: string }).name = 'ConditionalCheckFailedException';
-      ddbMock.on(PutItemCommand).rejects(condError);
+      ddbMock
+        .on(GetItemCommand, { Key: MARK_KEY })
+        .resolves({ Item: { ...MARK_KEY, eventType: { S: 'customer.subscription.created' } } });
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      await deliver();
 
-      // Should NOT have called UpdateItemCommand
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
 
-    it('records idempotency PutItem before processing (with TTL ~30 days)', async () => {
+    it('reads the mark with a strongly consistent read', async () => {
       setupStripeEvent('unknown.event', {});
 
+      await deliver();
+
+      expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input).toStrictEqual({
+        TableName: TABLE_NAME,
+        Key: MARK_KEY,
+        ConsistentRead: true,
+      });
+    });
+
+    it('marks the event after processing it (with TTL ~30 days)', async () => {
+      setupStripeEvent('customer.subscription.created', mockSubscription());
+
       const before = Math.floor(Date.now() / 1000);
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
       const after = Math.floor(Date.now() / 1000);
 
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
-      expect(putCalls).toHaveLength(1);
+      const writes = ddbMock
+        .calls()
+        .map((c) => c.args[0])
+        .filter((cmd) => cmd instanceof UpdateItemCommand || cmd instanceof PutItemCommand);
+      expect(writes.map((cmd) => cmd.constructor)).toEqual([UpdateItemCommand, PutItemCommand]);
 
-      const input = putCalls[0].args[0].input;
+      const input = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
       expect(input).toStrictEqual({
         TableName: TABLE_NAME,
-        ConditionExpression: 'attribute_not_exists(pk)',
         Item: {
-          pk: { S: `WEBHOOK#${MOCK_EVENT_ID}` },
-          sk: { S: 'EVENT' },
-          eventType: { S: 'unknown.event' },
+          ...MARK_KEY,
+          eventType: { S: 'customer.subscription.created' },
           processedAt: { S: expect.any(String) },
           ttl: { N: expect.any(String) },
         },
@@ -345,37 +310,22 @@ describe('stripe-webhook handler', () => {
       expect(ttl).toBeLessThanOrEqual(after + thirtyDays + 1);
     });
 
-    it('deletes idempotency record when processing fails', async () => {
+    it('leaves the event unmarked and fails the delivery when processing fails', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
       ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB error'));
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
+      await expect(deliver()).rejects.toThrow('DynamoDB error');
 
-      const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
-      expect(deleteCalls).toHaveLength(1);
-      expect(deleteCalls[0].args[0].input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: {
-          pk: { S: `WEBHOOK#${MOCK_EVENT_ID}` },
-          sk: { S: 'EVENT' },
-        },
-      });
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
 
-    it('returns 500 even if delete of idempotency record fails', async () => {
+    it('fails the delivery when the mark cannot be read', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
-      ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB error'));
-      ddbMock.on(DeleteItemCommand).rejects(new Error('Delete failed'));
+      ddbMock.on(GetItemCommand, { Key: MARK_KEY }).rejects(new Error('DynamoDB get failed'));
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
+      await expect(deliver()).rejects.toThrow('DynamoDB get failed');
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
   });
 
@@ -386,7 +336,7 @@ describe('stripe-webhook handler', () => {
     it('updates the billing record named by subscription.metadata', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -405,7 +355,6 @@ describe('stripe-webhook handler', () => {
         },
         ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('falls back to customer metadata when subscription metadata empty', async () => {
@@ -414,7 +363,7 @@ describe('stripe-webhook handler', () => {
       // which metadata the handler read.
       setupCustomerRetrieve('fallback-user', 'fallback-org');
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -427,15 +376,13 @@ describe('stripe-webhook handler', () => {
         }),
       );
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('skips when customer is deleted (fallback path)', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription({ metadata: {} }));
       setupDeletedCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -447,8 +394,7 @@ describe('stripe-webhook handler', () => {
         metadata: {},
       });
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -458,7 +404,7 @@ describe('stripe-webhook handler', () => {
         mockSubscription({ customer: 'cus_string_id' }),
       );
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
       // No error thrown, processed correctly
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
     });
@@ -471,7 +417,7 @@ describe('stripe-webhook handler', () => {
         }),
       );
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
     });
 
@@ -485,15 +431,14 @@ describe('stripe-webhook handler', () => {
       );
       setupDeletedCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
     it('passes through non-active subscription status', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'past_due' }));
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -504,21 +449,19 @@ describe('stripe-webhook handler', () => {
           }),
         }),
       );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('skips DDB update when Stripe status is incomplete (unmappable)', async () => {
       const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'incomplete' }));
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(consoleSpy).toHaveBeenCalledWith(
         '[stripe-webhook] Unmappable Stripe status, skipping update',
         expect.objectContaining({ stripeStatus: 'incomplete' }),
       );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       consoleSpy.mockRestore();
     });
 
@@ -528,7 +471,7 @@ describe('stripe-webhook handler', () => {
         mockSubscription({ status: 'incomplete_expired' }),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -539,13 +482,12 @@ describe('stripe-webhook handler', () => {
           }),
         }),
       );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('maps unpaid to past_due', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'unpaid' }));
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -556,7 +498,6 @@ describe('stripe-webhook handler', () => {
           }),
         }),
       );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('falls back to customer lookup when userId is empty string', async () => {
@@ -566,7 +507,7 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve('fallback-user', 'fallback-org');
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -579,7 +520,6 @@ describe('stripe-webhook handler', () => {
           },
         }),
       );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
 
@@ -590,7 +530,7 @@ describe('stripe-webhook handler', () => {
     it('processes same as created (UpdateItemCommand with correct key/values)', async () => {
       setupStripeEvent('customer.subscription.updated', mockSubscription());
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -609,7 +549,6 @@ describe('stripe-webhook handler', () => {
         },
         ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('sets currentPeriodEnd from subscription.items.data[0].current_period_end', async () => {
@@ -620,7 +559,7 @@ describe('stripe-webhook handler', () => {
         }),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -631,7 +570,6 @@ describe('stripe-webhook handler', () => {
           }),
         }),
       );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('handles empty items.data array (defaults to epoch 0)', async () => {
@@ -642,7 +580,7 @@ describe('stripe-webhook handler', () => {
         }),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -653,7 +591,6 @@ describe('stripe-webhook handler', () => {
           }),
         }),
       );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
 
@@ -671,7 +608,7 @@ describe('stripe-webhook handler', () => {
     it('updates payment method in DynamoDB when default_payment_method is expanded object', async () => {
       setupStripeEvent('customer.updated', mockCustomerObject());
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -690,7 +627,6 @@ describe('stripe-webhook handler', () => {
         },
         ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
       });
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('swallows a missing billing row, with a metric so it is not silent', async () => {
@@ -703,10 +639,8 @@ describe('stripe-webhook handler', () => {
       (noRow as { name: string }).name = 'ConditionalCheckFailedException';
       ddbMock.on(UpdateItemCommand).rejects(noRow);
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0); // claim not released
       expect(
         reportMetricMock.mock.calls.some(
           ([event]) => (event as { BillingRowMissing?: number }).BillingRowMissing === 1,
@@ -724,7 +658,7 @@ describe('stripe-webhook handler', () => {
       );
       setupPaymentMethodsRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(mockPaymentMethodsRetrieve).toHaveBeenCalledWith(MOCK_PM_ID);
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -736,7 +670,6 @@ describe('stripe-webhook handler', () => {
           }),
         }),
       );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('resolves the org from the billing row when the customer metadata carries none', async () => {
@@ -752,16 +685,15 @@ describe('stripe-webhook handler', () => {
         .on(GetItemCommand, { Key: LEGACY_KEY })
         .resolves({ Item: marshall({ orgId: MOCK_ORG_ID }) });
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(updatedKeys()).toEqual([ORG_KEY]);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('does not read the billing row when the metadata already names the org', async () => {
       setupStripeEvent('customer.updated', mockCustomerObject());
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const legacyReads = ddbMock
         .commandCalls(GetItemCommand)
@@ -779,11 +711,9 @@ describe('stripe-webhook handler', () => {
         mockCustomerObject({ metadata: { userId: MOCK_USER_ID } }),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0); // claim not released
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining('resolves to no org'),
         expect.objectContaining({ customerId: MOCK_CUSTOMER_ID, userId: MOCK_USER_ID }),
@@ -794,15 +724,9 @@ describe('stripe-webhook handler', () => {
     it('throws when customer has no userId in metadata', async () => {
       setupStripeEvent('customer.updated', mockCustomerObject({ metadata: {} }));
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await expect(deliver()).rejects.toThrow();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-
-      const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
-      expect(deleteCalls).toHaveLength(1);
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
 
     it('skips update when default_payment_method is null', async () => {
@@ -813,13 +737,10 @@ describe('stripe-webhook handler', () => {
         }),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      await deliver();
 
       // This handler path should not perform any DynamoDB updates or deletes.
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
     });
 
     it('skips update for trial-creation customer.updated event (currency null → usd, no default_payment_method)', async () => {
@@ -830,7 +751,7 @@ describe('stripe-webhook handler', () => {
 
       consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
 
-      mockConstructEvent.mockReturnValue({
+      currentEvent = {
         id: TRIAL_EVENT_ID,
         type: 'customer.updated',
         data: {
@@ -851,15 +772,12 @@ describe('stripe-webhook handler', () => {
           },
           previous_attributes: { currency: null },
         },
-      });
+      };
 
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      await deliver();
 
       // This handler path should not perform any DynamoDB updates or deletes.
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
 
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('customer.updated without default_payment_method'),
@@ -885,12 +803,11 @@ describe('stripe-webhook handler', () => {
       setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: 'sub_the_live_one' });
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
       expect(supersededEmissions()).toHaveLength(1);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('grants the grace period when the event names the subscription on the row', async () => {
@@ -898,7 +815,7 @@ describe('stripe-webhook handler', () => {
       setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
         S: SubscriptionStatus.GracePeriod,
@@ -916,7 +833,7 @@ describe('stripe-webhook handler', () => {
       setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(supersededEmissions()).toHaveLength(1);
@@ -935,7 +852,7 @@ describe('stripe-webhook handler', () => {
       setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
@@ -952,7 +869,7 @@ describe('stripe-webhook handler', () => {
       setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
         S: SubscriptionStatus.PastDue,
@@ -968,7 +885,7 @@ describe('stripe-webhook handler', () => {
       setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: 'sub_the_previous_one' });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(updateInputs()[0].ExpressionAttributeValues![':subId']).toEqual({
         S: MOCK_SUBSCRIPTION_ID,
@@ -983,7 +900,7 @@ describe('stripe-webhook handler', () => {
       setupCustomerRetrieve();
 
       const before = Date.now();
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
       const after = Date.now();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -1009,7 +926,6 @@ describe('stripe-webhook handler', () => {
       expect(graceDate).toBeGreaterThanOrEqual(before + thirtyDays - 5000);
       expect(graceDate).toBeLessThanOrEqual(after + thirtyDays + 5000);
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('sets GracePeriod status with 7-day grace window for trialing subscriptions', async () => {
@@ -1021,7 +937,7 @@ describe('stripe-webhook handler', () => {
       setupCustomerRetrieve();
 
       const before = Date.now();
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
       const after = Date.now();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
@@ -1032,7 +948,6 @@ describe('stripe-webhook handler', () => {
       const sevenDays = 7 * 24 * 60 * 60 * 1000;
       expect(graceDate).toBeGreaterThanOrEqual(before + sevenDays - 5000);
       expect(graceDate).toBeLessThanOrEqual(after + sevenDays + 5000);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('falls back to the subscription’s own org when the customer names none', async () => {
@@ -1042,13 +957,12 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieveWithoutOrg();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(updatedKeys()).toEqual([ORG_KEY]);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
-    it('fails the webhook when neither object names an org', async () => {
+    it('fails the delivery when neither object names an org', async () => {
       // The org id is both the row's address and the tenant's name, so nothing
       // can be written or locked. A 500 releases the idempotency claim and lets
       // Stripe retry until the metadata is repaired.
@@ -1058,14 +972,10 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieveWithoutOrg();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await expect(deliver()).rejects.toThrow();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
     });
 
     describe('when the customer is already deleted', () => {
@@ -1074,20 +984,19 @@ describe('stripe-webhook handler', () => {
         setupStripeEvent('customer.subscription.deleted', mockSubscription());
         setupDeletedCustomerRetrieve();
 
-        const result = await handler(buildWebhookEvent('{}'));
+        await deliver();
 
         expect(mockStartDeletion).toHaveBeenCalledWith(
           expect.objectContaining({ userId: MOCK_USER_ID, caller: 'subscription.deleted' }),
         );
         expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-        expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       });
 
       it('emits a DunningEscalation metric with reason customer_deleted', async () => {
         setupStripeEvent('customer.subscription.deleted', mockSubscription());
         setupDeletedCustomerRetrieve();
 
-        await handler(buildWebhookEvent('{}'));
+        await deliver();
 
         const emissions = dunningEmissions();
         expect(
@@ -1107,11 +1016,10 @@ describe('stripe-webhook handler', () => {
         const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
         try {
-          const result = await handler(buildWebhookEvent('{}'));
+          await deliver();
 
           expect(mockStartDeletion).not.toHaveBeenCalled();
           expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-          expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
         } finally {
           error.mockRestore();
         }
@@ -1126,7 +1034,7 @@ describe('stripe-webhook handler', () => {
         metadata: {},
       });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -1134,30 +1042,26 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
         MOCK_ORG_ID,
         'write-locked',
-        WEBHOOK_STATUS_SYNC_RETRY,
       );
-
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
-    it('does not fail webhook when Aurora WRITE_LOCK fails', async () => {
+    it('fails the delivery when Aurora WRITE_LOCK fails, so SQS retries it', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
       mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
         regionSyncFailure(new Error('Aurora API error')),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await expect(deliver()).rejects.toThrow('tenant status sync failed for: aurora');
 
       // The grace period is already recorded when the lock is attempted
       expect(updatedKeys()).toEqual([ORG_KEY]);
-      // Webhook should still return 200
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
   });
 
@@ -1173,7 +1077,7 @@ describe('stripe-webhook handler', () => {
         mockCustomerObject({ metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID } }),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(mockStartDeletion).toHaveBeenCalledWith({
         userId: MOCK_USER_ID,
@@ -1183,13 +1087,12 @@ describe('stripe-webhook handler', () => {
       });
       // The teardown owns every write from here; the handler makes none.
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('reads userId from the event payload and never calls Stripe customers.retrieve', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(mockCustomersRetrieve).not.toHaveBeenCalled();
     });
@@ -1202,10 +1105,9 @@ describe('stripe-webhook handler', () => {
       const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       try {
-        const result = await handler(buildWebhookEvent('{}'));
+        await deliver();
 
         expect(mockStartDeletion).not.toHaveBeenCalled();
-        expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
       } finally {
         error.mockRestore();
       }
@@ -1214,7 +1116,7 @@ describe('stripe-webhook handler', () => {
     it('emits a DunningEscalation metric with reason customer_deleted', async () => {
       setupStripeEvent('customer.deleted', mockCustomerObject());
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const emissions = dunningEmissions();
       expect(
@@ -1234,12 +1136,11 @@ describe('stripe-webhook handler', () => {
         mockCustomerObject({ metadata: { userId: MOCK_USER_ID } }),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(mockStartDeletion).toHaveBeenCalledWith(
         expect.objectContaining({ userId: MOCK_USER_ID, orgId: undefined }),
       );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
 
@@ -1250,8 +1151,7 @@ describe('stripe-webhook handler', () => {
     it('logs only, no UpdateItemCommand, idempotency claimed upfront', async () => {
       setupStripeEvent('customer.subscription.trial_will_end', mockSubscription());
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
     });
@@ -1265,7 +1165,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -1284,13 +1184,12 @@ describe('stripe-webhook handler', () => {
         ReturnValues: 'ALL_OLD',
       });
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('skips when invoice.customer is null', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice({ customer: null }));
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -1298,7 +1197,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupDeletedCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -1310,7 +1209,7 @@ describe('stripe-webhook handler', () => {
         metadata: {},
       });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -1323,38 +1222,31 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('calls updateTenantStatus ACTIVE on payment success', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-        MOCK_ORG_ID,
-        'active',
-        WEBHOOK_STATUS_SYNC_RETRY,
-      );
-
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'active');
     });
 
-    it('does not fail webhook when Aurora re-activation fails', async () => {
+    it('fails the delivery when Aurora re-activation fails, so SQS retries it', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
       mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
         regionSyncFailure(new Error('Aurora API error')),
       );
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await expect(deliver()).rejects.toThrow('tenant status sync failed for: aurora');
 
       expect(updatedKeys()).toEqual([ORG_KEY]);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
   });
 
@@ -1362,29 +1254,25 @@ describe('stripe-webhook handler', () => {
   // 8. invoice.payment_failed
   // -----------------------------------------------------------------------
   describe('invoice.payment_failed', () => {
-    it('fails the webhook when the Stripe objects name no org', async () => {
+    it('fails the delivery when the Stripe objects name no org', async () => {
       // There is no key to write the row under, and no billing-row fallback any
-      // more. A 500 releases the idempotency claim, so Stripe's retries converge
+      // more. Failing the delivery leaves the event unmarked, so retries converge
       // once somebody repairs the metadata; reporting success would consume the
       // event and take the status change with it.
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieveWithoutOrg();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await expect(deliver()).rejects.toThrow();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
 
     it('sets PastDue status with lastPaymentFailedAt (no grace period)', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
       expect(updateCalls).toHaveLength(1);
@@ -1407,13 +1295,12 @@ describe('stripe-webhook handler', () => {
       // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window
       expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt');
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('skips when invoice.customer is null', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice({ customer: null }));
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -1421,7 +1308,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupDeletedCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -1433,7 +1320,7 @@ describe('stripe-webhook handler', () => {
         metadata: {},
       });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
 
@@ -1446,10 +1333,9 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
   });
 
@@ -1457,46 +1343,34 @@ describe('stripe-webhook handler', () => {
   // 9. Error handling & edge cases
   // -----------------------------------------------------------------------
   describe('error handling & edge cases', () => {
-    it('returns 500 when UpdateItemCommand fails during processing', async () => {
+    it('fails the delivery when UpdateItemCommand fails during processing', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
       ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB update failed'));
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
+      await expect(deliver()).rejects.toThrow('DynamoDB update failed');
     });
 
-    it('returns 500 when stripe.customers.retrieve fails', async () => {
+    it('fails the delivery when stripe.customers.retrieve fails', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       mockCustomersRetrieve.mockRejectedValue(new Error('Stripe API error'));
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
+      await expect(deliver()).rejects.toThrow('Stripe API error');
     });
 
-    it('unhandled event type returns 200 and records idempotency', async () => {
+    it('unhandled event type is marked processed', async () => {
       setupStripeEvent('some.unknown.event', {});
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      await deliver();
       expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
     });
 
-    it('returns 500 when idempotency PutItem fails (non-condition error)', async () => {
+    it('fails the delivery when the processed mark cannot be written', async () => {
+      // The event was handled, but without the mark a redelivery would handle it
+      // again; the handlers tolerate that, so retrying is the safe outcome.
       setupStripeEvent('customer.subscription.created', mockSubscription());
       ddbMock.on(PutItemCommand).rejects(new Error('DynamoDB put failed'));
 
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Idempotency check error' }),
-      });
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      await expect(deliver()).rejects.toThrow('DynamoDB put failed');
     });
   });
 
@@ -1514,7 +1388,7 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const emissions = dunningEmissions();
       expect(emissions).toHaveLength(1);
@@ -1545,7 +1419,7 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(dunningEmissions()[0]).toMatchObject({
         stage: 'retry',
@@ -1564,7 +1438,7 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(dunningEmissions()[0]).toMatchObject({
         stage: 'retry',
@@ -1576,7 +1450,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice({ attempt_count: 1 }));
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(dunningEmissions()[0]).toMatchObject({
         stage: 'entered',
@@ -1594,7 +1468,7 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(dunningEmissions()[0]).toMatchObject({
         stage: 'canceled',
@@ -1612,7 +1486,7 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(dunningEmissions()[0]).toMatchObject({
         stage: 'canceled',
@@ -1627,7 +1501,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(dunningEmissions()[0]).toMatchObject({
         stage: 'canceled',
@@ -1642,7 +1516,7 @@ describe('stripe-webhook handler', () => {
         Attributes: marshall({ subscriptionStatus: SubscriptionStatus.PastDue }),
       });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(dunningEmissions()[0]).toMatchObject({
         stage: 'recovered',
@@ -1658,7 +1532,7 @@ describe('stripe-webhook handler', () => {
         Attributes: marshall({ subscriptionStatus: SubscriptionStatus.GracePeriod }),
       });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(dunningEmissions()[0]).toMatchObject({
         stage: 'recovered',
@@ -1666,11 +1540,7 @@ describe('stripe-webhook handler', () => {
         attemptBucket: '4+',
       });
       // Aurora re-activation must still run
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-        MOCK_ORG_ID,
-        'active',
-        WEBHOOK_STATUS_SYNC_RETRY,
-      );
+      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'active');
     });
 
     it('does NOT emit recovered on normal renewal (prior status was active)', async () => {
@@ -1680,7 +1550,7 @@ describe('stripe-webhook handler', () => {
         Attributes: marshall({ subscriptionStatus: SubscriptionStatus.Active }),
       });
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(dunningEmissions()).toHaveLength(0);
     });
@@ -1688,7 +1558,7 @@ describe('stripe-webhook handler', () => {
     it('does NOT emit on unrelated events (customer.subscription.created)', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(dunningEmissions()).toHaveLength(0);
     });
@@ -1708,7 +1578,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const emissions = invoicePaidEmissions();
       expect(emissions).toHaveLength(1);
@@ -1727,7 +1597,7 @@ describe('stripe-webhook handler', () => {
     it('does not emit even when invoice.customer is null', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice({ customer: null }));
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(invoicePaidEmissions()).toHaveLength(0);
@@ -1737,7 +1607,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice({ attempt_count: 1 }));
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(invoicePaidEmissions()).toHaveLength(0);
     });
@@ -1745,7 +1615,7 @@ describe('stripe-webhook handler', () => {
     it('does NOT emit on unrelated events (customer.subscription.created)', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(invoicePaidEmissions()).toHaveLength(0);
     });
@@ -1764,7 +1634,7 @@ describe('stripe-webhook handler', () => {
     it('emits one InvoiceFinalized event on invoice.finalized', async () => {
       setupStripeEvent('invoice.finalized', mockInvoice());
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const emissions = invoiceFinalizedEmissions();
       expect(emissions).toHaveLength(1);
@@ -1783,7 +1653,7 @@ describe('stripe-webhook handler', () => {
     it('does NOT emit on invoice.finalization_failed', async () => {
       setupStripeEvent('invoice.finalization_failed', mockInvoice());
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(invoiceFinalizedEmissions()).toHaveLength(0);
     });
@@ -1792,7 +1662,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(invoiceFinalizedEmissions()).toHaveLength(0);
     });
@@ -1816,7 +1686,7 @@ describe('stripe-webhook handler', () => {
         mockInvoice({ last_finalization_error: { code: 'tax_calculation_failed' } }),
       );
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       const emissions = invoiceFinalizationFailedEmissions();
       expect(emissions).toHaveLength(1);
@@ -1838,7 +1708,7 @@ describe('stripe-webhook handler', () => {
     it('emits with reason="unknown" when last_finalization_error missing', async () => {
       setupStripeEvent('invoice.finalization_failed', mockInvoice());
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(invoiceFinalizationFailedEmissions()[0]).toMatchObject({
         reason: 'unknown',
@@ -1848,7 +1718,7 @@ describe('stripe-webhook handler', () => {
     it('does NOT emit on invoice.finalized', async () => {
       setupStripeEvent('invoice.finalized', mockInvoice());
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expect(invoiceFinalizationFailedEmissions()).toHaveLength(0);
     });
@@ -1880,17 +1750,14 @@ describe('stripe-webhook handler', () => {
     }
 
     // A key built from a guessed org would put this subscription on another
-    // org's partition, so nothing is written — and the webhook fails rather than
-    // reporting success. A 500 releases the idempotency claim, so Stripe keeps
-    // retrying and the event converges on its own once somebody repairs the
-    // metadata. Swallowing it consumes the event and the status change with it.
-    function expectRefusedAndRetryable(result: unknown) {
+    // org's partition, so nothing is written — and the delivery fails rather than
+    // reporting success. The event stays unmarked, so it is retried and converges
+    // on its own once somebody repairs the metadata. Swallowing it consumes the
+    // event and the status change with it.
+    async function expectRefusedAndRetryable(delivery: Promise<void>) {
+      await expect(delivery).rejects.toThrow();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1);
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     }
 
     it('subscription update persists orgId from subscription metadata when present', async () => {
@@ -1899,7 +1766,7 @@ describe('stripe-webhook handler', () => {
         mockSubscription({ metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID } }),
       );
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expectOrgIdBackfilled();
     });
@@ -1908,7 +1775,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('customer.subscription.updated', mockSubscription({ metadata: {} }));
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expectOrgIdBackfilled();
     });
@@ -1924,11 +1791,10 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieve();
 
-      const result = await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expectOrgIdBackfilled();
       expect(mockCustomersRetrieve).toHaveBeenCalledTimes(1);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
     });
 
     it('subscription update writes nothing when neither the subscription nor the customer names an org', async () => {
@@ -1938,16 +1804,14 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieveWithoutOrg();
 
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expectRefusedAndRetryable(result);
+      await expectRefusedAndRetryable(deliver());
     });
 
     it('subscription deleted persists orgId from customer metadata', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expectOrgIdBackfilled();
     });
@@ -1959,16 +1823,14 @@ describe('stripe-webhook handler', () => {
       );
       setupCustomerRetrieveWithoutOrg();
 
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expectRefusedAndRetryable(result);
+      await expectRefusedAndRetryable(deliver());
     });
 
     it('payment succeeded persists orgId from customer metadata', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expectOrgIdBackfilled();
     });
@@ -1980,7 +1842,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoiceForOrgSubscription());
       setupCustomerRetrieveWithoutOrg();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expectOrgIdBackfilled();
     });
@@ -1989,16 +1851,14 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
       setupCustomerRetrieveWithoutOrg();
 
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expectRefusedAndRetryable(result);
+      await expectRefusedAndRetryable(deliver());
     });
 
     it('payment failed persists orgId from customer metadata', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieve();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expectOrgIdBackfilled();
     });
@@ -2007,7 +1867,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_failed', mockInvoiceForOrgSubscription());
       setupCustomerRetrieveWithoutOrg();
 
-      await handler(buildWebhookEvent('{}'));
+      await deliver();
 
       expectOrgIdBackfilled();
     });
@@ -2016,9 +1876,7 @@ describe('stripe-webhook handler', () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieveWithoutOrg();
 
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expectRefusedAndRetryable(result);
+      await expectRefusedAndRetryable(deliver());
     });
   });
 });

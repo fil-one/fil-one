@@ -1,6 +1,17 @@
 // Processing for verified Stripe webhook events: the billing-table writes,
 // Stripe lookups and per-region tenant status syncs each event type triggers.
+//
+// The webhook verifies Stripe's signature and enqueues the event (see
+// lib/stripe-event-queue.ts); this worker consumes the queue one event per
+// invocation. An error fails the delivery, and SQS retries it before parking it
+// in the dead-letter queue. The event is marked processed only after its
+// handling succeeds, so a failed or killed delivery is always retried; the
+// handlers tolerate running twice (conditional writes, superseded checks, and a
+// status sync that probes before it updates).
 
+import { GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
+import type { SQSEvent } from 'aws-lambda';
 import Stripe from 'stripe';
 import {
   PAID_GRACE_DAYS,
@@ -8,12 +19,13 @@ import {
   TRIAL_GRACE_DAYS,
   mapStripeStatus,
 } from '@filone/shared';
+import { Resource } from 'sst';
+import { getDynamoClient } from '../lib/ddb-client.ts';
 import { resolveOrgId, resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.ts';
 import { startDeletionFromStripe } from '../lib/deletion-from-stripe.ts';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
-  WEBHOOK_STATUS_SYNC_RETRY,
 } from '../lib/region-helpers.ts';
 import {
   invoiceSubscriptionId,
@@ -29,6 +41,45 @@ import {
   emitInvoiceFinalized,
   emitInvoicePaid,
 } from '../lib/stripe-webhook-metrics.ts';
+
+const LOG = '[stripe-event-worker]';
+
+const dynamo = getDynamoClient();
+
+export async function handler(event: SQSEvent): Promise<void> {
+  // One message per invocation (batch size 1), so an error escaping this
+  // handler returns exactly the failed event to the queue.
+  for (const record of event.Records) {
+    await processRecord(JSON.parse(record.body) as Stripe.Event);
+  }
+}
+
+async function processRecord(stripeEvent: Stripe.Event): Promise<void> {
+  const tableName = Resource.BillingTable.name;
+  const markKey = { pk: `WEBHOOK#${stripeEvent.id}`, sk: 'EVENT' };
+
+  const { Item: mark } = await dynamo.send(
+    new GetItemCommand({ TableName: tableName, Key: marshall(markKey), ConsistentRead: true }),
+  );
+  if (mark) {
+    console.warn(`${LOG} Already processed event`, { eventId: stripeEvent.id });
+    return;
+  }
+
+  await processStripeEvent(stripeEvent);
+
+  await dynamo.send(
+    new PutItemCommand({
+      TableName: tableName,
+      Item: marshall({
+        ...markKey,
+        eventType: stripeEvent.type,
+        processedAt: new Date().toISOString(),
+        ttl: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days
+      }),
+    }),
+  );
+}
 
 export async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
   switch (stripeEvent.type) {
@@ -373,23 +424,14 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
     attemptCount: attemptCount ?? 0,
   });
 
-  // Best-effort: write-lock the tenant on every orchestrator during grace
-  // period. If this fails, the daily grace-period-enforcer cron will also
-  // attempt WRITE_LOCK for active grace periods missing it. The sync never
-  // downgrades a tenant that is already disabled.
-  try {
-    if (orgId) {
-      assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(
-          orgId,
-          'write-locked',
-          WEBHOOK_STATUS_SYNC_RETRY,
-        ),
-      );
-      console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
-    }
-  } catch (error) {
-    console.error('[stripe-webhook] Failed to write-lock tenant', { userId, error });
+  // Write-lock the tenant on every orchestrator during grace period. A failure
+  // fails the delivery, so SQS retries the event and parks it in the DLQ once
+  // retries are spent; the daily grace-period-enforcer cron also attempts
+  // WRITE_LOCK for active grace periods missing it. The sync never downgrades a
+  // tenant that is already disabled.
+  if (orgId) {
+    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'write-locked'));
+    console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
   }
 }
 
@@ -453,19 +495,13 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
 
   emitInvoicePaid();
 
-  // Best-effort: re-enable the tenant on every orchestrator if recovering from
-  // PastDue/GracePeriod. If this fails, the tenant may remain locked until
-  // manual intervention. A refused write means the teardown owns this account:
-  // the tenant it disabled stays disabled.
-  try {
-    if (orgId && !updateResult.refused) {
-      assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),
-      );
-      console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
-    }
-  } catch (error) {
-    console.error('[stripe-webhook] Failed to re-activate tenant', { userId, error });
+  // Re-enable the tenant on every orchestrator if recovering from
+  // PastDue/GracePeriod. A failure fails the delivery, so SQS retries the event
+  // and parks it in the DLQ once retries are spent. A refused write means the
+  // teardown owns this account: the tenant it disabled stays disabled.
+  if (orgId && !updateResult.refused) {
+    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'active'));
+    console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
   }
 }
 

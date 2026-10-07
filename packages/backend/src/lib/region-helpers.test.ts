@@ -16,7 +16,6 @@ import {
   assertRegionSyncSucceeded,
   getProvisionedRegions,
   syncTenantStatusInProvisionedRegions,
-  WEBHOOK_STATUS_SYNC_RETRY,
   type RegionSyncOutcome,
 } from './region-helpers.ts';
 import { fakeOrchestrator, fakeOrgProfile } from '../test/fake-orchestrator.ts';
@@ -204,11 +203,10 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('outage') });
     mockGetAvailableOrchestrators.mockReturnValue([aurora]);
 
-    const promise = syncTenantStatusInProvisionedRegions(
-      'org-1',
-      'write-locked',
-      WEBHOOK_STATUS_SYNC_RETRY,
-    );
+    const promise = syncTenantStatusInProvisionedRegions('org-1', 'write-locked', {
+      retries: 1,
+      minTimeout: 200,
+    });
     await vi.runAllTimersAsync();
     await promise;
 

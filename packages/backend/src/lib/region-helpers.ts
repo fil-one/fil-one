@@ -50,21 +50,10 @@ export function assertRegionSyncSucceeded(outcomes: RegionSyncOutcome[]): void {
 }
 
 // Default for background callers — the grace-period enforcer and usage-reporting
-// worker crons (60s timeouts, re-run on schedule) and the activate-subscription
-// API. They have generous time budgets, so they ride out transient outages with
-// several retries (p-retry's default 1s/2s/4s backoff).
+// worker crons (60s timeouts, re-run on schedule), the Stripe event worker and
+// the activate-subscription API. They have generous time budgets, so they ride
+// out transient outages with several retries (p-retry's default 1s/2s/4s backoff).
 const STATUS_SYNC_RETRY: RetryOptions = { retries: 3 };
-
-// Override for the Stripe webhook, which awaits this sync synchronously and
-// should return 2xx quickly (Stripe's ~2s window). syncRegionTenantStatus probes
-// then updates each region (two sequential pRetry calls); with ~200-300ms
-// round-trips the worst case (probe succeeds on its retry, then update exhausts
-// its retry) is ≈ 2 × (2×300ms + 200ms) ≈ 1.6s — comfortably under ~2s. A
-// momentary blip is ridden out; a persistent failure leaves the region out of
-// sync until a later billing event re-runs this probe-first sync or the
-// grace-period-enforcer cron re-attempts the lock. (The subscription-drift-checker
-// only observes drift via telemetry; it does not reconcile.)
-export const WEBHOOK_STATUS_SYNC_RETRY: RetryOptions = { retries: 1, minTimeout: 200 };
 
 // Reconciles every provisioned region with the desired tenant status. Each
 // region's live status is its own source of truth: probe first, update only
