@@ -14,6 +14,7 @@ vi.mock('sst', () => ({
 // The webhook acknowledges Stripe before any processing, so it must not even
 // load the orchestrator clients: importing them costs cold-start time, and
 // this mock fails the whole file if anything on the webhook's import path does.
+// The module mocks below spread the real modules so their imports load too.
 vi.mock('../lib/service-orchestrator-registry.ts', () => {
   throw new Error('the Stripe webhook must not load the orchestrator registry');
 });
@@ -21,7 +22,8 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => {
 const mockConstructEvent = vi.fn();
 const mockCustomersRetrieve = vi.fn();
 
-vi.mock('../lib/stripe-client.ts', () => ({
+vi.mock('../lib/stripe-client.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/stripe-client.ts')>()),
   getStripeClient: () => ({
     webhooks: { constructEvent: mockConstructEvent },
     customers: { retrieve: mockCustomersRetrieve },
@@ -30,7 +32,8 @@ vi.mock('../lib/stripe-client.ts', () => ({
 }));
 
 const mockEnqueueStripeEvent = vi.fn();
-vi.mock('../lib/stripe-event-queue.ts', () => ({
+vi.mock('../lib/stripe-event-queue.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/stripe-event-queue.ts')>()),
   enqueueStripeEvent: (...args: unknown[]) => mockEnqueueStripeEvent(...args),
 }));
 
