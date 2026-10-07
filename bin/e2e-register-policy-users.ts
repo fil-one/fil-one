@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // One-time setup for the bucket policy e2e suite (tests/e2e/policies): signs up
-// the Owner, Admin, Member and ReadOnly users it drives, on a local stage, and records their
+// the Owner, Admin, Member, ReadOnly and Leaver users it drives, on a local stage, and records their
 // credentials in the gitignored .env.e2e.local that playwright.config.ts loads.
 //
 // Usage:
