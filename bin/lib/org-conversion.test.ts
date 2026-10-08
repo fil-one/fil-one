@@ -901,7 +901,7 @@ describe('verifyConversion', () => {
   function verify(
     states: OrgState[],
     overrides: Partial<ScanCounts> = {},
-    accepted: string | undefined = undefined,
+    accepted?: string,
     membership: MembershipScan = membershipScan(states),
   ) {
     const plans = states.map((one) => classifyOrg(one, knownUsers));
