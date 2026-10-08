@@ -66,7 +66,7 @@ describe('useBucketPolicy', () => {
   });
 
   it('writes a save into the cache and invalidates the bucket\u2019s keys', async () => {
-    mockPut.mockResolvedValue({ etag: '"v2"', created: false });
+    mockPut.mockResolvedValue({ etag: '"v2"' });
     const { client, result } = renderPolicy();
     await waitFor(() => expect(result.current.loading).toBe(false));
     const setData = vi.spyOn(client, 'setQueryData');

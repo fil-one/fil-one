@@ -463,6 +463,11 @@ export async function apiRequest<T>(
   return response.json() as Promise<T>;
 }
 
+/** The raw response, for a caller that reads its headers, such as a bucket policy's `ETag`. */
+export function apiResponse(path: string, options: RequestInit = {}): Promise<Response> {
+  return sendApiRequest(path, options);
+}
+
 /**
  * A file the API generated, as a blob the caller can hand to `downloadBlob`.
  *

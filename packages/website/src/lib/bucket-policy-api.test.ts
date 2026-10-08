@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ApiErrorCode, S3Region } from '@filone/shared';
 import type { BucketPolicy } from '@filone/shared';
 
-const mockApiRequest = vi.fn();
+const mockApiResponse = vi.fn();
 vi.mock('./api.js', async () => ({
   ...(await vi.importActual<typeof import('./api.js')>('./api.js')),
-  apiRequest: (...args: unknown[]) => mockApiRequest(...args),
+  apiResponse: (...args: unknown[]) => mockApiResponse(...args),
 }));
 
 import {
@@ -20,54 +20,75 @@ const policy: BucketPolicy = {
 };
 const failure = (status: number, code?: string) =>
   Object.assign(new Error('refused'), { status, ...(code ? { code } : {}) });
+const answer = (status: number, etag?: string, body?: object) =>
+  new Response(body ? JSON.stringify(body) : null, {
+    status,
+    headers: etag ? { ETag: etag } : {},
+  });
+const PATH = '/buckets/photos/policy?region=us-east-9';
 
 describe('bucket policy client', () => {
   beforeEach(() => {
-    mockApiRequest.mockReset();
+    mockApiResponse.mockReset();
   });
 
-  it('reads the policy with its etag from the bucket route', async () => {
-    mockApiRequest.mockResolvedValue({ policy, etag: '"v1"' });
+  it('reads the policy with its ETag header from the bucket route', async () => {
+    mockApiResponse.mockResolvedValue(answer(200, '"v1"', { policy }));
 
     await expect(getBucketPolicy('photos', S3Region.UsEast9)).resolves.toStrictEqual({
       policy,
       etag: '"v1"',
     });
-    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/photos/policy?region=us-east-9');
+    expect(mockApiResponse).toHaveBeenCalledWith(PATH);
   });
 
   it('reads a bucket with no policy as null, and lets every other failure through', async () => {
-    mockApiRequest.mockRejectedValueOnce(failure(404, ApiErrorCode.POLICY_NOT_FOUND));
+    mockApiResponse.mockRejectedValueOnce(failure(404, ApiErrorCode.POLICY_NOT_FOUND));
     await expect(getBucketPolicy('photos', S3Region.UsEast9)).resolves.toBeNull();
 
-    mockApiRequest.mockRejectedValueOnce(failure(404));
+    mockApiResponse.mockRejectedValueOnce(failure(404));
     await expect(getBucketPolicy('photos', S3Region.UsEast9)).rejects.toThrow('refused');
   });
 
-  it('writes the document with the etag it read, and creates without one', async () => {
-    mockApiRequest.mockResolvedValue({ etag: '"v2"', created: false });
+  it('writes under If-Match with the etag it read, creates under If-None-Match: *, and answers the new ETag', async () => {
+    mockApiResponse.mockResolvedValue(answer(204, '"v2"'));
 
-    await putBucketPolicy('photos', S3Region.UsEast9, { policy, etag: '"v1"' });
+    await expect(
+      putBucketPolicy('photos', S3Region.UsEast9, { policy, etag: '"v1"' }),
+    ).resolves.toStrictEqual({ etag: '"v2"' });
+    await putBucketPolicy('photos', S3Region.UsEast9, { policy });
 
-    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/photos/policy?region=us-east-9', {
-      method: 'PUT',
-      body: JSON.stringify({ policy, etag: '"v1"' }),
-    });
+    expect(mockApiResponse.mock.calls).toStrictEqual([
+      [PATH, { method: 'PUT', headers: { 'If-Match': '"v1"' }, body: JSON.stringify({ policy }) }],
+      [
+        PATH,
+        { method: 'PUT', headers: { 'If-None-Match': '*' }, body: JSON.stringify({ policy }) },
+      ],
+    ]);
   });
 
-  it('removes the policy by the etag it read, in the query', async () => {
-    mockApiRequest.mockResolvedValue(undefined);
+  it('refuses a write answered without an ETag', async () => {
+    mockApiResponse.mockResolvedValue(answer(204));
 
-    await deleteBucketPolicy('photos', S3Region.UsEast9, '"v1"');
-
-    expect(mockApiRequest).toHaveBeenCalledWith(
-      `/buckets/photos/policy?region=us-east-9&etag=${encodeURIComponent('"v1"')}`,
-      { method: 'DELETE' },
+    await expect(putBucketPolicy('photos', S3Region.UsEast9, { policy })).rejects.toThrow(
+      /no ETag/,
     );
   });
 
+  it('removes the policy under If-Match with the etag it read', async () => {
+    mockApiResponse.mockResolvedValue(answer(204));
+
+    await deleteBucketPolicy('photos', S3Region.UsEast9, '"v1"');
+
+    expect(mockApiResponse).toHaveBeenCalledWith(PATH, {
+      method: 'DELETE',
+      headers: { 'If-Match': '"v1"' },
+    });
+  });
+
   it('recognizes a write that lost to another writer', () => {
-    expect(isPolicyConflict(failure(409, ApiErrorCode.POLICY_CONFLICT))).toBe(true);
+    expect(isPolicyConflict(failure(412, ApiErrorCode.POLICY_CONFLICT))).toBe(true);
+    expect(isPolicyConflict(failure(412))).toBe(true);
     expect(isPolicyConflict(failure(409))).toBe(true);
     expect(isPolicyConflict(failure(400))).toBe(false);
     expect(isPolicyConflict(undefined)).toBe(false);
