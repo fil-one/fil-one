@@ -67,7 +67,12 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
         {ready && (
           <div className="flex items-center gap-2">
             {policy.snapshot && (
-              <Button variant="tertiary" size="sm" onClick={() => setConfirmRemove(true)}>
+              <Button
+                variant="tertiary"
+                size="sm"
+                disabled={draft.stale}
+                onClick={() => setConfirmRemove(true)}
+              >
                 Remove policy
               </Button>
             )}
@@ -126,43 +131,47 @@ function usePolicyEditor(bucketName: string, region: S3Region) {
   const { toast } = useToast();
   const policy = useBucketPolicy(bucketName, region);
   const draft = usePolicyDraft(policy.snapshot);
-  const etag = policy.snapshot?.etag;
 
-  async function removePolicy() {
-    if (!etag) return;
-    await policy.remove.mutateAsync({ etag });
+  // Every write goes under the draft's ETag rather than the query's: the user
+  // edited the document they read, and a newer one the query has since fetched
+  // is exactly the write the compare-and-set exists to refuse.
+  async function write(change: () => Promise<void>, failure: string) {
+    try {
+      await change();
+    } catch (err) {
+      // A conflict renders in place; anything else is a failed request.
+      if (!isPolicyConflict(err)) toast.error(err instanceof Error ? err.message : failure);
+    }
+  }
+
+  async function removeDraft() {
+    if (!draft.etag) return;
+    await policy.remove.mutateAsync({ etag: draft.etag });
     draft.acceptSaved(null);
     toast.success('Policy removed');
   }
 
-  // The draft's ETag rather than the query's: the user edited the document
-  // they read, and a newer one the query has since fetched is exactly the
-  // write the compare-and-set exists to refuse.
-  async function save() {
-    try {
+  const removePolicy = () => write(removeDraft, 'Failed to remove the policy');
+
+  const save = () =>
+    write(async () => {
       // A draft with no statements removes the policy: the storage system
       // stores no empty document.
-      if (draft.statements.length === 0) {
-        if (!draft.etag) return;
-        await policy.remove.mutateAsync({ etag: draft.etag });
-        draft.acceptSaved(null);
-        toast.success('Policy removed');
-        return;
-      }
+      if (draft.statements.length === 0) return removeDraft();
       const document = { Statement: draft.statements };
       const written = await policy.save.mutateAsync({ policy: document, etag: draft.etag });
       draft.acceptSaved({ policy: document, etag: written.etag });
       toast.success('Policy saved');
-    } catch (err) {
-      // A conflict renders in place; anything else is a failed request.
-      if (!isPolicyConflict(err)) {
-        toast.error(err instanceof Error ? err.message : 'Failed to save the policy');
-      }
-    }
-  }
+    }, 'Failed to save the policy');
 
+  // A reload that fails keeps the draft and the conflict, so nothing is lost
+  // to a network error.
   async function reload() {
-    await policy.refetch();
+    const result = await policy.refetch();
+    if (result.isError) {
+      toast.error('Could not reload the policy. Try again.');
+      return;
+    }
     policy.save.reset();
     policy.remove.reset();
     draft.reset();

@@ -66,7 +66,9 @@ export function useBucketPolicy(bucketName: string, region: S3Region) {
     snapshot: enabled ? query.data : undefined,
     // A disabled query stays pending forever, which is not "loading".
     loading: enabled && query.isPending,
-    failed: enabled && query.isError,
+    // Only a first load that failed: a failed refetch keeps the document, and
+    // the draft over it, on screen.
+    failed: enabled && query.isLoadingError,
     errorMessage: query.error instanceof Error ? query.error.message : undefined,
     refetch: () => query.refetch(),
     save,
