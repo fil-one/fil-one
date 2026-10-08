@@ -1,5 +1,5 @@
-// The access-key create request as the storage system takes it. Shared by the
-// two arms: the body's shape is the key's kind on both.
+// Builds the body of the storage system's create-access-key request. Both
+// orchestrator arms use it.
 
 import type { AccessModel } from '@filone/shared';
 import type {
@@ -11,24 +11,25 @@ import { AccessKeyValidationError } from '../errors.ts';
 import { buildPermissions } from './permissions.ts';
 
 /**
- * The create request in the storage system's shape, which is the key's kind: a
- * principal-bound key carries `principalId` and nothing of its own, a service
- * key its permissions and bucket list.
+ * A principal-bound key sends only its name, `principalId` and expiry; a
+ * service key sends its permissions and bucket list.
  */
-export function accessKeyBody(
+export function buildAccessKeyBody(
   keyOpts: IssueAccessKeyOpts,
   arm: { id: string; accessModel: AccessModel },
 ): CreateAccessKeyRequest {
   const expiresAt = keyOpts.expiresAt ?? null;
   if ('principalId' in keyOpts) {
-    // Only the iam arm has principals to bind to, as on Aurora and FTH.
+    // Only the iam arm has principals to bind to. Aurora and FTH refuse the same way.
     if (arm.accessModel !== 'iam') {
       throw new Error(
         `${arm.id} serves scoped keys; a principal-bound key needs the iam access model`,
       );
     }
     // The type forbids these; a non-literal object can still carry them, and
-    // dropping them would mint a key the caller did not ask for.
+    // dropping them would mint a key the caller did not ask for. `bucketScope`
+    // is a field of the create-key handler's request, not of these options,
+    // so it arrives only when a caller spreads that request in.
     if (
       ['permissions', 'granularPermissions', 'buckets', 'bucketScope'].some((f) => f in keyOpts)
     ) {

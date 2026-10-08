@@ -32,7 +32,7 @@ interface CannedResponse {
   body?: string;
 }
 
-function clientAnswering(captured: CapturedRequest[], answers: CannedResponse[]): S3Client {
+function createS3ClientAnswering(captured: CapturedRequest[], answers: CannedResponse[]): S3Client {
   return new S3Client({
     endpoint: 'https://s3.example.test',
     region: 'us-east-9',
@@ -57,40 +57,61 @@ function clientAnswering(captured: CapturedRequest[], answers: CannedResponse[])
   });
 }
 
-const s3Error = (code: string, message = code) =>
+const buildS3ErrorXml = (code: string, message = code) =>
   `<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code><Message>${message}</Message></Error>`;
 
 const policy: BucketPolicy = {
   Statement: [{ Effect: 'Allow', Principal: ['alice'], Action: ['s3:GetObject'] }],
 };
 
-const bodyOf = (request: CapturedRequest) =>
+const readRequestBody = (request: CapturedRequest) =>
   typeof request.body === 'string'
     ? request.body
     : Buffer.from(request.body as Uint8Array).toString();
 
 describe('PutBucketPolicy', () => {
-  it('sends the document as the body with a signed If-Match and returns the ETag', async () => {
-    const captured: CapturedRequest[] = [];
-    const s3 = clientAnswering(captured, [{ statusCode: 204, headers: { etag: '"bafy-v2"' } }]);
+  it('returns the ETag from the response header', async () => {
+    const s3 = createS3ClientAnswering([], [{ statusCode: 204, headers: { etag: '"bafy-v2"' } }]);
 
     await expect(putBucketPolicy(s3, 'photos', policy, { ifMatch: '"bafy-v1"' })).resolves.toEqual({
       etag: '"bafy-v2"',
     });
+  });
+
+  it('sends a PUT to ?policy with the policy as the JSON body', async () => {
+    const captured: CapturedRequest[] = [];
+    const s3 = createS3ClientAnswering(captured, [
+      { statusCode: 204, headers: { etag: '"bafy-v2"' } },
+    ]);
+
+    await putBucketPolicy(s3, 'photos', policy, { ifMatch: '"bafy-v1"' });
 
     expect(captured).toHaveLength(1);
     const request = captured[0]!;
     expect(request.method).toBe('PUT');
     expect(request.path).toMatch(/^\/photos\/?$/);
     expect(request.query).toHaveProperty('policy');
-    expect(JSON.parse(bodyOf(request))).toStrictEqual(policy);
-    expect(request.headers['if-match'] ?? request.headers['If-Match']).toBe('"bafy-v1"');
-    expect(request.headers.authorization).toMatch(/SignedHeaders=[^,]*if-match/);
+    expect(JSON.parse(readRequestBody(request))).toStrictEqual(policy);
+  });
+
+  it('signs the If-Match header', async () => {
+    const captured: CapturedRequest[] = [];
+    const s3 = createS3ClientAnswering(captured, [
+      { statusCode: 204, headers: { etag: '"bafy-v2"' } },
+    ]);
+
+    await putBucketPolicy(s3, 'photos', policy, { ifMatch: '"bafy-v1"' });
+
+    const headers = captured[0]!.headers;
+    expect(headers['if-match'] ?? headers['If-Match']).toBe('"bafy-v1"');
+    expect(headers.authorization).toMatch(/SignedHeaders=[^,]*if-match/);
   });
 
   it('sends a signed If-None-Match: * to create the first policy', async () => {
     const captured: CapturedRequest[] = [];
-    const s3 = clientAnswering(captured, [{ statusCode: 204, headers: { etag: '"bafy-v1"' } }]);
+    const s3 = createS3ClientAnswering(captured, [
+      { statusCode: 204, headers: { etag: '"bafy-v1"' } },
+    ]);
 
     await putBucketPolicy(s3, 'photos', policy, { ifNoneMatch: '*' });
 
@@ -101,52 +122,58 @@ describe('PutBucketPolicy', () => {
 
   it('sends no precondition on an unconditional write', async () => {
     const captured: CapturedRequest[] = [];
-    const s3 = clientAnswering(captured, [{ statusCode: 204, headers: { etag: '"bafy-v1"' } }]);
+    const s3 = createS3ClientAnswering(captured, [
+      { statusCode: 204, headers: { etag: '"bafy-v1"' } },
+    ]);
 
     await putBucketPolicy(s3, 'photos', policy);
 
-    expect(Object.keys(captured[0]!.headers).map((h) => h.toLowerCase())).not.toEqual(
-      expect.arrayContaining(['if-match', 'if-none-match']),
+    const headers = Object.fromEntries(
+      Object.entries(captured[0]!.headers).map(([name, value]) => [name.toLowerCase(), value]),
     );
+    expect(headers).not.toHaveProperty('if-match');
+    expect(headers).not.toHaveProperty('if-none-match');
   });
 
-  it('refuses a 204 that carries no ETag', async () => {
-    const s3 = clientAnswering([], [{ statusCode: 204 }]);
+  it('throws when a successful write answers without an ETag header', async () => {
+    const s3 = createS3ClientAnswering([], [{ statusCode: 204 }]);
     await expect(putBucketPolicy(s3, 'photos', policy, { ifNoneMatch: '*' })).rejects.toThrow(
       /without an ETag/,
     );
   });
 
-  it('maps each S3 error code to its policy error', async () => {
-    const cases: Array<[number, string, unknown]> = [
-      [404, 'NoSuchBucket', BucketNotFoundError],
-      [404, 'NoSuchBucketPolicy', PolicyNotFoundError],
-      [412, 'PreconditionFailed', PolicyPreconditionFailedError],
-      [409, 'OperationAborted', PolicyConflictError],
-      [503, 'ServiceUnavailable', PolicyConflictError],
-      [400, 'MalformedPolicy', PolicyValidationError],
-      [500, 'InternalError', PolicyPublishError],
-      [400, 'InvalidRequest', Error],
-    ];
-    for (const [status, code, want] of cases) {
-      const s3 = clientAnswering(
-        [],
-        [{ statusCode: status, body: s3Error(code, `refused: ${code}`) }],
-      );
-      const err: unknown = await putBucketPolicy(s3, 'photos', policy, { ifMatch: '"v1"' }).catch(
-        (e: unknown) => e,
-      );
-      expect(err, code).toBeInstanceOf(want);
-      if (want === PolicyValidationError)
-        expect((err as Error).message).toBe('refused: MalformedPolicy');
-    }
+  it.each([
+    { status: 404, code: 'NoSuchBucket', expected: BucketNotFoundError },
+    { status: 404, code: 'NoSuchBucketPolicy', expected: PolicyNotFoundError },
+    { status: 412, code: 'PreconditionFailed', expected: PolicyPreconditionFailedError },
+    { status: 409, code: 'OperationAborted', expected: PolicyConflictError },
+    { status: 503, code: 'ServiceUnavailable', expected: PolicyConflictError },
+    { status: 400, code: 'MalformedPolicy', expected: PolicyValidationError },
+    { status: 500, code: 'InternalError', expected: PolicyPublishError },
+    { status: 400, code: 'InvalidRequest', expected: Error },
+  ])('maps S3 error $code to $expected.name', async ({ status, code, expected }) => {
+    const s3 = createS3ClientAnswering([], [{ statusCode: status, body: buildS3ErrorXml(code) }]);
+    await expect(putBucketPolicy(s3, 'photos', policy, { ifMatch: '"v1"' })).rejects.toBeInstanceOf(
+      expected,
+    );
+  });
+
+  it('uses the MalformedPolicy message as the PolicyValidationError message', async () => {
+    const s3 = createS3ClientAnswering(
+      [],
+      [{ statusCode: 400, body: buildS3ErrorXml('MalformedPolicy', 'unknown principal "bob"') }],
+    );
+    await expect(putBucketPolicy(s3, 'photos', policy, { ifMatch: '"v1"' })).rejects.toMatchObject({
+      name: 'PolicyValidationError',
+      message: 'unknown principal "bob"',
+    });
   });
 });
 
 describe('GetBucketPolicy', () => {
   it('returns the document with the ETag the gateway sent', async () => {
     const captured: CapturedRequest[] = [];
-    const s3 = clientAnswering(captured, [
+    const s3 = createS3ClientAnswering(captured, [
       { statusCode: 200, headers: { etag: '"bafy-v1"' }, body: JSON.stringify(policy) },
     ]);
 
@@ -158,39 +185,50 @@ describe('GetBucketPolicy', () => {
     expect(captured[0]!.query).toHaveProperty('policy');
   });
 
-  it('answers null for a bucket without a policy and throws for a bucket that is not there', async () => {
-    await expect(
-      getBucketPolicy(
-        clientAnswering([], [{ statusCode: 404, body: s3Error('NoSuchBucketPolicy') }]),
-        'photos',
-      ),
-    ).resolves.toBeNull();
-    await expect(
-      getBucketPolicy(
-        clientAnswering([], [{ statusCode: 404, body: s3Error('NoSuchBucket') }]),
-        'photos',
-      ),
-    ).rejects.toBeInstanceOf(BucketNotFoundError);
+  it('returns null when the bucket has no policy', async () => {
+    const s3 = createS3ClientAnswering(
+      [],
+      [{ statusCode: 404, body: buildS3ErrorXml('NoSuchBucketPolicy') }],
+    );
+    await expect(getBucketPolicy(s3, 'photos')).resolves.toBeNull();
   });
 
-  it('treats a 500 on a read as an ordinary failure', async () => {
-    const err: unknown = await getBucketPolicy(
-      clientAnswering([], [{ statusCode: 500, body: s3Error('InternalError') }]),
-      'photos',
-    ).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(Error);
+  it('throws BucketNotFoundError when the bucket does not exist', async () => {
+    const s3 = createS3ClientAnswering(
+      [],
+      [{ statusCode: 404, body: buildS3ErrorXml('NoSuchBucket') }],
+    );
+    await expect(getBucketPolicy(s3, 'photos')).rejects.toBeInstanceOf(BucketNotFoundError);
+  });
+
+  it('throws a plain Error, not PolicyPublishError, when a read answers 500', async () => {
+    const s3 = createS3ClientAnswering(
+      [],
+      [{ statusCode: 500, body: buildS3ErrorXml('InternalError') }],
+    );
+    const err: unknown = await getBucketPolicy(s3, 'photos').catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(PolicyPublishError);
+    expect(err).toMatchObject({
+      name: 'Error',
+      message: 'Failed to read the policy of bucket "photos"',
+    });
   });
 });
 
 describe('DeleteBucketPolicy', () => {
-  it('sends a signed If-Match and treats 204 as done', async () => {
-    const captured: CapturedRequest[] = [];
-    const s3 = clientAnswering(captured, [{ statusCode: 204 }]);
-
+  it('resolves when the delete answers 204', async () => {
+    const s3 = createS3ClientAnswering([], [{ statusCode: 204 }]);
     await expect(
       deleteBucketPolicy(s3, 'photos', { ifMatch: '"bafy-v1"' }),
     ).resolves.toBeUndefined();
+  });
+
+  it('sends a DELETE to ?policy with a signed If-Match', async () => {
+    const captured: CapturedRequest[] = [];
+    const s3 = createS3ClientAnswering(captured, [{ statusCode: 204 }]);
+
+    await deleteBucketPolicy(s3, 'photos', { ifMatch: '"bafy-v1"' });
+
     const request = captured[0]!;
     expect(request.method).toBe('DELETE');
     expect(request.query).toHaveProperty('policy');
@@ -198,20 +236,13 @@ describe('DeleteBucketPolicy', () => {
     expect(request.headers.authorization).toMatch(/SignedHeaders=[^,]*if-match/);
   });
 
-  it('reports a bucket without a policy and a stale tag', async () => {
-    await expect(
-      deleteBucketPolicy(
-        clientAnswering([], [{ statusCode: 404, body: s3Error('NoSuchBucketPolicy') }]),
-        'photos',
-        { ifMatch: '"v1"' },
-      ),
-    ).rejects.toBeInstanceOf(PolicyNotFoundError);
-    await expect(
-      deleteBucketPolicy(
-        clientAnswering([], [{ statusCode: 412, body: s3Error('PreconditionFailed') }]),
-        'photos',
-        { ifMatch: '"v1"' },
-      ),
-    ).rejects.toBeInstanceOf(PolicyPreconditionFailedError);
+  it.each([
+    { status: 404, code: 'NoSuchBucketPolicy', expected: PolicyNotFoundError },
+    { status: 412, code: 'PreconditionFailed', expected: PolicyPreconditionFailedError },
+  ])('throws $expected.name on $code', async ({ status, code, expected }) => {
+    const s3 = createS3ClientAnswering([], [{ statusCode: status, body: buildS3ErrorXml(code) }]);
+    await expect(deleteBucketPolicy(s3, 'photos', { ifMatch: '"v1"' })).rejects.toBeInstanceOf(
+      expected,
+    );
   });
 });

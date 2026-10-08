@@ -12,7 +12,8 @@ import type { IamMethods } from './iam-orchestrator.ts';
 
 export type {
   IamMethods,
-  MemberPolicy,
+  IfMatchPrecondition,
+  MemberBucketPolicy,
   PolicyPrecondition,
   StoredBucketPolicy,
 } from './iam-orchestrator.ts';
@@ -218,10 +219,10 @@ export interface OrchestratorCore {
 
   /**
    * How this backend decides what a credential may do, and therefore which
-   * rules the console applies to it. Every orchestrator serves `scoped-keys`
-   * today; see {@link getRegionAccessModel}, which answers the same question
-   * for callers holding a region rather than an orchestrator, and which the
-   * registry hands each orchestrator so the two cannot disagree.
+   * rules the console applies to it. See {@link getRegionAccessModel}, which
+   * answers the same question for callers holding a region rather than an
+   * orchestrator, and which the registry hands each orchestrator so the two
+   * cannot disagree.
    */
   readonly accessModel: AccessModel;
 
@@ -384,12 +385,12 @@ export interface UsageOrchestrator {
   ): Promise<StorageUsageSample[]>;
 }
 
-/** The parent RFC's model: a key is authorized from what it was created with. */
+/** The model before fil-one/RFC#30: a key is authorized from what it was created with. */
 export interface ScopedKeysOrchestrator extends OrchestratorCore {
   readonly accessModel: 'scoped-keys';
 }
 
-/** The RFC#30 model: principals, bucket policies, and keys bound to a principal. */
+/** The fil-one/RFC#30 model: principals, bucket policies, and keys bound to a principal. */
 export interface IamOrchestrator extends OrchestratorCore {
   readonly accessModel: 'iam';
   readonly iam: IamMethods;

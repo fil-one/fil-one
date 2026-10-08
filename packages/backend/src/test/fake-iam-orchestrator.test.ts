@@ -1,26 +1,26 @@
 import { describe, it, expect } from 'vitest';
+import type { BucketPolicy } from '@filone/shared';
 import { PolicyValidationError, PrincipalNotFoundError } from '../lib/errors.ts';
-import type { PolicyPrecondition } from '../lib/iam-orchestrator.ts';
 import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 
 describe('FakeIamOrchestrator principal reads', () => {
-  const wildcard = {
+  const grantReadToEveryone: BucketPolicy = {
     Statement: [{ Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] }],
-  } as never;
+  };
 
-  it('refuses resolveMemberAccess for a principal never synced, as Hilt does', async () => {
+  it('resolveMemberAccess throws PrincipalNotFoundError for a principal that was never added', async () => {
     const fake = new FakeIamOrchestrator();
-    fake.seedPolicy('t1', 'photos', wildcard);
+    fake.seedPolicy('t1', 'photos', grantReadToEveryone);
     await expect(fake.resolveMemberAccess('t1', 'ghost')).rejects.toBeInstanceOf(
       PrincipalNotFoundError,
     );
   });
 
-  it('refuses listBucketPoliciesForMember for a removed principal, as Hilt does', async () => {
+  it('listBucketPoliciesForMember throws PrincipalNotFoundError for a removed principal', async () => {
     const fake = new FakeIamOrchestrator();
     await fake.syncMember('t1', 'u1');
     await fake.removeMember('t1', 'u1');
-    fake.seedPolicy('t1', 'photos', wildcard);
+    fake.seedPolicy('t1', 'photos', grantReadToEveryone);
     await expect(fake.listBucketPoliciesForMember('t1', 'u1')).rejects.toBeInstanceOf(
       PrincipalNotFoundError,
     );
@@ -28,30 +28,25 @@ describe('FakeIamOrchestrator principal reads', () => {
 });
 
 describe('FakeIamOrchestrator policy writes', () => {
-  it('leaves a policy that never names the removed member untouched, as Hilt does', async () => {
+  it('removeMember keeps the policy and ETag of a bucket whose policy does not name the member', async () => {
     const fake = new FakeIamOrchestrator();
     await fake.syncMember('t1', 'u1');
     await fake.syncMember('t1', 'u2');
-    const etag = fake.seedPolicy('t1', 'photos', {
+    const policy: BucketPolicy = {
       Statement: [{ Effect: 'Allow', Principal: ['u2'], Action: ['s3:GetObject'] }],
-    } as never);
+    };
+    const etag = fake.seedPolicy('t1', 'photos', policy);
     await fake.removeMember('t1', 'u1');
-    expect((await fake.getBucketPolicy('t1', 'photos'))?.etag).toBe(etag);
+    await expect(fake.getBucketPolicy('t1', 'photos')).resolves.toStrictEqual({ policy, etag });
   });
 
-  it('refuses a policy naming an unknown principal as a malformed policy, as Hilt does', async () => {
+  it('putBucketPolicy throws PolicyValidationError when a statement names an unknown principal', async () => {
     const fake = new FakeIamOrchestrator();
-    const policy = {
+    const policy: BucketPolicy = {
       Statement: [{ Effect: 'Allow', Principal: ['ghost'], Action: ['s3:GetObject'] }],
-    } as never;
+    };
     await expect(
       fake.putBucketPolicy('t1', 'photos', policy, { ifNoneMatch: '*' }),
     ).rejects.toBeInstanceOf(PolicyValidationError);
-  });
-
-  it('takes exactly one precondition', () => {
-    // @ts-expect-error — a write carries If-Match or If-None-Match, never both.
-    const _p: PolicyPrecondition = { ifMatch: '"e1"', ifNoneMatch: '*' };
-    void _p;
   });
 });

@@ -27,7 +27,11 @@ import {
   PolicyPublishError,
   PolicyValidationError,
 } from './errors.ts';
-import type { PolicyPrecondition } from './iam-orchestrator.ts';
+import type {
+  IfMatchPrecondition,
+  PolicyPrecondition,
+  StoredBucketPolicy,
+} from './iam-orchestrator.ts';
 
 /**
  * Per-call options a caller passes to bound one S3 operation. The caller owns
@@ -319,19 +323,16 @@ export async function deleteBucket(
 // ---------------------------------------------------------------------------
 // Bucket policies (fil-one/RFC#30). The three S3 operations on
 // `/{bucket}?policy`, signed with the tenant's console key, which holds
-// `s3:GetBucketPolicy`, `s3:PutBucketPolicy` and `s3:DeleteBucketPolicy`.
+// CONSOLE_KEY_POLICY_PERMISSIONS on an iam region.
 // The storage system reads the preconditions from signed headers and answers
 // the policy's ETag in a header, so both travel through command middleware
 // rather than the SDK's typed input and output.
-
-/** The precondition a delete carries; a delete never creates. */
-export type DeletePolicyPrecondition = { ifMatch: string };
 
 type PolicyCommand = GetBucketPolicyCommand | PutBucketPolicyCommand | DeleteBucketPolicyCommand;
 
 // The middleware below reads the HTTP request and response and nothing typed
 // per command, so one command's stack type serves all three.
-const stackOf = (command: PolicyCommand) =>
+const getMiddlewareStack = (command: PolicyCommand) =>
   command.middlewareStack as GetBucketPolicyCommand['middlewareStack'];
 
 /**
@@ -340,8 +341,8 @@ const stackOf = (command: PolicyCommand) =>
  * storage system refuses an unsigned precondition. Per command rather than on
  * the client: the same client serves every other data-plane call.
  */
-function withSignedHeaders(command: PolicyCommand, headers: Record<string, string>): void {
-  stackOf(command).add(
+function addSignedHeaders(command: PolicyCommand, headers: Record<string, string>): void {
+  getMiddlewareStack(command).add(
     (next) => async (args) => {
       const request = args.request as { headers?: Record<string, string> };
       if (request.headers) Object.assign(request.headers, headers);
@@ -354,7 +355,7 @@ function withSignedHeaders(command: PolicyCommand, headers: Record<string, strin
 /** Capture the response's ETag header, which the SDK's typed output omits. */
 function captureEtag(command: PolicyCommand): { etag?: string } {
   const captured: { etag?: string } = {};
-  stackOf(command).add(
+  getMiddlewareStack(command).add(
     (next) => async (args) => {
       const result = await next(args);
       const response = (result as { response?: { headers?: Record<string, string> } }).response;
@@ -367,7 +368,9 @@ function captureEtag(command: PolicyCommand): { etag?: string } {
   return captured;
 }
 
-function preconditionHeaders(precondition: PolicyPrecondition | undefined): Record<string, string> {
+function buildPreconditionHeaders(
+  precondition: PolicyPrecondition | undefined,
+): Record<string, string> {
   if (!precondition) return {};
   return precondition.ifMatch !== undefined
     ? { 'If-Match': precondition.ifMatch }
@@ -376,12 +379,17 @@ function preconditionHeaders(precondition: PolicyPrecondition | undefined): Reco
 
 /**
  * A failed policy operation, by the S3 error code the gateway answered
- * (fil-one/RFC#30, "Failures"). `write` decides what a 5xx means: on a write
- * it is a publish that failed before commit, which the caller retries; on a
- * read it is an ordinary upstream failure. `InvalidRequest` is a precondition
+ * (fil-one/RFC#30, "Failures"). The operation decides what a 5xx means: on a
+ * write it is a publish that failed before commit, which the caller retries;
+ * on a read it is an ordinary upstream failure. `InvalidRequest` is a precondition
  * the console built wrong and is left to the fallback.
  */
-function policyError(err: unknown, bucketName: string, write: boolean, fallback: string): Error {
+function toPolicyError(
+  err: unknown,
+  bucketName: string,
+  { operation }: { operation: 'read' | 'write' },
+  fallback: string,
+): Error {
   const cause = err as Error & { $metadata?: { httpStatusCode?: number } };
   switch (cause.name) {
     case 'NoSuchBucket':
@@ -399,7 +407,7 @@ function policyError(err: unknown, bucketName: string, write: boolean, fallback:
         { cause },
       );
     default:
-      if (write && (cause.$metadata?.httpStatusCode ?? 0) >= 500) {
+      if (operation === 'write' && (cause.$metadata?.httpStatusCode ?? 0) >= 500) {
         return new PolicyPublishError({ cause });
       }
       return new Error(fallback, { cause });
@@ -414,16 +422,11 @@ function requireEtag(captured: { etag?: string }, bucketName: string): string {
   return captured.etag;
 }
 
-export interface StoredPolicyDocument {
-  policy: BucketPolicy;
-  etag: string;
-}
-
 /** The bucket's policy, or null when the bucket exists and has none. */
 export async function getBucketPolicy(
   s3: S3Client,
   bucketName: string,
-): Promise<StoredPolicyDocument | null> {
+): Promise<StoredBucketPolicy | null> {
   const command = new GetBucketPolicyCommand({ Bucket: bucketName });
   const captured = captureEtag(command);
   try {
@@ -433,10 +436,10 @@ export async function getBucketPolicy(
       etag: requireEtag(captured, bucketName),
     };
   } catch (err) {
-    const failure = policyError(
+    const failure = toPolicyError(
       err,
       bucketName,
-      false,
+      { operation: 'read' },
       `Failed to read the policy of bucket "${bucketName}"`,
     );
     if (failure instanceof PolicyNotFoundError) return null;
@@ -455,15 +458,15 @@ export async function putBucketPolicy(
     Bucket: bucketName,
     Policy: JSON.stringify(policy),
   });
-  withSignedHeaders(command, preconditionHeaders(precondition));
+  addSignedHeaders(command, buildPreconditionHeaders(precondition));
   const captured = captureEtag(command);
   try {
     await s3.send(command);
   } catch (err) {
-    throw policyError(
+    throw toPolicyError(
       err,
       bucketName,
-      true,
+      { operation: 'write' },
       `Failed to write the policy of bucket "${bucketName}"`,
     );
   }
@@ -474,17 +477,17 @@ export async function putBucketPolicy(
 export async function deleteBucketPolicy(
   s3: S3Client,
   bucketName: string,
-  precondition?: DeletePolicyPrecondition,
+  precondition?: IfMatchPrecondition,
 ): Promise<void> {
   const command = new DeleteBucketPolicyCommand({ Bucket: bucketName });
-  withSignedHeaders(command, preconditionHeaders(precondition));
+  addSignedHeaders(command, buildPreconditionHeaders(precondition));
   try {
     await s3.send(command);
   } catch (err) {
-    throw policyError(
+    throw toPolicyError(
       err,
       bucketName,
-      true,
+      { operation: 'write' },
       `Failed to delete the policy of bucket "${bucketName}"`,
     );
   }

@@ -19,7 +19,7 @@ import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
 } from './tenant-setup.ts';
-import { accessKeyBody, describeAccessKeyBody } from './access-key-body.ts';
+import { buildAccessKeyBody, describeAccessKeyBody } from './access-key-body.ts';
 import { buildIamMethods } from './iam.ts';
 import { extractApiCode, extractApiMessage } from './api-message.ts';
 import {
@@ -379,7 +379,7 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
     keyOpts: IssueAccessKeyOpts,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
-    const body = accessKeyBody(keyOpts, this);
+    const body = buildAccessKeyBody(keyOpts, this);
     console.log(
       `Creating ${this.id} access key "${body.name}" for tenant ${tenantId} ${describeAccessKeyBody(body)}`,
     );

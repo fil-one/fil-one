@@ -18,27 +18,28 @@ import {
   PolicyValidationError,
   PrincipalNotFoundError,
 } from '../errors.ts';
-import type { IamMethods, MemberPolicy, StoredBucketPolicy } from '../iam-orchestrator.ts';
+import type { IamMethods, MemberBucketPolicy, StoredBucketPolicy } from '../iam-orchestrator.ts';
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { deleteBucketPolicy, getBucketPolicy, putBucketPolicy } from '../s3-bucket-operations.ts';
 import { createS3Client, type S3ClientContext } from '../s3-client.ts';
 import { extractApiMessage } from './api-message.ts';
 
-/**
- * The two answers the RFC documents as "retry the same request": a lock
- * timeout (409 on the management API, OperationAborted over S3), and a 500
- * after the storage system published revocations but committed nothing. A
- * stale precondition is never retried, because the caller must read the
- * current document first, and a refused document never succeeds on a repeat.
- */
 const IAM_WRITE_RETRY = { retries: 2, minTimeout: 200, maxTimeout: 1000 } as const;
 
-function retryableWrite(error: unknown): boolean {
+/**
+ * True for the answers fil-one/RFC#30 documents as "retry the same request".
+ * A stale precondition is never retried, because the caller must read the
+ * current document first, and a refused document never succeeds on a repeat.
+ */
+function isRetryableWriteError(error: unknown): boolean {
   return error instanceof PolicyConflictError || error instanceof PolicyPublishError;
 }
 
 function withWriteRetry<T>(run: () => Promise<T>): Promise<T> {
-  return pRetry(run, { ...IAM_WRITE_RETRY, shouldRetry: ({ error }) => retryableWrite(error) });
+  return pRetry(run, {
+    ...IAM_WRITE_RETRY,
+    shouldRetry: ({ error }) => isRetryableWriteError(error),
+  });
 }
 
 /** What the generated SDK hands back; only the fields read here. */
@@ -50,7 +51,7 @@ interface SdkResult<T> {
 }
 
 /** A failed principal route, by status. */
-function principalFailure(
+function toPrincipalError(
   result: SdkResult<unknown>,
   principalId: string,
   fallback: string,
@@ -82,11 +83,11 @@ interface IamContext {
   client: Client;
   orchestratorId: string;
   /** An S3 client signing as the tenant's console key on this region. */
-  s3: (tenantId: string) => Promise<ReturnType<typeof createS3Client>>;
+  getTenantS3Client: (tenantId: string) => Promise<ReturnType<typeof createS3Client>>;
 }
 
 /** The message for an answer no mapping names; the upstream body rides as the cause. */
-function failed(ctx: IamContext, what: string, tenantId: string): string {
+function formatFailureMessage(ctx: IamContext, what: string, tenantId: string): string {
   return `Failed to ${what} for ${ctx.orchestratorId} tenant ${tenantId}`;
 }
 
@@ -98,7 +99,8 @@ export function buildIamMethods(
   const ctx: IamContext = {
     client,
     orchestratorId,
-    s3: async (tenantId) => createS3Client(await source.getS3ClientContext(tenantId)),
+    getTenantS3Client: async (tenantId) =>
+      createS3Client(await source.getS3ClientContext(tenantId)),
   };
   return {
     ...buildPrincipalMethods(ctx),
@@ -122,10 +124,10 @@ function buildPrincipalMethods(
           throwOnError: false,
         });
         if (result.error) {
-          throw principalFailure(
+          throw toPrincipalError(
             result,
             userId,
-            failed(ctx, `create principal "${userId}"`, tenantId),
+            formatFailureMessage(ctx, `create principal "${userId}"`, tenantId),
           );
         }
       });
@@ -138,28 +140,35 @@ function buildPrincipalMethods(
           path: { tenantId, principalId: userId },
           throwOnError: false,
         });
-        // 204 covers a principal that is already gone; a 404 is the tenant.
         if (result.error) {
-          throw principalFailure(
+          // A principal that is already gone answers 204, so a 404 means the
+          // tenant is missing.
+          if (result.response?.status === 404) {
+            throw new Error(
+              `${formatFailureMessage(ctx, `remove principal "${userId}"`, tenantId)}: the tenant does not exist`,
+              { cause: result.error },
+            );
+          }
+          throw toPrincipalError(
             result,
             userId,
-            failed(ctx, `remove principal "${userId}"`, tenantId),
+            formatFailureMessage(ctx, `remove principal "${userId}"`, tenantId),
           );
         }
       });
     },
 
-    async listBucketPoliciesForMember(tenantId, userId): Promise<MemberPolicy[]> {
+    async listBucketPoliciesForMember(tenantId, userId): Promise<MemberBucketPolicy[]> {
       const result = await getTenantsByTenantIdPrincipalsByPrincipalIdPolicies({
         client,
         path: { tenantId, principalId: userId },
         throwOnError: false,
       });
       if (result.error || !result.data) {
-        throw principalFailure(
+        throw toPrincipalError(
           result,
           userId,
-          failed(ctx, `list the policies naming "${userId}"`, tenantId),
+          formatFailureMessage(ctx, `list the policies naming "${userId}"`, tenantId),
         );
       }
       return result.data.items.map((item) => ({
@@ -175,10 +184,10 @@ function buildPrincipalMethods(
         throwOnError: false,
       });
       if (result.error || !result.data) {
-        throw principalFailure(
+        throw toPrincipalError(
           result,
           userId,
-          failed(ctx, `resolve the access of "${userId}"`, tenantId),
+          formatFailureMessage(ctx, `resolve the access of "${userId}"`, tenantId),
         );
       }
       return result.data.buckets.map((bucket) => ({
@@ -194,17 +203,17 @@ function buildPolicyMethods(
 ): Pick<IamMethods, 'getBucketPolicy' | 'putBucketPolicy' | 'deleteBucketPolicy'> {
   return {
     async getBucketPolicy(tenantId, bucketName): Promise<StoredBucketPolicy | null> {
-      // The gateway's document shape is the shared one, field for field.
-      return getBucketPolicy(await ctx.s3(tenantId), bucketName);
+      // The S3 document matches `BucketPolicy` in `@filone/shared`.
+      return getBucketPolicy(await ctx.getTenantS3Client(tenantId), bucketName);
     },
 
     async putBucketPolicy(tenantId, bucketName, policy, precondition) {
-      const s3 = await ctx.s3(tenantId);
+      const s3 = await ctx.getTenantS3Client(tenantId);
       return withWriteRetry(() => putBucketPolicy(s3, bucketName, policy, precondition));
     },
 
     async deleteBucketPolicy(tenantId, bucketName, precondition) {
-      const s3 = await ctx.s3(tenantId);
+      const s3 = await ctx.getTenantS3Client(tenantId);
       await withWriteRetry(() => deleteBucketPolicy(s3, bucketName, precondition));
     },
   };

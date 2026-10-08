@@ -1,9 +1,9 @@
-// The `iam` half of the orchestrator interface: what a Forge region's Hilt
-// offers once it serves principals and bucket policies (fil-one/RFC#30). The
-// principal methods are management-API calls under the partner key; the
-// policy methods are the S3 bucket policy operations signed with the tenant's
-// console key. None touches DynamoDB, and every one takes a `tenantId` the
-// caller has already resolved.
+// The `iam` half of the orchestrator interface: what Hilt, Forge's storage
+// gateway, offers once it serves principals and bucket policies
+// (fil-one/RFC#30). The principal methods are management-API calls under the
+// partner key; the policy methods are the S3 bucket policy operations signed
+// with the tenant's console key. None touches DynamoDB, and every one takes a
+// `tenantId` the caller has already resolved.
 //
 // Principals are console user ids. The console holds no copy of any policy: it
 // reads one under an ETag, edits it, and writes it back under that ETag, so a
@@ -18,7 +18,7 @@ export interface StoredBucketPolicy {
 }
 
 /** A policy naming a principal, as the member detail view lists them. */
-export interface MemberPolicy {
+export interface MemberBucketPolicy {
   bucketName: string;
   policy: BucketPolicy;
 }
@@ -31,6 +31,9 @@ export interface MemberPolicy {
 export type PolicyPrecondition =
   | { ifMatch: string; ifNoneMatch?: never }
   | { ifNoneMatch: '*'; ifMatch?: never };
+
+/** The precondition a delete carries; a delete never creates. */
+export type IfMatchPrecondition = { ifMatch: string };
 
 export interface IamMethods {
   /**
@@ -70,11 +73,11 @@ export interface IamMethods {
   deleteBucketPolicy(
     tenantId: string,
     bucketName: string,
-    precondition?: { ifMatch: string },
+    precondition?: IfMatchPrecondition,
   ): Promise<void>;
 
   /** Every policy with a statement naming the member or everyone. */
-  listBucketPoliciesForMember(tenantId: string, userId: string): Promise<MemberPolicy[]>;
+  listBucketPoliciesForMember(tenantId: string, userId: string): Promise<MemberBucketPolicy[]>;
 
   /**
    * The member's effective actions per bucket, computed by the storage system
