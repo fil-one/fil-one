@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import {
-  DynamoDBClient,
-  GetItemCommand,
-  PutItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { SQSEvent } from 'aws-lambda';
 import { type MetricEvent, reportMetric } from '../lib/metrics.ts';
@@ -238,7 +233,6 @@ describe('stripe-event-worker handler', () => {
 
   beforeEach(() => {
     ddbMock.reset();
-    ddbMock.on(PutItemCommand).resolves({});
     ddbMock.on(UpdateItemCommand).resolves({});
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
     currentEvent = {};
@@ -251,87 +245,14 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Idempotency: an event is marked processed once its handling succeeds
+  // A failed delivery is retried by SQS
   // -----------------------------------------------------------------------
-  describe('idempotency', () => {
-    const MARK_KEY = { pk: { S: `WEBHOOK#${MOCK_EVENT_ID}` }, sk: { S: 'EVENT' } };
-
-    it('skips an event already marked processed', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-      ddbMock
-        .on(GetItemCommand, { Key: MARK_KEY })
-        .resolves({ Item: { ...MARK_KEY, eventType: { S: 'customer.subscription.created' } } });
-
-      await deliver();
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
-    });
-
-    it('reads the mark with a strongly consistent read', async () => {
-      setupStripeEvent('unknown.event', {});
-
-      await deliver();
-
-      expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: MARK_KEY,
-        ConsistentRead: true,
-      });
-    });
-
-    it('writes the processed mark only after the billing update', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-
-      await deliver();
-
-      const writes = ddbMock
-        .calls()
-        .map((c) => c.args[0])
-        .filter((cmd) => cmd instanceof UpdateItemCommand || cmd instanceof PutItemCommand);
-      expect(writes.map((cmd) => cmd.constructor)).toEqual([UpdateItemCommand, PutItemCommand]);
-    });
-
-    it('marks the event with its type and a 30-day TTL', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-
-      const before = Math.floor(Date.now() / 1000);
-      await deliver();
-      const after = Math.floor(Date.now() / 1000);
-
-      const input = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
-      expect(input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Item: {
-          ...MARK_KEY,
-          eventType: { S: 'customer.subscription.created' },
-          processedAt: { S: expect.any(String) },
-          ttl: { N: expect.any(String) },
-        },
-      });
-
-      const ttl = Number(input.Item!.ttl.N);
-      const thirtyDays = 30 * 24 * 60 * 60;
-      expect(ttl).toBeGreaterThanOrEqual(before + thirtyDays);
-      expect(ttl).toBeLessThanOrEqual(after + thirtyDays + 1);
-    });
-
-    it('leaves the event unmarked and fails the delivery when processing fails', async () => {
+  describe('delivery', () => {
+    it('fails the delivery when processing fails, so SQS retries it', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
       ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB error'));
 
       await expect(deliver()).rejects.toThrow('DynamoDB error');
-
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
-    });
-
-    it('fails the delivery when the mark cannot be read', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-      ddbMock.on(GetItemCommand, { Key: MARK_KEY }).rejects(new Error('DynamoDB get failed'));
-
-      await expect(deliver()).rejects.toThrow('DynamoDB get failed');
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
     });
   });
 
@@ -731,7 +652,6 @@ describe('stripe-event-worker handler', () => {
 
       await expect(deliver()).rejects.toThrow('No userId in metadata');
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
 
     it('skips update when default_payment_method is null', async () => {
@@ -987,7 +907,7 @@ describe('stripe-event-worker handler', () => {
 
     it('fails the delivery when neither object names an org', async () => {
       // The org id is both the row's address and the tenant's name, so nothing
-      // can be written or locked. The event stays unmarked, so it is retried and
+      // can be written or locked. The delivery fails, so it is retried and
       // then parked in the DLQ, where it can be redriven once the metadata is
       // repaired.
       setupStripeEvent(
@@ -1085,7 +1005,6 @@ describe('stripe-event-worker handler', () => {
 
       // The grace period is already recorded when the lock is attempted
       expect(updatedKeys()).toEqual([ORG_KEY]);
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
   });
 
@@ -1171,12 +1090,11 @@ describe('stripe-event-worker handler', () => {
   // customer.subscription.trial_will_end
   // -----------------------------------------------------------------------
   describe('customer.subscription.trial_will_end', () => {
-    it('writes no billing update for trial_will_end and marks the event processed', async () => {
+    it('writes no billing update for trial_will_end', async () => {
       setupStripeEvent('customer.subscription.trial_will_end', mockSubscription());
 
       await deliver();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
     });
   });
 
@@ -1269,7 +1187,6 @@ describe('stripe-event-worker handler', () => {
       await expect(deliver()).rejects.toThrow('tenant status sync failed for: aurora');
 
       expect(updatedKeys()).toEqual([ORG_KEY]);
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
   });
 
@@ -1279,7 +1196,7 @@ describe('stripe-event-worker handler', () => {
   describe('invoice.payment_failed', () => {
     it('fails the delivery when the Stripe objects name no org', async () => {
       // There is no key to write the row under, and no billing-row fallback any
-      // more. Failing the delivery leaves the event unmarked, so it is retried and
+      // more. The delivery fails, so it is retried and
       // then parked in the DLQ, where it can be redriven once the metadata is
       // repaired; reporting success would consume the event and take the status
       // change with it.
@@ -1289,7 +1206,6 @@ describe('stripe-event-worker handler', () => {
       await expect(deliver()).rejects.toThrow(MissingOrgIdError);
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
 
     it('sets PastDue status with lastPaymentFailedAt (no grace period)', async () => {
@@ -1381,29 +1297,10 @@ describe('stripe-event-worker handler', () => {
       await expect(deliver()).rejects.toThrow('Stripe API error');
     });
 
-    it('unhandled event type is marked processed', async () => {
+    it('acknowledges an unhandled event type', async () => {
       setupStripeEvent('some.unknown.event', {});
 
       await deliver();
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
-    });
-
-    it('acknowledges the delivery, with an error log, when the processed mark cannot be written', async () => {
-      // The event was handled. Failing the delivery would make SQS handle it
-      // again and count its metrics twice; an unmarked event only matters if
-      // Stripe redelivers it after the queue's 5-minute dedup window.
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-      ddbMock.on(PutItemCommand).rejects(new Error('DynamoDB put failed'));
-
-      await expect(deliver()).resolves.toBeUndefined();
-
-      expect(errorSpy).toHaveBeenCalledWith(
-        '[stripe-webhook] Failed to mark event processed:',
-        MOCK_EVENT_ID,
-        expect.objectContaining({ message: 'DynamoDB put failed' }),
-      );
-      errorSpy.mockRestore();
     });
   });
 
@@ -1655,18 +1552,6 @@ describe('stripe-event-worker handler', () => {
       expect(invoicePaidEmissions()).toHaveLength(0);
     });
 
-    it('counts a payment once when the processed mark fails to write', async () => {
-      // A failed delivery would be redelivered by SQS and emit the metric again.
-      vi.spyOn(console, 'error').mockImplementationOnce(() => {});
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-      ddbMock.on(PutItemCommand).rejectsOnce(new Error('ProvisionedThroughputExceeded'));
-
-      await expect(deliver()).resolves.toBeUndefined();
-
-      expect(invoicePaidEmissions()).toHaveLength(1);
-    });
-
     it('does not emit even when invoice.customer is null', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice({ customer: null }));
 
@@ -1824,13 +1709,12 @@ describe('stripe-event-worker handler', () => {
 
     // A key built from a guessed org would put this subscription on another
     // org's partition, so nothing is written — and the delivery fails rather than
-    // reporting success. The event stays unmarked, so it is retried and then
+    // reporting success. The delivery fails, so it is retried and then
     // parked in the DLQ, where it can be redriven once the metadata is repaired.
     // Swallowing it consumes the event and the status change with it.
     async function expectRefusedAndRetryable(delivery: Promise<void>) {
       await expect(delivery).rejects.toThrow(MissingOrgIdError);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     }
 
     it('subscription update persists orgId from subscription metadata when present', async () => {

@@ -9,7 +9,7 @@
 // flight, so two events for the same customer never run at once (a payment
 // success cannot race the cancellation it follows). Deduplicating on the event
 // id drops Stripe's own redeliveries that arrive within the 5-minute window;
-// the worker's processed-event mark catches later ones.
+// the webhook's received-event mark catches later ones.
 
 import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import type Stripe from 'stripe';

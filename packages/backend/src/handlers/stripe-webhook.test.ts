@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
@@ -66,6 +66,8 @@ function buildWebhookEvent(body: string, opts?: { isBase64Encoded?: boolean }) {
 describe('stripe-webhook handler', () => {
   beforeEach(() => {
     ddbMock.reset();
+    ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+    ddbMock.on(PutItemCommand).resolves({});
     mockConstructEvent.mockReset();
     mockConstructEvent.mockReturnValue(STRIPE_EVENT);
     mockCustomersRetrieve.mockReset();
@@ -126,11 +128,108 @@ describe('stripe-webhook handler', () => {
       });
     });
 
-    it('makes no DynamoDB or Stripe API call while Stripe waits', async () => {
+    it('makes no Stripe API call while Stripe waits', async () => {
       await handler(buildWebhookEvent('{}'));
 
-      expect(ddbMock.calls()).toHaveLength(0);
       expect(mockCustomersRetrieve).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deduplication', () => {
+    const MARK_KEY = { pk: { S: `WEBHOOK#${STRIPE_EVENT.id}` }, sk: { S: 'EVENT' } };
+
+    it('acknowledges an event already received without enqueueing it again', async () => {
+      ddbMock
+        .on(GetItemCommand, { Key: MARK_KEY })
+        .resolves({ Item: { ...MARK_KEY, eventType: { S: STRIPE_EVENT.type } } });
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(mockEnqueueStripeEvent).not.toHaveBeenCalled();
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    });
+
+    it('reads the mark with a strongly consistent read', async () => {
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input).toStrictEqual({
+        TableName: 'BillingTable',
+        Key: MARK_KEY,
+        ConsistentRead: true,
+      });
+    });
+
+    it('writes the mark only after the event is enqueued', async () => {
+      // Marking first would lose the event if the enqueue then failed: Stripe's
+      // retry would find the mark and be acknowledged with nothing queued.
+      mockEnqueueStripeEvent.mockImplementation(async () => {
+        expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+      });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockEnqueueStripeEvent).toHaveBeenCalledOnce();
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
+    });
+
+    it('marks the event with its type and a 30-day TTL', async () => {
+      const before = Math.floor(Date.now() / 1000);
+      await handler(buildWebhookEvent('{}'));
+      const after = Math.floor(Date.now() / 1000);
+
+      const input = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
+      expect(input).toStrictEqual({
+        TableName: 'BillingTable',
+        Item: {
+          ...MARK_KEY,
+          eventType: { S: STRIPE_EVENT.type },
+          processedAt: { S: expect.any(String) },
+          ttl: { N: expect.any(String) },
+        },
+      });
+
+      const ttl = Number(input.Item!.ttl.N);
+      const thirtyDays = 30 * 24 * 60 * 60;
+      expect(ttl).toBeGreaterThanOrEqual(before + thirtyDays);
+      expect(ttl).toBeLessThanOrEqual(after + thirtyDays + 1);
+    });
+
+    it('does not mark an event it failed to enqueue', async () => {
+      mockEnqueueStripeEvent.mockRejectedValue(new Error('SQS unavailable'));
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    });
+
+    it('returns 500 when the mark cannot be read, so Stripe retries', async () => {
+      ddbMock.on(GetItemCommand).rejects(new Error('DynamoDB get failed'));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Idempotency check error' }),
+      });
+      expect(mockEnqueueStripeEvent).not.toHaveBeenCalled();
+    });
+
+    it('acknowledges a queued event, with an error log, when the mark cannot be written', async () => {
+      // The event is queued. Without the mark, a later duplicate from Stripe
+      // would be handled again, which the handlers tolerate.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      ddbMock.on(PutItemCommand).rejects(new Error('DynamoDB put failed'));
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[stripe-webhook] Failed to mark event received:',
+        STRIPE_EVENT.id,
+        expect.objectContaining({ message: 'DynamoDB put failed' }),
+      );
+      errorSpy.mockRestore();
     });
   });
 });

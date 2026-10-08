@@ -1,16 +1,13 @@
 // Processing for verified Stripe webhook events: the billing-table writes,
 // Stripe lookups and per-region tenant status syncs each event type triggers.
 //
-// The webhook verifies Stripe's signature and enqueues the event (see
-// lib/stripe-event-queue.ts); this worker consumes the queue one event per
-// invocation. An error fails the delivery, and SQS retries it before parking it
-// in the dead-letter queue. The event is marked processed only after its
-// handling succeeds, so a failed or killed delivery is always retried; the
-// handlers tolerate running twice (conditional writes, superseded checks, and a
-// status sync that probes before it updates).
+// The webhook verifies Stripe's signature, drops events it has already
+// received, and enqueues the rest (see lib/stripe-event-queue.ts); this worker
+// consumes the queue one event per invocation. An error fails the delivery,
+// and SQS retries it before parking it in the dead-letter queue. The handlers
+// tolerate running twice (conditional writes, superseded checks, and a status
+// sync that probes before it updates).
 
-import { GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
 import type { SQSEvent } from 'aws-lambda';
 import Stripe from 'stripe';
 import {
@@ -19,8 +16,6 @@ import {
   TRIAL_GRACE_DAYS,
   mapStripeStatus,
 } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.ts';
 import { resolveOrgId, resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.ts';
 import { startDeletionFromStripe } from '../lib/deletion-from-stripe.ts';
 import {
@@ -42,47 +37,11 @@ import {
   emitInvoicePaid,
 } from '../lib/stripe-webhook-metrics.ts';
 
-const dynamo = getDynamoClient();
-
 export async function handler(event: SQSEvent): Promise<void> {
   // One message per invocation (batch size 1), so an error escaping this
   // handler returns exactly the failed event to the queue.
   for (const record of event.Records) {
-    await processEventOnce(JSON.parse(record.body) as Stripe.Event);
-  }
-}
-
-async function processEventOnce(stripeEvent: Stripe.Event): Promise<void> {
-  const tableName = Resource.BillingTable.name;
-  const markKey = { pk: `WEBHOOK#${stripeEvent.id}`, sk: 'EVENT' };
-
-  const { Item: mark } = await dynamo.send(
-    new GetItemCommand({ TableName: tableName, Key: marshall(markKey), ConsistentRead: true }),
-  );
-  if (mark) {
-    console.warn('[stripe-webhook] Already processed event:', stripeEvent.id);
-    return;
-  }
-
-  await processStripeEvent(stripeEvent);
-
-  // The event is handled. A failed mark write is logged rather than thrown:
-  // failing the delivery would make SQS handle the event again and count its
-  // metrics twice.
-  try {
-    await dynamo.send(
-      new PutItemCommand({
-        TableName: tableName,
-        Item: marshall({
-          ...markKey,
-          eventType: stripeEvent.type,
-          processedAt: new Date().toISOString(),
-          ttl: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days
-        }),
-      }),
-    );
-  } catch (err) {
-    console.error('[stripe-webhook] Failed to mark event processed:', stripeEvent.id, err);
+    await processStripeEvent(JSON.parse(record.body) as Stripe.Event);
   }
 }
 

@@ -325,7 +325,7 @@ The org and member routes stay off this guard deliberately. Managing who is in t
 
 ### Stripe webhook
 
-[`stripe-webhook.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/stripe-webhook.ts) has no auth middleware. It verifies the signature with `stripe.webhooks.constructEvent`, enqueues the event on the `StripeEventQueue` FIFO queue and returns 200. The `StripeEventWorker` Lambda ([`stripe-event-worker.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/jobs/stripe-event-worker.ts)) updates `BillingTable` based on the event and marks the event ID processed afterwards for idempotency. Webhook secret is in SSM.
+[`stripe-webhook.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/stripe-webhook.ts) has no auth middleware. It verifies the signature with `stripe.webhooks.constructEvent`, skips an event ID it has already received (a `WEBHOOK#<eventId>` record in `BillingTable`), enqueues the rest on the `StripeEventQueue` FIFO queue, records the event ID, and returns 200. The `StripeEventWorker` Lambda ([`stripe-event-worker.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/jobs/stripe-event-worker.ts)) updates `BillingTable` based on the event. Webhook secret is in SSM.
 
 ## Frontend
 

@@ -58,11 +58,12 @@ describe('Payment Failure (invoice.payment_failed)', () => {
     });
   });
 
-  it('marks the event processed once the worker has handled it', async () => {
+  it('marks a received event so a later duplicate is dropped', async () => {
     const invoiceId = await createAndFailInvoice(cusId);
 
-    // The worker writes the mark after the billing update. Without it, Stripe's
-    // later redeliveries of the event would be processed again.
+    // The webhook writes the mark once the event is queued. Without it, a
+    // duplicate Stripe sends after the queue's 5-minute dedup window would be
+    // handled again.
     const eventId = await pollUntil(async () => {
       const { data } = await getStripeClient().events.list({
         type: 'invoice.payment_failed',
