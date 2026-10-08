@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   AbortMultipartUploadCommand,
   DeleteObjectCommand,
+  GetBucketVersioningCommand,
   ListMultipartUploadsCommand,
   ListObjectVersionsCommand,
   ListObjectsV2Command,
@@ -308,8 +309,13 @@ export async function removeBucket(
     const { Versions = [], DeleteMarkers = [] } = await s3.send(
       new ListObjectVersionsCommand({ Bucket: bucket }),
     );
+    // An unversioned bucket lists its objects under the literal version "null",
+    // which a gateway may refuse as a version-scoped delete; only a suspended
+    // bucket needs it kept (as s3-bulk-delete.ts does).
+    const { Status } = await s3.send(new GetBucketVersioningCommand({ Bucket: bucket }));
     for (const { Key, VersionId } of [...Versions, ...DeleteMarkers]) {
-      await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key, VersionId }));
+      const scoped = VersionId !== 'null' || Status === 'Suspended';
+      await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key, ...(scoped && { VersionId }) }));
     }
     const { Uploads = [] } = await s3.send(new ListMultipartUploadsCommand({ Bucket: bucket }));
     for (const { Key, UploadId } of Uploads) {
