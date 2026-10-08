@@ -7,7 +7,8 @@ import { z } from 'zod';
  * A policy is one bucket's own document: a list of statements, each naming an
  * effect, the principals it applies to, and the S3 actions it covers. The
  * console keeps no copy; it reads the document from the orchestrator, edits it,
- * and writes it back under the ETag it read. Principals are console user ids,
+ * and writes it back under the ETag it read, which travels in the `ETag` and
+ * `If-Match` headers. Principals are console user ids,
  * which the orchestrator stores verbatim and never interprets.
  *
  * This module is the one place the wire shape is spelled out. The RFC review
@@ -374,32 +375,22 @@ export function withRosterStatements(
 
 // ── Console API shapes ────────────────────────────────────────────────
 
-/** `GET /api/buckets/{name}/policy?region=` */
+/**
+ * `GET /api/buckets/{name}/policy?region=`. The `ETag` response header carries
+ * the version a write sends back in `If-Match`.
+ */
 export interface GetBucketPolicyResponse {
   policy: BucketPolicy;
-  /** Opaque. Sent back on the next write so a stale edit loses. */
-  etag: string;
 }
 
 /**
- * `PUT /api/buckets/{name}/policy?region=`. `etag` is the value the last read
- * returned; absent, the write creates the bucket's first policy and is refused
- * if one exists.
+ * `PUT /api/buckets/{name}/policy?region=`, answered 204 with the new `ETag`.
+ * As on S3, `If-Match` replaces only that version, `If-None-Match: *` creates
+ * only the first, and neither overwrites.
  */
-export const PutBucketPolicyRequestSchema = z
-  .object({
-    policy: BucketPolicySchema,
-    etag: z.string().min(1).optional(),
-  })
-  .strict();
+export const PutBucketPolicyRequestSchema = z.object({ policy: BucketPolicySchema }).strict();
 
 export type PutBucketPolicyRequest = z.infer<typeof PutBucketPolicyRequestSchema>;
-
-export interface PutBucketPolicyResponse {
-  etag: string;
-  /** True when this write created the policy, false when it replaced one. */
-  created: boolean;
-}
 
 /** One bucket a principal reaches, with what they may do there. */
 export interface MemberBucketAccess {
