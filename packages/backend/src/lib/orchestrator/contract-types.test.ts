@@ -4,7 +4,7 @@ import type { PolicyAction, PrincipalAccess } from '@filone/orchestrator-client'
 // Type-level claims about the generated Management API client. The runtime
 // body is empty; `tsc --noEmit` is the assertion.
 describe('generated contract types', () => {
-  it('PolicyAction never admits the policy-administration actions', () => {
+  it('rejects s3:GetBucketPolicy, s3:PutBucketPolicy and s3:DeleteBucketPolicy as a PolicyAction', () => {
     // @ts-expect-error — a policy cannot grant s3:GetBucketPolicy.
     const _a: PolicyAction = 's3:GetBucketPolicy';
     // @ts-expect-error — nor s3:PutBucketPolicy.
@@ -16,7 +16,7 @@ describe('generated contract types', () => {
     void _c;
   });
 
-  it('a principal access entry lists expanded actions, never s3:*', () => {
+  it("rejects s3:* as an action in a principal's effective access", () => {
     // @ts-expect-error — the effective set is expanded before it is returned.
     const _a: PrincipalAccess['buckets'][number]['actions'][number] = 's3:*';
     void _a;
