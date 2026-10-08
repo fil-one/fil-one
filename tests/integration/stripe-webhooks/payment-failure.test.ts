@@ -82,6 +82,12 @@ describe('Payment Failure (invoice.payment_failed)', () => {
       return Item ?? null;
     }, 30_000);
 
-    expect(mark.eventType).toEqual({ S: 'invoice.payment_failed' });
+    expect(mark).toStrictEqual({
+      pk: { S: `WEBHOOK#${eventId}` },
+      sk: { S: 'EVENT' },
+      eventType: { S: 'invoice.payment_failed' },
+      processedAt: { S: expect.any(String) },
+      ttl: { N: expect.any(String) },
+    });
   });
 });
