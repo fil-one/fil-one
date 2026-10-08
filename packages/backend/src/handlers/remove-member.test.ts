@@ -227,7 +227,7 @@ function stubOwnerCount(ownerCount: number | undefined) {
 function stubTargetProfile(
   email: string | undefined,
   userId = TARGET_ID,
-  sub: string | undefined = undefined,
+  sub?: string,
   homeOrgId = ORG_ID,
 ) {
   ddbMock
