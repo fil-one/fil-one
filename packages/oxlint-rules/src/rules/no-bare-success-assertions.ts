@@ -43,6 +43,9 @@ function isExpectCall(callee: ESTree.Expression): boolean {
 }
 
 // Matches `x.success` and `x?.success`.
+// The check is deliberately simple: any `success` property counts, whatever
+// produced `x`. If it starts reporting false positives, narrow it, e.g. to
+// results of `safeParse()` calls.
 function isSuccessProperty(argument: ESTree.Argument): boolean {
   const expression = argument.type === 'ChainExpression' ? argument.expression : argument;
   return (
