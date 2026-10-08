@@ -49,10 +49,8 @@ export function assertRegionSyncSucceeded(outcomes: RegionSyncOutcome[]): void {
   }
 }
 
-// Default for background callers — the grace-period enforcer and usage-reporting
-// worker crons (60s timeouts, re-run on schedule), the Stripe event worker and
-// the activate-subscription API. They have generous time budgets, so they ride
-// out transient outages with several retries (p-retry's default 1s/2s/4s backoff).
+// Every caller can wait out a transient orchestrator outage, so each probe and
+// update retries several times (p-retry's default 1s/2s/4s backoff).
 const STATUS_SYNC_RETRY: RetryOptions = { retries: 3 };
 
 // Reconciles every provisioned region with the desired tenant status. Each
@@ -63,13 +61,12 @@ const STATUS_SYNC_RETRY: RetryOptions = { retries: 3 };
 export async function syncTenantStatusInProvisionedRegions(
   orgId: string,
   desired: TenantStatus,
-  retry: RetryOptions = STATUS_SYNC_RETRY,
 ): Promise<RegionSyncOutcome[]> {
   const ready = await getProvisionedRegions(orgId);
 
   return Promise.all(
     ready.map(({ orchestrator, tenantId }) =>
-      syncRegionTenantStatus({ orgId, orchestrator, tenantId, desired, retry }),
+      syncRegionTenantStatus({ orgId, orchestrator, tenantId, desired }),
     ),
   );
 }
@@ -79,13 +76,11 @@ async function syncRegionTenantStatus({
   orchestrator,
   tenantId,
   desired,
-  retry,
 }: {
   orgId: string;
   orchestrator: ServiceOrchestrator;
   tenantId: string;
   desired: TenantStatus;
-  retry: RetryOptions;
 }): Promise<RegionSyncOutcome> {
   const base = { orchestratorId: orchestrator.id, tenantId };
   try {
@@ -99,7 +94,7 @@ async function syncRegionTenantStatus({
         });
       }
       return result;
-    }, retry);
+    }, STATUS_SYNC_RETRY);
 
     if (probe.kind === 'not_found') {
       console.warn('[region-helpers] tenant not found, skipping status sync', {
@@ -125,7 +120,7 @@ async function syncRegionTenantStatus({
     // failures are safe to retry here rather than inside each orchestrator.
     // Retrying at this level keeps the whole status-sync retry budget
     // (probe + update) in one place.
-    await pRetry(() => orchestrator.updateTenantStatus(tenantId, desired), retry);
+    await pRetry(() => orchestrator.updateTenantStatus(tenantId, desired), STATUS_SYNC_RETRY);
     return { ...base, outcome: 'updated' };
   } catch (cause) {
     console.error('[region-helpers] tenant status sync failed', {

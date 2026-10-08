@@ -196,22 +196,6 @@ describe('syncTenantStatusInProvisionedRegions', () => {
 
     expect(result).toEqual([{ orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'updated' }]);
   });
-
-  it('honors a tighter retry override (1 initial + 1 retry)', async () => {
-    vi.useFakeTimers();
-    const aurora = fakeOrchestrator('aurora');
-    aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('outage') });
-    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
-
-    const promise = syncTenantStatusInProvisionedRegions('org-1', 'write-locked', {
-      retries: 1,
-      minTimeout: 200,
-    });
-    await vi.runAllTimersAsync();
-    await promise;
-
-    expect(aurora.getTenantStatus).toHaveBeenCalledTimes(2);
-  });
 });
 
 describe('assertRegionSyncSucceeded', () => {
