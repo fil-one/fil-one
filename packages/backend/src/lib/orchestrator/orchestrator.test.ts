@@ -613,7 +613,7 @@ describe('issueAccessKey', () => {
     );
   });
 
-  it('maps read, write and list onto the multipart actions the contract carries', async () => {
+  it('grants the multipart actions with read, write and list', async () => {
     mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
 
     await orchestrator.issueAccessKey(tenantId, {
@@ -624,9 +624,15 @@ describe('issueAccessKey', () => {
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
     // Parity with FTH_BASE_PERMISSIONS (fth-orchestrator.ts): the console's
     // read/write/list promise multipart support, so scoped keys get it too.
-    expect(permissions).toContain('s3:ListMultipartUploadParts');
-    expect(permissions).toContain('s3:AbortMultipartUpload');
-    expect(permissions).toContain('s3:ListBucketMultipartUploads');
+    expect(permissions).toStrictEqual([
+      's3:ListAllMyBuckets',
+      's3:GetObject',
+      's3:ListBucket',
+      's3:ListMultipartUploadParts',
+      's3:PutObject',
+      's3:AbortMultipartUpload',
+      's3:ListBucketMultipartUploads',
+    ]);
   });
 
   it('maps granular permissions and bucket scopes', async () => {
