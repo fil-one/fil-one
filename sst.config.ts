@@ -449,7 +449,9 @@ export default $config({
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         // Authorization carries RAG API key bearer tokens (query endpoint);
-        // X-Org-Id names the organization each request operates on. Deployed
+        // X-Org-Id names the organization each request operates on; If-Match
+        // and If-None-Match condition a bucket policy write, and ETag answers
+        // the version it reads or writes. Deployed
         // stages serve the console and the API from one origin through the
         // Router, so CORS never applies there — local dev at
         // https://localhost:5173 is cross-origin, and a preflight that omitted
@@ -461,7 +463,10 @@ export default $config({
           'X-Requested-With',
           'Authorization',
           'X-Org-Id',
+          'If-Match',
+          'If-None-Match',
         ],
+        exposeHeaders: ['ETag'],
         allowCredentials: true,
         maxAge: '1 day',
       },

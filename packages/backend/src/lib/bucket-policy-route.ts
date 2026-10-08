@@ -14,9 +14,12 @@ import {
   PolicyValidationError,
   PrincipalNotFoundError,
 } from './errors.ts';
+import type { PolicyPrecondition } from './iam-orchestrator.ts';
 import { isOrgDeleting } from './org-profile.ts';
+import { getRequestHeader } from './request-headers.ts';
 import {
   accountDeletedResponse,
+  badRequestResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
@@ -54,6 +57,31 @@ export function resolvePolicyRouteTarget(
   }
 
   return { target: { bucketName, region } };
+}
+
+/**
+ * The write's precondition from `If-Match` or `If-None-Match: *`, by the rules
+ * S3 and the storage system apply: at most one, never empty, and
+ * `If-None-Match` only as `*`. Neither means an unconditional write.
+ */
+export function readPolicyPrecondition(
+  event: AuthenticatedEvent,
+):
+  | { precondition: PolicyPrecondition | undefined }
+  | { response: APIGatewayProxyStructuredResultV2 } {
+  const ifMatch = getRequestHeader(event, 'If-Match');
+  const ifNoneMatch = getRequestHeader(event, 'If-None-Match');
+  if (ifMatch === '' || ifNoneMatch === '') {
+    return { response: badRequestResponse('If-Match and If-None-Match cannot be empty') };
+  }
+  if (ifMatch !== undefined && ifNoneMatch !== undefined) {
+    return { response: badRequestResponse('Send If-Match or If-None-Match, not both') };
+  }
+  if (ifNoneMatch !== undefined && ifNoneMatch !== '*') {
+    return { response: badRequestResponse('If-None-Match must be *') };
+  }
+  if (ifMatch !== undefined) return { precondition: { ifMatch } };
+  return { precondition: ifNoneMatch ? { ifNoneMatch: '*' } : undefined };
 }
 
 /**
@@ -106,14 +134,15 @@ export function bucketNotFoundResponse(): APIGatewayProxyStructuredResultV2 {
 }
 
 /**
- * The stored policy moved under the caller. Both a stale ETag and a lock that
- * could not be taken within the storage system's timeout answer the same way:
- * nothing was written, and the remedy is to read the policy again and apply
- * the edit to what is there now.
+ * The stored policy moved under the caller: a stale `If-Match` or an
+ * `If-None-Match: *` that found a policy is a 412, and a lock that could not be
+ * taken within the storage system's timeout a 409. Nothing was written either
+ * way, and the remedy is to read the policy again and apply the edit to what is
+ * there now.
  */
-export function policyConflictResponse(): APIGatewayProxyStructuredResultV2 {
+export function policyConflictResponse(status: 409 | 412): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
-    .status(409)
+    .status(status)
     .body<ErrorResponse>({
       message: 'This policy changed while you were editing it. Reload it and try again.',
       code: ApiErrorCode.POLICY_CONFLICT,
@@ -135,9 +164,8 @@ export function bucketPolicyErrorResponse(
 ): APIGatewayProxyStructuredResultV2 | undefined {
   if (err instanceof PolicyNotFoundError) return policyNotFoundResponse();
   if (err instanceof BucketNotFoundError) return bucketNotFoundResponse();
-  if (err instanceof PolicyPreconditionFailedError || err instanceof PolicyConflictError) {
-    return policyConflictResponse();
-  }
+  if (err instanceof PolicyPreconditionFailedError) return policyConflictResponse(412);
+  if (err instanceof PolicyConflictError) return policyConflictResponse(409);
   if (err instanceof PolicyValidationError) {
     return new ResponseBuilder().status(400).body<ErrorResponse>({ message: err.message }).build();
   }

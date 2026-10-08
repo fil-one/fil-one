@@ -44,13 +44,14 @@ const body = (result: { body?: string }) => JSON.parse(result.body ?? '{}');
 describe('get-bucket-policy baseHandler', () => {
   beforeEach(resetFixture);
 
-  it('answers the stored document with the ETag the next write must carry', async () => {
+  it('answers the stored document with the ETag the next write must carry as a header', async () => {
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
 
     const result = await baseHandler(request());
 
     expect(result.statusCode).toBe(200);
-    expect(body(result)).toStrictEqual({ policy: readPolicy, etag });
+    expect(result.headers?.ETag).toBe(etag);
+    expect(body(result)).toStrictEqual({ policy: readPolicy });
   });
 
   it('tells a bucket with no policy apart from a bucket that is not there', async () => {

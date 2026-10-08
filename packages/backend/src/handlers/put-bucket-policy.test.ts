@@ -31,13 +31,14 @@ import {
   resetFixture,
 } from '../test/bucket-policy-fixture.ts';
 
+/** `etag` goes out as `If-Match`; without one the write creates (`If-None-Match: *`) unless `unconditional`. */
 function request(
-  payload: { policy: BucketPolicy; etag?: string },
+  { policy, etag, unconditional }: { policy: BucketPolicy; etag?: string; unconditional?: true },
   { region = IAM_REGION, role = OrgRole.Owner }: { region?: string; role?: OrgRole } = {},
 ) {
   const event = buildEvent({
     method: 'PUT',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ policy }),
     userInfo: {
       userId: USER_ID,
       orgId: ORG_ID,
@@ -46,6 +47,7 @@ function request(
     },
     queryStringParameters: { region },
   });
+  event.headers = etag ? { 'if-match': etag } : unconditional ? {} : { 'if-none-match': '*' };
   event.pathParameters = { name: BUCKET };
   return event;
 }
@@ -65,15 +67,18 @@ const retentionGrant: BucketPolicy = {
 describe('put-bucket-policy baseHandler', () => {
   beforeEach(resetFixture);
 
-  it('creates the first policy without an etag and answers 201 with the new one', async () => {
+  it('creates the first policy under If-None-Match: * and answers 204 with the new ETag', async () => {
     const result = await baseHandler(request({ policy: readPolicy }));
 
-    expect(result.statusCode).toBe(201);
-    expect(body(result)).toStrictEqual({ etag: expect.any(String), created: true });
+    expect(result).toStrictEqual({
+      statusCode: 204,
+      headers: { ETag: iam.policies.get(TENANT_ID)?.get(BUCKET)?.etag },
+      body: '',
+    });
     expect(iam.policies.get(TENANT_ID)?.get(BUCKET)?.policy).toStrictEqual(readPolicy);
   });
 
-  it('replaces the policy under the etag it read and answers 200', async () => {
+  it('replaces the policy under the If-Match it read', async () => {
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
     const next: BucketPolicy = {
       Statement: [{ Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] }],
@@ -81,17 +86,48 @@ describe('put-bucket-policy baseHandler', () => {
 
     const result = await baseHandler(request({ policy: next, etag }));
 
-    expect(result.statusCode).toBe(200);
-    expect(body(result).created).toBe(false);
-    expect(body(result).etag).not.toBe(etag);
+    expect(result.statusCode).toBe(204);
+    expect(result.headers?.ETag).not.toBe(etag);
   });
 
-  it('refuses a stale etag with nothing written', async () => {
+  it('replaces or creates unconditionally without a precondition, as on S3', async () => {
+    const created = await baseHandler(request({ policy: readPolicy, unconditional: true }));
+    expect(created.statusCode).toBe(204);
+
+    const next: BucketPolicy = {
+      Statement: [{ Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] }],
+    };
+    const replaced = await baseHandler(request({ policy: next, unconditional: true }));
+    expect(replaced.statusCode).toBe(204);
+    expect(iam.policies.get(TENANT_ID)?.get(BUCKET)?.policy).toStrictEqual(next);
+  });
+
+  it('refuses a precondition S3 would refuse, before any vendor call', async () => {
+    const both = request({ policy: readPolicy, etag: '"v1"' });
+    both.headers['if-none-match'] = '*';
+    const notStar = request({ policy: readPolicy, unconditional: true });
+    notStar.headers['if-none-match'] = '"v1"';
+    const empty = request({ policy: readPolicy, etag: ' ' });
+
+    for (const event of [both, notStar, empty]) {
+      expect((await baseHandler(event)).statusCode).toBe(400);
+    }
+    expect(iam.calls).toHaveLength(0);
+  });
+
+  it('refuses an etag in the body, which belongs in If-Match', async () => {
+    const event = request({ policy: readPolicy });
+    event.body = JSON.stringify({ policy: readPolicy, etag: '"v1"' });
+
+    expect((await baseHandler(event)).statusCode).toBe(400);
+  });
+
+  it('refuses a stale If-Match with nothing written', async () => {
     iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
 
     const result = await baseHandler(request({ policy: readPolicy, etag: '"stale"' }));
 
-    expect(result.statusCode).toBe(409);
+    expect(result.statusCode).toBe(412);
     expect(body(result).code).toBe(ApiErrorCode.POLICY_CONFLICT);
     expect(iam.policies.get(TENANT_ID)?.get(BUCKET)?.policy).toStrictEqual(readPolicy);
   });
@@ -101,7 +137,7 @@ describe('put-bucket-policy baseHandler', () => {
 
     const result = await baseHandler(request({ policy: readPolicy }));
 
-    expect(result.statusCode).toBe(409);
+    expect(result.statusCode).toBe(412);
     expect(body(result).code).toBe(ApiErrorCode.POLICY_CONFLICT);
   });
 
@@ -113,7 +149,7 @@ describe('put-bucket-policy baseHandler', () => {
     expect(ensureTenantReady).not.toHaveBeenCalled();
 
     const owner = await baseHandler(request({ policy: retentionGrant }, { role: OrgRole.Owner }));
-    expect(owner.statusCode).toBe(201);
+    expect(owner.statusCode).toBe(204);
   });
 
   it('lets an Admin edit around the roster statement\u2019s s3:* without granting it again', async () => {
@@ -132,7 +168,7 @@ describe('put-bucket-policy baseHandler', () => {
 
     const result = await baseHandler(request({ policy: edited, etag }, { role: OrgRole.Admin }));
 
-    expect(result.statusCode).toBe(200);
+    expect(result.statusCode).toBe(204);
   });
 
   it('refuses an Admin restoring the Owners roster statement, since s3:* is an Owner\u2019s to grant', async () => {
@@ -197,7 +233,7 @@ describe('put-bucket-policy baseHandler', () => {
       statuses.push(result.statusCode);
     }
 
-    expect(statuses).toStrictEqual([200, 200]);
+    expect(statuses).toStrictEqual([204, 204]);
   });
 
   it('refuses an Admin dropping the deny that withheld a retention write', async () => {
@@ -239,7 +275,7 @@ describe('put-bucket-policy baseHandler', () => {
 
     const result = await baseHandler(request({ policy: named, etag }, { role: OrgRole.Admin }));
 
-    expect(result.statusCode).toBe(200);
+    expect(result.statusCode).toBe(204);
   });
 
   it('refuses an Admin widening a retention write to a new principal', async () => {
@@ -261,6 +297,29 @@ describe('put-bucket-policy baseHandler', () => {
     expect(result.statusCode).toBe(403);
     expect(body(result).code).toBe(ApiErrorCode.RETENTION_GRANT_FORBIDDEN);
     expect(iam.policies.get(TENANT_ID)?.get(BUCKET)?.etag).toBe(etag);
+  });
+
+  it('holds an Admin\u2019s unconditional write to the same cap, against the stored policy', async () => {
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
+
+    const result = await baseHandler(
+      request({ policy: retentionGrant, unconditional: true }, { role: OrgRole.Admin }),
+    );
+
+    expect(result.statusCode).toBe(403);
+    expect(iam.policies.get(TENANT_ID)?.get(BUCKET)?.etag).toBe(etag);
+  });
+
+  it('writes an Admin\u2019s unconditional edit under the version the cap read', async () => {
+    iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
+    // An Owner's write lands between the cap's read and the write.
+    vi.spyOn(iam, 'getBucketPolicy').mockResolvedValueOnce({ policy: readPolicy, etag: '"old"' });
+
+    const result = await baseHandler(
+      request({ policy: readPolicy, unconditional: true }, { role: OrgRole.Admin }),
+    );
+
+    expect(result.statusCode).toBe(412);
   });
 
   it('refuses a document the schema does not accept as a 400', async () => {
@@ -342,7 +401,7 @@ describe('put-bucket-policy baseHandler', () => {
 
     const result = await baseHandler(request({ policy: edited, etag }));
 
-    expect(result.statusCode).toBe(200);
+    expect(result.statusCode).toBe(204);
   });
 
   it('answers as a bucket with no policy on a region that serves none', async () => {

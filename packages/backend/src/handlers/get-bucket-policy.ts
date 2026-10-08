@@ -19,8 +19,8 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 /**
- * GET /api/buckets/{name}/policy?region= — the bucket's policy and the ETag its
- * next write must carry.
+ * GET /api/buckets/{name}/policy?region= — the bucket's policy, with the ETag
+ * its next write sends back in `If-Match` as the `ETag` header.
  *
  * Reading takes `buckets.policy_manage`, the same permission as editing: a
  * member learns their own reach from the bucket list, and the document names
@@ -50,7 +50,8 @@ export async function baseHandler(
     if (!stored) return policyNotFoundResponse();
     return new ResponseBuilder()
       .status(200)
-      .body<GetBucketPolicyResponse>({ policy: stored.policy, etag: stored.etag })
+      .header('ETag', stored.etag)
+      .body<GetBucketPolicyResponse>({ policy: stored.policy })
       .build();
   } catch (err) {
     return bucketPolicyErrorResponse(err) ?? Promise.reject(err);

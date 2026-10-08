@@ -11,20 +11,20 @@ import {
   isRosterSid,
   roleHasPermission,
 } from '@filone/shared';
-import type {
-  BucketPolicy,
-  ErrorResponse,
-  PutBucketPolicyRequest,
-  PutBucketPolicyResponse,
-} from '@filone/shared';
+import type { BucketPolicy, ErrorResponse, PutBucketPolicyRequest } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import {
   bucketPolicyErrorResponse,
   namedPrincipalCount,
+  readPolicyPrecondition,
   resolveIamWriteTarget,
   resolvePolicyRouteTarget,
 } from '../lib/bucket-policy-route.ts';
-import type { IamMethods } from '../lib/iam-orchestrator.ts';
+import type {
+  IamMethods,
+  PolicyPrecondition,
+  StoredBucketPolicy,
+} from '../lib/iam-orchestrator.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import type { ParsedBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
@@ -51,9 +51,10 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
  * Owner who holds it through `s3:*`. The storage system enforces the statement
  * without knowing either action was privileged, so the rule has to hold here.
  *
- * The body carries the ETag the last read returned; without one the write
- * creates the bucket's first policy and is refused if one exists. Either way a
- * stale edit loses with nothing written, and the console re-reads.
+ * As on S3, `If-Match` replaces only the version the caller read and
+ * `If-None-Match: *` creates only the first; either way a stale edit is a 412
+ * with nothing written, and the console re-reads. Without either the write is
+ * unconditional. It answers 204 with the new version in the `ETag` header.
  *
  * Two-phase audit around the vendor call, as for a key: the document lives at
  * the storage system and nothing local records it, so a crash between the two
@@ -66,28 +67,36 @@ export async function baseHandler(
   if ('response' in resolved) return resolved.response;
   const { bucketName, region } = resolved.target;
 
+  const read = readPolicyPrecondition(event);
+  if ('response' in read) return read.response;
+  let { precondition } = read;
+  const creating = precondition !== undefined && 'ifNoneMatch' in precondition;
+
   const parsed = parsePolicyBody(event.body);
   if ('error' in parsed) return parsed.error;
-  const { policy, etag } = parsed.data;
+  const { policy } = parsed.data;
 
   const { orgId, userId, membership } = getUserInfo(event);
   const mayGrantRetention = roleHasPermission(membership?.role ?? NO_ROLE, 'privileged.grant');
-  const refusedFirst = refuseFirstPolicyRetentionGrants({ policy, etag, mayGrantRetention });
+  const refusedFirst = refuseFirstPolicyRetentionGrants({ policy, creating, mayGrantRetention });
   if (refusedFirst) return refusedFirst;
 
   const target = await resolveIamWriteTarget(orgId, region);
   if ('response' in target) return target.response;
   const { orchestrator, tenantId } = target;
 
-  if (etag && !mayGrantRetention) {
-    const refused = await refuseNewRetentionGrants(orchestrator.iam, tenantId, bucketName, policy);
-    if (refused) return refused;
+  if (!creating && !mayGrantRetention) {
+    const checked = await refuseNewRetentionGrants(orchestrator.iam, tenantId, bucketName, policy);
+    if ('response' in checked) return checked.response;
+    precondition ??= checked.pinned;
   }
 
   // The intent names the kind of write the caller asked for, so the two halves
   // agree whatever the vendor answers.
   const audit = await twoPhaseAudit({
-    type: etag ? 'bucket_policy.updated' : 'bucket_policy.created',
+    // ponytail: an unconditional write that creates is recorded as an update;
+    // tell them apart by reading first if the log ever needs it.
+    type: creating ? 'bucket_policy.created' : 'bucket_policy.updated',
     mode: 'fail-closed',
     actor: userActor({ userId, email: getVerifiedEmail(event) }),
     orgId,
@@ -100,16 +109,13 @@ export async function baseHandler(
       tenantId,
       bucketName,
       policy,
-      etag ? { ifMatch: etag } : { ifNoneMatch: '*' },
+      precondition,
     );
     await audit.complete({
       outcome: 'succeeded',
       details: { statements: policy.Statement.length, principals: namedPrincipalCount(policy) },
     });
-    return new ResponseBuilder()
-      .status(written.created ? 201 : 200)
-      .body<PutBucketPolicyResponse>({ etag: written.etag, created: written.created })
-      .build();
+    return { statusCode: 204, headers: { ETag: written.etag }, body: '' };
   } catch (err) {
     const response = bucketPolicyErrorResponse(err);
     if (!response) throw err;
@@ -146,20 +152,21 @@ function parsePolicyBody(raw: string | undefined): ParsedBody<PutBucketPolicyReq
 }
 
 /**
- * The cap on a first policy, which is compared against nothing: it needs no
- * vendor read and answers ahead of the region, since the refusal depends on
- * neither. A replacement, or a caller who may grant, passes through.
+ * The cap on a first policy (`If-None-Match: *`), which is compared against
+ * nothing: it needs no vendor read and answers ahead of the region, since the
+ * refusal depends on neither. Any other write, or a caller who may grant,
+ * passes through.
  */
 function refuseFirstPolicyRetentionGrants({
   policy,
-  etag,
+  creating,
   mayGrantRetention,
 }: {
   policy: BucketPolicy;
-  etag: string | undefined;
+  creating: boolean;
   mayGrantRetention: boolean;
 }): APIGatewayProxyStructuredResultV2 | undefined {
-  if (etag || mayGrantRetention) return undefined;
+  if (!creating || mayGrantRetention) return undefined;
   return addsRetentionGrants(null, policy) ? retentionGrantForbiddenResponse() : undefined;
 }
 
@@ -168,24 +175,29 @@ function refuseFirstPolicyRetentionGrants({
  * stored document is read, and the write is refused if the new one grants a
  * retention write the stored one did not, or names one outright that the stored
  * one did not name. A read that fails answers as the write would have.
+ *
+ * Otherwise it answers the precondition pinning the version it checked, which
+ * an unconditional write takes, so an Owner's write in between cannot slip a
+ * grant past the cap.
  */
 async function refuseNewRetentionGrants(
   iam: IamMethods,
   tenantId: string,
   bucketName: string,
   next: BucketPolicy,
-): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  let current: BucketPolicy | null;
+): Promise<{ pinned: PolicyPrecondition } | { response: APIGatewayProxyStructuredResultV2 }> {
+  let stored: StoredBucketPolicy | null;
   try {
-    current = (await iam.getBucketPolicy(tenantId, bucketName))?.policy ?? null;
+    stored = await iam.getBucketPolicy(tenantId, bucketName);
   } catch (err) {
     const response = bucketPolicyErrorResponse(err);
     if (!response) throw err;
-    return response;
+    return { response };
   }
+  const current = stored?.policy ?? null;
   return addsRetentionGrants(current, next) || addsNamedRetentionGrants(current, next)
-    ? retentionGrantForbiddenResponse()
-    : undefined;
+    ? { response: retentionGrantForbiddenResponse() }
+    : { pinned: stored ? { ifMatch: stored.etag } : { ifNoneMatch: '*' } };
 }
 
 /**
