@@ -195,6 +195,7 @@ type LambdaModule = {
 /** The parts of a request an in-handler route reads to decide its permission. */
 type RouteRequest = {
   body?: string;
+  headers?: Record<string, string>;
   queryStringParameters?: Record<string, string>;
   pathParameters?: Record<string, string>;
 };
@@ -223,7 +224,7 @@ async function invokeRoute(
   },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const module = (await import(`./handlers/${route.handler}.ts`)) as LambdaModule;
-  const { pathParameters, ...eventProps } = request;
+  const { pathParameters, headers, ...eventProps } = request;
   const event = buildEvent({
     ...eventProps,
     method: route.method,
@@ -233,6 +234,7 @@ async function invokeRoute(
   // Assigned rather than passed: the shared builder takes no path parameters,
   // and the handler tests set them on the built event the same way.
   if (pathParameters) event.pathParameters = pathParameters;
+  if (headers) Object.assign(event.headers, headers);
   if (csrf) event.headers['x-csrf-token'] = CSRF_TOKEN;
   // Every route here answers with a ResponseBuilder, so the union's string arm
   // never occurs; middy's declared return type carries it anyway.
@@ -734,8 +736,9 @@ describe('the caps routes apply on top of their declared permission', () => {
   /**
    * Writing a bucket policy clears `buckets.policy_manage` in the chain and
    * then reads the body: a statement that grants a retention or legal-hold
-   * write, or `s3:*` which covers both, needs `privileged.grant`. The cap runs
-   * before the region is consulted, which is why it answers while no region
+   * write, or `s3:*` which covers both, needs `privileged.grant`. On a first
+   * policy (`If-None-Match: *`) the cap runs before the region is consulted,
+   * which is why it answers while no region
    * serves policies: an Owner is let through to the region check, an Admin is
    * refused with the code the console renders.
    */
@@ -744,6 +747,7 @@ describe('the caps routes apply on top of their declared permission', () => {
       body: JSON.stringify({
         policy: { Statement: [{ Effect: 'Allow', Principal: [USER_ID], Action: [action] }] },
       }),
+      headers: { 'if-none-match': '*' },
       pathParameters: { name: 'photos' },
       queryStringParameters: { region: 'eu-west-1' },
     });

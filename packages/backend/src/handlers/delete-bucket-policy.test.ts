@@ -26,12 +26,13 @@ import {
   resetFixture,
 } from '../test/bucket-policy-fixture.ts';
 
-function request(query: Record<string, string>) {
+function request(headers: Record<string, string>) {
   const event = buildEvent({
     method: 'DELETE',
     userInfo: { userId: USER_ID, orgId: ORG_ID },
-    queryStringParameters: { region: IAM_REGION, ...query },
+    queryStringParameters: { region: IAM_REGION },
   });
+  event.headers = headers;
   event.pathParameters = { name: BUCKET };
   return event;
 }
@@ -44,7 +45,7 @@ describe('delete-bucket-policy baseHandler', () => {
   it('removes the policy the caller read and records the pair', async () => {
     const etag = iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
 
-    const result = await baseHandler(request({ etag }));
+    const result = await baseHandler(request({ 'if-match': etag }));
 
     expect(result.statusCode).toBe(204);
     expect(result.body).toBe('');
@@ -54,27 +55,36 @@ describe('delete-bucket-policy baseHandler', () => {
     expect(completion).toMatchObject({ phase: 'completion', outcome: 'succeeded' });
   });
 
-  it('requires the etag of the document being removed', async () => {
+  it('removes the policy unconditionally without If-Match, as on S3', async () => {
     iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
 
     const result = await baseHandler(request({}));
+
+    expect(result.statusCode).toBe(204);
+    expect(iam.policies.get(TENANT_ID)?.has(BUCKET)).toBe(false);
+  });
+
+  it('refuses If-None-Match, since a delete creates nothing', async () => {
+    iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
+
+    const result = await baseHandler(request({ 'if-none-match': '*' }));
 
     expect(result.statusCode).toBe(400);
     expect(iam.calls).toHaveLength(0);
   });
 
-  it('refuses a stale etag with the policy still in place', async () => {
+  it('refuses a stale If-Match with the policy still in place', async () => {
     iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
 
-    const result = await baseHandler(request({ etag: '"stale"' }));
+    const result = await baseHandler(request({ 'if-match': '"stale"' }));
 
-    expect(result.statusCode).toBe(409);
+    expect(result.statusCode).toBe(412);
     expect(body(result).code).toBe(ApiErrorCode.POLICY_CONFLICT);
     expect(iam.policies.get(TENANT_ID)?.has(BUCKET)).toBe(true);
   });
 
   it('answers 404 with the policy code for a bucket that has none', async () => {
-    const result = await baseHandler(request({ etag: '"any"' }));
+    const result = await baseHandler(request({ 'if-match': '"any"' }));
 
     expect(result.statusCode).toBe(404);
     expect(body(result).code).toBe(ApiErrorCode.POLICY_NOT_FOUND);
