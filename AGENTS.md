@@ -34,10 +34,10 @@ These rules apply to new names; leave existing names alone. In React code, React
 - Assert on the result object with `toMatchObject` or `toStrictEqual`, and on the specific error for a rejection. The failure message then shows what went wrong, and the test cannot pass for a different reason. Assert on a single property only when its value alone explains a failure.
 
   ```ts
-  // A failure prints only "expected true to be false"
+  // Bad: a failure prints only "expected true to be false"
   expect(schema.safeParse(input).success).toBe(false);
 
-  // A failure prints the parser's error
+  // Good: a failure prints the parser's error
   expect(schema.safeParse(input)).toMatchObject({
     success: false,
     error: { issues: [{ code: 'unrecognized_keys', keys: ['version'] }] },
