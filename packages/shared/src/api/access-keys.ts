@@ -255,7 +255,11 @@ interface AccessKeyBase {
 /** A key that carries its own permissions and bucket list. */
 export interface ServiceAccessKey extends AccessKeyBase {
   type: 'service';
-  /** Absent on a recovered row, whose grant was never recorded. */
+  /**
+   * Absent on a recovered row: one the backend rebuilt from the storage
+   * provider after a create that returned 409, so it never learned the key's
+   * permissions (`recovered` in backend `dynamo-records.ts`).
+   */
   permissions?: AccessKeyPermission[];
   granularPermissions?: GranularPermission[];
   bucketScope?: AccessKeyBucketScope;

@@ -130,21 +130,15 @@ function requirementFor(
 }
 
 /**
- * What a key row records about the authority it carries.
+ * What a service key row records about the authority it carries.
  *
- * Both fields are optional because a row the console rebuilt after a vendor
- * 409 carries neither: the retry answers 409 with no secret, so the credential
- * was never handed to anyone and the console never learned what it holds.
+ * The permission fields are optional because a recovered row (see
+ * `ServiceAccessKey.permissions`) carries neither.
  */
-export interface AccessKeyPermissions {
+export interface ServiceKeyGrant {
   permissions?: readonly string[] | undefined;
   granularPermissions?: readonly string[] | undefined;
-  /**
-   * The member a key is bound to on an `iam` region. Such a key records no
-   * permission set because it has none of its own.
-   */
-  principalId?: string | undefined;
-  /** Where the key lives; on an `iam` region a key with no principal is a service key. */
+  /** Where the key lives. On an `iam` region a service key needs `keys.create_service`. */
   region?: S3Region | undefined;
 }
 
@@ -178,8 +172,9 @@ export type KeyRetentionResult =
   | { retained: false; reason: 'exceeds_role'; excess: ExcessKeyPermission[] };
 
 /**
- * Whether a key its holder already has may be kept once that holder moves to
- * `role`.
+ * Whether a service key its holder already has may be kept once that holder
+ * moves to `role`. Principal-bound keys are never revoked on a role change, so
+ * callers do not ask about them.
  *
  * One test, and the same one {@link excessKeyPermissions} applies at creation:
  * a key is kept when its holder could mint it today. A role without
@@ -188,22 +183,18 @@ export type KeyRetentionResult =
  * nor revoke it, since `keys.manage_own` is what scopes the list and the
  * delete.
  *
- * A principal-bound key is kept by any role that can mint: it carries nothing
- * of its own, so a narrowing has nothing to compare, and what its holder may do
- * follows the bucket policies live. A row recording no permission set and no
- * principal cannot be placed inside the new role, so it goes. A key with no
- * principal on an `iam` region is a service key, kept only by a role that holds
+ * A row recording no permission set cannot be placed inside the new role, so it
+ * goes. A service key on an `iam` region is kept only by a role that holds
  * `keys.create_service`, since the bucket policies never see it. Bucket scope is
  * never compared: it is the creator's choice at mint time and no role caps it.
  *
  * The caller decides whose keys to ask about. A row with no `createdBy` belongs
  * to nobody the console can name and is outside this rule entirely.
  */
-export function canRetainAccessKey(role: string, key: AccessKeyPermissions): KeyRetentionResult {
+export function canRetainAccessKey(role: string, key: ServiceKeyGrant): KeyRetentionResult {
   if (!roleHasPermission(role, 'keys.create')) {
     return { retained: false, reason: 'role_cannot_mint' };
   }
-  if (key.principalId) return { retained: true };
   if (
     key.region &&
     getRegionAccessModel(key.region) === 'iam' &&

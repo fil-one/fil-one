@@ -94,9 +94,13 @@ export function useKeyRotation(): {
     /**
      * A key is rotatable when its holder could mint it today: the replacement
      * is a fresh credential, and the server refuses one carrying more than the
-     * caller's role grants. Same function, so the menu hides what would 403.
+     * caller's role grants. Same function, so the menu hides what would 403. A
+     * principal key carries no permissions of its own, so `keys.create` is enough.
      */
     canRotate: (key: AccessKey) =>
-      mayCreate && mayRevoke(key) && role !== undefined && canRetainAccessKey(role, key).retained,
+      mayCreate &&
+      mayRevoke(key) &&
+      role !== undefined &&
+      (key.type === 'principal' || canRetainAccessKey(role, key).retained),
   };
 }

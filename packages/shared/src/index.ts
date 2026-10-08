@@ -207,7 +207,7 @@ export type {
   ExcessKeyPermission,
   AccessKeyRevocationReason,
   KeyRetentionResult,
-  AccessKeyPermissions,
+  ServiceKeyGrant,
 } from './access-key-permissions.ts';
 
 export { ROUTE_MANIFEST } from './route-manifest.ts';
@@ -236,12 +236,11 @@ export {
   BucketPolicySchema,
   PolicyStatementSchema,
   PutBucketPolicyRequestSchema,
-  addsRetentionGrants,
-  defaultBucketPolicy,
-  effectiveActions,
-  policyActionsInGroup,
-  rosterStatements,
-  withRosterStatements,
+  hasNewRetentionGrants,
+  getDefaultBucketPolicy,
+  getEffectiveActions,
+  getPolicyActionsInGroup,
+  replaceRosterStatements,
 } from './api/bucket-policies.ts';
 export type {
   BucketPolicy,

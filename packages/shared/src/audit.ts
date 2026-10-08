@@ -200,12 +200,12 @@ export type RevocationTrigger =
   | 'stale_role_at_mint';
 
 /** What asked for a bucket policy write. */
-export type BucketPolicyChangeTrigger = 'policy_edit' | 'role_change' | 'bucket_created';
+export type BucketPolicyChangeTrigger = 'policy_edited' | 'role_changed' | 'bucket_created';
 
 /**
- * Shared by the three `bucket_policy.*` events. A type literal rather than an
- * interface, so it carries the implicit index signature `AuditDetailRecord`
- * asks of every payload.
+ * Shared by the three `bucket_policy.*` events. A type alias rather than an
+ * interface, so it can be read with any string key (`details[name]`), which
+ * `AuditDetailRecord` requires of every payload.
  */
 export type BucketPolicyEventDetails = {
   region: string;
@@ -492,9 +492,8 @@ export type BucketPolicyEvent = Extract<AuditEvent, { type: `bucket_policy.${str
 /**
  * An event that may ride a local transaction — what `commitAudited` accepts.
  *
- * Everything except a vendor-backed key or bucket-policy event with no phase:
- * that one names a write made outside the transaction, so a single row
- * recording it is a half with nothing to pair it to.
+ * Excludes every event that records a write made outside the transaction and
+ * has no phase: a single row for it would be a half with nothing to pair it to.
  */
 export type CommittableAuditEvent = Exclude<
   AuditEvent,

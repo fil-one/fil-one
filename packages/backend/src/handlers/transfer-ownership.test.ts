@@ -323,7 +323,7 @@ describe('POST /api/org/transfer handler', () => {
     const result = await handler(transferEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 502 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
   });
 
   it('names the caller’s own keys the transfer revoked', async () => {
@@ -337,7 +337,7 @@ describe('POST /api/org/transfer handler', () => {
     const result = await handler(transferEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual([
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual([
       'key-0',
       'key-1',
     ]);

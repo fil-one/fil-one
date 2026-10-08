@@ -33,7 +33,7 @@ import {
   keyMintedResponse,
   refusedKeysSubject,
 } from '../lib/response-builder.ts';
-import type { ErrorWithRevokedKeys } from '../lib/response-builder.ts';
+import type { ErrorWithKeysRevoked } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -139,8 +139,8 @@ export async function baseHandler(
       ...(invitationsToRevoke.length > 0 ? { revokedInvitations: invitationsToRevoke.length } : {}),
     },
     source: SOURCE,
-    onCancelled: (err, revokedKeys) =>
-      transferFailureResponse(err, { orgId, labels: change.labels, revokedKeys }),
+    onCancelled: (err, keysRevoked) =>
+      transferFailureResponse(err, { orgId, labels: change.labels, keysRevoked }),
     onRefused: (refused, revoked) => vendorRefusedResponse(revoked, refused),
     // No `notifyMember`: the keys that went are the caller's own, and the
     // refusal they are about to read names every one of them. A mail would tell
@@ -213,7 +213,7 @@ async function finishTransfer({
       previousOwnerUserId: userId,
       // Named only when there are any, so a transfer that stranded nothing
       // reads the same as one by an Owner who held no privileged key.
-      ...(revoked.length > 0 ? { revokedKeys: revoked } : {}),
+      ...(revoked.length > 0 ? { keysRevoked: revoked } : {}),
     })
     .build();
 }
@@ -265,21 +265,21 @@ function transferBase({
  * revoked stay revoked. Retrying is the same POST, which finds fewer keys.
  */
 function vendorRefusedResponse(
-  revokedKeys: AccessKeySummary[],
+  keysRevoked: AccessKeySummary[],
   failedKeys: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(502)
-    .body<ErrorWithRevokedKeys>({
+    .body<ErrorWithKeysRevoked>({
       message: `${refusedKeysSubject(failedKeys)} could not be revoked, so ownership has not moved. Try again.`,
-      revokedKeys,
+      keysRevoked,
     })
     .build();
 }
 
 /**
  * The answer when the transfer transaction cancels. Whatever the seat now says,
- * the keys named in `revokedKeys` are gone, and the caller is the person who
+ * the keys named in `keysRevoked` are gone, and the caller is the person who
  * held them, so the refusal has to carry them.
  */
 function transferFailureResponse(
@@ -287,8 +287,8 @@ function transferFailureResponse(
   {
     orgId,
     labels,
-    revokedKeys,
-  }: { orgId: string; labels: string[]; revokedKeys: AccessKeySummary[] },
+    keysRevoked,
+  }: { orgId: string; labels: string[]; keysRevoked: AccessKeySummary[] },
 ): APIGatewayProxyStructuredResultV2 {
   // The fence, at its own index: the org is being torn down and no retry helps.
   if (isGuardRejection(err)) throw new OrgDeletingError(orgId);
@@ -299,9 +299,9 @@ function transferFailureResponse(
   console.warn('[transfer-ownership] Transfer cancelled', { failed });
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorWithRevokedKeys>({
+    .body<ErrorWithKeysRevoked>({
       message: 'The organization’s roles changed while the transfer was in flight — try again.',
-      revokedKeys,
+      keysRevoked,
     })
     .build();
 }
