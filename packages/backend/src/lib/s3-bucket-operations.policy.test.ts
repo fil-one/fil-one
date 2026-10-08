@@ -99,6 +99,17 @@ describe('PutBucketPolicy', () => {
     expect(headers.authorization).toMatch(/SignedHeaders=[^,]*if-none-match/);
   });
 
+  it('sends no precondition on an unconditional write', async () => {
+    const captured: CapturedRequest[] = [];
+    const s3 = clientAnswering(captured, [{ statusCode: 204, headers: { etag: '"bafy-v1"' } }]);
+
+    await putBucketPolicy(s3, 'photos', policy);
+
+    expect(Object.keys(captured[0]!.headers).map((h) => h.toLowerCase())).not.toEqual(
+      expect.arrayContaining(['if-match', 'if-none-match']),
+    );
+  });
+
   it('refuses a 204 that carries no ETag', async () => {
     const s3 = clientAnswering([], [{ statusCode: 204 }]);
     await expect(putBucketPolicy(s3, 'photos', policy, { ifNoneMatch: '*' })).rejects.toThrow(

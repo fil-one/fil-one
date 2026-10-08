@@ -127,18 +127,18 @@ describe('putBucketPolicy', () => {
 
     await expect(
       iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
-    ).resolves.toStrictEqual({ etag: '"v2"', created: false });
+    ).resolves.toStrictEqual({ etag: '"v2"' });
     expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy, {
       ifMatch: '"v1"',
     });
   });
 
-  it('creates under If-None-Match: * and reports created', async () => {
+  it('creates under If-None-Match: *', async () => {
     mockPutPolicy.mockResolvedValue({ etag: '"v1"' });
 
     await expect(
       iam.putBucketPolicy(tenantId, 'photos', policy, { ifNoneMatch: '*' }),
-    ).resolves.toStrictEqual({ etag: '"v1"', created: true });
+    ).resolves.toStrictEqual({ etag: '"v1"' });
     expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy, {
       ifNoneMatch: '*',
     });
@@ -160,7 +160,7 @@ describe('putBucketPolicy', () => {
 
     await expect(
       iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
-    ).resolves.toStrictEqual({ etag: '"v2"', created: false });
+    ).resolves.toStrictEqual({ etag: '"v2"' });
     expect(mockPutPolicy).toHaveBeenCalledTimes(2);
   });
 
@@ -230,15 +230,13 @@ describe('principals', () => {
   });
 
   it('lists the policies naming a member and resolves their access', async () => {
-    mockPrincipalPolicies.mockResolvedValue(
-      ok({ items: [{ bucketName: 'photos', etag: '"v1"', policy }] }),
-    );
+    mockPrincipalPolicies.mockResolvedValue(ok({ items: [{ bucketName: 'photos', policy }] }));
     mockPrincipalAccess.mockResolvedValue(
       ok({ buckets: [{ name: 'photos', actions: ['s3:GetObject'] }] }),
     );
 
     await expect(iam.listBucketPoliciesForMember(tenantId, 'alice')).resolves.toStrictEqual([
-      { bucketName: 'photos', etag: '"v1"', policy },
+      { bucketName: 'photos', policy },
     ]);
     await expect(iam.resolveMemberAccess(tenantId, 'alice')).resolves.toStrictEqual([
       { bucketName: 'photos', actions: ['s3:GetObject'] },
