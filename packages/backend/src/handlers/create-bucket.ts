@@ -5,7 +5,7 @@ import type { BucketPolicy, CreateBucketResponse, ErrorResponse, S3Region } from
 import {
   CreateBucketSchema,
   OrgRole,
-  defaultBucketPolicy,
+  getDefaultBucketPolicy,
   isSupportedRegion,
 } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
@@ -71,10 +71,12 @@ export async function baseHandler(
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
-  const policy = await getOrgDefaultPolicy(orchestrator, orgId, userId);
-  const audit = policy
+  const policy = await loadDefaultBucketPolicy(orchestrator, orgId, userId);
+  const policyAudit = policy
     ? await auditDefaultBucketPolicy({ event, orgId, userId, region, bucketName })
     : undefined;
+
+  const completionDetails = { statements: policy?.Statement.length };
 
   try {
     await orchestrator.createBucket(tenantId, {
@@ -87,28 +89,24 @@ export async function baseHandler(
   } catch (err) {
     // The bucket was created but couldn't be fully configured. Surface the
     // actionable message so the caller can finish setup via the S3 API instead
-    // of getting the generic 500 from errorHandlerMiddleware. The policy is
-    // written before the configuration calls, so the policy write did succeed.
+    // of getting the generic 500 from errorHandlerMiddleware. The orchestrator
+    // writes the policy before the configuration calls, so that write succeeded.
     if (err instanceof BucketConfigurationError) {
-      await audit?.complete({
-        outcome: 'succeeded',
-        details: { statements: policy?.Statement.length },
-      });
+      await policyAudit?.complete({ outcome: 'succeeded', details: completionDetails });
       return new ResponseBuilder()
         .status(500)
         .body<ErrorResponse>({ message: err.message })
         .build();
     }
-    await audit?.complete({ outcome: 'failed' });
+    await policyAudit?.complete({ outcome: 'failed' });
     if (err instanceof BucketAlreadyExistsError) {
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: `Bucket "${bucketName}" already exists` })
         .build();
     }
-    // The storage system refused the policy written after the create; the
-    // bucket exists without a policy. Any other failure of that write answers
-    // the generic 500.
+    // The storage system refused the policy; the bucket exists without one.
+    // Other policy write errors go to errorHandlerMiddleware.
     if (err instanceof PolicyValidationError) {
       return new ResponseBuilder()
         .status(400)
@@ -117,10 +115,7 @@ export async function baseHandler(
     }
     throw err;
   }
-  await audit?.complete({
-    outcome: 'succeeded',
-    details: { statements: policy?.Statement.length },
-  });
+  await policyAudit?.complete({ outcome: 'succeeded', details: completionDetails });
 
   const now = new Date().toISOString();
 
@@ -138,22 +133,19 @@ export async function baseHandler(
 }
 
 /**
- * The policy a new bucket starts with on an `iam` region: the org's current
- * Owners with every action, its Admins with every action but the two retention
- * writes, and a Member creator with the same in a statement of their own.
- * Owners and Admins reach a bucket only because the console names them on its
- * policy, so every bucket the console creates carries the roster from its first
- * moment. Undefined on a `scoped-keys` orchestrator, where nothing evaluates a
- * policy.
+ * Loads the policy a new bucket starts with:
+ * 1. On a `scoped-keys` orchestrator, returns `undefined`.
+ * 2. Otherwise reads the org's members and splits them into Owners and Admins.
+ * 3. Builds the policy with `getDefaultBucketPolicy`.
  */
-async function getOrgDefaultPolicy(
+async function loadDefaultBucketPolicy(
   orchestrator: ServiceOrchestrator,
   orgId: string,
   creatorId: string,
 ): Promise<BucketPolicy | undefined> {
   if (orchestrator.accessModel !== 'iam') return undefined;
   const members = await listMembers(orgId);
-  return defaultBucketPolicy({
+  return getDefaultBucketPolicy({
     owners: members.filter((m) => m.role === OrgRole.Owner).map((m) => m.userId),
     admins: members.filter((m) => m.role === OrgRole.Admin).map((m) => m.userId),
     creatorId,
