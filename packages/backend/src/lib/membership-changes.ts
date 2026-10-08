@@ -7,7 +7,7 @@ import {
   canRetainAccessKey,
   roleHasPermission,
 } from '@filone/shared';
-import type { AccessKeyPermissions, OrgMembershipSource } from '@filone/shared';
+import type { OrgMembershipSource, ServiceKeyGrant } from '@filone/shared';
 import { retireInvitationItems } from './invitations.ts';
 import type { InvitationRecord } from './invitations.ts';
 import { OrgKeys } from './org-membership.ts';
@@ -344,7 +344,7 @@ export function creatorRoleStillMintsCheck({
   orgId: string;
   userId: string;
   /** The permissions the requested key would carry. */
-  key: AccessKeyPermissions;
+  key: ServiceKeyGrant;
 }): TransactWriteItem {
   return {
     ConditionCheck: {
@@ -374,7 +374,7 @@ export function rotatorStillAuthorizedCheck({
 }: {
   orgId: string;
   userId: string;
-  key: AccessKeyPermissions;
+  key: ServiceKeyGrant;
 }): TransactWriteItem {
   return {
     ConditionCheck: {

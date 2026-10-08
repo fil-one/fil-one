@@ -396,7 +396,7 @@ describe('PATCH /api/org/members/{userId} handler', () => {
 
     expect(result).toMatchObject({ statusCode: 409 });
     expect(body(result).message).toStrictEqual(expect.stringContaining('contact support'));
-    expect(body(result).revokedKeys).toHaveLength(1);
+    expect(body(result).keysRevoked).toHaveLength(1);
   });
 
   it('reports a transient conflict as a failure rather than a verdict', async () => {
@@ -605,7 +605,7 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
     const result = await handler(roleEvent(OrgRole.Member), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200 });
-    expect(body(result).revokedKeys).toStrictEqual([
+    expect(body(result).keysRevoked).toStrictEqual([
       {
         id: 'key-0',
         keyName: 'key 0',
@@ -645,7 +645,7 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
     const result = await handler(roleEvent(OrgRole.ReadOnly), buildContext());
 
     expect(
-      body(result).revokedKeys.map((key: { id: string; reason: string }) => key.reason),
+      body(result).keysRevoked.map((key: { id: string; reason: string }) => key.reason),
     ).toStrictEqual(['role_cannot_mint', 'role_cannot_mint']);
   });
 
@@ -659,7 +659,7 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
     const result = await handler(roleEvent(OrgRole.Member), buildContext());
 
     expect(result).toMatchObject({ statusCode: 502 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
     expect(body(result).failedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-1']);
     // The role write never ran: the only transactions are the completed
     // revocation's own.
@@ -761,7 +761,7 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
     const result = await handler(roleEvent(OrgRole.Member), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200 });
-    expect(body(result)).not.toHaveProperty('revokedKeys');
+    expect(body(result)).not.toHaveProperty('keysRevoked');
     expect(
       ddbMock
         .commandCalls(PutItemCommand)
@@ -866,7 +866,7 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
     const result = await handler(roleEvent(OrgRole.Member), buildContext());
 
     expect(result).toMatchObject({ statusCode: 500 });
-    expect(body(result).revokedKeys).toHaveLength(1);
+    expect(body(result).keysRevoked).toHaveLength(1);
     expect(body(result).message).not.toContain('Throughput');
   });
 

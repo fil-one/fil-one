@@ -47,7 +47,7 @@ export type PolicyActionOrWildcard = PolicyAction | typeof POLICY_ACTION_WILDCAR
 export const POLICY_ACTIONS_WITH_WILDCARD = [...POLICY_ACTIONS, POLICY_ACTION_WILDCARD] as const;
 
 /** How the editor groups the actions. Order is display order. */
-export const POLICY_ACTION_GROUPS = ['read', 'list', 'write', 'delete', 'protection'] as const;
+export const POLICY_ACTION_GROUPS = ['read', 'list', 'write', 'delete', 'protect'] as const;
 export type PolicyActionGroup = (typeof POLICY_ACTION_GROUPS)[number];
 
 export const POLICY_ACTION_GROUP_LABELS: Record<PolicyActionGroup, string> = {
@@ -55,7 +55,7 @@ export const POLICY_ACTION_GROUP_LABELS: Record<PolicyActionGroup, string> = {
   list: 'List objects',
   write: 'Write objects',
   delete: 'Delete objects',
-  protection: 'Data protection',
+  protect: 'Manage data protection',
 };
 
 export const POLICY_ACTION_LABELS: Record<
@@ -111,27 +111,27 @@ export const POLICY_ACTION_LABELS: Record<
   's3:GetObjectRetention': {
     label: 'Read retention settings',
     description: 'View retention policies on objects',
-    group: 'protection',
+    group: 'protect',
   },
   's3:GetObjectLegalHold': {
     label: 'Read legal hold status',
     description: 'View legal hold status on objects',
-    group: 'protection',
+    group: 'protect',
   },
   's3:PutObjectRetention': {
     label: 'Set retention',
     description: 'Apply or modify retention policies',
-    group: 'protection',
+    group: 'protect',
   },
   's3:PutObjectLegalHold': {
     label: 'Set legal hold',
     description: 'Apply or remove legal holds on objects',
-    group: 'protection',
+    group: 'protect',
   },
 };
 
 /** The actions in a group, in {@link POLICY_ACTIONS} order. */
-export function policyActionsInGroup(group: PolicyActionGroup): PolicyAction[] {
+export function getPolicyActionsInGroup(group: PolicyActionGroup): PolicyAction[] {
   return POLICY_ACTIONS.filter((action) => POLICY_ACTION_LABELS[action].group === group);
 }
 
@@ -141,10 +141,10 @@ export function policyActionsInGroup(group: PolicyActionGroup): PolicyAction[] {
  * can make an object undeletable for years; the same pair needs
  * `privileged.grant` on a scoped key (`access-key-permissions.ts`).
  */
-export const RETENTION_WRITE_ACTIONS = [
+export const RETENTION_WRITE_ACTIONS: readonly PolicyAction[] = [
   's3:PutObjectRetention',
   's3:PutObjectLegalHold',
-] as const satisfies readonly PolicyAction[];
+];
 
 export const POLICY_EFFECTS = ['Allow', 'Deny'] as const;
 export type PolicyEffect = (typeof POLICY_EFFECTS)[number];
@@ -202,8 +202,8 @@ export const BucketPolicySchema = z
 
 export type BucketPolicy = z.infer<typeof BucketPolicySchema>;
 
-/** Whether a statement applies to a principal: it names them, or it names everyone. */
-export function statementNames(statement: PolicyStatement, principalId: string): boolean {
+/** True when the statement's Principal is `*` or lists the principal. */
+function isPrincipalInStatement(statement: PolicyStatement, principalId: string): boolean {
   return (
     statement.Principal === POLICY_WILDCARD_PRINCIPAL || statement.Principal.includes(principalId)
   );
@@ -218,15 +218,15 @@ export function expandActions(actions: readonly PolicyActionOrWildcard[]): Polic
 
 /**
  * What a principal may do on the bucket: the union of the `Allow` statements
- * naming them minus the union of the `Deny` statements naming them, sorted.
- * The storage system computes the same thing on every request; this copy
- * serves previews and the in-memory fake, and must agree with it.
+ * that apply to them minus the union of the `Deny` statements that apply to
+ * them, sorted. The storage system computes the same thing on every request;
+ * this copy serves previews and the in-memory fake, and must agree with it.
  */
-export function effectiveActions(policy: BucketPolicy, principalId: string): PolicyAction[] {
+export function getEffectiveActions(policy: BucketPolicy, principalId: string): PolicyAction[] {
   const allowed = new Set<PolicyAction>();
   const denied = new Set<PolicyAction>();
   for (const statement of policy.Statement) {
-    if (!statementNames(statement, principalId)) continue;
+    if (!isPrincipalInStatement(statement, principalId)) continue;
     const target = statement.Effect === 'Allow' ? allowed : denied;
     for (const action of expandActions(statement.Action)) target.add(action);
   }
@@ -234,7 +234,7 @@ export function effectiveActions(policy: BucketPolicy, principalId: string): Pol
 }
 
 /** Every principal a document names outright. */
-function namedPrincipals(policy: BucketPolicy | null): string[] {
+function getNamedPrincipals(policy: BucketPolicy | null): string[] {
   return (policy?.Statement ?? []).flatMap((statement) =>
     statement.Principal === POLICY_WILDCARD_PRINCIPAL ? [] : statement.Principal,
   );
@@ -249,15 +249,15 @@ function namedPrincipals(policy: BucketPolicy | null): string[] {
  * pair, and an Admin editing an unrelated statement is not granting it again.
  * The wildcard principal stands for a member neither document names.
  */
-export function addsRetentionGrants(current: BucketPolicy | null, next: BucketPolicy): boolean {
+export function hasNewRetentionGrants(current: BucketPolicy | null, next: BucketPolicy): boolean {
   const principals = new Set([
     POLICY_WILDCARD_PRINCIPAL,
-    ...namedPrincipals(current),
-    ...namedPrincipals(next),
+    ...getNamedPrincipals(current),
+    ...getNamedPrincipals(next),
   ]);
   for (const principal of principals) {
-    const before = current ? effectiveActions(current, principal) : [];
-    const after = effectiveActions(next, principal);
+    const before = current ? getEffectiveActions(current, principal) : [];
+    const after = getEffectiveActions(next, principal);
     if (RETENTION_WRITE_ACTIONS.some((a) => after.includes(a) && !before.includes(a))) return true;
   }
   return false;
@@ -288,7 +288,7 @@ export function isRosterSid(sid: string | undefined): boolean {
  * pairing `s3:*` with a `Deny`.
  */
 export const ROSTER_ADMIN_ACTIONS: PolicyAction[] = POLICY_ACTIONS.filter(
-  (action) => !(RETENTION_WRITE_ACTIONS as readonly PolicyAction[]).includes(action),
+  (action) => !RETENTION_WRITE_ACTIONS.includes(action),
 );
 
 /**
@@ -297,7 +297,7 @@ export const ROSTER_ADMIN_ACTIONS: PolicyAction[] = POLICY_ACTIONS.filter(
  * out. Written on every bucket the console creates, and rewritten by the
  * role-change fan-out.
  */
-export function rosterStatements({
+function buildRosterStatements({
   owners,
   admins,
 }: {
@@ -335,7 +335,7 @@ export function rosterStatements({
  * Member from a statement that is meant to follow the Admins. An Owner or
  * Admin creator is already named and gets no second statement.
  */
-export function defaultBucketPolicy({
+export function getDefaultBucketPolicy({
   owners,
   admins,
   creatorId,
@@ -344,7 +344,7 @@ export function defaultBucketPolicy({
   admins: readonly string[];
   creatorId: string;
 }): BucketPolicy {
-  const statement = rosterStatements({ owners, admins });
+  const statement = buildRosterStatements({ owners, admins });
   if (!owners.includes(creatorId) && !admins.includes(creatorId)) {
     statement.push({
       Sid: ROSTER_CREATOR_SID,
@@ -362,14 +362,14 @@ export function defaultBucketPolicy({
  * fan-out writes. Returns null when the result would carry no statement, which
  * means "delete the policy".
  */
-export function withRosterStatements(
+export function replaceRosterStatements(
   policy: BucketPolicy | null,
   roster: { owners: readonly string[]; admins: readonly string[] },
 ): BucketPolicy | null {
   const others = (policy?.Statement ?? []).filter(
     (statement) => statement.Sid !== ROSTER_OWNERS_SID && statement.Sid !== ROSTER_ADMINS_SID,
   );
-  const statement = [...rosterStatements(roster), ...others];
+  const statement = [...buildRosterStatements(roster), ...others];
   return statement.length > 0 ? { Statement: statement } : null;
 }
 

@@ -4,11 +4,11 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, NO_ROLE, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
 import type {
-  AccessKeyPermissions,
   AuditActor,
   ErrorResponse,
   ExcessKeyPermission,
   S3Region,
+  ServiceKeyGrant,
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { accessKeyMintSeqItem } from './access-key-mint-seq.ts';
@@ -64,7 +64,7 @@ export interface KeyMinter {
   orgId: string;
   userId: string;
   /** The permissions the key would carry. */
-  key: AccessKeyPermissions;
+  key: ServiceKeyGrant;
 }
 
 /**

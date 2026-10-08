@@ -457,7 +457,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     const result = await handler(removeEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 409 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
   });
 
   it('records the removal with no secret in it', async () => {
@@ -773,7 +773,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     ]);
     // The admin doing this is not the key holder, so the response is the only
     // place they learn which credentials the removal destroyed.
-    expect(body(result).revokedKeys.map((key: AccessKeySummary) => key.keyName)).toStrictEqual([
+    expect(body(result).keysRevoked.map((key: AccessKeySummary) => key.keyName)).toStrictEqual([
       'key 0',
       'key 1',
     ]);
@@ -835,7 +835,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     const result = await handler(removeEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 502 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
   });
 
   it('removes the member even when the pass after it cannot finish', async () => {
@@ -891,7 +891,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     const result = await handler(removeEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 409 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
   });
 
   it('records the removal with the ids of the keys that went', async () => {

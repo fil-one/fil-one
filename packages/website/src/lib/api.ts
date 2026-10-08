@@ -130,8 +130,8 @@ export function errorStatusOf(error: unknown): number | undefined {
  * Those credentials are gone whatever the role now says, so a refusal that
  * mentions only the role is telling the admin half of what happened.
  */
-export function revokedKeysOf(error: unknown): AccessKeySummary[] {
-  const keys = (error as { revokedKeys?: unknown } | null | undefined)?.revokedKeys;
+export function keysRevokedOf(error: unknown): AccessKeySummary[] {
+  const keys = (error as { keysRevoked?: unknown } | null | undefined)?.keysRevoked;
   return Array.isArray(keys) ? (keys as AccessKeySummary[]) : [];
 }
 
@@ -422,11 +422,11 @@ async function sendApiRequest(
       message?: string;
       code?: ApiErrorCode;
       resendAvailableAt?: string;
-      revokedKeys?: AccessKeySummary[];
+      keysRevoked?: AccessKeySummary[];
     };
     // Carry the backend's error code through so callers can render specific copy
     // (e.g. BUCKET_NOT_EMPTY), or honour a server-set cooldown (the deletion 429
-    // carries resendAvailableAt). `revokedKeys` rides along for the same reason:
+    // carries resendAvailableAt). `keysRevoked` rides along for the same reason:
     // a role change that fails after revoking keys leaves those credentials
     // gone, and a refusal that does not say so is a worse answer than none.
     throw Object.assign(
@@ -435,7 +435,7 @@ async function sendApiRequest(
         status: response.status,
         ...(error.code && { code: error.code }),
         ...(error.resendAvailableAt && { resendAvailableAt: error.resendAvailableAt }),
-        ...(error.revokedKeys?.length && { revokedKeys: error.revokedKeys }),
+        ...(error.keysRevoked?.length && { keysRevoked: error.keysRevoked }),
       },
     );
   }

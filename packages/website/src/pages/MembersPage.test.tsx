@@ -615,7 +615,7 @@ describe('the role-narrowing confirmation', () => {
       userId: 'user-2',
       role: OrgRole.Member,
       previousRole: OrgRole.Admin,
-      revokedKeys: [
+      keysRevoked: [
         {
           id: 'key-1',
           keyName: 'nightly backup',
@@ -647,7 +647,7 @@ describe('the role-narrowing confirmation', () => {
     mockUpdateRole.mockRejectedValue(
       Object.assign(new Error('That member’s role changed while you were editing it.'), {
         status: 409,
-        revokedKeys: [
+        keysRevoked: [
           {
             id: 'key-1',
             keyName: 'nightly backup',
@@ -747,7 +747,7 @@ describe('MembersPage — a removal that revoked keys', () => {
   it('names the keys a removal revoked, and drops the views that listed them', async () => {
     // The admin doing this is not the key holder, so the toast is the only
     // place they learn which credentials the removal destroyed.
-    mockRemove.mockResolvedValue({ revokedKeys: [REVOKED_KEY] });
+    mockRemove.mockResolvedValue({ keysRevoked: [REVOKED_KEY] });
     const { client } = renderPage();
     const invalidate = vi.spyOn(client, 'invalidateQueries');
 
@@ -782,7 +782,7 @@ describe('MembersPage — a removal that revoked keys', () => {
     mockRemove.mockRejectedValue(
       Object.assign(new Error('That person is no longer on this roster.'), {
         status: 404,
-        revokedKeys: [REVOKED_KEY],
+        keysRevoked: [REVOKED_KEY],
       }),
     );
     renderPage();
@@ -946,7 +946,7 @@ describe('MembersPage — transferring the owner seat', () => {
     mockTransfer.mockRejectedValue(
       Object.assign(new Error('The owner seat moved while you were transferring it.'), {
         status: 409,
-        revokedKeys: [REVOKED_KEY],
+        keysRevoked: [REVOKED_KEY],
       }),
     );
     renderPage();

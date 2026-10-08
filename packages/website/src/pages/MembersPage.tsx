@@ -13,7 +13,7 @@ import { MembersToolbar } from '../components/MembersToolbar';
 import { MemberDialogs, useMemberDialogs } from '../components/MemberDialogs';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { errorCodeOf, errorMessageOf, errorStatusOf, getMe, revokedKeysOf } from '../lib/api.js';
+import { errorCodeOf, errorMessageOf, errorStatusOf, getMe, keysRevokedOf } from '../lib/api.js';
 import {
   listMembers,
   removeMember,
@@ -162,14 +162,14 @@ function useRoleChange(ctx: MutationContext) {
     onSuccess: (result, { member, role }) => {
       patchRosterRole(ctx.client, member.userId, role);
       invalidateAfterMembershipChange(ctx.client, member.userId, ctx.selfUserId);
-      invalidateRevokedKeyViews(ctx.client, result.revokedKeys?.length ?? 0);
+      invalidateRevokedKeyViews(ctx.client, result.keysRevoked?.length ?? 0);
       ctx.notice.clear();
       ctx.toastSuccess(
-        `${memberName(member)} is now ${ROLE_LABELS[role]}${revokedSuffix(result.revokedKeys)}`,
+        `${memberName(member)} is now ${ROLE_LABELS[role]}${revokedSuffix(result.keysRevoked)}`,
       );
     },
     onError: (err) => {
-      const revoked = revokedKeysOf(err);
+      const revoked = keysRevokedOf(err);
       // Those keys are gone whatever the role now says, so the key list is stale
       // either way, and a refusal that omits them is half the answer.
       invalidateRevokedKeyViews(ctx.client, revoked.length);
@@ -211,7 +211,7 @@ function useMemberRemoval(ctx: MutationContext) {
       // Optional: this endpoint answered 204 with no body until the removal
       // began revoking, so a console running against an older deploy reads
       // `undefined` here rather than an empty object.
-      const revoked = result?.revokedKeys;
+      const revoked = result?.keysRevoked;
       invalidateRevokedKeyViews(ctx.client, revoked?.length ?? 0);
       ctx.notice.clear();
       ctx.toastSuccess(
@@ -221,7 +221,7 @@ function useMemberRemoval(ctx: MutationContext) {
     onError: (err, member) => {
       // Gone whatever the roster now says, so the key list is stale on every
       // branch below and a refusal that omits them is half the answer.
-      const revoked = revokedKeysOf(err);
+      const revoked = keysRevokedOf(err);
       invalidateRevokedKeyViews(ctx.client, revoked.length);
       const remedy = 'That removal would leave the organization without an owner.';
       if (ctx.notice.capture(err, `${errorMessageOf(err, remedy)}${revokedSuffix(revoked)}`))
@@ -294,20 +294,20 @@ function useOwnershipTransfer(ctx: MutationContext, onDone: () => void) {
       patchRosterRole(ctx.client, result.userId, OrgRole.Owner);
       patchRosterRole(ctx.client, result.previousOwnerUserId, OrgRole.Admin);
       invalidateAfterMembershipChange(ctx.client, result.previousOwnerUserId, ctx.selfUserId);
-      invalidateRevokedKeyViews(ctx.client, result.revokedKeys?.length ?? 0);
+      invalidateRevokedKeyViews(ctx.client, result.keysRevoked?.length ?? 0);
       ctx.notice.clear();
       // The dialog goes with the seat. Left open, it offers a destructive button
       // to a caller who is now an Admin, and the server answers the second click
       // with a refusal rather than a second transfer.
       onDone();
       ctx.toastSuccess(
-        `${memberName(member)} owns this organization now. You are an admin.${revokedSuffix(result.revokedKeys)}`,
+        `${memberName(member)} owns this organization now. You are an admin.${revokedSuffix(result.keysRevoked)}`,
       );
     },
     onError: (err) => {
       // The keys here are the caller's own, so this is the one flow where the
       // person reading the refusal is the person whose clients just stopped.
-      const revoked = revokedKeysOf(err);
+      const revoked = keysRevokedOf(err);
       invalidateRevokedKeyViews(ctx.client, revoked.length);
       ctx.toastError(
         `${errorMessageOf(err, 'Failed to transfer ownership')}${revokedSuffix(revoked)}`,
