@@ -118,17 +118,13 @@ export function excessKeyPermissions(
  *
  * The table's own keys are the membership test, so there is no second list to
  * keep in step with it. The own-property check keeps an inherited key such as
- * `'constructor'` from resolving to something that is not a permission —
- * `Object.hasOwn` semantics, spelled the ES2020 way because the console
- * compiles this file at that target.
+ * `'constructor'` from resolving to something that is not a permission.
  */
 function requirementFor(
   keyPermission: string,
   table: Record<string, Permission>,
 ): Permission | undefined {
-  return Object.prototype.hasOwnProperty.call(table, keyPermission)
-    ? table[keyPermission]
-    : undefined;
+  return Object.hasOwn(table, keyPermission) ? table[keyPermission] : undefined;
 }
 
 /**
