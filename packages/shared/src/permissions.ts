@@ -155,12 +155,10 @@ export const ROLE_RANK = {
  * The parameter is `string` because every caller is holding a value read out of
  * DynamoDB: taking the raw value keeps the fail-closed branch reachable instead
  * of casting past it. The own-property check is what keeps an inherited key such
- * as `'constructor'` from resolving to something that is not a permission list —
- * `Object.hasOwn` semantics, spelled the ES2020 way because the console
- * compiles this file at that target.
+ * as `'constructor'` from resolving to something that is not a permission list.
  */
 export function permissionsForRole(role: string): readonly Permission[] {
-  return isOrgRole(role) && Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, role)
+  return isOrgRole(role) && Object.hasOwn(ROLE_PERMISSIONS, role)
     ? ROLE_PERMISSIONS[role]
     : NO_PERMISSIONS;
 }
