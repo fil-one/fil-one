@@ -30,13 +30,6 @@ export interface Roster {
 }
 
 /**
- * A stale ETag between the read and the write is another writer landing first;
- * the read-modify-write simply runs again on what is there now. Bounded, so a
- * bucket under constant edit fails the report rather than the request.
- */
-const ROSTER_WRITE_RETRY = { retries: 3, minTimeout: 50, maxTimeout: 500 } as const;
-
-/**
  * The roster as the storage system should see it after a role change. Read
  * from the membership rows, with the changing member placed at the role they
  * are moving to, so the same function serves a demotion written before the role
@@ -44,12 +37,12 @@ const ROSTER_WRITE_RETRY = { retries: 3, minTimeout: 50, maxTimeout: 500 } as co
  */
 export async function rosterAfterChange(
   orgId: string,
-  change?: { userId: string; role: OrgRole | null },
+  change?: { userId: string; role: OrgRole },
 ): Promise<Roster> {
   const members = (await listMembers(orgId))
     .filter((member) => member.userId !== change?.userId)
     .map((member) => ({ userId: member.userId, role: member.role as string }));
-  if (change?.role) members.push({ userId: change.userId, role: change.role });
+  if (change) members.push(change);
   return {
     owners: members.filter((m) => m.role === OrgRole.Owner).map((m) => m.userId),
     admins: members.filter((m) => m.role === OrgRole.Admin).map((m) => m.userId),
@@ -173,7 +166,7 @@ async function writeRosterStatements({
     async () => {
       const current = await iam.getBucketPolicy(tenantId, bucketName);
       const next = withRosterStatements(current?.policy ?? null, roster);
-      if (unchanged(current, next)) return;
+      if (JSON.stringify(current?.policy ?? null) === JSON.stringify(next)) return;
       await auditedWrite({ orgId, region, bucketName, actor, current, next }, () =>
         next
           ? iam.putBucketPolicy(
@@ -185,16 +178,16 @@ async function writeRosterStatements({
           : iam.deleteBucketPolicy(tenantId, bucketName, { ifMatch: current!.etag }),
       );
     },
+    // A stale ETag is another writer landing first; the read-modify-write runs
+    // again on what is there now. Bounded, so a bucket under constant edit fails
+    // the report rather than the request.
     {
-      ...ROSTER_WRITE_RETRY,
+      retries: 3,
+      minTimeout: 50,
+      maxTimeout: 500,
       shouldRetry: ({ error }) => error instanceof PolicyPreconditionFailedError,
     },
   );
-}
-
-function unchanged(current: StoredBucketPolicy | null, next: BucketPolicy | null): boolean {
-  if (!current && !next) return true;
-  return Boolean(current && next) && JSON.stringify(current!.policy) === JSON.stringify(next);
 }
 
 /**
@@ -264,26 +257,23 @@ export async function removeMemberPrincipals({
   // The PROFILE set is pruned as part of the region's removal: an id left
   // behind would make a later ensureTenantReady skip registering a re-invited
   // member, so a prune that fails refuses the region and the retry runs both.
-  const outcomes = await Promise.allSettled(
+  const outcomes = await Promise.all(
     regions.map(async ({ orchestrator, tenantId }) => {
-      await orchestrator.iam.removeMember(tenantId, userId);
-      await removeRegisteredPrincipal(orgId, orchestrator.id, userId);
+      const { region } = orchestrator;
+      try {
+        await orchestrator.iam.removeMember(tenantId, userId);
+        await removeRegisteredPrincipal(orgId, orchestrator.id, userId);
+        return { region, ok: true };
+      } catch (error) {
+        console.error('[iam-policy-fanout] Could not remove a principal', {
+          region,
+          userId,
+          error,
+        });
+        return { region, ok: false };
+      }
     }),
   );
-  const removed: S3Region[] = [];
-  const failed: S3Region[] = [];
-  outcomes.forEach((outcome, index) => {
-    const { region } = regions[index]!.orchestrator;
-    if (outcome.status === 'fulfilled') {
-      removed.push(region);
-      return;
-    }
-    console.error('[iam-policy-fanout] Could not remove a principal', {
-      region,
-      userId,
-      error: outcome.reason,
-    });
-    failed.push(region);
-  });
-  return { removed, failed };
+  const regionsWhere = (ok: boolean) => outcomes.filter((o) => o.ok === ok).map((o) => o.region);
+  return { removed: regionsWhere(true), failed: regionsWhere(false) };
 }

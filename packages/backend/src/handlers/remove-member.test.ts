@@ -1161,9 +1161,6 @@ describe('the principal on iam regions', () => {
     expect(mockRemovePrincipals).toHaveBeenCalledWith(
       expect.objectContaining({ userId: TARGET_ID }),
     );
-    expect(JSON.parse((result as { body: string }).body).principalsRemoved).toStrictEqual([
-      S3Region.UsEast9,
-    ]);
   });
 
   it('resolves the iam regions from a consistent read of the org profile', async () => {

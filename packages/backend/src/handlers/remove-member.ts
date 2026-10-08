@@ -231,7 +231,6 @@ export async function baseHandler(
     changedBy,
     later,
     revoked: committed.revoked,
-    principalsRemoved: principals.removed,
   });
 }
 
@@ -308,7 +307,6 @@ async function finishRemoval({
   changedBy,
   later,
   revoked,
-  principalsRemoved,
 }: {
   orgId: string;
   orgProfile: OrgProfileItem | undefined;
@@ -318,8 +316,6 @@ async function finishRemoval({
   /** The revoked invitations the transaction had no room for. */
   later: InvitationRecord[];
   revoked: AccessKeySummary[];
-  /** The `iam` regions whose principal went with the membership. */
-  principalsRemoved: S3Region[];
 }): Promise<APIGatewayProxyStructuredResultV2> {
   await revokeDeferred(later);
   await notifyRevokedKeys({
@@ -337,10 +333,7 @@ async function finishRemoval({
     .body<RemoveMemberResponse>(
       // Named only when there are any, so removing somebody who held no key
       // answers with the empty body rather than an empty list.
-      {
-        ...(revoked.length > 0 ? { revokedKeys: revoked } : {}),
-        ...(principalsRemoved.length > 0 ? { principalsRemoved } : {}),
-      },
+      revoked.length > 0 ? { revokedKeys: revoked } : {},
     )
     .build();
 }
