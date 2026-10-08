@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "types": ["node"],
-    "target": "ES2022",
+    // Every package compiles for one target: the newest ES version that both
+    // Node.js 24 on AWS Lambda and current evergreen browsers run.
+    "target": "ES2025",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
