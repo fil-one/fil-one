@@ -213,7 +213,6 @@ export type BucketPolicy = {
 export type PrincipalPolicies = {
   items: Array<{
     bucketName: BucketName;
-    etag: string;
     policy: BucketPolicy;
   }>;
 };
