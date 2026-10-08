@@ -149,12 +149,11 @@ describe('BucketPolicySchema', () => {
     ).toBe(false);
   });
 
-  it('lets the PUT request omit the etag only as a whole field', () => {
+  it('refuses an etag in the PUT body, which travels in If-Match', () => {
     expect(PutBucketPolicyRequestSchema.safeParse({ policy: read }).success).toBe(true);
     expect(PutBucketPolicyRequestSchema.safeParse({ policy: read, etag: '"abc"' }).success).toBe(
-      true,
+      false,
     );
-    expect(PutBucketPolicyRequestSchema.safeParse({ policy: read, etag: '' }).success).toBe(false);
   });
 });
 

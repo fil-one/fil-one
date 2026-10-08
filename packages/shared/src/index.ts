@@ -253,7 +253,6 @@ export type {
   PolicyEffect,
   PolicyStatement,
   PutBucketPolicyRequest,
-  PutBucketPolicyResponse,
 } from './api/bucket-policies.ts';
 export {
   DELETION_CODE_LENGTH,
