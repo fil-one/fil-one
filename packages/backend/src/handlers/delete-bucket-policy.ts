@@ -4,6 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import {
   bucketPolicyErrorResponse,
+  readPolicyPrecondition,
   resolveIamWriteTarget,
   resolvePolicyRouteTarget,
 } from '../lib/bucket-policy-route.ts';
@@ -17,13 +18,10 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 /**
- * DELETE /api/buckets/{name}/policy?region=&etag= — remove the bucket's policy.
+ * DELETE /api/buckets/{name}/policy?region= — remove the bucket's policy.
  *
- * The ETag travels as a query parameter rather than an `If-Match` header: the
- * API's CORS allowlist names its headers one by one, and a body on a DELETE is
- * the shape proxies drop. A missing ETag is a 400, since deleting a document
- * the caller has not read is never what they meant; a stale one is a 409 with
- * nothing written.
+ * As on S3, `If-Match` removes only the version the caller read, and a stale
+ * one is a 412 with nothing removed; without it the delete is unconditional.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -32,8 +30,12 @@ export async function baseHandler(
   if ('response' in resolved) return resolved.response;
   const { bucketName, region } = resolved.target;
 
-  const etag = event.queryStringParameters?.etag;
-  if (!etag) return badRequestResponse('The etag of the policy being removed is required');
+  const read = readPolicyPrecondition(event);
+  if ('response' in read) return read.response;
+  const { precondition } = read;
+  if (precondition && 'ifNoneMatch' in precondition) {
+    return badRequestResponse('A delete cannot carry If-None-Match');
+  }
 
   const { orgId, userId } = getUserInfo(event);
   const target = await resolveIamWriteTarget(orgId, region);
@@ -50,7 +52,7 @@ export async function baseHandler(
   });
 
   try {
-    await orchestrator.iam.deleteBucketPolicy(tenantId, bucketName, { ifMatch: etag });
+    await orchestrator.iam.deleteBucketPolicy(tenantId, bucketName, precondition);
     await audit.complete({ outcome: 'succeeded' });
     return { statusCode: 204, body: '' };
   } catch (err) {
