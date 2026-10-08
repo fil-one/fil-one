@@ -45,7 +45,7 @@ These rules apply to new names; leave existing names alone. In React code, React
   ```
 
 - Test one behavior per test. Write similar cases as `it.each` with the case in the test name. When `it.each` does not fit and a test repeats an assertion in a loop, pass the case to `expect` as its message, so a failure names the case that failed.
-- Name each test by its behavior in plain words ("returns no effective actions for a principal the policy does not mention"), and check exactly what the name claims.
+- Name each test by its behavior in plain words: the expected outcome first, then the condition under which it happens ("returns no effective actions for a principal the policy does not mention"). Make the test assert exactly what its name describes.
 - Make each test show which properties of its input matter to the behavior it checks, and leave out the ones that don't. Choose the form that fits:
   - A test-data builder: the test sets only the relevant fields and the builder fills in defaults for the rest.
   - A shared fixture whose name tells the reader the scenario (`grantReadToAlice`).
