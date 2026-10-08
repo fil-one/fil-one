@@ -95,8 +95,13 @@ export class ConsoleApi {
     method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     data?: unknown,
+    headers: Record<string, string> = {},
   ): Promise<APIResponse> {
-    return this.ctx.fetch(`/api${path}`, { method, data, headers: this.headers(true) });
+    return this.ctx.fetch(`/api${path}`, {
+      method,
+      data,
+      headers: { ...this.headers(true), ...headers },
+    });
   }
 
   // ── Policy ───────────────────────────────────────────────────────
@@ -105,27 +110,46 @@ export class ConsoleApi {
     return this.get(`/buckets/${bucket}/policy?region=${REGION}`);
   }
 
-  async readPolicy(bucket: string): Promise<GetBucketPolicyResponse> {
+  /** The policy with the ETag its response header carried. */
+  async readPolicy(bucket: string): Promise<GetBucketPolicyResponse & { etag: string }> {
     const res = await this.getPolicy(bucket);
     expect(res.status(), await res.text()).toBe(200);
-    return (await res.json()) as GetBucketPolicyResponse;
+    const { policy } = (await res.json()) as GetBucketPolicyResponse;
+    return { policy, etag: res.headers().etag! };
   }
 
-  putPolicy(bucket: string, body: { policy: unknown; etag?: string }): Promise<APIResponse> {
-    return this.send('PUT', `/buckets/${bucket}/policy?region=${REGION}`, body);
+  /**
+   * `etag` goes out as `If-Match`; without one the write creates the first
+   * policy (`If-None-Match: *`) unless `unconditional`.
+   */
+  putPolicy(
+    bucket: string,
+    { policy, etag, unconditional }: { policy: unknown; etag?: string; unconditional?: boolean },
+  ): Promise<APIResponse> {
+    const precondition: Record<string, string> = etag
+      ? { 'If-Match': etag }
+      : unconditional
+        ? {}
+        : { 'If-None-Match': '*' };
+    return this.send('PUT', `/buckets/${bucket}/policy?region=${REGION}`, { policy }, precondition);
   }
 
+  /** Under `If-Match` when `etag` is given, unconditional otherwise. */
   deletePolicy(bucket: string, etag?: string): Promise<APIResponse> {
-    const query = etag ? `&etag=${encodeURIComponent(etag)}` : '';
-    return this.send('DELETE', `/buckets/${bucket}/policy?region=${REGION}${query}`);
+    return this.send(
+      'DELETE',
+      `/buckets/${bucket}/policy?region=${REGION}`,
+      undefined,
+      etag ? { 'If-Match': etag } : {},
+    );
   }
 
   /** Replace the policy with `statement`, reading the ETag first. */
   async setStatements(bucket: string, statement: PolicyStatement[]): Promise<string> {
     const { etag } = await this.readPolicy(bucket);
     const res = await this.putPolicy(bucket, { policy: { Statement: statement }, etag });
-    expect(res.status(), await res.text()).toBe(200);
-    return ((await res.json()) as { etag: string }).etag;
+    expect(res.status(), await res.text()).toBe(204);
+    return res.headers().etag!;
   }
 
   // ── Buckets and keys ─────────────────────────────────────────────
@@ -272,9 +296,9 @@ export async function removeBucket(
     return; // Already gone.
   }
   const policy: BucketPolicy = { Statement: [ownersStatement(ownerId)] };
-  const etag = current.ok() ? ((await current.json()) as GetBucketPolicyResponse).etag : undefined;
+  const etag = current.ok() ? current.headers().etag : undefined;
   const put = await owner.putPolicy(bucket, { policy, etag });
-  expect([200, 201], await put.text()).toContain(put.status());
+  expect(put.status(), await put.text()).toBe(204);
 
   const key = await owner.mintKey();
   try {

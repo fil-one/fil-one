@@ -154,7 +154,7 @@ test('7. taking a grant away reaches a key the gateway cached', async () => {
     .toBe('404 NoSuchBucket');
 });
 
-test('8. a write under a stale etag loses', async () => {
+test('8. a write under a stale If-Match loses', async () => {
   const { etag: stale } = await owner.readPolicy(B1);
   await owner.setStatements(B1, [ownersStatement(ownerId), allow([memberId], ['s3:ListBucket'])]);
   const before = await owner.readPolicy(B1);
@@ -162,13 +162,13 @@ test('8. a write under a stale etag loses', async () => {
     policy: { Statement: [ownersStatement(ownerId)] },
     etag: stale,
   });
-  expect([res.status(), (await res.json()).code]).toEqual([409, 'POLICY_CONFLICT']);
+  expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
   expect(await owner.readPolicy(B1)).toEqual(before);
 });
 
-test('9. creating a policy where one exists loses', async () => {
+test('9. creating a policy under If-None-Match: * where one exists loses', async () => {
   const res = await owner.putPolicy(B1, { policy: { Statement: [ownersStatement(ownerId)] } });
-  expect([res.status(), (await res.json()).code]).toEqual([409, 'POLICY_CONFLICT']);
+  expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
 });
 
 test('10. invalid documents are refused', async () => {
@@ -214,18 +214,17 @@ test('13. a deny naming everyone locks the owner out of S3 but not out of the po
 });
 
 test('14. deleting the policy leaves the bucket to service keys alone', async () => {
-  const { etag } = await owner.readPolicy(B2);
-  expect((await owner.deletePolicy(B2)).status()).toBe(400);
-  expect((await owner.deletePolicy(B2, etag)).status()).toBe(204);
+  // Without If-Match, as on S3, the delete is unconditional.
+  expect((await owner.deletePolicy(B2)).status()).toBe(204);
   const gone = await owner.getPolicy(B2);
   expect([gone.status(), (await gone.json()).code]).toEqual([404, 'POLICY_NOT_FOUND']);
   expect(await outcome(listObjects(await freshS3(owner), B2))).toBe('404 NoSuchBucket');
 
-  const created = await owner.putPolicy(B2, { policy: { Statement: [ownersStatement(ownerId)] } });
-  expect([created.status(), await created.json()]).toEqual([
-    201,
-    { etag: expect.any(String), created: true },
-  ]);
+  const created = await owner.putPolicy(B2, {
+    policy: { Statement: [ownersStatement(ownerId)] },
+    unconditional: true,
+  });
+  expect([created.status(), created.headers().etag]).toEqual([204, expect.any(String)]);
 });
 
 test('15. a member presigned GET follows their grants', async () => {
