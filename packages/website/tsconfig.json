@@ -1,14 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // The console must run in the browsers Vite builds for by default
-    // (Chrome 107, Firefox 104, Safari 16), which support ES2022 built-ins
-    // and nothing newer. Vite rewrites newer syntax but adds no polyfills,
-    // so type checking at ES2022 is what keeps ES2023+ built-ins such as
-    // Array.prototype.toSorted out of the bundle. Every package the console
-    // bundles uses the same target; change them together with Vite's
-    // build.target.
-    "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",

@@ -1,9 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // The console bundles this package, so it compiles for the console's
-    // browser target; see packages/website/tsconfig.json.
-    "target": "ES2022",
     "outDir": "./dist",
     "rootDir": "./src"
   },
