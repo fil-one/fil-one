@@ -460,15 +460,11 @@ export default $config({
       cors: {
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        // Authorization carries RAG API key bearer tokens (query endpoint);
-        // X-Org-Id names the organization each request operates on; If-Match
-        // and If-None-Match condition a bucket policy write, and ETag answers
-        // the version it reads or writes. Deployed
-        // stages serve the console and the API from one origin through the
-        // Router, so CORS never applies there — local dev at
+        // Deployed stages serve the console and the API from one origin
+        // through the Router, so CORS never applies there. Local dev at
         // https://localhost:5173 is cross-origin, and a preflight that omitted
-        // X-Org-Id would strip the header before it reached the API. Origins
-        // stay locked to our own domain above.
+        // a header the console sends would strip it before it reached the API.
+        // Origins stay locked to our own domain above.
         allowHeaders: [
           'Content-Type',
           'X-CSRF-Token',
@@ -1153,23 +1149,25 @@ export default $config({
     // Minting a key reaches the orchestrator and its SSM-held credentials and
     // waits on a vendor call. Rotation does the same and then revokes, so both
     // routes take one grant set; rotation takes more time.
-    const bucketPolicyWriteRoute: RouteInfraConfig = {
-      extraEnv: orchestratorEnv,
-      permissions: [
-        {
-          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn],
-        },
-      ],
-      timeout: '30 seconds',
-    };
-
     const accessKeyMintRoute: RouteInfraConfig = {
       extraEnv: orchestratorEnv,
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
           resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+        },
+      ],
+      timeout: '30 seconds',
+    };
+
+    // A bucket policy write may provision the tenant, which stores its console
+    // S3 key in SSM. Only Forge regions serve bucket policies.
+    const bucketPolicyWriteRoute: RouteInfraConfig = {
+      extraEnv: orchestratorEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn],
         },
       ],
       timeout: '30 seconds',

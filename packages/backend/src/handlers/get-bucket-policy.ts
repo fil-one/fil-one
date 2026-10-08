@@ -4,7 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { GetBucketPolicyResponse } from '@filone/shared';
 import {
   POLICIES_UNAVAILABLE_MESSAGE,
-  bucketPolicyErrorResponse,
+  toPolicyErrorResponse,
   policyNotFoundResponse,
   resolvePolicyRouteTarget,
 } from '../lib/bucket-policy-route.ts';
@@ -31,9 +31,9 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const resolved = resolvePolicyRouteTarget(event);
-  if ('response' in resolved) return resolved.response;
-  const { bucketName, region } = resolved.target;
+  const routeTarget = resolvePolicyRouteTarget(event);
+  if ('response' in routeTarget) return routeTarget.response;
+  const { bucketName, region } = routeTarget.target;
 
   const orchestrator = getOrchestratorForRegion(region);
   if (orchestrator.accessModel !== 'iam') {
@@ -41,7 +41,7 @@ export async function baseHandler(
   }
 
   const { orgId } = getUserInfo(event);
-  // Read path: never provisions.
+  // isTenantReady rather than ensureTenantReady: a read must not create a tenant.
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
@@ -54,7 +54,9 @@ export async function baseHandler(
       .body<GetBucketPolicyResponse>({ policy: stored.policy })
       .build();
   } catch (err) {
-    return bucketPolicyErrorResponse(err) ?? Promise.reject(err);
+    const response = toPolicyErrorResponse(err);
+    if (!response) throw err;
+    return response;
   }
 }
 

@@ -10,7 +10,9 @@ import {
   GRANULAR_PERMISSION_REQUIREMENT,
   OrgRole,
   PresignOpSchema,
+  RETENTION_WRITE_ACTIONS,
   ROUTE_MANIFEST,
+  S3Region,
   roleHasPermission,
   SubscriptionStatus,
 } from '@filone/shared';
@@ -734,54 +736,65 @@ describe('the caps routes apply on top of their declared permission', () => {
   );
 
   /**
-   * Writing a bucket policy clears `buckets.policy_manage` in the chain and
-   * then reads the body: a statement that grants a retention or legal-hold
-   * write, or `s3:*` which covers both, needs `privileged.grant`. On a first
-   * policy (`If-None-Match: *`) the cap runs before the region is consulted,
-   * which is why it answers while no region
-   * serves policies: an Owner is let through to the region check, an Admin is
-   * refused with the code the console renders.
+   * Writing a bucket policy needs `buckets.policy_manage` to reach the handler,
+   * and `privileged.grant` for a statement that grants a retention write. On a
+   * first policy (`If-None-Match: *`) that check runs before the region is
+   * read, so it answers even in a region without bucket policies: a caller who
+   * may grant reaches the region check, and anyone else gets the 403.
    */
   describe('granting a retention write through a policy needs privileged.grant', () => {
-    const policyWrite = (action: string): RouteRequest => ({
+    const buildPolicyGrantRequest = (action: string): RouteRequest => ({
       body: JSON.stringify({
         policy: { Statement: [{ Effect: 'Allow', Principal: [USER_ID], Action: [action] }] },
       }),
       headers: { 'if-none-match': '*' },
       pathParameters: { name: 'photos' },
-      queryStringParameters: { region: 'eu-west-1' },
+      // A scoped-keys region, which serves no bucket policies.
+      queryStringParameters: { region: S3Region.EuWest1 },
     });
     const editors = Object.values(OrgRole).filter((role) =>
       roleHasPermission(role, 'buckets.policy_manage'),
     );
+    const retentionGrantActions = [...RETENTION_WRITE_ACTIONS, 's3:*'];
+    const pairWithRetentionActions = (roles: OrgRole[]) =>
+      roles.flatMap((role) => retentionGrantActions.map((action) => [role, action] as const));
+    const granters = editors.filter((role) => roleHasPermission(role, 'privileged.grant'));
+    const nonGranters = editors.filter((role) => !granters.includes(role));
 
-    it.each(editors)('%s may grant an ordinary read', async (role) => {
+    it.each(editors)('%s may grant s3:GetObject', async (role) => {
       const result = await invokeRoute(routeFor('put-bucket-policy'), {
         membership: membershipFor(ORG_ID, USER_ID, role),
-        request: policyWrite('s3:GetObject'),
+        request: buildPolicyGrantRequest('s3:GetObject'),
       });
 
-      expect(errorCode(result)).not.toBe(ApiErrorCode.RETENTION_GRANT_FORBIDDEN);
+      expect({ ...result, body: errorBody(result) }).toMatchObject({
+        statusCode: 404,
+        body: { code: ApiErrorCode.POLICY_NOT_FOUND },
+      });
     });
 
-    it.each(
-      editors.flatMap((role) =>
-        ['s3:PutObjectRetention', 's3:PutObjectLegalHold', 's3:*'].map(
-          (action) => [role, action] as const,
-        ),
-      ),
-    )('%s granting %s only with privileged.grant', async (role, action) => {
+    it.each(pairWithRetentionActions(granters))('%s may grant %s', async (role, action) => {
       const result = await invokeRoute(routeFor('put-bucket-policy'), {
         membership: membershipFor(ORG_ID, USER_ID, role),
-        request: policyWrite(action),
+        request: buildPolicyGrantRequest(action),
       });
 
-      if (roleHasPermission(role, 'privileged.grant')) {
-        expect(errorCode(result)).not.toBe(ApiErrorCode.RETENTION_GRANT_FORBIDDEN);
-        return;
-      }
-      expect(result.statusCode).toBe(403);
-      expect(errorCode(result)).toBe(ApiErrorCode.RETENTION_GRANT_FORBIDDEN);
+      expect({ ...result, body: errorBody(result) }).toMatchObject({
+        statusCode: 404,
+        body: { code: ApiErrorCode.POLICY_NOT_FOUND },
+      });
+    });
+
+    it.each(pairWithRetentionActions(nonGranters))('%s may not grant %s', async (role, action) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: buildPolicyGrantRequest(action),
+      });
+
+      expect({ ...result, body: errorBody(result) }).toMatchObject({
+        statusCode: 403,
+        body: { code: ApiErrorCode.RETENTION_GRANT_FORBIDDEN },
+      });
     });
   });
 
