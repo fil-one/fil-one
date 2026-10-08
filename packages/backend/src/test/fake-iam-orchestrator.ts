@@ -87,8 +87,8 @@ export class FakeIamOrchestrator implements IamMethods {
     tenantId: string,
     bucketName: string,
     policy: BucketPolicy,
-    precondition: PolicyPrecondition,
-  ): Promise<{ etag: string; created: boolean }> {
+    precondition?: PolicyPrecondition,
+  ): Promise<{ etag: string }> {
     this.record('putBucketPolicy', tenantId, bucketName);
     this.assertBucket(tenantId, bucketName);
     const current = this.policiesOf(tenantId).get(bucketName);
@@ -104,13 +104,13 @@ export class FakeIamOrchestrator implements IamMethods {
     }
     const stored = { policy, etag: this.nextEtag() };
     this.policiesOf(tenantId).set(bucketName, stored);
-    return { etag: stored.etag, created: current === undefined };
+    return { etag: stored.etag };
   }
 
   async deleteBucketPolicy(
     tenantId: string,
     bucketName: string,
-    precondition: { ifMatch: string },
+    precondition?: { ifMatch: string },
   ): Promise<void> {
     this.record('deleteBucketPolicy', tenantId, bucketName);
     this.assertBucket(tenantId, bucketName);
@@ -128,7 +128,7 @@ export class FakeIamOrchestrator implements IamMethods {
       .filter(([, stored]) =>
         stored.policy.Statement.some((s) => s.Principal === '*' || s.Principal.includes(userId)),
       )
-      .map(([bucketName, stored]) => ({ bucketName, ...stored }));
+      .map(([bucketName, { policy }]) => ({ bucketName, policy }));
   }
 
   async resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]> {
@@ -160,8 +160,9 @@ export class FakeIamOrchestrator implements IamMethods {
   private assertPrecondition(
     bucketName: string,
     current: StoredBucketPolicy | undefined,
-    precondition: PolicyPrecondition,
+    precondition: PolicyPrecondition | undefined,
   ): void {
+    if (!precondition) return;
     if ('ifNoneMatch' in precondition) {
       if (current) throw new PolicyPreconditionFailedError(bucketName);
       return;

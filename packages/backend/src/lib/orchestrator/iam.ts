@@ -164,7 +164,6 @@ function buildPrincipalMethods(
       }
       return result.data.items.map((item) => ({
         bucketName: item.bucketName,
-        etag: item.etag,
         policy: item.policy as BucketPolicy,
       }));
     },
@@ -201,12 +200,7 @@ function buildPolicyMethods(
 
     async putBucketPolicy(tenantId, bucketName, policy, precondition) {
       const s3 = await ctx.s3(tenantId);
-      return withWriteRetry(async () => {
-        const { etag } = await putBucketPolicy(s3, bucketName, policy, precondition);
-        // The operation answers 204 either way; a write that conditioned on
-        // there being no policy and landed created it.
-        return { etag, created: 'ifNoneMatch' in precondition };
-      });
+      return withWriteRetry(() => putBucketPolicy(s3, bucketName, policy, precondition));
     },
 
     async deleteBucketPolicy(tenantId, bucketName, precondition) {
