@@ -30,7 +30,9 @@ export interface BulkDeleteWorkerPayload {
   jobId: string;
 }
 
-const sqs = new SQSClient({});
+// Send to the client's regional endpoint. In AWS that is the queue URL's host
+// anyway; a local emulator returns queue URLs on a host the Lambda can't reach.
+const sqs = new SQSClient({ useQueueUrlAsEndpoint: false });
 
 /**
  * Hand a job to the worker.

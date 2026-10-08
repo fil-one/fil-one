@@ -5,11 +5,18 @@ vi.mock('sst', () => ({
   Resource: { StripeEventQueue: { url: 'https://sqs.example.com/stripe-event.fifo' } },
 }));
 
-const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }));
+const { sendMock, clientConfigs } = vi.hoisted(() => ({
+  sendMock: vi.fn(),
+  clientConfigs: [] as unknown[],
+}));
 
 vi.mock('@aws-sdk/client-sqs', () => ({
   SQSClient: class {
     send = sendMock;
+
+    constructor(config: unknown) {
+      clientConfigs.push(config);
+    }
   },
   SendMessageCommand: class {
     input: Record<string, string>;
@@ -36,6 +43,12 @@ beforeEach(() => {
 });
 
 describe('enqueueStripeEvent', () => {
+  it('sends to the regional SQS endpoint rather than the queue URL host', () => {
+    // In AWS the two are the same host. A local emulator hands out queue URLs
+    // on a host the Lambda cannot reach, and the SDK would otherwise use it.
+    expect(clientConfigs).toEqual([{ useQueueUrlAsEndpoint: false }]);
+  });
+
   it('sends the verified event to the queue, deduplicated on its Stripe id', async () => {
     const event = stripeEvent('invoice.finalized', { object: 'invoice', customer: 'cus_1' });
 

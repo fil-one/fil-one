@@ -15,7 +15,9 @@ import { SendMessageCommand, SQSClient } from '@aws-sdk/client-sqs';
 import type Stripe from 'stripe';
 import { Resource } from 'sst';
 
-const sqs = new SQSClient({});
+// Send to the client's regional endpoint. In AWS that is the queue URL's host
+// anyway; a local emulator returns queue URLs on a host the Lambda can't reach.
+const sqs = new SQSClient({ useQueueUrlAsEndpoint: false });
 
 export async function enqueueStripeEvent(event: Stripe.Event): Promise<void> {
   await sqs.send(
