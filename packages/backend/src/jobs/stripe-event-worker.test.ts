@@ -916,9 +916,10 @@ describe('stripe-event-worker handler', () => {
         TableName: TABLE_NAME,
         Key: ORG_KEY,
         UpdateExpression:
-          'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
+          'SET subscriptionStatus = :status, canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
         ExpressionAttributeValues: {
           ':status': { S: SubscriptionStatus.GracePeriod },
+          ':canceledAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
           ':orgId': { S: MOCK_ORG_ID },
@@ -931,6 +932,23 @@ describe('stripe-event-worker handler', () => {
       expect(graceDate).toBeGreaterThanOrEqual(before + thirtyDays - 5000);
       expect(graceDate).toBeLessThanOrEqual(after + thirtyDays + 5000);
       expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
+    });
+
+    it('dates the cancellation and grace deadline from when Stripe ended the subscription', async () => {
+      // A redelivered event then writes the same deadline instead of pushing it
+      // out by the time the event spent in the queue.
+      const endedAt = Date.UTC(2026, 9, 1) / 1000;
+      setupStripeEvent('customer.subscription.deleted', mockSubscription({ ended_at: endedAt }));
+      setupCustomerRetrieve();
+
+      await deliver();
+
+      const values =
+        ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input.ExpressionAttributeValues!;
+      expect(values).toMatchObject({
+        ':canceledAt': { S: '2026-10-01T00:00:00.000Z' },
+        ':grace': { S: '2026-10-31T00:00:00.000Z' },
+      });
     });
 
     it('sets GracePeriod status with 7-day grace window for trialing subscriptions', async () => {

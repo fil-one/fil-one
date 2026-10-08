@@ -388,8 +388,14 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
 
   const graceDays = subscription.trial_end ? TRIAL_GRACE_DAYS : PAID_GRACE_DAYS;
 
+  // Dated from when Stripe ended the subscription, so a redelivered event
+  // writes the same deadline. Stripe sets ended_at on a deleted subscription;
+  // the clock covers one that arrives without it.
   const now = new Date();
-  const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
+  const canceledAt = subscription.ended_at ? new Date(subscription.ended_at * 1000) : now;
+  const gracePeriodEndsAt = new Date(
+    canceledAt.getTime() + graceDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
   // Resolved once: the same org id keys the write below and the tenant
   // write-lock after it.
@@ -409,9 +415,10 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   await updateSubscriptionByUser(
     { userId, orgId },
     {
-      UpdateExpression: `SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
+      UpdateExpression: `SET subscriptionStatus = :status, canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.GracePeriod },
+        ':canceledAt': { S: canceledAt.toISOString() },
         ':now': { S: now.toISOString() },
         ':grace': { S: gracePeriodEndsAt },
         ...backfill.values,
