@@ -48,11 +48,11 @@ export async function handler(event: SQSEvent): Promise<void> {
   // One message per invocation (batch size 1), so an error escaping this
   // handler returns exactly the failed event to the queue.
   for (const record of event.Records) {
-    await processRecord(JSON.parse(record.body) as Stripe.Event);
+    await processEventOnce(JSON.parse(record.body) as Stripe.Event);
   }
 }
 
-async function processRecord(stripeEvent: Stripe.Event): Promise<void> {
+async function processEventOnce(stripeEvent: Stripe.Event): Promise<void> {
   const tableName = Resource.BillingTable.name;
   const markKey = { pk: `WEBHOOK#${stripeEvent.id}`, sk: 'EVENT' };
 

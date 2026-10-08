@@ -59,7 +59,7 @@ const reportMetricMock = vi.mocked(reportMetric);
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-event-worker.ts';
-import { BILLING_IDENTITY_PROJECTION } from '../lib/subscription-store.ts';
+import { BILLING_IDENTITY_PROJECTION, MissingOrgIdError } from '../lib/subscription-store.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -251,7 +251,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 1. Idempotency: an event is marked processed once its handling succeeds
+  // Idempotency: an event is marked processed once its handling succeeds
   // -----------------------------------------------------------------------
   describe('idempotency', () => {
     const MARK_KEY = { pk: { S: `WEBHOOK#${MOCK_EVENT_ID}` }, sk: { S: 'EVENT' } };
@@ -280,18 +280,24 @@ describe('stripe-event-worker handler', () => {
       });
     });
 
-    it('marks the event after processing it (with TTL ~30 days)', async () => {
+    it('writes the processed mark only after the billing update', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());
 
-      const before = Math.floor(Date.now() / 1000);
       await deliver();
-      const after = Math.floor(Date.now() / 1000);
 
       const writes = ddbMock
         .calls()
         .map((c) => c.args[0])
         .filter((cmd) => cmd instanceof UpdateItemCommand || cmd instanceof PutItemCommand);
       expect(writes.map((cmd) => cmd.constructor)).toEqual([UpdateItemCommand, PutItemCommand]);
+    });
+
+    it('marks the event with its type and a 30-day TTL', async () => {
+      setupStripeEvent('customer.subscription.created', mockSubscription());
+
+      const before = Math.floor(Date.now() / 1000);
+      await deliver();
+      const after = Math.floor(Date.now() / 1000);
 
       const input = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
       expect(input).toStrictEqual({
@@ -330,7 +336,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 3. customer.subscription.created
+  // customer.subscription.created
   // -----------------------------------------------------------------------
   describe('customer.subscription.created', () => {
     it('updates the billing record named by subscription.metadata', async () => {
@@ -524,7 +530,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 4. customer.subscription.updated
+  // customer.subscription.updated
   // -----------------------------------------------------------------------
   describe('customer.subscription.updated', () => {
     it('processes same as created (UpdateItemCommand with correct key/values)', async () => {
@@ -595,7 +601,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 4b. customer.updated
+  // customer.updated
   // -----------------------------------------------------------------------
   describe('customer.updated', () => {
     let consoleSpy: MockInstance | undefined;
@@ -723,7 +729,7 @@ describe('stripe-event-worker handler', () => {
     it('throws when customer has no userId in metadata', async () => {
       setupStripeEvent('customer.updated', mockCustomerObject({ metadata: {} }));
 
-      await expect(deliver()).rejects.toThrow();
+      await expect(deliver()).rejects.toThrow('No userId in metadata');
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
@@ -786,7 +792,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 5. customer.subscription.deleted
+  // customer.subscription.deleted
   // -----------------------------------------------------------------------
   describe('a subscription the account has already replaced', () => {
     function supersededEmissions(): MetricEvent[] {
@@ -972,7 +978,7 @@ describe('stripe-event-worker handler', () => {
       );
       setupCustomerRetrieveWithoutOrg();
 
-      await expect(deliver()).rejects.toThrow();
+      await expect(deliver()).rejects.toThrow(MissingOrgIdError);
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
@@ -1066,7 +1072,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 5b. customer.deleted
+  // customer.deleted
   // -----------------------------------------------------------------------
   describe('customer.deleted', () => {
     // Deleting the customer in Stripe is the standing response to trial abuse, so
@@ -1144,10 +1150,10 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 6. customer.subscription.trial_will_end
+  // customer.subscription.trial_will_end
   // -----------------------------------------------------------------------
   describe('customer.subscription.trial_will_end', () => {
-    it('logs only, no UpdateItemCommand, then marks the event processed', async () => {
+    it('writes no billing update for trial_will_end and marks the event processed', async () => {
       setupStripeEvent('customer.subscription.trial_will_end', mockSubscription());
 
       await deliver();
@@ -1157,7 +1163,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 7. invoice.payment_succeeded
+  // invoice.payment_succeeded
   // -----------------------------------------------------------------------
   describe('invoice.payment_succeeded', () => {
     it('sets Active status, REMOVEs gracePeriodEndsAt, lastPaymentFailedAt, and canceledAt', async () => {
@@ -1250,18 +1256,19 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 8. invoice.payment_failed
+  // invoice.payment_failed
   // -----------------------------------------------------------------------
   describe('invoice.payment_failed', () => {
     it('fails the delivery when the Stripe objects name no org', async () => {
       // There is no key to write the row under, and no billing-row fallback any
-      // more. Failing the delivery leaves the event unmarked, so retries converge
-      // once somebody repairs the metadata; reporting success would consume the
-      // event and take the status change with it.
+      // more. Failing the delivery leaves the event unmarked, so it is retried and
+      // then parked in the DLQ, where it can be redriven once the metadata is
+      // repaired; reporting success would consume the event and take the status
+      // change with it.
       setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieveWithoutOrg();
 
-      await expect(deliver()).rejects.toThrow();
+      await expect(deliver()).rejects.toThrow(MissingOrgIdError);
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
@@ -1339,7 +1346,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 9. Error handling & edge cases
+  // Error handling & edge cases
   // -----------------------------------------------------------------------
   describe('error handling & edge cases', () => {
     it('fails the delivery when UpdateItemCommand fails during processing', async () => {
@@ -1383,7 +1390,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 10. DunningEscalation metric (EMF via reportMetric)
+  // DunningEscalation metric (EMF via reportMetric)
   // -----------------------------------------------------------------------
   describe('DunningEscalation metric', () => {
     it('emits stage=entered on first payment_failed (attempt_count=1)', async () => {
@@ -1494,7 +1501,7 @@ describe('stripe-event-worker handler', () => {
         regionSyncFailure(new Error('Aurora API error')),
       );
 
-      await expect(deliver()).rejects.toThrow();
+      await expect(deliver()).rejects.toThrow('tenant status sync failed for: aurora');
 
       expect(dunningEmissions()).toHaveLength(0);
     });
@@ -1587,7 +1594,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 11. InvoicePaid metric (EMF via reportMetric)
+  // InvoicePaid metric (EMF via reportMetric)
   // -----------------------------------------------------------------------
   describe('InvoicePaid metric', () => {
     function invoicePaidEmissions(): MetricEvent[] {
@@ -1625,7 +1632,7 @@ describe('stripe-event-worker handler', () => {
         regionSyncFailure(new Error('Aurora API error')),
       );
 
-      await expect(deliver()).rejects.toThrow();
+      await expect(deliver()).rejects.toThrow('tenant status sync failed for: aurora');
 
       expect(invoicePaidEmissions()).toHaveLength(0);
     });
@@ -1670,7 +1677,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 12. InvoiceFinalized metric (EMF via reportMetric)
+  // InvoiceFinalized metric (EMF via reportMetric)
   // -----------------------------------------------------------------------
   describe('InvoiceFinalized metric', () => {
     function invoiceFinalizedEmissions(): MetricEvent[] {
@@ -1717,7 +1724,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 13. InvoiceFinalizationFailed metric (EMF via reportMetric)
+  // InvoiceFinalizationFailed metric (EMF via reportMetric)
   // -----------------------------------------------------------------------
   describe('InvoiceFinalizationFailed metric', () => {
     function invoiceFinalizationFailedEmissions(): MetricEvent[] {
@@ -1773,7 +1780,7 @@ describe('stripe-event-worker handler', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 11. orgId backfill — the org id keys the row, and every lifecycle job
+  // orgId backfill — the org id keys the row, and every lifecycle job
   // reads the attribute off it, so each writer stamps it from Stripe metadata.
   // if_not_exists is the do-not-overwrite guarantee: a stored orgId wins over
   // whatever the metadata carries. Metadata that names no org names no row
@@ -1799,11 +1806,11 @@ describe('stripe-event-worker handler', () => {
 
     // A key built from a guessed org would put this subscription on another
     // org's partition, so nothing is written — and the delivery fails rather than
-    // reporting success. The event stays unmarked, so it is retried and converges
-    // on its own once somebody repairs the metadata. Swallowing it consumes the
-    // event and the status change with it.
+    // reporting success. The event stays unmarked, so it is retried and then
+    // parked in the DLQ, where it can be redriven once the metadata is repaired.
+    // Swallowing it consumes the event and the status change with it.
     async function expectRefusedAndRetryable(delivery: Promise<void>) {
-      await expect(delivery).rejects.toThrow();
+      await expect(delivery).rejects.toThrow(MissingOrgIdError);
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
       expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     }
