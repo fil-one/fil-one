@@ -285,7 +285,7 @@ test.describe('C. policy writes', () => {
     bucket = await bucketWith([]);
   });
 
-  test('C1. of two writes under one etag, exactly one lands', async () => {
+  test('C1. of two writes under one If-Match, exactly one lands', async () => {
     const { etag } = await owner.readPolicy(bucket);
     const write = (sid: string) =>
       owner.putPolicy(bucket, {
@@ -295,14 +295,14 @@ test.describe('C. policy writes', () => {
         etag,
       });
     const statuses = (await Promise.all([write('first'), write('second')])).map((r) => r.status());
-    expect(statuses.sort((a, b) => a - b)).toEqual([200, 409]);
+    expect(statuses.sort((a, b) => a - b)).toEqual([204, 412]);
   });
 
-  test('C2. a delete under a stale etag loses', async () => {
+  test('C2. a delete under a stale If-Match loses', async () => {
     const { etag: stale } = await owner.readPolicy(bucket);
     await owner.setStatements(bucket, [ownersStatement(ownerId)]);
     const res = await owner.deletePolicy(bucket, stale);
-    expect([res.status(), (await res.json()).code]).toEqual([409, 'POLICY_CONFLICT']);
+    expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
     expect((await owner.getPolicy(bucket)).status()).toBe(200);
   });
 

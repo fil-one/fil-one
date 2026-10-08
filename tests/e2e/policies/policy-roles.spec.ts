@@ -83,8 +83,8 @@ test('R1. only the owner and the admin may read or write a policy', async () => 
     ]);
   }
   expect(statuses).toEqual([
-    ['owner', 200, 200],
-    ['admin', 200, 200],
+    ['owner', 200, 204],
+    ['admin', 200, 204],
     ['member', 403, 403],
     ['readonly', 403, 403],
   ]);
