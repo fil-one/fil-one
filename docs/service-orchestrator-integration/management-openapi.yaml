@@ -444,7 +444,7 @@ paths:
         - PartnerKey: []
       responses:
         '200':
-          description: The policies, each with its bucket and current ETag.
+          description: The policies, each with its bucket.
           content:
             application/json:
               schema:
@@ -951,20 +951,24 @@ components:
                   $ref: '#/components/schemas/PolicyConcreteAction'
 
     CreateAccessKeyRequest:
+      description: A service key with its own permissions, or a key bound to a principal that carries none.
+      oneOf:
+        - $ref: '#/components/schemas/CreateServiceAccessKeyRequest'
+        - $ref: '#/components/schemas/CreatePrincipalAccessKeyRequest'
+
+    CreateServiceAccessKeyRequest:
       type: object
-      required: [name]
+      additionalProperties: false
+      required: [name, permissions]
       properties:
         name:
           type: string
           minLength: 1
           maxLength: 100
-          description: Unique within the tenant for a service key; unique within the principal for a principal-bound key.
-        principalId:
-          $ref: '#/components/schemas/PrincipalId'
+          description: Unique within the tenant.
         permissions:
           type: array
           minItems: 1
-          description: Required for a service key. Must be absent when `principalId` is set.
           items:
             $ref: '#/components/schemas/AccessKeyPermission'
         buckets:
@@ -972,15 +976,33 @@ components:
           description: |
             Optional. When set and non-empty, the key may only operate on
             these buckets. Omit (or pass an empty array) for tenant-wide
-            access. Must be absent when `principalId` is set.
+            access.
           items:
             $ref: '#/components/schemas/BucketName'
         expiresAt:
-          type: [string, 'null']
-          format: date-time
-          description: |
-            Optional expiration. The Service Orchestrator must reject the credentials
-            after this time.
+          $ref: '#/components/schemas/AccessKeyExpiresAt'
+
+    CreatePrincipalAccessKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [name, principalId]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Unique within the principal.
+        principalId:
+          $ref: '#/components/schemas/PrincipalId'
+        expiresAt:
+          $ref: '#/components/schemas/AccessKeyExpiresAt'
+
+    AccessKeyExpiresAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        Optional expiration. The Service Orchestrator must reject the credentials
+        after this time.
 
     AccessKey:
       type: object

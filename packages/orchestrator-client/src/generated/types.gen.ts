@@ -224,30 +224,44 @@ export type PrincipalAccess = {
   }>;
 };
 
-export type CreateAccessKeyRequest = {
+/**
+ * A service key with its own permissions, or a key bound to a principal that carries none.
+ */
+export type CreateAccessKeyRequest =
+  | CreateServiceAccessKeyRequest
+  | CreatePrincipalAccessKeyRequest;
+
+export type CreateServiceAccessKeyRequest = {
   /**
-   * Unique within the tenant for a service key; unique within the principal for a principal-bound key.
+   * Unique within the tenant.
    */
   name: string;
-  principalId?: PrincipalId;
-  /**
-   * Required for a service key. Must be absent when `principalId` is set.
-   */
-  permissions?: Array<AccessKeyPermission>;
+  permissions: Array<AccessKeyPermission>;
   /**
    * Optional. When set and non-empty, the key may only operate on
    * these buckets. Omit (or pass an empty array) for tenant-wide
-   * access. Must be absent when `principalId` is set.
+   * access.
    *
    */
   buckets?: Array<BucketName>;
-  /**
-   * Optional expiration. The Service Orchestrator must reject the credentials
-   * after this time.
-   *
-   */
-  expiresAt?: string | null;
+  expiresAt?: AccessKeyExpiresAt;
 };
+
+export type CreatePrincipalAccessKeyRequest = {
+  /**
+   * Unique within the principal.
+   */
+  name: string;
+  principalId: PrincipalId;
+  expiresAt?: AccessKeyExpiresAt;
+};
+
+/**
+ * Optional expiration. The Service Orchestrator must reject the credentials
+ * after this time.
+ *
+ */
+export type AccessKeyExpiresAt = string | null;
 
 export type AccessKey = {
   /**
@@ -864,7 +878,7 @@ export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesError =
 
 export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses = {
   /**
-   * The policies, each with its bucket and current ETag.
+   * The policies, each with its bucket.
    */
   200: PrincipalPolicies;
 };
