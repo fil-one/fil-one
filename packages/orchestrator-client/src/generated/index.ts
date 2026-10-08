@@ -21,6 +21,7 @@ export {
 } from './sdk.gen.ts';
 export type {
   AccessKey,
+  AccessKeyExpiresAt,
   AccessKeyId,
   AccessKeyList,
   AccessKeyPermission,
@@ -30,6 +31,8 @@ export type {
   ClientOptions,
   CreateAccessKeyRequest,
   CreatedAccessKey,
+  CreatePrincipalAccessKeyRequest,
+  CreateServiceAccessKeyRequest,
   CreateTenantRequest,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdData,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdError,
