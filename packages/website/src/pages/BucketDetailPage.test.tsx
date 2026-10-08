@@ -22,6 +22,9 @@ const { OBJECT_KEY } = vi.hoisted(() => ({ OBJECT_KEY: 'README.md' }));
 vi.mock('../lib/api.js', async () => ({
   ...(await vi.importActual<typeof import('../lib/api.js')>('../lib/api.js')),
   apiRequest: (...a: unknown[]) => mockApiRequest(...a),
+  // The policy client reads the ETag header, so its path answers a Response.
+  apiResponse: async (...a: unknown[]) =>
+    new Response(JSON.stringify(await mockApiRequest(...a)), { headers: { ETag: '"v1"' } }),
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -98,7 +101,6 @@ const POLICY = {
   policy: {
     Statement: [{ Sid: 'team', Effect: 'Allow', Principal: ['user-1'], Action: ['s3:*'] }],
   },
-  etag: '"v1"',
 };
 
 function respond(path: string) {
