@@ -926,12 +926,10 @@ components:
           type: array
           items:
             type: object
-            required: [bucketName, etag, policy]
+            required: [bucketName, policy]
             properties:
               bucketName:
                 $ref: '#/components/schemas/BucketName'
-              etag:
-                type: string
               policy:
                 $ref: '#/components/schemas/BucketPolicy'
 
