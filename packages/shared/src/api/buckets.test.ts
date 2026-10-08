@@ -102,11 +102,12 @@ describe('CreateBucketSchema', () => {
         versioning: false,
         lock: true,
       });
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const lockError = result.error.issues.find((i) => i.path.includes('lock'));
-        expect(lockError?.message).toBe('Versioning must be enabled to use Object Lock');
-      }
+      expect(result).toMatchObject({
+        success: false,
+        error: {
+          issues: [{ path: ['lock'], message: 'Versioning must be enabled to use Object Lock' }],
+        },
+      });
     });
 
     it('rejects retention without lock', () => {
@@ -117,14 +118,17 @@ describe('CreateBucketSchema', () => {
         lock: false,
         retention: validRetention(),
       });
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const retentionError = result.error.issues.find((i) => i.path.includes('retention'));
-        expect(retentionError?.message).toBe('Object Lock must be enabled to use Retention');
-      }
+      expect(result).toMatchObject({
+        success: false,
+        error: {
+          issues: [
+            { path: ['retention'], message: 'Object Lock must be enabled to use Retention' },
+          ],
+        },
+      });
     });
 
-    it('rejects retention without versioning (both refinements fail)', () => {
+    it('rejects retention without versioning', () => {
       const result = CreateBucketSchema.safeParse({
         bucketName: 'my-bucket',
         region: 'eu-west-1',
@@ -132,11 +136,14 @@ describe('CreateBucketSchema', () => {
         lock: false,
         retention: validRetention(),
       });
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        const retentionError = result.error.issues.find((i) => i.path.includes('retention'));
-        expect(retentionError?.message).toBe('Object Lock must be enabled to use Retention');
-      }
+      expect(result).toMatchObject({
+        success: false,
+        error: {
+          issues: [
+            { path: ['retention'], message: 'Object Lock must be enabled to use Retention' },
+          ],
+        },
+      });
     });
   });
 
@@ -153,7 +160,10 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 0 }),
       });
-      expect(result.success).toBe(false);
+      expect(result).toMatchObject({
+        success: false,
+        error: { issues: [{ code: 'too_small', path: ['retention', 'duration'] }] },
+      });
     });
 
     it('accepts duration of 1', () => {
@@ -161,7 +171,7 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 1 }),
       });
-      expect(result.success).toBe(true);
+      expect(result).toMatchObject({ success: true });
     });
 
     it('accepts duration of 36500', () => {
@@ -169,7 +179,7 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 36500 }),
       });
-      expect(result.success).toBe(true);
+      expect(result).toMatchObject({ success: true });
     });
 
     it('rejects duration of 36501', () => {
@@ -177,7 +187,14 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 36501 }),
       });
-      expect(result.success).toBe(false);
+      expect(result).toMatchObject({
+        success: false,
+        error: {
+          issues: [
+            { path: ['retention', 'duration'], message: 'Duration exceeds the maximum allowed' },
+          ],
+        },
+      });
     });
 
     it('accepts years duration of 100', () => {
@@ -185,7 +202,7 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 100, durationType: 'y' }),
       });
-      expect(result.success).toBe(true);
+      expect(result).toMatchObject({ success: true });
     });
 
     it('rejects years duration of 101', () => {
@@ -193,7 +210,14 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 101, durationType: 'y' }),
       });
-      expect(result.success).toBe(false);
+      expect(result).toMatchObject({
+        success: false,
+        error: {
+          issues: [
+            { path: ['retention', 'duration'], message: 'Duration exceeds the maximum allowed' },
+          ],
+        },
+      });
     });
 
     it('rejects non-integer duration', () => {
@@ -201,7 +225,12 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 1.5 }),
       });
-      expect(result.success).toBe(false);
+      expect(result).toMatchObject({
+        success: false,
+        error: {
+          issues: [{ code: 'invalid_type', expected: 'int', path: ['retention', 'duration'] }],
+        },
+      });
     });
   });
 });
