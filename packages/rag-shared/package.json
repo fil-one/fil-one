@@ -21,6 +21,6 @@
     "@smithy/util-stream": "^4.5.23",
     "aws-sdk-client-mock": "^4.1.0",
     "typescript": "^6.0.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }
