@@ -11,7 +11,7 @@ import { fakeOrchestrator, tenantFor } from './fake-orchestrator.ts';
 
 export const ORG_ID = '11111111-2222-3333-4444-555555555555';
 export const USER_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
-/** The one region these tests treat as `iam`; every other region stays dark. */
+/** The one region these tests treat as `iam`; no production region serves iam yet. */
 export const IAM_REGION = S3Region.UsEast9;
 export const SERVICE_KEYS_REGION = S3Region.EuWest1;
 export const BUCKET_NAME = 'photos';

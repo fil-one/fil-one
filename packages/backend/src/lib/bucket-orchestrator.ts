@@ -43,9 +43,8 @@ export interface CreateBucketArgs {
   versioning?: boolean;
   lock?: boolean;
   /**
-   * The bucket's first policy, on a region serving the `iam` access model.
-   * Written with `PutBucketPolicy` and `If-None-Match: *` right after the
-   * bucket is created. Never set on a `scoped-keys` region.
+   * The policy the bucket starts with, on a region serving the `iam` access
+   * model. Never set on a `scoped-keys` region.
    */
   policy?: BucketPolicy;
   retention?: {

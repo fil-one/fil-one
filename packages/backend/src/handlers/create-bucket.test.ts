@@ -1,8 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
+import {
+  IAM_REGION,
+  SCOPED_KEYS_REGION,
+  ddbMock,
+  getAuditEvents,
+} from '../test/bucket-policy-fixture.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -14,19 +18,18 @@ const mockEnsureTenantReady = vi.fn();
 const mockCreateBucket = vi.fn();
 const mockGetOrchestratorForRegion = vi.fn();
 
-const mockOrchestrator = {
+const scopedKeysOrchestrator = {
   id: 'aurora',
-  region: 'eu-west-1',
+  region: SCOPED_KEYS_REGION,
   accessModel: 'scoped-keys',
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   createBucket: (...args: unknown[]) => mockCreateBucket(...args),
 };
 
 // One region serves the `iam` model in these tests, so the roster policy the
-// create carries can be asserted while every real region is still dark.
-const IAM_REGION = 'us-east-9';
+// create carries can be asserted; no production region serves iam yet.
 const iamOrchestrator = {
-  ...mockOrchestrator,
+  ...scopedKeysOrchestrator,
   id: 'forgeDev',
   region: IAM_REGION,
   accessModel: 'iam',
@@ -35,11 +38,9 @@ const iamOrchestrator = {
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
-    return region === IAM_REGION ? iamOrchestrator : mockOrchestrator;
+    return region === IAM_REGION ? iamOrchestrator : scopedKeysOrchestrator;
   },
 }));
-
-const ddbMock = mockClient(DynamoDBClient);
 
 const mockIsOrgDeleting = vi.fn(
   async (_orgId: string, _options?: { consistent?: boolean }) => false,
@@ -78,6 +79,8 @@ import {
 // ---------------------------------------------------------------------------
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+
+const parseResponseBody = (result: { body?: string }) => JSON.parse(result.body ?? '{}');
 
 function validBody() {
   return JSON.stringify({ bucketName: 'my-bucket', region: S3_REGION });
@@ -292,10 +295,16 @@ describe('create-bucket baseHandler', () => {
   });
 
   describe('on a region serving the iam access model', () => {
-    const iamBody = () => JSON.stringify({ bucketName: 'my-bucket', region: IAM_REGION });
+    const buildIamRegionBody = () =>
+      JSON.stringify({ bucketName: 'my-bucket', region: IAM_REGION });
+    const findAuditEvent = (phase: string) => getAuditEvents().find((e) => e.phase === phase);
 
-    it('carries the roster policy on the create, with the creator in a statement of their own', async () => {
+    beforeEach(() => {
       mockCreateBucket.mockResolvedValue(undefined);
+      mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
+    });
+
+    it('passes the roster policy to createBucket, with a Member creator in a statement of their own', async () => {
       mockListMembers.mockResolvedValue([
         { userId: 'owner-1', role: OrgRole.Owner },
         { userId: 'admin-1', role: OrgRole.Admin },
@@ -303,97 +312,144 @@ describe('create-bucket baseHandler', () => {
         { userId: 'reader-1', role: OrgRole.ReadOnly },
       ]);
 
-      const result = await baseHandler(buildEvent({ body: iamBody(), userInfo: USER_INFO }));
+      const result = await baseHandler(
+        buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }),
+      );
 
       expect(result.statusCode).toBe(201);
       expect(mockListMembers).toHaveBeenCalledWith('org-1');
-      expect(mockCreateBucket).toHaveBeenCalledWith(
-        'aurora-t-1',
-        expect.objectContaining({
-          policy: {
-            Statement: [
-              { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: ['owner-1'], Action: ['s3:*'] },
-              {
-                Sid: ROSTER_ADMINS_SID,
-                Effect: 'Allow',
-                Principal: ['admin-1'],
-                Action: ROSTER_ADMIN_ACTIONS,
-              },
-              {
-                Sid: ROSTER_CREATOR_SID,
-                Effect: 'Allow',
-                Principal: ['user-1'],
-                Action: ROSTER_ADMIN_ACTIONS,
-              },
-            ],
+      expect(mockCreateBucket.mock.calls[0]![1].policy).toStrictEqual({
+        Statement: [
+          { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: ['owner-1'], Action: ['s3:*'] },
+          {
+            Sid: ROSTER_ADMINS_SID,
+            Effect: 'Allow',
+            Principal: ['admin-1'],
+            Action: ROSTER_ADMIN_ACTIONS,
           },
-        }),
+          {
+            Sid: ROSTER_CREATOR_SID,
+            Effect: 'Allow',
+            Principal: ['user-1'],
+            Action: ROSTER_ADMIN_ACTIONS,
+          },
+        ],
+      });
+    });
+
+    it('records a bucket_policy.created intent with trigger bucket_created, region and bucket name', async () => {
+      await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }));
+
+      expect(findAuditEvent('intent')).toMatchObject({
+        type: 'bucket_policy.created',
+        details: { region: IAM_REGION, bucketName: 'my-bucket', trigger: 'bucket_created' },
+      });
+    });
+
+    it('completes the policy write as succeeded with the statement count', async () => {
+      await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }));
+
+      expect(findAuditEvent('completion')).toMatchObject({
+        type: 'bucket_policy.created',
+        outcome: 'succeeded',
+        details: { statements: 1 },
+      });
+    });
+
+    it('answers 500 with the configuration message when bucket configuration fails', async () => {
+      const err = new BucketConfigurationError('my-bucket');
+      mockCreateBucket.mockRejectedValue(err);
+
+      const result = await baseHandler(
+        buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }),
       );
+
+      expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
+        statusCode: 500,
+        body: { message: err.message },
+      });
     });
 
-    it('records the first policy as a bucket-created write, intent before completion', async () => {
-      mockCreateBucket.mockResolvedValue(undefined);
-      mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
-
-      await baseHandler(buildEvent({ body: iamBody(), userInfo: USER_INFO }));
-
-      const events = ddbMock
-        .commandCalls(PutItemCommand)
-        .map((call) => unmarshall(call.args[0].input.Item ?? {}));
-      expect(events.map((e) => [e.type, e.phase])).toStrictEqual([
-        ['bucket_policy.created', 'intent'],
-        ['bucket_policy.created', 'completion'],
-      ]);
-      expect(events[0]!.details).toMatchObject({ region: IAM_REGION, trigger: 'bucket_created' });
-      expect(events[1]).toMatchObject({ outcome: 'succeeded', details: { statements: 1 } });
-    });
-
-    it('records the first policy as created when configuration fails after the create', async () => {
-      mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
+    it('records the policy write as succeeded when configuration fails after it', async () => {
       mockCreateBucket.mockRejectedValue(new BucketConfigurationError('my-bucket'));
 
-      const result = await baseHandler(buildEvent({ body: iamBody(), userInfo: USER_INFO }));
+      await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }));
 
-      const events = ddbMock
-        .commandCalls(PutItemCommand)
-        .map((call) => unmarshall(call.args[0].input.Item ?? {}));
-      expect(result.statusCode).toBe(500);
-      expect(events[1]).toMatchObject({ phase: 'completion', outcome: 'succeeded' });
+      expect(findAuditEvent('completion')).toMatchObject({
+        type: 'bucket_policy.created',
+        outcome: 'succeeded',
+        details: { statements: 1 },
+      });
     });
 
     it('answers 400 when the storage system refuses the policy written after the create', async () => {
-      mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
       mockCreateBucket.mockRejectedValue(new PolicyValidationError('unknown principal'));
 
-      const result = await baseHandler(buildEvent({ body: iamBody(), userInfo: USER_INFO }));
+      const result = await baseHandler(
+        buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }),
+      );
 
-      expect(result.statusCode).toBe(400);
-      expect(JSON.parse(result.body as string).message).toBe('unknown principal');
+      expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
+        statusCode: 400,
+        body: { message: 'unknown principal' },
+      });
     });
 
-    it('fails the policy write after the create as a 500 and records it as failed', async () => {
-      mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
+    it('records the policy write as failed when the storage system refuses the policy', async () => {
+      mockCreateBucket.mockRejectedValue(new PolicyValidationError('unknown principal'));
+
+      await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }));
+
+      expect(findAuditEvent('completion')).toMatchObject({
+        type: 'bucket_policy.created',
+        outcome: 'failed',
+      });
+    });
+
+    it('rethrows a PolicyPublishError from the policy write', async () => {
       mockCreateBucket.mockRejectedValue(new PolicyPublishError());
 
       // errorHandlerMiddleware renders what baseHandler throws as a 500.
       await expect(
-        baseHandler(buildEvent({ body: iamBody(), userInfo: USER_INFO })),
+        baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO })),
       ).rejects.toBeInstanceOf(PolicyPublishError);
+    });
 
-      const events = ddbMock
-        .commandCalls(PutItemCommand)
-        .map((call) => unmarshall(call.args[0].input.Item ?? {}));
-      expect(events[1]).toMatchObject({ phase: 'completion', outcome: 'failed' });
+    it('records the policy write as failed when it cannot be published', async () => {
+      mockCreateBucket.mockRejectedValue(new PolicyPublishError());
+
+      await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(findAuditEvent('completion')).toMatchObject({
+        type: 'bucket_policy.created',
+        outcome: 'failed',
+      });
     });
   });
 
-  it('carries no policy, reads no roster and writes no event on a scoped-keys region', async () => {
+  it('passes no policy to createBucket on a scoped-keys region', async () => {
+    mockCreateBucket.mockResolvedValue(undefined);
+
+    await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+    expect(mockCreateBucket.mock.calls[0]![1]).not.toHaveProperty('policy');
+  });
+
+  it('does not read the org roster on a scoped-keys region', async () => {
     mockCreateBucket.mockResolvedValue(undefined);
 
     await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
 
     expect(mockListMembers).not.toHaveBeenCalled();
-    expect(mockCreateBucket.mock.calls[0]![1]).not.toHaveProperty('policy');
-    expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+  });
+
+  it('writes no audit event on a scoped-keys region', async () => {
+    mockCreateBucket.mockResolvedValue(undefined);
+
+    await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+    expect(getAuditEvents()).toStrictEqual([]);
   });
 });

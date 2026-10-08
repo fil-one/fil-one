@@ -27,13 +27,12 @@ export function withWriteRetry<T>(run: () => Promise<T>): Promise<T> {
 
 /**
  * A new bucket's first policy, written once the bucket exists (fil-one/RFC#30,
- * "Bucket creation") and refused if one is already stored. Called from
- * `createBucket` with the client that created the bucket.
+ * "Bucket creation") and refused if one is already stored.
  */
-export function putFirstBucketPolicy(
+export async function putFirstBucketPolicy(
   s3: S3Client,
   bucketName: string,
   policy: BucketPolicy,
-): Promise<{ etag: string }> {
-  return withWriteRetry(() => putBucketPolicy(s3, bucketName, policy, { ifNoneMatch: '*' }));
+): Promise<void> {
+  await withWriteRetry(() => putBucketPolicy(s3, bucketName, policy, { ifNoneMatch: '*' }));
 }
