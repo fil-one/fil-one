@@ -234,7 +234,7 @@ export function getEffectiveActions(policy: BucketPolicy, principalId: string): 
 }
 
 /** Every principal a document names outright. */
-function getNamedPrincipals(policy: BucketPolicy | null): string[] {
+export function getNamedPrincipals(policy: BucketPolicy | null): string[] {
   return (policy?.Statement ?? []).flatMap((statement) =>
     statement.Principal === POLICY_WILDCARD_PRINCIPAL ? [] : statement.Principal,
   );

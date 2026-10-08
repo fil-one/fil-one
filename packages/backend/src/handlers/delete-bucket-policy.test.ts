@@ -4,7 +4,7 @@ import { sstResourceMock } from '../test/sst-resource-mock.ts';
 vi.mock('sst', () => sstResourceMock());
 vi.mock('../lib/service-orchestrator-registry.ts', async () => {
   const fixture = await import('../test/bucket-policy-fixture.ts');
-  return { getOrchestratorForRegion: fixture.orchestratorForRegion };
+  return { getOrchestratorForRegion: fixture.getOrchestratorForRegion };
 });
 vi.mock('../lib/org-profile.ts', async () => {
   const fixture = await import('../test/bucket-policy-fixture.ts');
@@ -15,78 +15,104 @@ import { ApiErrorCode } from '@filone/shared';
 import { baseHandler } from './delete-bucket-policy.ts';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
 import {
-  BUCKET,
+  BUCKET_NAME,
   IAM_REGION,
   ORG_ID,
   TENANT_ID,
   USER_ID,
-  auditEvents,
+  getAuditEvents,
   iam,
-  readPolicy,
+  grantGetObjectToUser,
   resetFixture,
 } from '../test/bucket-policy-fixture.ts';
 
-function request(headers: Record<string, string>) {
+function buildDeleteEvent(headers: Record<string, string>) {
   const event = buildEvent({
     method: 'DELETE',
     userInfo: { userId: USER_ID, orgId: ORG_ID },
     queryStringParameters: { region: IAM_REGION },
   });
   event.headers = headers;
-  event.pathParameters = { name: BUCKET };
+  event.pathParameters = { name: BUCKET_NAME };
   return event;
 }
 
-const body = (result: { body?: string }) => JSON.parse(result.body ?? '{}');
+const parseResponseBody = (result: { body?: string }) => JSON.parse(result.body ?? '{}');
 
 describe('delete-bucket-policy baseHandler', () => {
   beforeEach(resetFixture);
 
-  it('removes the policy the caller read and records the pair', async () => {
-    const etag = iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
+  it('removes the policy matching If-Match', async () => {
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
 
-    const result = await baseHandler(request({ 'if-match': etag }));
+    const result = await baseHandler(buildDeleteEvent({ 'if-match': etag }));
 
-    expect(result.statusCode).toBe(204);
-    expect(result.body).toBe('');
-    expect(iam.policies.get(TENANT_ID)?.has(BUCKET)).toBe(false);
-    const [intent, completion] = auditEvents();
-    expect(intent).toMatchObject({ type: 'bucket_policy.deleted', phase: 'intent' });
-    expect(completion).toMatchObject({ phase: 'completion', outcome: 'succeeded' });
+    expect(result).toMatchObject({
+      statusCode: 204,
+      headers: {
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Strict-Transport-Security': 'max-age=2592000; includeSubDomains',
+      },
+      body: '',
+    });
+    expect(iam.policies.get(TENANT_ID)?.has(BUCKET_NAME)).toBe(false);
+  });
+
+  it('records a deleted intent and a succeeded completion', async () => {
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
+
+    await baseHandler(buildDeleteEvent({ 'if-match': etag }));
+
+    const [intent, completion] = getAuditEvents();
+    expect(intent).toMatchObject({
+      type: 'bucket_policy.deleted',
+      phase: 'intent',
+      details: { region: IAM_REGION, bucketName: BUCKET_NAME, trigger: 'policy_edited' },
+    });
+    expect(completion).toMatchObject({
+      type: 'bucket_policy.deleted',
+      phase: 'completion',
+      outcome: 'succeeded',
+      correlationId: intent!.correlationId,
+    });
   });
 
   it('removes the policy unconditionally without If-Match, as on S3', async () => {
-    iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
+    iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
 
-    const result = await baseHandler(request({}));
+    const result = await baseHandler(buildDeleteEvent({}));
 
     expect(result.statusCode).toBe(204);
-    expect(iam.policies.get(TENANT_ID)?.has(BUCKET)).toBe(false);
+    expect(iam.policies.get(TENANT_ID)?.has(BUCKET_NAME)).toBe(false);
   });
 
   it('refuses If-None-Match, since a delete creates nothing', async () => {
-    iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
+    iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
 
-    const result = await baseHandler(request({ 'if-none-match': '*' }));
+    const result = await baseHandler(buildDeleteEvent({ 'if-none-match': '*' }));
 
-    expect(result.statusCode).toBe(400);
+    expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
+      statusCode: 400,
+      body: { message: 'A delete cannot carry If-None-Match' },
+    });
     expect(iam.calls).toHaveLength(0);
   });
 
   it('refuses a stale If-Match with the policy still in place', async () => {
-    iam.seedPolicy(TENANT_ID, BUCKET, readPolicy);
+    iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
 
-    const result = await baseHandler(request({ 'if-match': '"stale"' }));
+    const result = await baseHandler(buildDeleteEvent({ 'if-match': '"stale"' }));
 
     expect(result.statusCode).toBe(412);
-    expect(body(result).code).toBe(ApiErrorCode.POLICY_CONFLICT);
-    expect(iam.policies.get(TENANT_ID)?.has(BUCKET)).toBe(true);
+    expect(parseResponseBody(result).code).toBe(ApiErrorCode.POLICY_CONFLICT);
+    expect(iam.policies.get(TENANT_ID)?.has(BUCKET_NAME)).toBe(true);
   });
 
   it('answers 404 with the policy code for a bucket that has none', async () => {
-    const result = await baseHandler(request({ 'if-match': '"any"' }));
+    const result = await baseHandler(buildDeleteEvent({ 'if-match': '"any"' }));
 
     expect(result.statusCode).toBe(404);
-    expect(body(result).code).toBe(ApiErrorCode.POLICY_NOT_FOUND);
+    expect(parseResponseBody(result).code).toBe(ApiErrorCode.POLICY_NOT_FOUND);
   });
 });

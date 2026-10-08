@@ -236,6 +236,7 @@ export {
   hasNewRetentionGrants,
   getCreatorBucketPolicy,
   getEffectiveActions,
+  getNamedPrincipals,
   getPolicyActionsInGroup,
 } from './api/bucket-policies.ts';
 export type {

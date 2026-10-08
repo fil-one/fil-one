@@ -3,12 +3,12 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import {
-  bucketPolicyErrorResponse,
-  readPolicyPrecondition,
+  parsePreconditionHeaders,
+  toPolicyErrorResponse,
   resolveIamWriteTarget,
   resolvePolicyRouteTarget,
 } from '../lib/bucket-policy-route.ts';
-import { badRequestResponse } from '../lib/response-builder.ts';
+import { badRequestResponse, ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -26,13 +26,13 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const resolved = resolvePolicyRouteTarget(event);
-  if ('response' in resolved) return resolved.response;
-  const { bucketName, region } = resolved.target;
+  const routeTarget = resolvePolicyRouteTarget(event);
+  if ('response' in routeTarget) return routeTarget.response;
+  const { bucketName, region } = routeTarget.target;
 
-  const read = readPolicyPrecondition(event);
-  if ('response' in read) return read.response;
-  const { precondition } = read;
+  const preconditionResult = parsePreconditionHeaders(event);
+  if ('response' in preconditionResult) return preconditionResult.response;
+  const { precondition } = preconditionResult;
   if (precondition && 'ifNoneMatch' in precondition) {
     return badRequestResponse('A delete cannot carry If-None-Match');
   }
@@ -48,15 +48,15 @@ export async function baseHandler(
     actor: userActor({ userId, email: getVerifiedEmail(event) }),
     orgId,
     subject: AuditSubjects.bucket(region, bucketName),
-    details: { region, bucketName, trigger: 'policy_edit' },
+    details: { region, bucketName, trigger: 'policy_edited' },
   });
 
   try {
     await orchestrator.iam.deleteBucketPolicy(tenantId, bucketName, precondition);
     await audit.complete({ outcome: 'succeeded' });
-    return { statusCode: 204, body: '' };
+    return new ResponseBuilder().status(204).emptyBody().build();
   } catch (err) {
-    const response = bucketPolicyErrorResponse(err);
+    const response = toPolicyErrorResponse(err);
     if (!response) throw err;
     await audit.complete({ outcome: 'failed' });
     return response;

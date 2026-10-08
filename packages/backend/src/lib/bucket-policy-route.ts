@@ -3,8 +3,14 @@
 // turning the orchestrator's refusals into the console's answers.
 
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ApiErrorCode, S3_REGION, isSupportedRegion, type S3Region } from '@filone/shared';
-import type { ErrorResponse } from '@filone/shared';
+import {
+  ApiErrorCode,
+  S3_REGION,
+  getNamedPrincipals,
+  isSupportedRegion,
+  type S3Region,
+} from '@filone/shared';
+import type { BucketPolicy, ErrorResponse } from '@filone/shared';
 import {
   BucketNotFoundError,
   PolicyConflictError,
@@ -64,7 +70,7 @@ export function resolvePolicyRouteTarget(
  * S3 and the storage system apply: at most one, never empty, and
  * `If-None-Match` only as `*`. Neither means an unconditional write.
  */
-export function readPolicyPrecondition(
+export function parsePreconditionHeaders(
   event: AuthenticatedEvent,
 ):
   | { precondition: PolicyPrecondition | undefined }
@@ -84,20 +90,14 @@ export function readPolicyPrecondition(
   return { precondition: ifNoneMatch ? { ifNoneMatch: '*' } : undefined };
 }
 
-/**
- * The answer for a region that does not serve the `iam` access model: it has
- * no policies, and says so as a bucket with none rather than revealing a
- * feature that is not there. Read off the orchestrator, which the registry
- * hands the shared `getRegionAccessModel` answer, so this is what keeps the
- * routes dark while every region is `scoped-keys`.
- */
 export const POLICIES_UNAVAILABLE_MESSAGE = 'Bucket policies are not available in this region';
 
 /**
  * What a policy write needs before it reaches the vendor: the region's `iam`
- * orchestrator and the org's tenant on it, provisioning if need be. The
- * deletion fence runs first, as every write path has it: the write lands
- * upstream, so a fence checked only afterwards would leave it behind.
+ * orchestrator and the org's tenant on it, which it provisions when the org has
+ * none yet. The deletion fence runs first, as every write path has it: the
+ * write lands upstream, so a fence checked only afterwards would leave it
+ * behind.
  */
 export async function resolveIamWriteTarget(
   orgId: string,
@@ -107,6 +107,9 @@ export async function resolveIamWriteTarget(
   | { response: APIGatewayProxyStructuredResultV2 }
 > {
   const orchestrator = getOrchestratorForRegion(region);
+  // A region without the `iam` access model has no policies. It answers as a
+  // bucket with no policy, so the routes stay hidden until a region declares
+  // `iam` through `getRegionAccessModel`.
   if (orchestrator.accessModel !== 'iam') {
     return { response: policyNotFoundResponse(POLICIES_UNAVAILABLE_MESSAGE) };
   }
@@ -159,9 +162,7 @@ export function policyConflictResponse(status: 409 | 412): APIGatewayProxyStruct
  * nothing and the same request may be sent again, which is what a 503 tells a
  * client and a 500 does not.
  */
-export function bucketPolicyErrorResponse(
-  err: unknown,
-): APIGatewayProxyStructuredResultV2 | undefined {
+export function toPolicyErrorResponse(err: unknown): APIGatewayProxyStructuredResultV2 | undefined {
   if (err instanceof PolicyNotFoundError) return policyNotFoundResponse();
   if (err instanceof BucketNotFoundError) return bucketNotFoundResponse();
   if (err instanceof PolicyPreconditionFailedError) return policyConflictResponse(412);
@@ -188,14 +189,8 @@ export function bucketPolicyErrorResponse(
   return undefined;
 }
 
-/** How many distinct members a document names, for the audit record. Absent when only `*` is named. */
-export function namedPrincipalCount(policy: {
-  Statement: readonly { Principal: readonly string[] | '*' }[];
-}): number | undefined {
-  const ids = new Set<string>();
-  for (const statement of policy.Statement) {
-    if (statement.Principal === '*') continue;
-    for (const id of statement.Principal) ids.add(id);
-  }
-  return ids.size > 0 ? ids.size : undefined;
+/** How many distinct members a document names, for the audit record. Undefined when it names only `*`. */
+export function countNamedPrincipals(policy: BucketPolicy): number | undefined {
+  const count = new Set(getNamedPrincipals(policy)).size;
+  return count > 0 ? count : undefined;
 }

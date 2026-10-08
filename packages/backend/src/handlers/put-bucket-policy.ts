@@ -7,17 +7,17 @@ import {
   POLICY_WILDCARD_PRINCIPAL,
   PutBucketPolicyRequestSchema,
   RETENTION_WRITE_ACTIONS,
-  addsRetentionGrants,
+  hasNewRetentionGrants,
   roleHasPermission,
 } from '@filone/shared';
-import type { BucketPolicy, ErrorResponse } from '@filone/shared';
+import type { BucketPolicy, ErrorResponse, PolicyAction } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import {
-  bucketPolicyErrorResponse,
-  namedPrincipalCount,
-  readPolicyPrecondition,
+  countNamedPrincipals,
+  parsePreconditionHeaders,
   resolveIamWriteTarget,
   resolvePolicyRouteTarget,
+  toPolicyErrorResponse,
 } from '../lib/bucket-policy-route.ts';
 import type {
   IamMethods,
@@ -38,16 +38,16 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
  * PUT /api/buckets/{name}/policy?region= — create or replace the bucket's
  * policy.
  *
- * `buckets.policy_manage` is what reaching the route costs. The cap on top of
- * it depends on the body: a statement that newly grants `s3:PutObjectRetention`
- * or `s3:PutObjectLegalHold`, or `s3:*` which stands for both, needs
- * `privileged.grant`, which only an Owner holds. Newly, against the stored
- * document: the roster statement the console writes for Owners carries `s3:*`,
- * so an Admin editing an unrelated statement is not granting it again. A
- * retention write named outright is held to the stored document by name, so an
- * Admin may keep or narrow one an Owner wrote but not add one, even for an
- * Owner who holds it through `s3:*`. The storage system enforces the statement
- * without knowing either action was privileged, so the rule has to hold here.
+ * The route needs `buckets.policy_manage`. A statement that newly grants one
+ * of the `RETENTION_WRITE_ACTIONS`, or `s3:*` which covers them, also needs
+ * `privileged.grant`, which only an Owner holds. "Newly" is measured against
+ * the stored policy. The Owners' roster statement carries `s3:*`, so an Admin
+ * who edits another statement is not granting it again. A retention write
+ * listed by name is also compared by name with the stored policy. An Admin may
+ * keep or narrow one that an Owner wrote, but may not add one, even for an
+ * Owner who already holds it through `s3:*`. The storage system enforces the
+ * statement without knowing that these actions are privileged, so this route
+ * has to apply the rule.
  *
  * As on S3, `If-Match` replaces only the version the caller read and
  * `If-None-Match: *` creates only the first; either way a stale edit is a 412
@@ -61,32 +61,41 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const resolved = resolvePolicyRouteTarget(event);
-  if ('response' in resolved) return resolved.response;
-  const { bucketName, region } = resolved.target;
+  const routeTarget = resolvePolicyRouteTarget(event);
+  if ('response' in routeTarget) return routeTarget.response;
+  const { bucketName, region } = routeTarget.target;
 
-  const read = readPolicyPrecondition(event);
-  if ('response' in read) return read.response;
-  let { precondition } = read;
-  const creating = precondition !== undefined && 'ifNoneMatch' in precondition;
+  const preconditionResult = parsePreconditionHeaders(event);
+  if ('response' in preconditionResult) return preconditionResult.response;
+  let { precondition } = preconditionResult;
+  const isFirstPolicyWrite = precondition !== undefined && 'ifNoneMatch' in precondition;
 
   const parsed = parseJsonBody(event.body, PutBucketPolicyRequestSchema);
   if ('error' in parsed) return parsed.error;
   const { policy } = parsed.data;
 
   const { orgId, userId, membership } = getUserInfo(event);
-  const mayGrantRetention = roleHasPermission(membership?.role ?? NO_ROLE, 'privileged.grant');
-  const refusedFirst = refuseFirstPolicyRetentionGrants({ policy, creating, mayGrantRetention });
-  if (refusedFirst) return refusedFirst;
+  const canGrantRetention = roleHasPermission(membership?.role ?? NO_ROLE, 'privileged.grant');
+  const firstPolicyRefusal = getFirstPolicyRetentionRefusal({
+    policy,
+    isFirstPolicyWrite,
+    canGrantRetention,
+  });
+  if (firstPolicyRefusal) return firstPolicyRefusal;
 
-  const target = await resolveIamWriteTarget(orgId, region);
-  if ('response' in target) return target.response;
-  const { orchestrator, tenantId } = target;
+  const writeTarget = await resolveIamWriteTarget(orgId, region);
+  if ('response' in writeTarget) return writeTarget.response;
+  const { orchestrator, tenantId } = writeTarget;
 
-  if (!creating && !mayGrantRetention) {
-    const checked = await refuseNewRetentionGrants(orchestrator.iam, tenantId, bucketName, policy);
-    if ('response' in checked) return checked.response;
-    precondition ??= checked.pinned;
+  if (!isFirstPolicyWrite && !canGrantRetention) {
+    const retentionCheck = await checkNewRetentionGrants(
+      orchestrator.iam,
+      tenantId,
+      bucketName,
+      policy,
+    );
+    if ('response' in retentionCheck) return retentionCheck.response;
+    precondition ??= retentionCheck.pinnedPrecondition;
   }
 
   // The intent names the kind of write the caller asked for, so the two halves
@@ -94,12 +103,12 @@ export async function baseHandler(
   const audit = await twoPhaseAudit({
     // ponytail: an unconditional write that creates is recorded as an update;
     // tell them apart by reading first if the log ever needs it.
-    type: creating ? 'bucket_policy.created' : 'bucket_policy.updated',
+    type: isFirstPolicyWrite ? 'bucket_policy.created' : 'bucket_policy.updated',
     mode: 'fail-closed',
     actor: userActor({ userId, email: getVerifiedEmail(event) }),
     orgId,
     subject: AuditSubjects.bucket(region, bucketName),
-    details: { region, bucketName, trigger: 'policy_edit' },
+    details: { region, bucketName, trigger: 'policy_edited' },
   });
 
   try {
@@ -111,11 +120,11 @@ export async function baseHandler(
     );
     await audit.complete({
       outcome: 'succeeded',
-      details: { statements: policy.Statement.length, principals: namedPrincipalCount(policy) },
+      details: { statements: policy.Statement.length, principals: countNamedPrincipals(policy) },
     });
-    return { statusCode: 204, headers: { ETag: written.etag }, body: '' };
+    return new ResponseBuilder().status(204).header('ETag', written.etag).emptyBody().build();
   } catch (err) {
-    const response = bucketPolicyErrorResponse(err);
+    const response = toPolicyErrorResponse(err);
     if (!response) throw err;
     await audit.complete({ outcome: 'failed' });
     return response;
@@ -123,80 +132,90 @@ export async function baseHandler(
 }
 
 /**
- * The cap on a first policy, which is compared against nothing: it needs no
- * vendor read and answers ahead of the region, since the refusal depends on
- * neither. A replacement, or a caller who may grant, passes through.
+ * The retention cap on a first policy (`If-None-Match: *`). There is no stored
+ * policy to compare with, so it needs no vendor read and runs before the
+ * region is checked. Returns the 403, or undefined when the write is not a
+ * first policy or the caller may grant.
  */
-function refuseFirstPolicyRetentionGrants({
+function getFirstPolicyRetentionRefusal({
   policy,
-  creating,
-  mayGrantRetention,
+  isFirstPolicyWrite,
+  canGrantRetention,
 }: {
   policy: BucketPolicy;
-  creating: boolean;
-  mayGrantRetention: boolean;
+  isFirstPolicyWrite: boolean;
+  canGrantRetention: boolean;
 }): APIGatewayProxyStructuredResultV2 | undefined {
-  if (!creating || mayGrantRetention) return undefined;
-  return addsRetentionGrants(null, policy) ? retentionGrantForbiddenResponse() : undefined;
+  if (!isFirstPolicyWrite || canGrantRetention) return undefined;
+  return hasNewRetentionGrants(null, policy) ? retentionGrantForbiddenResponse() : undefined;
 }
 
 /**
- * For a caller without `privileged.grant`, the cap on a replacement: the
- * stored document is read, and the write is refused if the new one grants a
- * retention write the stored one did not, or names one outright that the stored
- * one did not name. A read that fails answers as the write would have.
+ * The retention cap on a replacement, for a caller without `privileged.grant`.
+ * It reads the stored policy and refuses the write if the new one grants a
+ * retention write the stored one did not, or names one outright that the
+ * stored one did not name. If the read fails, the caller gets the same error
+ * response the write would have produced.
  *
- * Otherwise it answers the precondition pinning the version it checked, which
- * an unconditional write takes, so an Owner's write in between cannot slip a
+ * Otherwise it returns a precondition pinned to the version it checked. An
+ * unconditional write takes it, so an Owner's write in between cannot slip a
  * grant past the cap.
  */
-async function refuseNewRetentionGrants(
+async function checkNewRetentionGrants(
   iam: IamMethods,
   tenantId: string,
   bucketName: string,
   next: BucketPolicy,
-): Promise<{ pinned: PolicyPrecondition } | { response: APIGatewayProxyStructuredResultV2 }> {
+): Promise<
+  { pinnedPrecondition: PolicyPrecondition } | { response: APIGatewayProxyStructuredResultV2 }
+> {
   let stored: StoredBucketPolicy | null;
   try {
     stored = await iam.getBucketPolicy(tenantId, bucketName);
   } catch (err) {
-    const response = bucketPolicyErrorResponse(err);
+    const response = toPolicyErrorResponse(err);
     if (!response) throw err;
     return { response };
   }
   const current = stored?.policy ?? null;
-  return addsRetentionGrants(current, next) || addsNamedRetentionGrants(current, next)
+  return hasNewRetentionGrants(current, next) || hasNewNamedRetentionGrants(current, next)
     ? { response: retentionGrantForbiddenResponse() }
-    : { pinned: stored ? { ifMatch: stored.etag } : { ifNoneMatch: '*' } };
+    : { pinnedPrecondition: stored ? { ifMatch: stored.etag } : { ifNoneMatch: '*' } };
 }
 
 /**
- * Whether `next` names a retention or legal-hold write for a principal that
- * `current` does not name it for. Only actions spelled out count, not `s3:*`,
- * so this holds even when the principal already has the write through `s3:*`.
- * A name for everyone covers every principal.
+ * Whether `next` names a retention write for a principal that `current` does
+ * not name it for. Only actions listed by name count, not `s3:*`, so this
+ * holds even when the principal already has the write through `s3:*`. An
+ * Allow to `*` already names the action for every principal.
  */
-function addsNamedRetentionGrants(current: BucketPolicy | null, next: BucketPolicy): boolean {
-  const before = namedRetentionGrants(current);
-  return [...namedRetentionGrants(next)].some((grant) => {
-    // Split at the last bar: principal ids may hold one (`auth0|…`), actions never do.
-    const action = grant.slice(grant.lastIndexOf('|') + 1);
-    return !before.has(grant) && !before.has(`${POLICY_WILDCARD_PRINCIPAL}|${action}`);
-  });
+function hasNewNamedRetentionGrants(current: BucketPolicy | null, next: BucketPolicy): boolean {
+  const before = getNamedRetentionGrants(current);
+  const everyone = before.get(POLICY_WILDCARD_PRINCIPAL);
+  for (const [principal, actions] of getNamedRetentionGrants(next)) {
+    const held = before.get(principal);
+    for (const action of actions) {
+      if (!held?.has(action) && !everyone?.has(action)) return true;
+    }
+  }
+  return false;
 }
 
-/** Each principal an allow names a retention write for outright, keyed with the action. */
-function namedRetentionGrants(policy: BucketPolicy | null): Set<string> {
-  const grants = new Set<string>();
+/** The retention writes each principal is allowed by name, keyed by principal id or `*`. */
+function getNamedRetentionGrants(policy: BucketPolicy | null): Map<string, Set<PolicyAction>> {
+  const grants = new Map<string, Set<PolicyAction>>();
   for (const statement of policy?.Statement ?? []) {
     if (statement.Effect !== 'Allow') continue;
+    const actions = RETENTION_WRITE_ACTIONS.filter((action) => statement.Action.includes(action));
+    if (actions.length === 0) continue;
     const principals =
       statement.Principal === POLICY_WILDCARD_PRINCIPAL
         ? [POLICY_WILDCARD_PRINCIPAL]
         : statement.Principal;
-    for (const action of statement.Action) {
-      if (!(RETENTION_WRITE_ACTIONS as readonly string[]).includes(action)) continue;
-      for (const principal of principals) grants.add(`${principal}|${action}`);
+    for (const principal of principals) {
+      const held = grants.get(principal) ?? new Set<PolicyAction>();
+      for (const action of actions) held.add(action);
+      grants.set(principal, held);
     }
   }
   return grants;
