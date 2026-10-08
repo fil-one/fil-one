@@ -22,13 +22,12 @@ These rules apply to new names; leave existing names alone.
 
 - Model mutually exclusive shapes as a union of interfaces (`ServiceAccessKey | PrincipalAccessKey`), each with only the fields valid for it.
 - Let declared and inferred types flow. Add a cast only for a fact the compiler cannot know, with a comment naming that fact.
-- Every package compiles for ES2022, the newest version the console's browsers support; the comment in `tsconfig.base.json` explains why. Use ES2022 built-ins such as `Object.hasOwn` and `Array.prototype.at` over hand-written equivalents, and write a set difference as `[...a].filter((x) => !b.has(x))`.
+- Every package compiles for ES2022, the newest version the console's browsers support; the comment in `tsconfig.base.json` explains why. Use ES2022 built-ins such as `Object.hasOwn` and `Array.prototype.at` over hand-written equivalents.
 
 ### Comments
 
-- Explain why, in plain words a reader without deep TypeScript knowledge follows.
-- State the general rule and leave specific lists to the code (for example the `Exclude<>` arguments), so the comment stays true as the list grows.
-- Define a domain term the first time a comment uses it, or link the ADR that does.
+- When the code relies on a TypeScript choice that is not obvious (a type literal instead of an interface, a conditional or mapped type, an index signature), explain in a comment what the choice achieves, in plain words a reader without deep TypeScript knowledge follows.
+- When code lists cases explicitly, such as the event types excluded from a union, describe in the comment the rule that selects them and let the code carry the list. A comment that repeats the list goes stale when someone adds a case.
 - Re-read each comment against the code it describes before committing.
 
 ### Tests
