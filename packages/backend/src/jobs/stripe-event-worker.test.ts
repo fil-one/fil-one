@@ -1363,13 +1363,22 @@ describe('stripe-event-worker handler', () => {
       expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
     });
 
-    it('fails the delivery when the processed mark cannot be written', async () => {
-      // The event was handled, but without the mark a redelivery would handle it
-      // again; the handlers tolerate that, so retrying is the safe outcome.
+    it('acknowledges the delivery, with an error log, when the processed mark cannot be written', async () => {
+      // The event was handled. Failing the delivery would make SQS handle it
+      // again and count its metrics twice; an unmarked event only matters if
+      // Stripe redelivers it after the queue's 5-minute dedup window.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       setupStripeEvent('customer.subscription.created', mockSubscription());
       ddbMock.on(PutItemCommand).rejects(new Error('DynamoDB put failed'));
 
-      await expect(deliver()).rejects.toThrow('DynamoDB put failed');
+      await expect(deliver()).resolves.toBeUndefined();
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[stripe-webhook] Failed to mark event processed:',
+        MOCK_EVENT_ID,
+        expect.objectContaining({ message: 'DynamoDB put failed' }),
+      );
+      errorSpy.mockRestore();
     });
   });
 
@@ -1619,6 +1628,18 @@ describe('stripe-event-worker handler', () => {
       await expect(deliver()).rejects.toThrow();
 
       expect(invoicePaidEmissions()).toHaveLength(0);
+    });
+
+    it('counts a payment once when the processed mark fails to write', async () => {
+      // A failed delivery would be redelivered by SQS and emit the metric again.
+      vi.spyOn(console, 'error').mockImplementationOnce(() => {});
+      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
+      setupCustomerRetrieve();
+      ddbMock.on(PutItemCommand).rejectsOnce(new Error('ProvisionedThroughputExceeded'));
+
+      await expect(deliver()).resolves.toBeUndefined();
+
+      expect(invoicePaidEmissions()).toHaveLength(1);
     });
 
     it('does not emit even when invoice.customer is null', async () => {

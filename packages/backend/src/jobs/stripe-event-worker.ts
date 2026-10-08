@@ -66,17 +66,24 @@ async function processRecord(stripeEvent: Stripe.Event): Promise<void> {
 
   await processStripeEvent(stripeEvent);
 
-  await dynamo.send(
-    new PutItemCommand({
-      TableName: tableName,
-      Item: marshall({
-        ...markKey,
-        eventType: stripeEvent.type,
-        processedAt: new Date().toISOString(),
-        ttl: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days
+  // The event is handled. A failed mark write is logged rather than thrown:
+  // failing the delivery would make SQS handle the event again and count its
+  // metrics twice.
+  try {
+    await dynamo.send(
+      new PutItemCommand({
+        TableName: tableName,
+        Item: marshall({
+          ...markKey,
+          eventType: stripeEvent.type,
+          processedAt: new Date().toISOString(),
+          ttl: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days
+        }),
       }),
-    }),
-  );
+    );
+  } catch (err) {
+    console.error('[stripe-webhook] Failed to mark event processed:', stripeEvent.id, err);
+  }
 }
 
 async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
