@@ -18,14 +18,15 @@ export interface StoredBucketPolicy {
 }
 
 /** A policy naming a principal, as the member detail view lists them. */
-export interface MemberPolicy extends StoredBucketPolicy {
+export interface MemberPolicy {
   bucketName: string;
+  policy: BucketPolicy;
 }
 
 /**
- * Exactly one of the two, by construction: `ifMatch` replaces the policy the
+ * At most one of the two, by construction: `ifMatch` replaces the policy the
  * caller read, `ifNoneMatch` creates a bucket's first policy and is refused if
- * one exists.
+ * one exists. A write with neither is unconditional, as on S3.
  */
 export type PolicyPrecondition =
   | { ifMatch: string; ifNoneMatch?: never }
@@ -50,7 +51,8 @@ export interface IamMethods {
 
   /**
    * Creates or replaces the policy with `PutBucketPolicy` under the
-   * precondition, sent as a signed `If-Match` or `If-None-Match: *` header.
+   * precondition, if any, sent as a signed `If-Match` or `If-None-Match: *`
+   * header.
    * Throws {@link PolicyPreconditionFailedError} on a stale ETag with nothing
    * written, and {@link PolicyValidationError} when the storage system refuses
    * the document (`MalformedPolicy`). Retries the two answers the RFC documents
@@ -61,14 +63,14 @@ export interface IamMethods {
     tenantId: string,
     bucketName: string,
     policy: BucketPolicy,
-    precondition: PolicyPrecondition,
-  ): Promise<{ etag: string; created: boolean }>;
+    precondition?: PolicyPrecondition,
+  ): Promise<{ etag: string }>;
 
-  /** Deletes the policy the caller read with `DeleteBucketPolicy`. Same precondition and retry rules as the write. */
+  /** Deletes the policy with `DeleteBucketPolicy`. Same precondition and retry rules as the write, less `ifNoneMatch`. */
   deleteBucketPolicy(
     tenantId: string,
     bucketName: string,
-    precondition: { ifMatch: string },
+    precondition?: { ifMatch: string },
   ): Promise<void>;
 
   /** Every policy with a statement naming the member or everyone. */

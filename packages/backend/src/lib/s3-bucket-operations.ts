@@ -367,7 +367,8 @@ function captureEtag(command: PolicyCommand): { etag?: string } {
   return captured;
 }
 
-function preconditionHeaders(precondition: PolicyPrecondition): Record<string, string> {
+function preconditionHeaders(precondition: PolicyPrecondition | undefined): Record<string, string> {
+  if (!precondition) return {};
   return precondition.ifMatch !== undefined
     ? { 'If-Match': precondition.ifMatch }
     : { 'If-None-Match': precondition.ifNoneMatch };
@@ -443,12 +444,12 @@ export async function getBucketPolicy(
   }
 }
 
-/** Creates or replaces the bucket's policy under the precondition and returns the new ETag. */
+/** Creates or replaces the bucket's policy under the precondition, if any, and returns the new ETag. */
 export async function putBucketPolicy(
   s3: S3Client,
   bucketName: string,
   policy: BucketPolicy,
-  precondition: PolicyPrecondition,
+  precondition?: PolicyPrecondition,
 ): Promise<{ etag: string }> {
   const command = new PutBucketPolicyCommand({
     Bucket: bucketName,
@@ -469,11 +470,11 @@ export async function putBucketPolicy(
   return { etag: requireEtag(captured, bucketName) };
 }
 
-/** Deletes the policy the caller read. */
+/** Deletes the policy, under the caller's ETag if one is given. */
 export async function deleteBucketPolicy(
   s3: S3Client,
   bucketName: string,
-  precondition: DeletePolicyPrecondition,
+  precondition?: DeletePolicyPrecondition,
 ): Promise<void> {
   const command = new DeleteBucketPolicyCommand({ Bucket: bucketName });
   withSignedHeaders(command, preconditionHeaders(precondition));
