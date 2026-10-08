@@ -33,9 +33,8 @@ import {
 export const CONSOLE_KEY_NAME = 'filone-console';
 
 // The contract-legal maximum: every action in the Management API's
-// AccessKeyPermission enum. The console key drives bucket create, list and
-// the two bucket-configuration reads for the console, so it holds all of it,
-// plus the policy actions on an iam region.
+// AccessKeyPermission enum. The console key holds every action the console
+// performs for a tenant.
 const CONSOLE_KEY_PERMISSIONS = [
   's3:CreateBucket',
   's3:ListAllMyBuckets',

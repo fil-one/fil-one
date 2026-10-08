@@ -251,48 +251,61 @@ describe('ensureTenantReady', () => {
     });
   });
 
-  it('requests only s3:* actions from the contract enum for the console key', async () => {
+  // Every action in the contract enum. It carries no bucket-configuration
+  // actions: the versioning and object-lock reads classify as ListBucket
+  // (fil-one/RFC#30) and there are no writes.
+  const consoleKeyPermissions = [
+    's3:CreateBucket',
+    's3:ListAllMyBuckets',
+    's3:DeleteBucket',
+    's3:GetObject',
+    's3:GetObjectVersion',
+    's3:GetObjectRetention',
+    's3:GetObjectLegalHold',
+    's3:PutObject',
+    's3:PutObjectRetention',
+    's3:PutObjectLegalHold',
+    's3:ListBucket',
+    's3:ListBucketVersions',
+    's3:ListBucketMultipartUploads',
+    's3:ListMultipartUploadParts',
+    's3:AbortMultipartUpload',
+    's3:DeleteObject',
+    's3:DeleteObjectVersion',
+  ];
+
+  it('requests no bucket-configuration actions for the console key', async () => {
     stubHappyPath();
 
-    await ensureTenantReady({ ...deps, accessModel: 'iam' }, orgId);
+    await ensureTenantReady(deps, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).toHaveLength(20);
-    expect(permissions).toContain('s3:ListBucketMultipartUploads');
-    // The console writes bucket policies over S3 with this key.
-    expect(permissions).toContain('s3:PutBucketPolicy');
-    // The contract enum carries no bucket-config actions at all: the reads
-    // classify as ListBucket (fil-one/RFC#30) and there are no writes.
-    expect(permissions).not.toContain('s3:GetBucketVersioning');
-    expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
-    expect(permissions).not.toContain('s3:PutBucketVersioning');
-    expect(permissions).not.toContain('s3:PutBucketObjectLockConfiguration');
+    expect(permissions).toStrictEqual(consoleKeyPermissions);
   });
 
   // Only an iam region's storage system knows the policy actions; a
   // scoped-keys region refuses the whole key request over them.
-  it('leaves the bucket-policy permissions off a scoped-keys console key', async () => {
+  it('omits the bucket-policy permissions from the console key on a scoped-keys region', async () => {
     stubHappyPath();
 
     await ensureTenantReady({ ...deps, accessModel: 'scoped-keys' }, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).toHaveLength(17);
-    expect(permissions).toContain('s3:ListBucketMultipartUploads');
-    expect(permissions).not.toContain('s3:GetBucketPolicy');
-    expect(permissions).not.toContain('s3:PutBucketPolicy');
-    expect(permissions).not.toContain('s3:DeleteBucketPolicy');
+    expect(permissions).toStrictEqual(consoleKeyPermissions);
   });
 
-  it('grants the bucket-policy permissions to an iam console key', async () => {
+  it('adds the bucket-policy permissions to the console key on an iam region', async () => {
     stubHappyPath();
 
     await ensureTenantReady({ ...deps, accessModel: 'iam' }, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).toEqual(
-      expect.arrayContaining(['s3:GetBucketPolicy', 's3:PutBucketPolicy', 's3:DeleteBucketPolicy']),
-    );
+    expect(permissions).toStrictEqual([
+      ...consoleKeyPermissions,
+      's3:GetBucketPolicy',
+      's3:PutBucketPolicy',
+      's3:DeleteBucketPolicy',
+    ]);
   });
 
   describe('409 recovery (crash between key creation and SSM write)', () => {

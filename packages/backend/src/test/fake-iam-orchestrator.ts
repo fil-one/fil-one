@@ -1,4 +1,4 @@
-import { effectiveActions } from '@filone/shared';
+import { getEffectiveActions } from '@filone/shared';
 import type { BucketPolicy, MemberBucketAccess } from '@filone/shared';
 import {
   BucketNotFoundError,
@@ -9,7 +9,8 @@ import {
 } from '../lib/errors.ts';
 import type {
   IamMethods,
-  MemberPolicy,
+  IfMatchPrecondition,
+  MemberBucketPolicy,
   PolicyPrecondition,
   StoredBucketPolicy,
 } from '../lib/iam-orchestrator.ts';
@@ -31,20 +32,20 @@ export class FakeIamOrchestrator implements IamMethods {
   /** Every call in order, for tests that assert what ran before what. */
   readonly calls: Array<{ method: keyof IamMethods; tenantId: string; target: string }> = [];
 
-  private etagSeq = 0;
+  private etagCounter = 0;
   private readonly failures = new Map<keyof IamMethods, Error>();
 
   seedBucket(tenantId: string, bucketName: string): void {
-    this.bucketsOf(tenantId).add(bucketName);
+    this.getOrCreateBuckets(tenantId).add(bucketName);
   }
 
   seedPrincipal(tenantId: string, userId: string): void {
-    this.principalsOf(tenantId).add(userId);
+    this.getOrCreatePrincipals(tenantId).add(userId);
   }
 
   seedPolicy(tenantId: string, bucketName: string, policy: BucketPolicy): string {
-    const stored = { policy, etag: this.nextEtag() };
-    this.policiesOf(tenantId).set(bucketName, stored);
+    const stored = { policy, etag: this.createEtag() };
+    this.getOrCreatePolicies(tenantId).set(bucketName, stored);
     return stored.etag;
   }
 
@@ -54,33 +55,36 @@ export class FakeIamOrchestrator implements IamMethods {
   }
 
   async syncMember(tenantId: string, userId: string): Promise<void> {
-    this.record('syncMember', tenantId, userId);
-    this.principalsOf(tenantId).add(userId);
+    this.recordCall('syncMember', tenantId, userId);
+    this.throwInjectedFailure('syncMember');
+    this.getOrCreatePrincipals(tenantId).add(userId);
   }
 
   async removeMember(tenantId: string, userId: string): Promise<void> {
-    this.record('removeMember', tenantId, userId);
-    this.principalsOf(tenantId).delete(userId);
-    for (const [bucketName, stored] of this.policiesOf(tenantId)) {
-      const names = (s: BucketPolicy['Statement'][number]) =>
+    this.recordCall('removeMember', tenantId, userId);
+    this.throwInjectedFailure('removeMember');
+    this.getOrCreatePrincipals(tenantId).delete(userId);
+    for (const [bucketName, stored] of this.getOrCreatePolicies(tenantId)) {
+      const appliesToUser = (s: BucketPolicy['Statement'][number]) =>
         s.Principal !== '*' && s.Principal.includes(userId);
-      if (!stored.policy.Statement.some(names)) continue;
-      const statement = stored.policy.Statement.map((s) =>
+      if (!stored.policy.Statement.some(appliesToUser)) continue;
+      const remainingStatements = stored.policy.Statement.map((s) =>
         s.Principal === '*' ? s : { ...s, Principal: s.Principal.filter((p) => p !== userId) },
       ).filter((s) => s.Principal === '*' || s.Principal.length > 0);
-      if (statement.length === 0) this.policiesOf(tenantId).delete(bucketName);
+      if (remainingStatements.length === 0) this.getOrCreatePolicies(tenantId).delete(bucketName);
       else
-        this.policiesOf(tenantId).set(bucketName, {
-          policy: { Statement: statement },
-          etag: this.nextEtag(),
+        this.getOrCreatePolicies(tenantId).set(bucketName, {
+          policy: { Statement: remainingStatements },
+          etag: this.createEtag(),
         });
     }
   }
 
   async getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null> {
-    this.record('getBucketPolicy', tenantId, bucketName);
-    this.assertBucket(tenantId, bucketName);
-    return this.policiesOf(tenantId).get(bucketName) ?? null;
+    this.recordCall('getBucketPolicy', tenantId, bucketName);
+    this.throwInjectedFailure('getBucketPolicy');
+    this.assertBucketExists(tenantId, bucketName);
+    return this.getOrCreatePolicies(tenantId).get(bucketName) ?? null;
   }
 
   async putBucketPolicy(
@@ -89,42 +93,49 @@ export class FakeIamOrchestrator implements IamMethods {
     policy: BucketPolicy,
     precondition?: PolicyPrecondition,
   ): Promise<{ etag: string }> {
-    this.record('putBucketPolicy', tenantId, bucketName);
-    this.assertBucket(tenantId, bucketName);
-    const current = this.policiesOf(tenantId).get(bucketName);
-    this.assertPrecondition(bucketName, current, precondition);
+    this.recordCall('putBucketPolicy', tenantId, bucketName);
+    this.throwInjectedFailure('putBucketPolicy');
+    this.assertBucketExists(tenantId, bucketName);
+    const current = this.getOrCreatePolicies(tenantId).get(bucketName);
+    this.assertPreconditionHolds(bucketName, current, precondition);
     for (const statement of policy.Statement) {
       if (statement.Principal === '*') continue;
       for (const principal of statement.Principal) {
-        if (!this.principalsOf(tenantId).has(principal)) {
-          // The S3 write answers MalformedPolicy, which the console maps here.
+        if (!this.getOrCreatePrincipals(tenantId).has(principal)) {
+          // The S3 write answers MalformedPolicy, which the console maps to
+          // PolicyValidationError.
           throw new PolicyValidationError(`unknown principal "${principal}"`);
         }
       }
     }
-    const stored = { policy, etag: this.nextEtag() };
-    this.policiesOf(tenantId).set(bucketName, stored);
+    const stored = { policy, etag: this.createEtag() };
+    this.getOrCreatePolicies(tenantId).set(bucketName, stored);
     return { etag: stored.etag };
   }
 
   async deleteBucketPolicy(
     tenantId: string,
     bucketName: string,
-    precondition?: { ifMatch: string },
+    precondition?: IfMatchPrecondition,
   ): Promise<void> {
-    this.record('deleteBucketPolicy', tenantId, bucketName);
-    this.assertBucket(tenantId, bucketName);
-    const current = this.policiesOf(tenantId).get(bucketName);
+    this.recordCall('deleteBucketPolicy', tenantId, bucketName);
+    this.throwInjectedFailure('deleteBucketPolicy');
+    this.assertBucketExists(tenantId, bucketName);
+    const current = this.getOrCreatePolicies(tenantId).get(bucketName);
     if (!current) throw new PolicyNotFoundError(bucketName);
-    this.assertPrecondition(bucketName, current, precondition);
-    this.policiesOf(tenantId).delete(bucketName);
+    this.assertPreconditionHolds(bucketName, current, precondition);
+    this.getOrCreatePolicies(tenantId).delete(bucketName);
   }
 
-  async listBucketPoliciesForMember(tenantId: string, userId: string): Promise<MemberPolicy[]> {
-    this.record('listBucketPoliciesForMember', tenantId, userId);
+  async listBucketPoliciesForMember(
+    tenantId: string,
+    userId: string,
+  ): Promise<MemberBucketPolicy[]> {
+    this.recordCall('listBucketPoliciesForMember', tenantId, userId);
+    this.throwInjectedFailure('listBucketPoliciesForMember');
     // Hilt answers the access reads 404 for a principal it does not know.
-    if (!this.principalsOf(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);
-    return [...this.policiesOf(tenantId)]
+    if (!this.getOrCreatePrincipals(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);
+    return [...this.getOrCreatePolicies(tenantId)]
       .filter(([, stored]) =>
         stored.policy.Statement.some((s) => s.Principal === '*' || s.Principal.includes(userId)),
       )
@@ -132,19 +143,23 @@ export class FakeIamOrchestrator implements IamMethods {
   }
 
   async resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]> {
-    this.record('resolveMemberAccess', tenantId, userId);
+    this.recordCall('resolveMemberAccess', tenantId, userId);
+    this.throwInjectedFailure('resolveMemberAccess');
     // Hilt answers the access reads 404 for a principal it does not know.
-    if (!this.principalsOf(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);
-    return [...this.policiesOf(tenantId)]
+    if (!this.getOrCreatePrincipals(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);
+    return [...this.getOrCreatePolicies(tenantId)]
       .map(([bucketName, stored]) => ({
         bucketName,
-        actions: effectiveActions(stored.policy, userId),
+        actions: getEffectiveActions(stored.policy, userId),
       }))
       .filter((access) => access.actions.length > 0);
   }
 
-  private record(method: keyof IamMethods, tenantId: string, target: string): void {
+  private recordCall(method: keyof IamMethods, tenantId: string, target: string): void {
     this.calls.push({ method, tenantId, target });
+  }
+
+  private throwInjectedFailure(method: keyof IamMethods): void {
     const failure = this.failures.get(method);
     if (failure) {
       this.failures.delete(method);
@@ -152,12 +167,12 @@ export class FakeIamOrchestrator implements IamMethods {
     }
   }
 
-  private assertBucket(tenantId: string, bucketName: string): void {
+  private assertBucketExists(tenantId: string, bucketName: string): void {
     const known = this.buckets.get(tenantId);
     if (known && !known.has(bucketName)) throw new BucketNotFoundError(bucketName);
   }
 
-  private assertPrecondition(
+  private assertPreconditionHolds(
     bucketName: string,
     current: StoredBucketPolicy | undefined,
     precondition: PolicyPrecondition | undefined,
@@ -172,23 +187,23 @@ export class FakeIamOrchestrator implements IamMethods {
     }
   }
 
-  private nextEtag(): string {
-    return `"etag-${++this.etagSeq}"`;
+  private createEtag(): string {
+    return `"etag-${++this.etagCounter}"`;
   }
 
-  private principalsOf(tenantId: string): Set<string> {
+  private getOrCreatePrincipals(tenantId: string): Set<string> {
     let set = this.principals.get(tenantId);
     if (!set) this.principals.set(tenantId, (set = new Set()));
     return set;
   }
 
-  private policiesOf(tenantId: string): Map<string, StoredBucketPolicy> {
+  private getOrCreatePolicies(tenantId: string): Map<string, StoredBucketPolicy> {
     let map = this.policies.get(tenantId);
     if (!map) this.policies.set(tenantId, (map = new Map()));
     return map;
   }
 
-  private bucketsOf(tenantId: string): Set<string> {
+  private getOrCreateBuckets(tenantId: string): Set<string> {
     let set = this.buckets.get(tenantId);
     if (!set) this.buckets.set(tenantId, (set = new Set()));
     return set;

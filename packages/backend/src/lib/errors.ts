@@ -110,8 +110,8 @@ export class PolicyPreconditionFailedError extends Error {
 }
 
 // The storage system could not take its lock within its timeout because another
-// change to the same principal or policy was in flight. Nothing was written, and
-// the same request may be retried.
+// change to the same principal or policy was in flight, or answered
+// ServiceUnavailable. Nothing was written, and the same request may be retried.
 export class PolicyConflictError extends Error {
   constructor(options?: ErrorOptions) {
     super('Another change to this policy was in flight', options);
@@ -130,8 +130,9 @@ export class PolicyValidationError extends Error {
 }
 
 // A policy write failed after the storage system had published revocations for
-// it, so it committed nothing and the old policy stays in force. Retrying the
-// same write is the documented recovery: each publish carries a fresh nonce.
+// it (see "revocation publish" in fil-one/RFC#30), so it committed nothing and
+// the old policy stays in force. Retrying the same write is the documented
+// recovery: each publish carries a fresh nonce.
 export class PolicyPublishError extends Error {
   constructor(options?: ErrorOptions) {
     super('The storage system could not publish the policy change', options);

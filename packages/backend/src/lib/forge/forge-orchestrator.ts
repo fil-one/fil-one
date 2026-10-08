@@ -51,8 +51,9 @@ export function createForgeOrchestrator(
     s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(region, stage),
     s3PresignEndpointUrl: s3.presignEndpointUrl,
     api,
-    // The shared switch decides the model per region; the orchestrator only
-    // carries it, so the console and the handlers can never disagree.
+    // getRegionAccessModel from @filone/shared decides the model per region;
+    // the orchestrator only carries it, so the console and the handlers can
+    // never disagree.
     accessModel: getRegionAccessModel(region),
   });
 }
