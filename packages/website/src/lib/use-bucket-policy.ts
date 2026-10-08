@@ -63,7 +63,9 @@ export function useBucketPolicy(bucketName: string, region: S3Region) {
     snapshot: isAvailable ? query.data : undefined,
     // A disabled query stays pending forever, which is not loading.
     isLoading: isAvailable && query.isPending,
-    hasLoadFailed: isAvailable && query.isError,
+    // Only a first load that failed: a failed refetch keeps the policy, and the
+    // draft over it, on screen.
+    hasLoadFailed: isAvailable && query.isLoadingError,
     errorMessage: query.error instanceof Error ? query.error.message : undefined,
     refetch: () => query.refetch(),
     save,

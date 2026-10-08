@@ -199,6 +199,48 @@ describe('BucketPolicyTab', () => {
     expect(screen.queryByTestId('policy-save-bar')).not.toBeInTheDocument();
   });
 
+  it('keeps the draft when a reload fails, and will not remove the newer document behind it', async () => {
+    const { client } = renderTab();
+    await screen.findByText('team');
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
+    await screen.findByTestId('policy-save-bar');
+
+    mockGet.mockResolvedValue({ policy, etag: '"v2"' });
+    await act(async () => {
+      await client.refetchQueries({ queryKey: queryKeys.bucketPolicy('photos', S3Region.UsEast9) });
+    });
+    expect(await screen.findByText('This policy changed elsewhere')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove policy' })).toBeDisabled();
+
+    mockGet.mockRejectedValue(new Error('Service unavailable'));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Reload policy' }));
+    });
+
+    expect(await screen.findByText('Could not reload the policy. Try again.')).toBeInTheDocument();
+    expect(screen.getByText('This policy changed elsewhere')).toBeInTheDocument();
+    expect(screen.getByText('This policy has no statements')).toBeInTheDocument();
+  });
+
+  it('removes the policy under the etag it read, and says why when the removal fails', async () => {
+    mockDelete.mockRejectedValue(new Error('Service unavailable'));
+    renderTab();
+    await screen.findByText('team');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove policy' }));
+    fireEvent.click(
+      within(await screen.findByTestId('confirm-dialog')).getByRole('button', {
+        name: 'Remove policy',
+      }),
+    );
+
+    expect(await screen.findByText('Service unavailable')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument());
+    expect(mockDelete).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"');
+    expect(screen.getByText('team')).toBeInTheDocument();
+  });
+
   it('warns when a deny names everyone', async () => {
     mockGet.mockResolvedValue({
       policy: { Statement: [{ Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] }] },
