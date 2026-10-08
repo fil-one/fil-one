@@ -29,12 +29,12 @@ vi.mock('@aws-sdk/client-sqs', () => ({
 
 import { enqueueStripeEvent } from './stripe-event-queue.ts';
 
-function stripeEvent(type: string, object: Record<string, unknown>): Stripe.Event {
+function buildStripeEvent(type: string, object: Record<string, unknown>): Stripe.Event {
   return { id: 'evt_1', type, data: { object } } as unknown as Stripe.Event;
 }
 
 /** The command input the client was handed. */
-function sentInput(): Record<string, string> {
+function getSentInput(): Record<string, string> {
   return sendMock.mock.calls[0][0].input;
 }
 
@@ -50,41 +50,53 @@ describe('enqueueStripeEvent', () => {
   });
 
   it('sends the verified event to the queue, deduplicated on its Stripe id', async () => {
-    const event = stripeEvent('invoice.finalized', { object: 'invoice', customer: 'cus_1' });
+    const event = buildStripeEvent('invoice.finalized', {
+      object: 'invoice',
+      id: 'in_1',
+      customer: 'cus_1',
+    });
 
     await enqueueStripeEvent(event);
 
-    expect(sentInput().QueueUrl).toBe('https://sqs.example.com/stripe-event.fifo');
-    expect(sentInput().MessageDeduplicationId).toBe('evt_1');
-    expect(JSON.parse(sentInput().MessageBody)).toEqual(event);
+    expect(getSentInput()).toStrictEqual({
+      QueueUrl: 'https://sqs.example.com/stripe-event.fifo',
+      MessageBody: JSON.stringify(event),
+      MessageGroupId: 'cus_1',
+      MessageDeduplicationId: 'evt_1',
+    });
   });
 
   it('groups a customer event on the customer it describes', async () => {
-    await enqueueStripeEvent(stripeEvent('customer.updated', { object: 'customer', id: 'cus_1' }));
+    await enqueueStripeEvent(
+      buildStripeEvent('customer.updated', { object: 'customer', id: 'cus_1' }),
+    );
 
-    expect(sentInput().MessageGroupId).toBe('cus_1');
+    expect(getSentInput().MessageGroupId).toBe('cus_1');
   });
 
-  it('groups a subscription or invoice event on the customer it names', async () => {
-    await enqueueStripeEvent(
-      stripeEvent('customer.subscription.deleted', { object: 'subscription', customer: 'cus_1' }),
-    );
-    await enqueueStripeEvent(
-      stripeEvent('invoice.payment_failed', {
-        object: 'invoice',
-        customer: { object: 'customer', id: 'cus_2' },
-      }),
-    );
+  // Each object carries its own id, so grouping on that id instead of the
+  // customer's would fail these.
+  it.each([
+    [
+      'a subscription naming a customer id',
+      { object: 'subscription', id: 'sub_1', customer: 'cus_1' },
+    ],
+    ['an invoice naming a customer id', { object: 'invoice', id: 'in_1', customer: 'cus_1' }],
+    [
+      'an invoice with an expanded customer',
+      { object: 'invoice', id: 'in_1', customer: { object: 'customer', id: 'cus_1' } },
+    ],
+  ])('groups %s on that customer', async (_, object) => {
+    await enqueueStripeEvent(buildStripeEvent('invoice.payment_failed', object));
 
-    expect(sendMock.mock.calls[0][0].input.MessageGroupId).toBe('cus_1');
-    expect(sendMock.mock.calls[1][0].input.MessageGroupId).toBe('cus_2');
+    expect(getSentInput().MessageGroupId).toBe('cus_1');
   });
 
   it('groups an event naming no customer on its own id', async () => {
     await enqueueStripeEvent(
-      stripeEvent('invoice.finalized', { object: 'invoice', customer: null }),
+      buildStripeEvent('invoice.finalized', { object: 'invoice', id: 'in_1', customer: null }),
     );
 
-    expect(sentInput().MessageGroupId).toBe('evt_1');
+    expect(getSentInput().MessageGroupId).toBe('evt_1');
   });
 });

@@ -24,20 +24,19 @@ export async function enqueueStripeEvent(event: Stripe.Event): Promise<void> {
     new SendMessageCommand({
       QueueUrl: Resource.StripeEventQueue.url,
       MessageBody: JSON.stringify(event),
-      MessageGroupId: customerIdOf(event) ?? event.id,
+      MessageGroupId: getEventCustomerId(event) ?? event.id,
       MessageDeduplicationId: event.id,
     }),
   );
 }
 
 /** The customer an event concerns: the object itself, or the customer it names. */
-function customerIdOf(event: Stripe.Event): string | undefined {
-  const object = event.data.object as { object?: string; id?: string; customer?: unknown };
+function getEventCustomerId(event: Stripe.Event): string | undefined {
+  const object = event.data.object as {
+    object?: string;
+    id?: string;
+    customer?: string | { id: string } | null;
+  };
   if (object.object === 'customer') return object.id;
-  const customer = object.customer;
-  if (typeof customer === 'string') return customer;
-  if (customer && typeof customer === 'object' && 'id' in customer) {
-    return (customer as { id: string }).id;
-  }
-  return undefined;
+  return typeof object.customer === 'string' ? object.customer : object.customer?.id;
 }
