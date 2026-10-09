@@ -8,7 +8,12 @@ import type {
   S3Region,
   SortDirection,
 } from '@filone/shared';
-import { BUCKET_SORT_KEYS, listBucketsUnavailableMessage, SORT_DIRECTIONS } from '@filone/shared';
+import {
+  BUCKET_SORT_KEYS,
+  listBucketsUnavailableMessage,
+  OrgRole,
+  SORT_DIRECTIONS,
+} from '@filone/shared';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
@@ -29,10 +34,24 @@ function parseSortDirection(value: string | undefined): SortDirection {
   return SORT_DIRECTIONS.find((direction) => direction === value) ?? 'asc';
 }
 
+/**
+ * The member the listing is scoped to, or undefined for a caller who sees the
+ * tenant's whole set. Owner and Admin are unscoped by role, so the policy store
+ * is never read for them and a bucket with no policy is still theirs to see.
+ *
+ * Kept here rather than shared with the other `actAs` callers: this asks who is
+ * unscoped, which `isRosterRole` only happens to answer today. The two part
+ * company once a membership row can say `bucketScope: 'all'`, since a roster
+ * statement never names such a member.
+ */
+function scopedTo(role: string | undefined, userId: string): string | undefined {
+  return role === OrgRole.Owner || role === OrgRole.Admin ? undefined : userId;
+}
+
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId, membership } = getUserInfo(event);
   const { search, region } = event.queryStringParameters ?? {};
   const sortKey = parseSortKey(event.queryStringParameters?.sortKey);
   const sortDirection = parseSortDirection(event.queryStringParameters?.sortDirection);
@@ -54,7 +73,12 @@ export async function baseHandler(
   // Fail open (FIL-1049): one region's ListBuckets 403 used to collapse the whole request into a
   // generic 500, hiding the healthy regions' buckets. Return what answered, name what did not.
   const settled = await Promise.allSettled(
-    ready.map(({ orchestrator, tenantId }) => orchestrator.listBuckets(tenantId)),
+    // `actAs` scopes the listing to the member on a region serving the `iam`
+    // access model, where a bucket is reachable only through a policy naming
+    // them; every other region ignores it and answers tenant-wide as before.
+    ready.map(({ orchestrator, tenantId }) =>
+      orchestrator.listBuckets(tenantId, { actAs: scopedTo(membership?.role, userId) }),
+    ),
   );
 
   const buckets: BucketSummary[] = [];

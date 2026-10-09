@@ -1,16 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   GetItemCommand,
   TransactionCanceledException,
   TransactWriteItemsCommand,
+  QueryCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
+import { fakeOrchestrator, tenantFor } from '../test/fake-orchestrator.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -30,6 +32,13 @@ vi.mock('jose', () => ({
   jwtVerify: (token: unknown, jwks: unknown, opts: unknown) => mockJwtVerify(token, jwks, opts),
   decodeJwt: vi.fn(),
   createRemoteJWKSet: vi.fn((_url: unknown) => 'mock-jwks'),
+}));
+
+// No region by default, which is every committed stage today; the iam tests
+// put a ready iam region here.
+const regions: unknown[] = [];
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
+  getAvailableOrchestrators: () => regions,
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -783,6 +792,64 @@ describe('POST /api/invitations/accept handler', () => {
     ]);
     expect(everyCall).not.toContain('BillingTable');
     expect(everyCall).not.toContain('EMAIL_NORM#');
+  });
+
+  describe('on a tenant with a ready iam region', () => {
+    const iamRegion = fakeOrchestrator('forgeDev', { region: S3Region.UsEast9, iam: true });
+    const tenantId = tenantFor('forgeDev', INVITING_ORG_ID);
+
+    beforeEach(() => {
+      regions.splice(0, regions.length, iamRegion);
+      iamRegion.iam!.principals.clear();
+      iamRegion.iam!.calls.length = 0;
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `ORG#${INVITING_ORG_ID}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({ Item: { pk: { S: `ORG#${INVITING_ORG_ID}` }, name: { S: 'Acme Corp' } } });
+      // The member list after the join, which now holds the accepter.
+      ddbMock.on(QueryCommand).resolves({
+        Items: [
+          {
+            pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) },
+            sk: { S: OrgKeys.memberSk(USER_ID) },
+            role: { S: OrgRole.Member },
+            joinedAt: { S: CREATED_AT },
+          },
+        ],
+      });
+    });
+
+    afterEach(() => {
+      regions.length = 0;
+    });
+
+    it('registers the new member, so the access lookup behind their bucket listing resolves', async () => {
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      await expect(iamRegion.iam!.resolveMemberAccess(tenantId, USER_ID)).resolves.toStrictEqual(
+        [],
+      );
+      const recorded = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .map((call) => call.args[0].input)
+        .find((input) => input.UpdateExpression === 'ADD #principals :ids');
+      expect(recorded?.ExpressionAttributeValues).toStrictEqual({ ':ids': { SS: [USER_ID] } });
+    });
+
+    it('still admits the member when the region refuses the registration', async () => {
+      iamRegion.iam!.failNext('syncMember', new Error('region down'));
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('Could not register'),
+        expect.objectContaining({ region: S3Region.UsEast9, userId: USER_ID }),
+      );
+    });
   });
 
   it.each([
