@@ -102,11 +102,9 @@ describe('CreateBucketSchema', () => {
         versioning: false,
         lock: true,
       });
-      expect(result).toMatchObject({
-        success: false,
-        error: {
-          issues: [{ path: ['lock'], message: 'Versioning must be enabled to use Object Lock' }],
-        },
+      expect(result).toMatchZodValidationError({
+        path: ['lock'],
+        message: 'Versioning must be enabled to use Object Lock',
       });
     });
 
@@ -118,13 +116,9 @@ describe('CreateBucketSchema', () => {
         lock: false,
         retention: validRetention(),
       });
-      expect(result).toMatchObject({
-        success: false,
-        error: {
-          issues: [
-            { path: ['retention'], message: 'Object Lock must be enabled to use Retention' },
-          ],
-        },
+      expect(result).toMatchZodValidationError({
+        path: ['retention'],
+        message: 'Object Lock must be enabled to use Retention',
       });
     });
 
@@ -136,13 +130,9 @@ describe('CreateBucketSchema', () => {
         lock: false,
         retention: validRetention(),
       });
-      expect(result).toMatchObject({
-        success: false,
-        error: {
-          issues: [
-            { path: ['retention'], message: 'Object Lock must be enabled to use Retention' },
-          ],
-        },
+      expect(result).toMatchZodValidationError({
+        path: ['retention'],
+        message: 'Object Lock must be enabled to use Retention',
       });
     });
   });
@@ -160,9 +150,9 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 0 }),
       });
-      expect(result).toMatchObject({
-        success: false,
-        error: { issues: [{ code: 'too_small', path: ['retention', 'duration'] }] },
+      expect(result).toMatchZodValidationError({
+        code: 'too_small',
+        path: ['retention', 'duration'],
       });
     });
 
@@ -187,13 +177,9 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 36501 }),
       });
-      expect(result).toMatchObject({
-        success: false,
-        error: {
-          issues: [
-            { path: ['retention', 'duration'], message: 'Duration exceeds the maximum allowed' },
-          ],
-        },
+      expect(result).toMatchZodValidationError({
+        path: ['retention', 'duration'],
+        message: 'Duration exceeds the maximum allowed',
       });
     });
 
@@ -210,13 +196,9 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 101, durationType: 'y' }),
       });
-      expect(result).toMatchObject({
-        success: false,
-        error: {
-          issues: [
-            { path: ['retention', 'duration'], message: 'Duration exceeds the maximum allowed' },
-          ],
-        },
+      expect(result).toMatchZodValidationError({
+        path: ['retention', 'duration'],
+        message: 'Duration exceeds the maximum allowed',
       });
     });
 
@@ -225,11 +207,10 @@ describe('CreateBucketSchema', () => {
         ...base,
         retention: validRetention({ duration: 1.5 }),
       });
-      expect(result).toMatchObject({
-        success: false,
-        error: {
-          issues: [{ code: 'invalid_type', expected: 'int', path: ['retention', 'duration'] }],
-        },
+      expect(result).toMatchZodValidationError({
+        code: 'invalid_type',
+        expected: 'int',
+        path: ['retention', 'duration'],
       });
     });
   });

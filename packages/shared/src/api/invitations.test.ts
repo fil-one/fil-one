@@ -50,10 +50,7 @@ describe('CreateInvitationSchema', () => {
       { code: 'too_big', path: ['email'] },
     ],
   ])('rejects %s', (_label, body, issue) => {
-    expect(CreateInvitationSchema.safeParse(body)).toMatchObject({
-      success: false,
-      error: { issues: [issue] },
-    });
+    expect(CreateInvitationSchema.safeParse(body)).toMatchZodValidationError(issue);
   });
 
   it('answers a rejected address with something a form can show', () => {
@@ -62,11 +59,9 @@ describe('CreateInvitationSchema', () => {
       role: OrgRole.Member,
     });
 
-    expect(parsed).toMatchObject({
-      success: false,
-      error: {
-        issues: [{ path: ['email'], message: expect.stringContaining('valid email address') }],
-      },
+    expect(parsed).toMatchZodValidationError({
+      path: ['email'],
+      message: expect.stringContaining('valid email address'),
     });
   });
 });
@@ -83,10 +78,7 @@ describe('AcceptInvitationSchema', () => {
     ['no token', {}, { code: 'invalid_type', path: ['token'] }],
     ['a pasted blob', { token: 'x'.repeat(500) }, { code: 'too_big', path: ['token'] }],
   ])('rejects %s', (_label, body, issue) => {
-    expect(AcceptInvitationSchema.safeParse(body)).toMatchObject({
-      success: false,
-      error: { issues: [issue] },
-    });
+    expect(AcceptInvitationSchema.safeParse(body)).toMatchZodValidationError(issue);
   });
 
   it('trims a token a mail client wrapped in whitespace', () => {

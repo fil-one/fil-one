@@ -18,9 +18,11 @@ export const noBareSuccessAssertions = defineRule({
         context.report({
           node: subject,
           message:
-            'Assert on the whole result with `toMatchObject`. For a rejection, match the specific issue: ' +
-            "`expect(result).toMatchObject({ success: false, error: { issues: [{ code: 'invalid_type', path: ['name'] }] } })`. " +
-            'For a success, write `expect(result).toMatchObject({ success: true })`; a failure then prints the error. ' +
+            'Assert on the whole result. For a rejected zod parse, list the expected issues: ' +
+            "`expect(result).toMatchZodValidationError({ code: 'invalid_type', path: ['name'] })`. " +
+            'The matcher is set up in packages/shared/src/testing/zod-matchers.ts; ' +
+            'another package adds that file to its vitest `setupFiles`. ' +
+            'For a successful parse, write `expect(result).toMatchObject({ success: true })`; a failure then prints the error. ' +
             'A failed check on `.success` alone prints only "expected true to be false", ' +
             'and the test can pass for a different reason than the one it names.',
         });

@@ -14,49 +14,28 @@ describe('UpdatePreferencesSchema', () => {
 
   it('rejects non-boolean value', () => {
     const result = UpdatePreferencesSchema.safeParse({ marketingEmailsOptedIn: 'yes' });
-    expect(result).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          {
-            code: 'invalid_type',
-            path: ['marketingEmailsOptedIn'],
-            message: 'Invalid input: expected boolean, received string',
-          },
-        ],
-      },
+    expect(result).toMatchZodValidationError({
+      code: 'invalid_type',
+      path: ['marketingEmailsOptedIn'],
+      message: 'Invalid input: expected boolean, received string',
     });
   });
 
   it('rejects missing field', () => {
     const result = UpdatePreferencesSchema.safeParse({});
-    expect(result).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          {
-            code: 'invalid_type',
-            path: ['marketingEmailsOptedIn'],
-            message: 'Invalid input: expected boolean, received undefined',
-          },
-        ],
-      },
+    expect(result).toMatchZodValidationError({
+      code: 'invalid_type',
+      path: ['marketingEmailsOptedIn'],
+      message: 'Invalid input: expected boolean, received undefined',
     });
   });
 
   it('rejects null value', () => {
     const result = UpdatePreferencesSchema.safeParse({ marketingEmailsOptedIn: null });
-    expect(result).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          {
-            code: 'invalid_type',
-            path: ['marketingEmailsOptedIn'],
-            message: 'Invalid input: expected boolean, received null',
-          },
-        ],
-      },
+    expect(result).toMatchZodValidationError({
+      code: 'invalid_type',
+      path: ['marketingEmailsOptedIn'],
+      message: 'Invalid input: expected boolean, received null',
     });
   });
 

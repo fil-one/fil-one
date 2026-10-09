@@ -22,22 +22,17 @@ describe('CreateRagApiKeySchema', () => {
 
   it('trims and validates the key name like access keys', () => {
     expect(CreateRagApiKeySchema.parse({ keyName: '  ok name  ' }).keyName).toBe('ok name');
-    expect(CreateRagApiKeySchema.safeParse({ keyName: '' })).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          { code: 'too_small', path: ['keyName'] },
-          { code: 'invalid_format', path: ['keyName'] },
-        ],
-      },
+    expect(CreateRagApiKeySchema.safeParse({ keyName: '' })).toMatchZodValidationError(
+      { code: 'too_small', path: ['keyName'] },
+      { code: 'invalid_format', path: ['keyName'] },
+    );
+    expect(CreateRagApiKeySchema.safeParse({ keyName: 'bad/name' })).toMatchZodValidationError({
+      code: 'invalid_format',
+      path: ['keyName'],
     });
-    expect(CreateRagApiKeySchema.safeParse({ keyName: 'bad/name' })).toMatchObject({
-      success: false,
-      error: { issues: [{ code: 'invalid_format', path: ['keyName'] }] },
-    });
-    expect(CreateRagApiKeySchema.safeParse({ keyName: 'x'.repeat(65) })).toMatchObject({
-      success: false,
-      error: { issues: [{ code: 'too_big', path: ['keyName'] }] },
+    expect(CreateRagApiKeySchema.safeParse({ keyName: 'x'.repeat(65) })).toMatchZodValidationError({
+      code: 'too_big',
+      path: ['keyName'],
     });
   });
 
@@ -48,16 +43,9 @@ describe('CreateRagApiKeySchema', () => {
         bucketScope: 'specific',
         buckets,
       });
-      expect(result, `buckets: ${JSON.stringify(buckets)}`).toMatchObject({
-        success: false,
-        error: {
-          issues: [
-            {
-              path: ['buckets'],
-              message: 'At least one bucket is required when scope is "specific"',
-            },
-          ],
-        },
+      expect(result, `buckets: ${JSON.stringify(buckets)}`).toMatchZodValidationError({
+        path: ['buckets'],
+        message: 'At least one bucket is required when scope is "specific"',
       });
     }
   });
@@ -68,13 +56,9 @@ describe('CreateRagApiKeySchema', () => {
       bucketScope: 'all',
       buckets: [BUCKET],
     });
-    expect(result).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          { path: ['buckets'], message: 'Buckets must not be provided when scope is "all"' },
-        ],
-      },
+    expect(result).toMatchZodValidationError({
+      path: ['buckets'],
+      message: 'Buckets must not be provided when scope is "all"',
     });
   });
 
@@ -84,9 +68,9 @@ describe('CreateRagApiKeySchema', () => {
       bucketScope: 'specific',
       buckets: [BUCKET, { ...BUCKET }],
     });
-    expect(dup).toMatchObject({
-      success: false,
-      error: { issues: [{ path: ['buckets'], message: 'Duplicate bucket in scope' }] },
+    expect(dup).toMatchZodValidationError({
+      path: ['buckets'],
+      message: 'Duplicate bucket in scope',
     });
 
     const crossRegion = CreateRagApiKeySchema.safeParse({
@@ -107,9 +91,10 @@ describe('CreateRagApiKeySchema', () => {
       bucketScope: 'specific',
       buckets,
     });
-    expect(result).toMatchObject({
-      success: false,
-      error: { issues: [{ code: 'too_big', maximum: RAG_KEY_MAX_BUCKETS, path: ['buckets'] }] },
+    expect(result).toMatchZodValidationError({
+      code: 'too_big',
+      maximum: RAG_KEY_MAX_BUCKETS,
+      path: ['buckets'],
     });
   });
 
@@ -119,9 +104,9 @@ describe('CreateRagApiKeySchema', () => {
       bucketScope: 'specific',
       buckets: [{ region: 'mars-central-1', name: 'my-bucket' }],
     });
-    expect(result).toMatchObject({
-      success: false,
-      error: { issues: [{ code: 'invalid_value', path: ['buckets', 0, 'region'] }] },
+    expect(result).toMatchZodValidationError({
+      code: 'invalid_value',
+      path: ['buckets', 0, 'region'],
     });
   });
 });

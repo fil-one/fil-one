@@ -108,17 +108,10 @@ describe('CreateAccessKeySchema reserved key names', () => {
   for (const [desc, keyName] of Object.entries(reservedNames)) {
     it(`rejects a key name when ${desc}`, () => {
       const result = CreateAccessKeySchema.safeParse({ ...base, keyName });
-      expect(result).toMatchObject({
-        success: false,
-        error: {
-          issues: [
-            {
-              code: 'custom',
-              path: ['keyName'],
-              message: expect.stringContaining('must not start with "filone-console"'),
-            },
-          ],
-        },
+      expect(result).toMatchZodValidationError({
+        code: 'custom',
+        path: ['keyName'],
+        message: expect.stringContaining('must not start with "filone-console"'),
       });
     });
   }
@@ -150,17 +143,10 @@ describe('CreateAccessKeySchema bucket permissions', () => {
       permissions: ['read', 'CreateBucket'],
       region: S3Region.EuWest1,
     });
-    expect(result).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          {
-            code: 'custom',
-            path: ['permissions'],
-            message: 'Bucket management permissions are not supported in the selected region',
-          },
-        ],
-      },
+    expect(result).toMatchZodValidationError({
+      code: 'custom',
+      path: ['permissions'],
+      message: 'Bucket management permissions are not supported in the selected region',
     });
   });
 
@@ -188,13 +174,10 @@ describe('CreateAccessKeySchema bucket permissions', () => {
       permissions: [],
       region: S3Region.UsEast1,
     });
-    expect(result).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          { code: 'custom', path: ['permissions'], message: 'At least one permission is required' },
-        ],
-      },
+    expect(result).toMatchZodValidationError({
+      code: 'custom',
+      path: ['permissions'],
+      message: 'At least one permission is required',
     });
   });
 
@@ -205,17 +188,10 @@ describe('CreateAccessKeySchema bucket permissions', () => {
       granularPermissions: ['GetObjectVersion'], // belongs to `read`, not `list`
       region: S3Region.UsEast1,
     });
-    expect(result).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          {
-            code: 'custom',
-            path: ['granularPermissions'],
-            message: 'Granular permissions must belong to the selected basic permissions',
-          },
-        ],
-      },
+    expect(result).toMatchZodValidationError({
+      code: 'custom',
+      path: ['granularPermissions'],
+      message: 'Granular permissions must belong to the selected basic permissions',
     });
   });
 });

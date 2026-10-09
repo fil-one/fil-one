@@ -21,17 +21,10 @@ describe('DeletionCodeSchema', () => {
     ['empty', ''],
     ['internal space', '123 56'],
   ])('rejects %s', (_label, code) => {
-    expect(DeletionCodeSchema.safeParse(code)).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          {
-            code: 'invalid_format',
-            format: 'regex',
-            message: 'Verification code must be 6 digits',
-          },
-        ],
-      },
+    expect(DeletionCodeSchema.safeParse(code)).toMatchZodValidationError({
+      code: 'invalid_format',
+      format: 'regex',
+      message: 'Verification code must be 6 digits',
     });
   });
 
@@ -39,17 +32,12 @@ describe('DeletionCodeSchema', () => {
     expect(DeletionCodeSchema.safeParse('1'.repeat(DELETION_CODE_LENGTH))).toMatchObject({
       success: true,
     });
-    expect(DeletionCodeSchema.safeParse('1'.repeat(DELETION_CODE_LENGTH + 1))).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          {
-            code: 'invalid_format',
-            format: 'regex',
-            message: 'Verification code must be 6 digits',
-          },
-        ],
-      },
+    expect(
+      DeletionCodeSchema.safeParse('1'.repeat(DELETION_CODE_LENGTH + 1)),
+    ).toMatchZodValidationError({
+      code: 'invalid_format',
+      format: 'regex',
+      message: 'Verification code must be 6 digits',
     });
   });
 });
@@ -84,9 +72,6 @@ describe('DeleteAccountSchema', () => {
       { code: 'invalid_format', path: ['code'], message: 'Verification code must be 6 digits' },
     ],
   ])('rejects %s', (_label, body, issue) => {
-    expect(DeleteAccountSchema.safeParse(body)).toMatchObject({
-      success: false,
-      error: { issues: [issue] },
-    });
+    expect(DeleteAccountSchema.safeParse(body)).toMatchZodValidationError(issue);
   });
 });

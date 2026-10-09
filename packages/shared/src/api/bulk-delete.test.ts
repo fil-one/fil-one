@@ -27,26 +27,26 @@ describe('CreateBulkDeleteJobSchema', () => {
   });
 
   it('requires an idempotency key', () => {
-    expect(CreateBulkDeleteJobSchema.safeParse({})).toMatchObject({
-      success: false,
-      error: { issues: [{ code: 'invalid_type', path: ['idempotencyKey'] }] },
+    expect(CreateBulkDeleteJobSchema.safeParse({})).toMatchZodValidationError({
+      code: 'invalid_type',
+      path: ['idempotencyKey'],
     });
   });
 
   it('rejects a non-UUID idempotency key', () => {
-    expect(CreateBulkDeleteJobSchema.safeParse({ idempotencyKey: 'nope' })).toMatchObject({
-      success: false,
-      error: { issues: [{ code: 'invalid_format', format: 'uuid', path: ['idempotencyKey'] }] },
+    expect(
+      CreateBulkDeleteJobSchema.safeParse({ idempotencyKey: 'nope' }),
+    ).toMatchZodValidationError({
+      code: 'invalid_format',
+      format: 'uuid',
+      path: ['idempotencyKey'],
     });
   });
 
   it('rejects an unknown scope', () => {
     expect(
       CreateBulkDeleteJobSchema.safeParse({ idempotencyKey, scope: 'everything' }),
-    ).toMatchObject({
-      success: false,
-      error: { issues: [{ code: 'invalid_value', path: ['scope'] }] },
-    });
+    ).toMatchZodValidationError({ code: 'invalid_value', path: ['scope'] });
   });
 });
 

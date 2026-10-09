@@ -61,49 +61,28 @@ describe('ActivateSubscriptionRequestSchema', () => {
 
   it('rejects promotion codes shorter than 3 characters', () => {
     const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'ab' });
-    expect(parsed).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          {
-            code: 'invalid_format',
-            path: ['promotionCode'],
-            message: 'Promo code must be 3–40 letters, digits, or hyphens.',
-          },
-        ],
-      },
+    expect(parsed).toMatchZodValidationError({
+      code: 'invalid_format',
+      path: ['promotionCode'],
+      message: 'Promo code must be 3–40 letters, digits, or hyphens.',
     });
   });
 
   it('rejects promotion codes longer than 40 characters', () => {
     const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'A'.repeat(41) });
-    expect(parsed).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          {
-            code: 'invalid_format',
-            path: ['promotionCode'],
-            message: 'Promo code must be 3–40 letters, digits, or hyphens.',
-          },
-        ],
-      },
+    expect(parsed).toMatchZodValidationError({
+      code: 'invalid_format',
+      path: ['promotionCode'],
+      message: 'Promo code must be 3–40 letters, digits, or hyphens.',
     });
   });
 
   it('rejects promotion codes containing spaces or punctuation', () => {
     const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'bad code!' });
-    expect(parsed).toMatchObject({
-      success: false,
-      error: {
-        issues: [
-          {
-            code: 'invalid_format',
-            path: ['promotionCode'],
-            message: 'Promo code must be 3–40 letters, digits, or hyphens.',
-          },
-        ],
-      },
+    expect(parsed).toMatchZodValidationError({
+      code: 'invalid_format',
+      path: ['promotionCode'],
+      message: 'Promo code must be 3–40 letters, digits, or hyphens.',
     });
   });
 });
