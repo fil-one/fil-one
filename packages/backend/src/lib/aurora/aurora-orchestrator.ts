@@ -30,6 +30,7 @@ import {
   mapToModelsTenantStatus,
   updateTenantStatus as updateAuroraTenantStatusApi,
   getTenantInfo,
+  deleteAuroraTenant,
 } from '../aurora/aurora-backoffice.ts';
 import {
   getBucketStorageSamples,
@@ -62,6 +63,14 @@ export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting
 
 function getStage(): string {
   return process.env.FILONE_STAGE!;
+}
+
+/**
+ * Aurora serves tenant DELETE on its dev backoffice only; sst.config.ts sets the
+ * flag on every stage except production. Read per call so tests can flip it.
+ */
+function isTenantDeleteEnabled(): boolean {
+  return process.env.AURORA_TENANT_DELETE_ENABLED === 'true';
 }
 
 /** Object-lock and retention fields off a portal single-bucket response. */
@@ -124,8 +133,11 @@ export const auroraOrchestrator = {
           allowMissing: true,
           signal: opts?.signal,
         });
-        // TODO(FIL-919): delete the tenant once Aurora's Backoffice API exposes a
-        // DELETE. Until then buckets and objects survive the teardown.
+        // Disabling first cuts access even when Aurora refuses the DELETE (409:
+        // component setup incomplete, or another update in progress).
+        if (isTenantDeleteEnabled()) {
+          await deleteAuroraTenant({ tenantId, signal: opts?.signal });
+        }
       },
       { ...TENANT_DELETE_RETRY, signal: opts?.signal },
     );

@@ -5,6 +5,7 @@ import {
   createAuroraTenantApiKey,
   DuplicateTokenNameError,
   updateTenantStatus,
+  deleteAuroraTenant,
   getTenantInfo,
   getTenantStatus,
 } from './aurora-backoffice.ts';
@@ -29,6 +30,7 @@ const mockSetupS3Component = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockPostTokens = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockCreateClient = vi.fn((_config: Record<string, unknown>) => 'mock-aurora-client');
 const mockSetTenantStatus = vi.fn((_options: Record<string, unknown>) => ({}));
+const mockDeleteTenant = vi.fn((_options: Record<string, unknown>) => ({}));
 const mockGetTenant = vi.fn((_options: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/aurora-backoffice-client', () => ({
@@ -38,6 +40,7 @@ vi.mock('@filone/aurora-backoffice-client', () => ({
   setupS3Component: (options: Record<string, unknown>) => mockSetupS3Component(options),
   createTenantTokenV2: (options: Record<string, unknown>) => mockPostTokens(options),
   setTenantStatus: (options: Record<string, unknown>) => mockSetTenantStatus(options),
+  deleteTenant: (options: Record<string, unknown>) => mockDeleteTenant(options),
   getTenantV2: (options: Record<string, unknown>) => mockGetTenant(options),
 }));
 
@@ -366,6 +369,19 @@ describe('updateTenantStatus', () => {
     ).resolves.toBeUndefined();
   });
 
+  // Aurora answers 410 once tenant deletion has started. A re-driven teardown
+  // must get past the disable step to resume the DELETE.
+  it('treats a 410 as success when allowMissing is set', async () => {
+    mockSetTenantStatus.mockResolvedValue({
+      error: { message: 'Tenant is deleted' },
+      response: { status: 410 },
+    });
+
+    await expect(
+      updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED', allowMissing: true }),
+    ).resolves.toBeUndefined();
+  });
+
   it('still throws on a non-404 when allowMissing is set', async () => {
     mockSetTenantStatus.mockResolvedValue({
       error: { message: 'boom' },
@@ -375,6 +391,44 @@ describe('updateTenantStatus', () => {
     await expect(
       updateTenantStatus({ tenantId: 'tenant-1', status: 'DISABLED', allowMissing: true }),
     ).rejects.toThrow('Aurora status update failed for tenant tenant-1');
+  });
+});
+
+describe('deleteAuroraTenant', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('deletes the tenant', async () => {
+    mockDeleteTenant.mockResolvedValue({ error: undefined, response: { status: 204 } });
+
+    await deleteAuroraTenant({ tenantId: 'tenant-1' });
+
+    expect(mockDeleteTenant).toHaveBeenCalledWith({
+      client: 'mock-aurora-client',
+      path: { partnerId: 'test-partner', tenantId: 'tenant-1' },
+      throwOnError: false,
+    });
+  });
+
+  it('treats a 404 as success: the tenant is already gone', async () => {
+    mockDeleteTenant.mockResolvedValue({
+      error: { message: 'Tenant not found' },
+      response: { status: 404 },
+    });
+
+    await expect(deleteAuroraTenant({ tenantId: 'tenant-1' })).resolves.toBeUndefined();
+  });
+
+  it.each([409, 500])('throws on a %i', async (status) => {
+    mockDeleteTenant.mockResolvedValue({
+      error: { message: 'Deletion not possible' },
+      response: { status },
+    });
+
+    await expect(deleteAuroraTenant({ tenantId: 'tenant-1' })).rejects.toThrow(
+      'Aurora tenant deletion failed for tenant tenant-1',
+    );
   });
 });
 
@@ -454,6 +508,14 @@ describe('signal forwarding', () => {
         return getTenantStatus({ tenantId: 't', signal });
       },
       mocks: [mockGetTenant],
+    },
+    {
+      name: 'deleteAuroraTenant',
+      run: () => {
+        mockDeleteTenant.mockResolvedValue({ error: undefined });
+        return deleteAuroraTenant({ tenantId: 't', signal });
+      },
+      mocks: [mockDeleteTenant],
     },
     {
       name: 'updateTenantStatus',

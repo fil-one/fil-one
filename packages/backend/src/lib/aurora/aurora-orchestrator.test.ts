@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
@@ -45,6 +45,7 @@ const mockGetStorageSamples = vi.fn();
 const mockGetOperationsSamples = vi.fn();
 const mockGetBucketStorageSamples = vi.fn();
 const mockGetTenantInfo = vi.fn();
+const mockDeleteAuroraTenant = vi.fn();
 vi.mock('./aurora-backoffice.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('../aurora/aurora-backoffice.ts')>();
   return {
@@ -52,6 +53,7 @@ vi.mock('./aurora-backoffice.ts', async (importOriginal) => {
     updateTenantStatus: (...args: unknown[]) => mockUpdateAuroraTenantStatusApi(...args),
     getTenantStatus: (...args: unknown[]) => mockGetAuroraTenantStatusApi(...args),
     getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...args),
+    deleteAuroraTenant: (...args: unknown[]) => mockDeleteAuroraTenant(...args),
   };
 });
 
@@ -232,7 +234,11 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('deleteTenant', () => {
-    it('disables the tenant — Aurora exposes no tenant DELETE (FIL-919)', async () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('only disables the tenant while tenant deletion is off', async () => {
       mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
 
       await auroraOrchestrator.deleteTenant('aurora-t-1');
@@ -242,6 +248,48 @@ describe('auroraOrchestrator', () => {
         status: 'DISABLED',
         allowMissing: true,
       });
+      expect(mockDeleteAuroraTenant).not.toHaveBeenCalled();
+    });
+
+    it('only disables the tenant when the flag is set to anything but true', async () => {
+      vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'false');
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.deleteTenant('aurora-t-1');
+
+      expect(mockDeleteAuroraTenant).not.toHaveBeenCalled();
+    });
+
+    it('disables, then deletes the tenant while tenant deletion is on', async () => {
+      vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'true');
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+      mockDeleteAuroraTenant.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.deleteTenant('aurora-t-1');
+
+      expect(mockDeleteAuroraTenant).toHaveBeenCalledWith({ tenantId: 'aurora-t-1' });
+      expect(mockUpdateAuroraTenantStatusApi.mock.invocationCallOrder[0]).toBeLessThan(
+        mockDeleteAuroraTenant.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('retries a refused deletion and throws once the retry budget is exhausted', async () => {
+      vi.useFakeTimers();
+      vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'true');
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+      mockDeleteAuroraTenant.mockRejectedValue(
+        new Error('Aurora tenant deletion failed for tenant aurora-t-1'),
+      );
+
+      const promise = auroraOrchestrator.deleteTenant('aurora-t-1').catch((e: unknown) => e);
+      await vi.runAllTimersAsync();
+
+      expect(await promise).toMatchObject({
+        message: 'Aurora tenant deletion failed for tenant aurora-t-1',
+      });
+      // 1 initial + 3 retries
+      expect(mockDeleteAuroraTenant).toHaveBeenCalledTimes(4);
+      vi.useRealTimers();
     });
 
     // A re-driven teardown disables a tenant a previous pass may have removed.
@@ -932,6 +980,10 @@ describe('auroraOrchestrator signal forwarding', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   // Each case names the Aurora-facing mocks the method must reach; the test
   // checks every one of them received the caller's signal in its options.
   const cases: Array<{
@@ -1006,6 +1058,16 @@ describe('auroraOrchestrator signal forwarding', () => {
         return auroraOrchestrator.deleteTenant('t', { signal });
       },
       mocks: [mockUpdateAuroraTenantStatusApi],
+    },
+    {
+      name: 'deleteTenant with tenant deletion on',
+      run: () => {
+        vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'true');
+        mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+        mockDeleteAuroraTenant.mockResolvedValue(undefined);
+        return auroraOrchestrator.deleteTenant('t', { signal });
+      },
+      mocks: [mockUpdateAuroraTenantStatusApi, mockDeleteAuroraTenant],
     },
     {
       name: 'getTenantStatus',

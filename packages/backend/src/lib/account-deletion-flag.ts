@@ -3,11 +3,11 @@ import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from './response-builder.ts';
 
 /**
- * Self-serve deletion is withheld until Aurora exposes a tenant DELETE
- * (FIL-919): the teardown only disables an Aurora tenant, so an org's buckets
- * and objects survive its own deletion. The `customer.deleted` trigger is
- * deliberately not gated — it is the trial-abuse response and accepts that
- * residue.
+ * Self-serve deletion is withheld until Aurora serves its tenant DELETE in
+ * production (AURORA_TENANT_DELETE_ENABLED): there the teardown only
+ * disables an Aurora tenant, so an org's buckets and objects survive its own
+ * deletion. The `customer.deleted` trigger is deliberately not gated — it is
+ * the trial-abuse response and accepts that residue.
  *
  * Read per call so tests can flip it. Keep in step with
  * ACCOUNT_DELETION_ENABLED in packages/website/src/lib/account-deletion.ts.
