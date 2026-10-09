@@ -1,6 +1,7 @@
 import type {
   AccessKeyPermission,
   AccessModel,
+  BucketPolicy,
   GranularPermission,
   RetentionDurationType,
   RetentionMode,
@@ -69,6 +70,12 @@ export interface CreateBucketArgs {
   bucketName: string;
   versioning?: boolean;
   lock?: boolean;
+  /**
+   * The bucket's first policy, on a region serving the `iam` access model.
+   * Written with `PutBucketPolicy` and `If-None-Match: *` right after the
+   * bucket is created. Never set on a `scoped-keys` region.
+   */
+  policy?: BucketPolicy;
   retention?: {
     enabled: boolean;
     mode: RetentionMode;

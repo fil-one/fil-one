@@ -1,10 +1,23 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { CreateBucketResponse, ErrorResponse } from '@filone/shared';
-import { CreateBucketSchema, isSupportedRegion } from '@filone/shared';
+import type { BucketPolicy, CreateBucketResponse, ErrorResponse, S3Region } from '@filone/shared';
+import {
+  CreateBucketSchema,
+  OrgRole,
+  defaultBucketPolicy,
+  isSupportedRegion,
+} from '@filone/shared';
+import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
+import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import { BucketAlreadyExistsError, BucketConfigurationError } from '../lib/errors.ts';
+import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import {
+  BucketAlreadyExistsError,
+  BucketConfigurationError,
+  PolicyValidationError,
+} from '../lib/errors.ts';
+import { listMembers } from '../lib/org-membership.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
@@ -13,7 +26,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
-import { getUserInfo } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
@@ -44,7 +57,7 @@ export async function baseHandler(
 
   const { bucketName, region, versioning, lock, retention } = parsed.data;
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
 
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
     return unsupportedRegionResponse(region);
@@ -58,31 +71,56 @@ export async function baseHandler(
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
+  const policy = await getOrgDefaultPolicy(orchestrator, orgId, userId);
+  const audit = policy
+    ? await auditDefaultBucketPolicy({ event, orgId, userId, region, bucketName })
+    : undefined;
+
   try {
     await orchestrator.createBucket(tenantId, {
       bucketName,
       versioning,
       lock,
       retention,
+      ...(policy ? { policy } : {}),
     });
   } catch (err) {
+    // The bucket was created but couldn't be fully configured. Surface the
+    // actionable message so the caller can finish setup via the S3 API instead
+    // of getting the generic 500 from errorHandlerMiddleware. The policy is
+    // written before the configuration calls, so the policy write did succeed.
+    if (err instanceof BucketConfigurationError) {
+      await audit?.complete({
+        outcome: 'succeeded',
+        details: { statements: policy?.Statement.length },
+      });
+      return new ResponseBuilder()
+        .status(500)
+        .body<ErrorResponse>({ message: err.message })
+        .build();
+    }
+    await audit?.complete({ outcome: 'failed' });
     if (err instanceof BucketAlreadyExistsError) {
       return new ResponseBuilder()
         .status(409)
         .body<ErrorResponse>({ message: `Bucket "${bucketName}" already exists` })
         .build();
     }
-    // The bucket was created but couldn't be fully configured. Surface the
-    // actionable message so the caller can finish setup via the S3 API instead
-    // of getting the generic 500 from errorHandlerMiddleware.
-    if (err instanceof BucketConfigurationError) {
+    // The storage system refused the policy written after the create; the
+    // bucket exists without a policy. Any other failure of that write answers
+    // the generic 500.
+    if (err instanceof PolicyValidationError) {
       return new ResponseBuilder()
-        .status(500)
+        .status(400)
         .body<ErrorResponse>({ message: err.message })
         .build();
     }
     throw err;
   }
+  await audit?.complete({
+    outcome: 'succeeded',
+    details: { statements: policy?.Statement.length },
+  });
 
   const now = new Date().toISOString();
 
@@ -97,6 +135,59 @@ export async function baseHandler(
       },
     })
     .build();
+}
+
+/**
+ * The policy a new bucket starts with on an `iam` region: the org's current
+ * Owners with every action, its Admins with every action but the two retention
+ * writes, and a Member creator with the same in a statement of their own.
+ * Owners and Admins reach a bucket only because the console names them on its
+ * policy, so every bucket the console creates carries the roster from its first
+ * moment. Undefined on a `scoped-keys` orchestrator, where nothing evaluates a
+ * policy.
+ */
+async function getOrgDefaultPolicy(
+  orchestrator: ServiceOrchestrator,
+  orgId: string,
+  creatorId: string,
+): Promise<BucketPolicy | undefined> {
+  if (orchestrator.accessModel !== 'iam') return undefined;
+  const members = await listMembers(orgId);
+  return defaultBucketPolicy({
+    owners: members.filter((m) => m.role === OrgRole.Owner).map((m) => m.userId),
+    admins: members.filter((m) => m.role === OrgRole.Admin).map((m) => m.userId),
+    creatorId,
+  });
+}
+
+/**
+ * The default policy is written at the storage system with the bucket, so it is
+ * recorded like every other policy write: an intent before the call and a
+ * completion after it. Best-effort rather than fail-closed, because the
+ * document is the roster the console derives rather than a grant somebody
+ * authored, and an audit outage must not stop buckets being created.
+ */
+function auditDefaultBucketPolicy({
+  event,
+  orgId,
+  userId,
+  region,
+  bucketName,
+}: {
+  event: AuthenticatedEvent;
+  orgId: string;
+  userId: string;
+  region: S3Region;
+  bucketName: string;
+}): Promise<AuditCorrelation<'bucket_policy.created'>> {
+  return twoPhaseAudit({
+    type: 'bucket_policy.created',
+    mode: 'best-effort',
+    actor: userActor({ userId, email: getVerifiedEmail(event) }),
+    orgId,
+    subject: AuditSubjects.bucket(region, bucketName),
+    details: { region, bucketName, trigger: 'bucket_created' },
+  });
 }
 
 export const handler = middy(baseHandler)
