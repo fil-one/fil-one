@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { ServiceAccessKey } from '@filone/shared';
+import type { AccessKey, ServiceAccessKey } from '@filone/shared';
 import { AccessKeysTable } from './AccessKeysTable.js';
 import { ToastProvider } from './Toast/ToastProvider';
 
@@ -33,6 +33,26 @@ describe('AccessKeysTable — bucket-info permissions', () => {
     const keys = [makeKey({ permissions: ['read', 'write'] })];
     renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
     expect(screen.queryByTestId('permission-badge-bucket-info')).not.toBeInTheDocument();
+  });
+});
+
+describe('AccessKeysTable — a principal-bound key', () => {
+  it('shows the key following the bucket policies rather than a permission set', () => {
+    const keys: AccessKey[] = [
+      {
+        id: '1',
+        type: 'principal',
+        principalId: 'user-1',
+        keyName: 'Test Key',
+        accessKeyId: 'ACCESS_KEY_12345EXAMPL',
+        createdAt: '2026-01-15T10:00:00Z',
+        status: 'active',
+      },
+    ];
+    renderWithProviders(<AccessKeysTable keys={keys} showPermissions showBuckets />);
+    expect(screen.getByTestId('permission-badge-follows-policy')).toBeInTheDocument();
+    expect(screen.getByText('Per bucket policy')).toBeInTheDocument();
+    expect(screen.queryByText('All Buckets')).not.toBeInTheDocument();
   });
 });
 
