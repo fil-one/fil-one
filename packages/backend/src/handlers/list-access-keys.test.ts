@@ -3,6 +3,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { OrgRole, S3Region } from '@filone/shared';
+import { USER_ID, grantGetObjectToUser } from '../test/bucket-policy-fixture.ts';
 import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
 import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.ts';
 
@@ -152,14 +153,18 @@ describe('list-access-keys baseHandler', () => {
     const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
     const [listed] = JSON.parse(result.body!).keys;
-    expect(listed).toMatchObject({
+    expect(listed).toStrictEqual({
       id: 'key-9',
       type: 'principal',
-      principalId: 'user-1',
+      keyName: 'laptop',
+      accessKeyId: 'did:key:z9',
+      createdAt: '2026-09-16T00:00:00Z',
+      status: 'active',
       region: 'us-east-9',
+      expiresAt: null,
+      createdBy: 'user-1',
+      principalId: 'user-1',
     });
-    expect(listed).not.toHaveProperty('permissions');
-    expect(listed).not.toHaveProperty('bucketScope');
   });
 
   it('returns bucket-scoped key with buckets list', async () => {
@@ -671,7 +676,7 @@ describe('who sees which keys', () => {
     const TENANT_ID = tenantFor('forgeDev', USER_INFO.orgId);
     const BUCKET = 'photos';
 
-    function principalRow(id: string, principalId: string) {
+    function buildPrincipalKeyRow(id: string, principalId: string) {
       return ddbItem({
         id,
         keyName: `key ${id}`,
@@ -683,14 +688,23 @@ describe('who sees which keys', () => {
       });
     }
 
-    async function listedIds(): Promise<string[]> {
+    const serviceKeyRow = ddbItem({
+      id: 'service-1',
+      keyName: 'CI',
+      accessKeyId: 'AKIA1111',
+      createdAt: '2026-01-01T00:00:00Z',
+      permissions: ['read'],
+      bucketScope: 'all',
+      region: IAM_REGION,
+    });
+
+    async function listKeyIdsForBucket(): Promise<string[]> {
       const result = await baseHandler(
         buildEvent({
           userInfo: USER_INFO,
           queryStringParameters: { bucket: BUCKET, region: IAM_REGION },
         }),
       );
-      expect(result.statusCode).toBe(200);
       return JSON.parse(result.body!).keys.map((key: { id: string }) => key.id);
     }
 
@@ -702,53 +716,45 @@ describe('who sees which keys', () => {
     it('lists a principal-bound key when the bucket policy gives its principal any action', async () => {
       // A member who can see the bucket can act on it with their
       // principal-bound key, so that key belongs in the bucket's list.
-      iamFake.seedPolicy(TENANT_ID, BUCKET, {
-        Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
-      });
-      ddbMock.on(QueryCommand).resolves({ Items: [principalRow('key-1', 'user-1')] });
+      iamFake.seedPolicy(TENANT_ID, BUCKET, grantGetObjectToUser);
+      ddbMock.on(QueryCommand).resolves({ Items: [buildPrincipalKeyRow('key-1', USER_ID)] });
 
-      expect(await listedIds()).toStrictEqual(['key-1']);
+      expect(await listKeyIdsForBucket()).toStrictEqual(['key-1']);
     });
 
     it('leaves out a principal-bound key the bucket policy gives nothing', async () => {
-      iamFake.seedPolicy(TENANT_ID, BUCKET, {
-        Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
-      });
+      iamFake.seedPolicy(TENANT_ID, BUCKET, grantGetObjectToUser);
       ddbMock.on(QueryCommand).resolves({
-        Items: [principalRow('key-1', 'user-1'), principalRow('key-2', 'user-2')],
+        Items: [buildPrincipalKeyRow('key-1', USER_ID), buildPrincipalKeyRow('key-2', 'user-2')],
       });
 
-      expect(await listedIds()).toStrictEqual(['key-1']);
+      expect(await listKeyIdsForBucket()).toStrictEqual(['key-1']);
     });
 
-    it('keeps a scoped key on its stored scope, reading the policy once', async () => {
-      iamFake.seedPolicy(TENANT_ID, BUCKET, {
-        Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
-      });
+    it('keeps a service key whose stored scope covers the bucket', async () => {
+      iamFake.seedPolicy(TENANT_ID, BUCKET, grantGetObjectToUser);
       ddbMock.on(QueryCommand).resolves({
-        Items: [
-          ddbItem({
-            id: 'service-1',
-            keyName: 'CI',
-            accessKeyId: 'AKIA1111',
-            createdAt: '2026-01-01T00:00:00Z',
-            permissions: ['read'],
-            bucketScope: 'all',
-            region: IAM_REGION,
-          }),
-          principalRow('key-1', 'user-1'),
-          principalRow('key-2', 'user-2'),
-        ],
+        Items: [serviceKeyRow, buildPrincipalKeyRow('key-2', 'user-2')],
       });
 
-      expect(await listedIds()).toStrictEqual(['service-1', 'key-1']);
-      expect(iamFake.calls.filter((call) => call.method === 'getBucketPolicy')).toHaveLength(1);
+      expect(await listKeyIdsForBucket()).toStrictEqual(['service-1']);
+    });
+
+    it('reads the bucket policy once per request', async () => {
+      iamFake.seedPolicy(TENANT_ID, BUCKET, grantGetObjectToUser);
+      ddbMock.on(QueryCommand).resolves({
+        Items: [buildPrincipalKeyRow('key-1', USER_ID), buildPrincipalKeyRow('key-2', 'user-2')],
+      });
+
+      await listKeyIdsForBucket();
+
+      expect(iamFake.calls.map((call) => call.method)).toStrictEqual(['getBucketPolicy']);
     });
 
     it('lists no principal-bound key for a bucket with no policy', async () => {
-      ddbMock.on(QueryCommand).resolves({ Items: [principalRow('key-1', 'user-1')] });
+      ddbMock.on(QueryCommand).resolves({ Items: [buildPrincipalKeyRow('key-1', USER_ID)] });
 
-      expect(await listedIds()).toStrictEqual([]);
+      expect(await listKeyIdsForBucket()).toStrictEqual([]);
     });
   });
 });

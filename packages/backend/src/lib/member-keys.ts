@@ -36,7 +36,7 @@ export interface MemberAccessKey {
   createdBy?: string;
   permissions?: AccessKeyRecord['permissions'];
   granularPermissions?: AccessKeyRecord['granularPermissions'];
-  /** Set on a principal-bound key, which a narrowing keeps under any role that can mint. */
+  /** Set on a principal-bound key. */
   principalId?: string;
 }
 
@@ -125,6 +125,11 @@ export function reviewAccessKeysForRole(
       continue;
     }
     if (accessKey.createdBy !== userId) continue;
+    // A principal-bound key is never revoked by a role change.
+    if (accessKey.principalId) {
+      review.retainedKeyCount += 1;
+      continue;
+    }
 
     const retention = canRetainAccessKey(role, accessKey);
     if (retention.retained) {
@@ -159,8 +164,10 @@ export async function reviewMemberAccessKeysForRole(
  * landing between them is counted by the fence and missing from the list.
  *
  * Removal asks about `NO_ROLE`, the narrowing to nothing: no role is left to
- * mint under, so `canRetainAccessKey` condemns every attributed key. Rows with
- * no recorded creator are outside this rule, as they are outside every other.
+ * mint under, so `canRetainAccessKey` condemns every attributed service key.
+ * A principal-bound key is never revoked by a role change; removing the
+ * principal at the storage system removes it. Rows with no recorded creator are
+ * outside this rule, as they are outside every other.
  */
 export async function reviewKeysForRoleChange(
   orgId: string,

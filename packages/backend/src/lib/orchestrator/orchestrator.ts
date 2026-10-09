@@ -427,13 +427,13 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   async findAccessKeyByName(
     tenantId: string,
     keyName: string,
+    lookup?: { principalId?: string },
     requestOptions?: OrchestratorRequestOptions,
-    principalId?: string,
   ) {
     const { data, error } = await getTenantsByTenantIdAccessKeys({
       client: this.client,
       path: { tenantId },
-      ...(principalId ? { query: { principalId } } : {}),
+      ...(lookup?.principalId ? { query: { principalId: lookup.principalId } } : {}),
       throwOnError: false,
       ...requestOptions,
     });
