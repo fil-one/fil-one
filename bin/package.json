@@ -15,6 +15,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1031.0",
     "@aws-sdk/util-dynamodb": "^3.996.2",
     "@filone/aurora-backoffice-client": "workspace:*",
+    "@filone/aurora-portal-client": "workspace:*",
     "sst": "^4.5.12",
     "stripe": "^22.0.2"
   },
@@ -22,6 +23,6 @@
     "@filone/backend": "workspace:*",
     "@filone/rag-shared": "workspace:*",
     "@filone/shared": "workspace:*",
-    "vitest": "^4.1.2"
+    "vitest": "^4.1.11"
   }
 }
