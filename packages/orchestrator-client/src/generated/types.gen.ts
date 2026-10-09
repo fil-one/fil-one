@@ -28,18 +28,6 @@ export type BucketName = string;
  */
 export type TenantStatus = 'active' | 'write-locked' | 'disabled';
 
-export type CreateTenantRequest = {
-  /**
-   * Region identifier the tenant's data is provisioned in — the
-   * same region name used in the S3 Gateway hostname
-   * (`https://s3.{region}.filonecontent.com`), e.g. `us-east-1`. A Service
-   * Orchestrator may manage more than one region; it must reject
-   * (422) region values it does not serve.
-   *
-   */
-  region: string;
-};
-
 export type Tenant = {
   tenantId: TenantId;
   status: TenantStatus;
@@ -324,7 +312,7 @@ export type GetTenantsByTenantIdResponse =
   GetTenantsByTenantIdResponses[keyof GetTenantsByTenantIdResponses];
 
 export type PutTenantsByTenantIdData = {
-  body: CreateTenantRequest;
+  body?: never;
   path: {
     tenantId: TenantId;
   };
@@ -337,13 +325,6 @@ export type PutTenantsByTenantIdErrors = {
    * Missing or invalid bearer token, or token not authorised for this tenant.
    */
   401: Error;
-  /**
-   * Request body is well-formed but fails semantic validation
-   * (missing required field, value out of range, enum mismatch,
-   * cross-field constraint, etc.).
-   *
-   */
-  422: Error;
   /**
    * Unexpected server error.
    */

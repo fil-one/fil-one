@@ -23,7 +23,6 @@ export type {
   ClientOptions,
   CreateAccessKeyRequest,
   CreatedAccessKey,
-  CreateTenantRequest,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdData,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdError,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdErrors,
