@@ -233,6 +233,7 @@ export {
   ROSTER_ADMINS_SID,
   ROSTER_CREATOR_SID,
   ROSTER_OWNERS_SID,
+  ROSTER_SID_LABELS,
   BucketPolicySchema,
   PolicyStatementSchema,
   PutBucketPolicyRequestSchema,
