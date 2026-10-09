@@ -3,9 +3,6 @@
   "definitions": {
     "buckets.BucketOwnerResponse": {
       "properties": {
-        "orgId": {
-          "type": "string"
-        },
         "partnerId": {
           "type": "string"
         },
@@ -14,6 +11,16 @@
         }
       },
       "type": "object"
+    },
+    "buckets.BucketStatus": {
+      "enum": ["CreationInProgress", "Created", "DeletionInProgress", "Deleted"],
+      "type": "string",
+      "x-enum-varnames": [
+        "BucketStatusCreationInProgress",
+        "BucketStatusCreated",
+        "BucketStatusDeletionInProgress",
+        "BucketStatusDeleted"
+      ]
     },
     "buckets.ListBucketsResponse": {
       "properties": {
@@ -31,6 +38,9 @@
         },
         "objectLock": {
           "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/definitions/buckets.BucketStatus"
         },
         "tenantId": {
           "type": "string"
@@ -64,6 +74,213 @@
     "common.ReturnMessage": {
       "properties": {
         "message": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "credits.Account": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "postedBalanceNanoUsd": {
+          "type": "integer"
+        },
+        "revision": {
+          "type": "integer"
+        },
+        "tenantId": {
+          "type": "string"
+        },
+        "unallocatedNanoUsd": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "credits.AccountEntry": {
+      "properties": {
+        "amountNanoUsd": {
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "sourceType": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "credits.AdjustmentRequest": {
+      "properties": {
+        "amountNanoUsd": {
+          "type": "integer"
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "reference": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "credits.Balance": {
+      "properties": {
+        "accountRevision": {
+          "type": "integer"
+        },
+        "oldestConsumptionReportedAt": {
+          "type": "string"
+        },
+        "settledFundedBalanceNanoUsd": {
+          "type": "integer"
+        },
+        "tenantId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "credits.MutationResult": {
+      "properties": {
+        "account": {
+          "$ref": "#/definitions/credits.Account"
+        },
+        "applied": {
+          "type": "boolean"
+        },
+        "entry": {
+          "$ref": "#/definitions/credits.AccountEntry"
+        }
+      },
+      "type": "object"
+    },
+    "credits.PaginatedEntriesResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/credits.AccountEntry"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "credits.Wallet": {
+      "properties": {
+        "account": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/credits.Account"
+            }
+          ],
+          "description": "nil until the first ledger entry creates the account row"
+        },
+        "balance": {
+          "$ref": "#/definitions/credits.Balance"
+        }
+      },
+      "type": "object"
+    },
+    "model.InferenceUsageResponse": {
+      "properties": {
+        "series": {
+          "items": {
+            "$ref": "#/definitions/model.InferenceUsageSeries"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "model.InferenceUsageSample": {
+      "properties": {
+        "cacheReadCostNanoUsd": {
+          "type": "integer"
+        },
+        "cachedTokens": {
+          "type": "integer"
+        },
+        "completionTokens": {
+          "type": "integer"
+        },
+        "errors": {
+          "type": "integer"
+        },
+        "inputCostNanoUsd": {
+          "type": "integer"
+        },
+        "outputCostNanoUsd": {
+          "type": "integer"
+        },
+        "promptTokens": {
+          "type": "integer"
+        },
+        "requests": {
+          "type": "integer"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "totalCostNanoUsd": {
+          "type": "integer"
+        },
+        "totalTokens": {
+          "type": "integer"
+        },
+        "windowSizeSeconds": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "model.InferenceUsageSeries": {
+      "properties": {
+        "samples": {
+          "items": {
+            "$ref": "#/definitions/model.InferenceUsageSample"
+          },
+          "type": "array"
+        },
+        "tags": {
+          "$ref": "#/definitions/model.InferenceUsageSeriesKey"
+        }
+      },
+      "type": "object"
+    },
+    "model.InferenceUsageSeriesKey": {
+      "properties": {
+        "model": {
           "type": "string"
         }
       },
@@ -254,6 +471,9 @@
         "lastSetupStep": {
           "$ref": "#/definitions/models.SetupStep"
         },
+        "lastTeardownStep": {
+          "$ref": "#/definitions/models.TeardownStep"
+        },
         "properties": {
           "$ref": "#/definitions/models.EmptyComponentProperties"
         }
@@ -283,34 +503,6 @@
       },
       "type": "object"
     },
-    "models.Component": {
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        },
-        "lastSetupStep": {
-          "$ref": "#/definitions/models.SetupStep"
-        },
-        "lastStepAt": {
-          "type": "string"
-        },
-        "name": {
-          "$ref": "#/definitions/models.ComponentName"
-        },
-        "properties": {
-          "type": "object"
-        },
-        "tenantId": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "models.ComponentName": {
-      "enum": ["S3", "Compute", "Auth", "Unknown"],
-      "type": "string",
-      "x-enum-varnames": ["ComponentS3", "ComponentCompute", "ComponentAuth", "ComponentUnknown"]
-    },
     "models.ComponentsStatus": {
       "properties": {
         "auth": {
@@ -319,8 +511,71 @@
         "compute": {
           "$ref": "#/definitions/models.ComputeComponentSetupStatus"
         },
+        "inference": {
+          "$ref": "#/definitions/models.InferenceComponentSetupStatus"
+        },
         "s3": {
           "$ref": "#/definitions/models.S3ComponentSetupStatus"
+        }
+      },
+      "type": "object"
+    },
+    "models.ComputeComponentDetails": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        },
+        "lastTeardownStep": {
+          "$ref": "#/definitions/models.TeardownStep"
+        },
+        "properties": {
+          "$ref": "#/definitions/models.ComputeComponentProperties"
+        }
+      },
+      "type": "object"
+    },
+    "models.ComputeComponentLimitsProperties": {
+      "properties": {
+        "cpuCountLimit": {
+          "type": "integer"
+        },
+        "instancesCountLimit": {
+          "type": "integer"
+        },
+        "memoryMiBLimit": {
+          "type": "integer"
+        },
+        "networkCountLimit": {
+          "type": "integer"
+        },
+        "primaryStorageGiBLimit": {
+          "type": "integer"
+        },
+        "publicIpCountLimit": {
+          "type": "integer"
+        },
+        "secondaryStorageGiBLimit": {
+          "type": "integer"
+        },
+        "snapshotCountLimit": {
+          "type": "integer"
+        },
+        "volumeCountLimit": {
+          "type": "integer"
+        },
+        "vpcCountLimit": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "models.ComputeComponentProperties": {
+      "properties": {
+        "limits": {
+          "$ref": "#/definitions/models.ComputeComponentLimitsProperties"
         }
       },
       "type": "object"
@@ -332,6 +587,9 @@
         },
         "lastSetupStep": {
           "$ref": "#/definitions/models.SetupStep"
+        },
+        "lastTeardownStep": {
+          "$ref": "#/definitions/models.TeardownStep"
         },
         "properties": {
           "$ref": "#/definitions/models.EmptyComponentProperties"
@@ -382,6 +640,17 @@
       },
       "type": "object"
     },
+    "models.CreateTenantResponse": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "models.CreateTokenPortalRequest": {
       "properties": {
         "description": {
@@ -394,6 +663,27 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "models.CreateTokenPortalRequestV2": {
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "$ref": "#/definitions/rbac.PortalPermission"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["permissions"],
       "type": "object"
     },
     "models.CreateUserResponse": {
@@ -443,6 +733,82 @@
         },
         "name": {
           "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "models.InferenceBackend": {
+      "properties": {
+        "defaultEnabled": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "models.InferenceComponentDetails": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        },
+        "lastTeardownStep": {
+          "$ref": "#/definitions/models.TeardownStep"
+        },
+        "properties": {
+          "$ref": "#/definitions/models.InferenceComponentResponseProperties"
+        }
+      },
+      "type": "object"
+    },
+    "models.InferenceComponentResponseProperties": {
+      "properties": {
+        "backendOverrides": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object"
+        },
+        "backends": {
+          "items": {
+            "$ref": "#/definitions/models.InferenceBackend"
+          },
+          "type": "array"
+        },
+        "prepaidCreditsRequired": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "models.InferenceComponentSetupProperties": {
+      "properties": {
+        "prepaidCreditsRequired": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "models.InferenceComponentSetupStatus": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "lastSetupStep": {
+          "$ref": "#/definitions/models.SetupStep"
+        },
+        "lastTeardownStep": {
+          "$ref": "#/definitions/models.TeardownStep"
+        },
+        "properties": {
+          "$ref": "#/definitions/models.InferenceComponentSetupProperties"
         }
       },
       "type": "object"
@@ -509,6 +875,26 @@
         "items": {
           "items": {
             "$ref": "#/definitions/models.TenantWithMetricsBackofficeResponse"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "models.PaginatedTenantsResponseV2": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/models.TenantWithMetricsBackofficeResponseV2"
           },
           "type": "array"
         },
@@ -596,6 +982,9 @@
     },
     "models.PartnerResponse": {
       "properties": {
+        "billingEnabled": {
+          "type": "boolean"
+        },
         "database": {
           "type": "string"
         },
@@ -668,10 +1057,27 @@
       },
       "type": "object"
     },
+    "models.S3ComponentLimits": {
+      "properties": {
+        "accessKeyQuantityLimit": {
+          "type": "integer"
+        },
+        "bucketQuantityLimit": {
+          "type": "integer"
+        },
+        "bucketSizeLimitBytes": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "models.S3ComponentProperties": {
       "properties": {
         "bucketSharingEnabled": {
           "type": "boolean"
+        },
+        "limits": {
+          "$ref": "#/definitions/models.S3ComponentLimits"
         }
       },
       "type": "object"
@@ -683,6 +1089,9 @@
         },
         "lastSetupStep": {
           "$ref": "#/definitions/models.SetupStep"
+        },
+        "lastTeardownStep": {
+          "$ref": "#/definitions/models.TeardownStep"
         },
         "properties": {
           "$ref": "#/definitions/models.S3ComponentProperties"
@@ -728,15 +1137,59 @@
         "FINISHED"
       ]
     },
-    "models.TenantBackofficeResponse": {
+    "models.TeardownStep": {
+      "enum": [
+        "NOT_STARTED",
+        "FINISHED",
+        "ORGANIZATION_DELETED",
+        "SHARES_REVOKED",
+        "ACCESS_DENIED",
+        "ACCESS_KEYS_DELETED",
+        "ROOT_KEYS_DESTROYED"
+      ],
+      "type": "string",
+      "x-enum-varnames": [
+        "TeardownNotStarted",
+        "TeardownFinished",
+        "TeardownOrganizationDeleted",
+        "TeardownSharesRevoked",
+        "TeardownAccessDenied",
+        "TeardownAccessKeysDeleted",
+        "TeardownRootKeysDestroyed"
+      ]
+    },
+    "models.TenantStatus": {
+      "enum": ["DISABLED", "LOCKED", "WRITE_LOCKED", "ACTIVE"],
+      "type": "string",
+      "x-enum-comments": {
+        "ACTIVE": "ACTIVE allows full access (read, write, delete).",
+        "DISABLED": "DISABLED denies all actions for the tenant.",
+        "LOCKED": "LOCKED makes the tenant read-only (no writes or deletes).",
+        "WRITE_LOCKED": "WRITE_LOCKED blocks writes but still allows reads and deletes."
+      },
+      "x-enum-descriptions": [
+        "DISABLED denies all actions for the tenant.",
+        "LOCKED makes the tenant read-only (no writes or deletes).",
+        "WRITE_LOCKED blocks writes but still allows reads and deletes.",
+        "ACTIVE allows full access (read, write, delete)."
+      ],
+      "x-enum-varnames": ["DISABLED", "LOCKED", "WRITE_LOCKED", "ACTIVE"]
+    },
+    "models.TenantWithMetricsBackofficeResponse": {
       "properties": {
         "accessKeyQuantityLimit": {
+          "description": "Deprecated - moved to S3 component properties",
+          "type": "integer"
+        },
+        "bucketCount": {
           "type": "integer"
         },
         "bucketQuantityLimit": {
+          "description": "Deprecated - moved to S3 component properties",
           "type": "integer"
         },
         "bucketSizeLimit": {
+          "description": "Deprecated - moved to S3 component properties",
           "type": "integer"
         },
         "components": {
@@ -745,8 +1198,15 @@
         "createdAt": {
           "type": "string"
         },
+        "deletedAt": {
+          "description": "DeletedAt is set once tenant deletion has been requested; per-component teardown\nprogress is reported in Components.*.LastTeardownStep.",
+          "type": "string"
+        },
         "id": {
           "type": "string"
+        },
+        "keyCount": {
+          "type": "integer"
         },
         "name": {
           "type": "string"
@@ -769,52 +1229,18 @@
       },
       "type": "object"
     },
-    "models.TenantSetupResponse": {
+    "models.TenantWithMetricsBackofficeResponseV2": {
       "properties": {
-        "components": {
-          "$ref": "#/definitions/models.ComponentsStatus"
-        },
-        "id": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "models.TenantStatus": {
-      "enum": ["DISABLED", "LOCKED", "WRITE_LOCKED", "ACTIVE"],
-      "type": "string",
-      "x-enum-comments": {
-        "ACTIVE": "ACTIVE allows full access (read, write, delete).",
-        "DISABLED": "DISABLED denies all actions for the tenant.",
-        "LOCKED": "LOCKED makes the tenant read-only (no writes or deletes).",
-        "WRITE_LOCKED": "WRITE_LOCKED blocks writes but still allows reads and deletes."
-      },
-      "x-enum-descriptions": [
-        "DISABLED denies all actions for the tenant.",
-        "LOCKED makes the tenant read-only (no writes or deletes).",
-        "WRITE_LOCKED blocks writes but still allows reads and deletes.",
-        "ACTIVE allows full access (read, write, delete)."
-      ],
-      "x-enum-varnames": ["DISABLED", "LOCKED", "WRITE_LOCKED", "ACTIVE"]
-    },
-    "models.TenantWithMetricsBackofficeResponse": {
-      "properties": {
-        "accessKeyQuantityLimit": {
-          "type": "integer"
-        },
         "bucketCount": {
-          "type": "integer"
-        },
-        "bucketQuantityLimit": {
-          "type": "integer"
-        },
-        "bucketSizeLimit": {
           "type": "integer"
         },
         "components": {
           "$ref": "#/definitions/models.ComponentsStatus"
         },
         "createdAt": {
+          "type": "string"
+        },
+        "deletedAt": {
           "type": "string"
         },
         "id": {
@@ -941,6 +1367,9 @@
         "id": {
           "type": "string"
         },
+        "lastUsedAt": {
+          "type": "string"
+        },
         "name": {
           "type": "string"
         },
@@ -967,6 +1396,9 @@
         "id": {
           "type": "string"
         },
+        "lastUsedAt": {
+          "type": "string"
+        },
         "name": {
           "type": "string"
         }
@@ -985,6 +1417,9 @@
           "type": "string"
         },
         "id": {
+          "type": "string"
+        },
+        "lastUsedAt": {
           "type": "string"
         },
         "name": {
@@ -1016,8 +1451,17 @@
         "id": {
           "type": "string"
         },
+        "lastUsedAt": {
+          "type": "string"
+        },
         "name": {
           "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "$ref": "#/definitions/rbac.PortalPermission"
+          },
+          "type": "array"
         },
         "token": {
           "type": "string"
@@ -1079,8 +1523,17 @@
         "id": {
           "type": "string"
         },
+        "lastUsedAt": {
+          "type": "string"
+        },
         "name": {
           "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "$ref": "#/definitions/rbac.PortalPermission"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -1173,6 +1626,115 @@
       },
       "type": "object"
     },
+    "rbac.PortalPermission": {
+      "enum": [
+        "read:s3:access_keys",
+        "create:s3:access_keys",
+        "delete:s3:access_keys",
+        "read:s3:buckets",
+        "create:s3:buckets",
+        "update:s3:buckets",
+        "delete:s3:buckets",
+        "clone:s3:bucket_objects",
+        "read:s3:bucket_shares",
+        "create:s3:bucket_shares",
+        "delete:s3:bucket_shares",
+        "read:s3:storage_analytics",
+        "read:s3:operations_analytics",
+        "read:compute:catalog",
+        "read:compute:jobs",
+        "read:compute:events",
+        "read:compute:instances",
+        "create:compute:instances",
+        "update:compute:instances",
+        "operate:compute:instances",
+        "delete:compute:instances",
+        "read:compute:ssh_keys",
+        "create:compute:ssh_keys",
+        "delete:compute:ssh_keys",
+        "read:compute:vpcs",
+        "create:compute:vpcs",
+        "delete:compute:vpcs",
+        "read:compute:public_ips",
+        "create:compute:public_ips",
+        "delete:compute:public_ips",
+        "read:compute:networks",
+        "create:compute:networks",
+        "delete:compute:networks",
+        "read:compute:volumes",
+        "create:compute:volumes",
+        "update:compute:volumes",
+        "delete:compute:volumes",
+        "read:compute:snapshots",
+        "create:compute:snapshots",
+        "restore:compute:snapshots",
+        "delete:compute:snapshots",
+        "execute:inference:requests",
+        "read:inference:analytics",
+        "read:portal:tenants",
+        "read:portal:tags",
+        "update:portal:tags",
+        "read:portal:messages",
+        "update:portal:messages",
+        "read:portal:tokens",
+        "create:portal:tokens",
+        "delete:portal:tokens"
+      ],
+      "type": "string",
+      "x-enum-varnames": [
+        "PermissionS3AccessKeysRead",
+        "PermissionS3AccessKeysCreate",
+        "PermissionS3AccessKeysDelete",
+        "PermissionS3BucketsRead",
+        "PermissionS3BucketsCreate",
+        "PermissionS3BucketsUpdate",
+        "PermissionS3BucketsDelete",
+        "PermissionS3BucketObjectsClone",
+        "PermissionS3BucketSharesRead",
+        "PermissionS3BucketSharesCreate",
+        "PermissionS3BucketSharesDelete",
+        "PermissionS3StorageAnalyticsRead",
+        "PermissionS3OperationsAnalyticsRead",
+        "PermissionComputeCatalogRead",
+        "PermissionComputeJobsRead",
+        "PermissionComputeEventsRead",
+        "PermissionComputeInstancesRead",
+        "PermissionComputeInstancesCreate",
+        "PermissionComputeInstancesUpdate",
+        "PermissionComputeInstancesOperate",
+        "PermissionComputeInstancesDelete",
+        "PermissionComputeSSHKeysRead",
+        "PermissionComputeSSHKeysCreate",
+        "PermissionComputeSSHKeysDelete",
+        "PermissionComputeVPCsRead",
+        "PermissionComputeVPCsCreate",
+        "PermissionComputeVPCsDelete",
+        "PermissionComputePublicIPsRead",
+        "PermissionComputePublicIPsCreate",
+        "PermissionComputePublicIPsDelete",
+        "PermissionComputeNetworksRead",
+        "PermissionComputeNetworksCreate",
+        "PermissionComputeNetworksDelete",
+        "PermissionComputeVolumesRead",
+        "PermissionComputeVolumesCreate",
+        "PermissionComputeVolumesUpdate",
+        "PermissionComputeVolumesDelete",
+        "PermissionComputeSnapshotsRead",
+        "PermissionComputeSnapshotsCreate",
+        "PermissionComputeSnapshotsRestore",
+        "PermissionComputeSnapshotsDelete",
+        "PermissionInferenceRequestsExecute",
+        "PermissionInferenceAnalyticsRead",
+        "PermissionPortalTenantsRead",
+        "PermissionPortalTagsRead",
+        "PermissionPortalTagsUpdate",
+        "PermissionPortalMessagesRead",
+        "PermissionPortalMessagesUpdate",
+        "PermissionPortalTokensRead",
+        "PermissionPortalTokensCreate",
+        "PermissionPortalTokensDelete"
+      ]
+    },
     "roles.PaginatedRoleResponse": {
       "properties": {
         "items": {
@@ -1204,6 +1766,31 @@
       },
       "type": "object"
     },
+    "services.InferenceComponentUpdateRequest": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "properties": {
+          "$ref": "#/definitions/services.InferenceUpdateComponentProperties"
+        }
+      },
+      "type": "object"
+    },
+    "services.InferenceUpdateComponentProperties": {
+      "properties": {
+        "backendOverrides": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object"
+        },
+        "prepaidCreditsRequired": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "services.UpdateComponentRequest": {
       "properties": {
         "enabled": {
@@ -1212,10 +1799,152 @@
       },
       "type": "object"
     },
+    "templates.AddMessageRequest": {
+      "properties": {
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "templateId": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "templates.AddMessageRequestBase": {
+      "properties": {
+        "templateId": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "templates.AddMessageResponse": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "templates.BackofficeMessageListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/templates.BackofficeMessageResponse"
+          },
+          "type": "array"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "pageSize": {
+          "type": "integer"
+        },
+        "totalCount": {
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "templates.BackofficeMessagePreview": {
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "dismissible": {
+          "type": "boolean"
+        },
+        "type": {
+          "enum": ["info", "warning", "error"],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "templates.BackofficeMessageResponse": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "dismissedAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "templateId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "variables": {
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "templates.MassUpdateMessageRequest": {
+      "properties": {
+        "messages": {
+          "items": {
+            "$ref": "#/definitions/templates.AddMessageRequestBase"
+          },
+          "type": "array"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "templates.UpdateMessageRequest": {
+      "properties": {
+        "variables": {
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "tenants.UpdateStatusRequest": {
       "properties": {
         "status": {
           "$ref": "#/definitions/models.TenantStatus"
+        }
+      },
+      "type": "object"
+    },
+    "users.InviteParams": {
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "tenantId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
         }
       },
       "type": "object"
@@ -1262,10 +1991,13 @@
         "email": {
           "type": "string"
         },
-        "role": {
+        "firstName": {
           "type": "string"
         },
-        "tenantId": {
+        "lastName": {
+          "type": "string"
+        },
+        "password": {
           "type": "string"
         }
       },
@@ -1440,6 +2172,87 @@
         ],
         "summary": "Get bucket storage metrics",
         "tags": ["Metrics"]
+      }
+    },
+    "/analytics/v1/{partnerId}/tenants/{tenantId}/inference": {
+      "get": {
+        "description": "Returns inference usage metrics (token counts, requests, errors) for a tenant in the given time range, optionally resampled by window duration and grouped by model",
+        "operationId": "GetTenantInferenceUsageBackoffice",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Start of time range (RFC3339)",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "End of time range (RFC3339)",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Resample window duration (e.g. 5m, 1h)",
+            "in": "query",
+            "name": "window",
+            "type": "string"
+          },
+          {
+            "description": "Group by fields (comma-separated): model",
+            "in": "query",
+            "name": "groupBy",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Inference usage metrics",
+            "schema": {
+              "$ref": "#/definitions/model.InferenceUsageResponse"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get tenant inference usage metrics",
+        "tags": ["Inference"]
       }
     },
     "/analytics/v1/{partnerId}/tenants/{tenantId}/operations": {
@@ -1657,7 +2470,8 @@
       },
       "post": {
         "consumes": ["application/json"],
-        "description": "Creates a new token for a tenant",
+        "deprecated": true,
+        "description": "Creates a new token with all portal permissions for a tenant",
         "operationId": "CreateTenantToken",
         "parameters": [
           {
@@ -2030,6 +2844,234 @@
         "tags": ["Partner Token"]
       }
     },
+    "/auth/v2/partners/{partnerId}/tenants/{tenantId}/tokens": {
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new token with the requested portal permissions for a tenant",
+        "operationId": "CreateTenantTokenV2",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Token creation request",
+            "in": "body",
+            "name": "request",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/models.CreateTokenPortalRequestV2"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Tenant token created",
+            "schema": {
+              "$ref": "#/definitions/models.TokenCreatePortalResponse"
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "409": {
+            "description": "Token with this name already exists",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Error while creating token",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Create tenant token v2",
+        "tags": ["Tenant Token"]
+      }
+    },
+    "/inference/v1/{partnerId}/tenants/{tenantId}/credits/adjustments": {
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Applies an idempotent audited manual adjustment to a tenant's inference credits",
+        "operationId": "AdjustTenantInferenceCredits",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Credit adjustment",
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/credits.AdjustmentRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Adjustment result",
+            "schema": {
+              "$ref": "#/definitions/credits.MutationResult"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "409": {
+            "description": "Operation conflict",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Adjust tenant inference credits",
+        "tags": ["Inference Credits"]
+      }
+    },
+    "/inference/v1/{partnerId}/tenants/{tenantId}/credits/entries": {
+      "get": {
+        "description": "Returns a paginated list of the tenant's inference credit ledger entries, newest first",
+        "operationId": "ListTenantInferenceCreditEntries",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Credit ledger entries",
+            "schema": {
+              "$ref": "#/definitions/credits.PaginatedEntriesResponse"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List tenant inference credit ledger entries",
+        "tags": ["Inference Credits"]
+      }
+    },
+    "/inference/v1/{partnerId}/tenants/{tenantId}/credits/wallet": {
+      "get": {
+        "description": "Returns inference credit details. Account field will be null until first credit is applied",
+        "operationId": "GetTenantInferenceCreditWallet",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Credit wallet",
+            "schema": {
+              "$ref": "#/definitions/credits.Wallet"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get tenant inference credit wallet",
+        "tags": ["Inference Credits"]
+      }
+    },
     "/partners/{partnerId}/regions": {
       "get": {
         "description": "Returns a list of regions for the partner",
@@ -2312,6 +3354,56 @@
         "tags": ["Partners"]
       }
     },
+    "/v1/partners/{partnerId}/buckets/{bucketName}/owner": {
+      "get": {
+        "description": "Returns the owner information for a specific bucket in the partner context",
+        "operationId": "GetBucketOwnerFromPartner",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Bucket name",
+            "in": "path",
+            "name": "bucketName",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Bucket owner information",
+            "schema": {
+              "$ref": "#/definitions/buckets.BucketOwnerResponse"
+            }
+          },
+          "404": {
+            "description": "Bucket not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get bucket owner",
+        "tags": ["Buckets"]
+      }
+    },
     "/v1/partners/{partnerId}/config": {
       "get": {
         "description": "Returns the configuration for the partner",
@@ -2454,6 +3546,7 @@
     },
     "/v1/partners/{partnerId}/tenants": {
       "get": {
+        "deprecated": true,
         "description": "Returns a paginated list of tenants for the partner",
         "operationId": "ListTenants",
         "parameters": [
@@ -2477,6 +3570,12 @@
             "in": "query",
             "name": "pageSize",
             "type": "integer"
+          },
+          {
+            "in": "query",
+            "maxLength": 50,
+            "name": "orgName",
+            "type": "string"
           }
         ],
         "produces": ["application/json"],
@@ -2504,7 +3603,8 @@
       },
       "post": {
         "consumes": ["application/json"],
-        "description": "Creates a new tenant for the partner. Created tenant must be initialized with the Setup endpoint before it's ready to use.",
+        "deprecated": true,
+        "description": "Creates a new tenant for the partner. Created tenant components must be initialized before they're ready to use.",
         "operationId": "CreateTenant",
         "parameters": [
           {
@@ -2529,7 +3629,7 @@
           "201": {
             "description": "Tenant created successfully",
             "schema": {
-              "$ref": "#/definitions/models.TenantBackofficeResponse"
+              "$ref": "#/definitions/models.CreateTenantResponse"
             }
           },
           "400": {
@@ -2561,7 +3661,59 @@
       }
     },
     "/v1/partners/{partnerId}/tenants/{tenantId}": {
+      "delete": {
+        "description": "Marks the tenant as deleted, permanently disables API token authentication and creation, and tears down its components: deletes the Auth0 organization while preserving user accounts, revokes bucket shares, denies S3 access, deletes access keys and destroys bucket root encryption keys. Refused (409) when a component that has been set up has no teardown implemented yet, or when a component's setup is incomplete (finish it first). Idempotent: calling it again resumes an interrupted teardown. Progress is visible per component in the tenant's components status.",
+        "operationId": "DeleteTenant",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "204": {
+            "description": "Tenant deleted"
+          },
+          "404": {
+            "description": "Tenant not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "409": {
+            "description": "Deletion not possible (unsupported component set up, component setup incomplete, or another update in progress)",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Error deleting tenant",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete tenant",
+        "tags": ["Tenants"]
+      },
       "get": {
+        "deprecated": true,
         "description": "Returns details of a specific tenant by ID",
         "operationId": "GetTenant",
         "parameters": [
@@ -2667,6 +3819,54 @@
       }
     },
     "/v1/partners/{partnerId}/tenants/{tenantId}/components/Auth": {
+      "get": {
+        "description": "Get the current status and properties of the Auth component for a tenant",
+        "operationId": "GetAuthComponent",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component status",
+            "schema": {
+              "$ref": "#/definitions/models.AuthComponentSetupStatus"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Auth component status and properties",
+        "tags": ["Components"]
+      },
       "patch": {
         "consumes": ["application/json"],
         "description": "Updates settings (e.g. enabled status) for a component of a tenant",
@@ -2783,6 +3983,54 @@
       }
     },
     "/v1/partners/{partnerId}/tenants/{tenantId}/components/Compute": {
+      "get": {
+        "description": "Get the current status and properties of the Compute component for a tenant",
+        "operationId": "GetComputeComponent",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component details",
+            "schema": {
+              "$ref": "#/definitions/models.ComputeComponentDetails"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Compute component status and properties",
+        "tags": ["Components"]
+      },
       "patch": {
         "consumes": ["application/json"],
         "description": "Updates settings (e.g. enabled status) for a component of a tenant",
@@ -2815,9 +4063,9 @@
         "produces": ["application/json"],
         "responses": {
           "200": {
-            "description": "Component setup status",
+            "description": "Component details",
             "schema": {
-              "$ref": "#/definitions/models.ComputeComponentSetupStatus"
+              "$ref": "#/definitions/models.ComputeComponentDetails"
             }
           },
           "400": {
@@ -2871,9 +4119,9 @@
         "produces": ["application/json"],
         "responses": {
           "200": {
-            "description": "Component setup status",
+            "description": "Component details",
             "schema": {
-              "$ref": "#/definitions/models.ComputeComponentSetupStatus"
+              "$ref": "#/definitions/models.ComputeComponentDetails"
             }
           },
           "400": {
@@ -2898,7 +4146,163 @@
         "tags": ["Components"]
       }
     },
+    "/v1/partners/{partnerId}/tenants/{tenantId}/components/Inference": {
+      "get": {
+        "description": "Get the current status, backend overrides, and resolved backends of the Inference component for a tenant",
+        "operationId": "GetInferenceComponent",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component details",
+            "schema": {
+              "$ref": "#/definitions/models.InferenceComponentDetails"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Inference component status and properties",
+        "tags": ["Components"]
+      },
+      "patch": {
+        "consumes": ["application/json"],
+        "description": "Updates enabled status and prepaid credit enforcement for a tenant",
+        "operationId": "UpdateInferenceComponent",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Component update fields",
+            "in": "body",
+            "name": "Inference",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/services.InferenceComponentUpdateRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component setup status",
+            "schema": {
+              "$ref": "#/definitions/models.InferenceComponentSetupStatus"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Inference component settings",
+        "tags": ["Components"]
+      }
+    },
     "/v1/partners/{partnerId}/tenants/{tenantId}/components/S3": {
+      "get": {
+        "description": "Get the current status and properties of the S3 component for a tenant",
+        "operationId": "GetS3Component",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Component status",
+            "schema": {
+              "$ref": "#/definitions/models.S3ComponentSetupStatus"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get S3 component status and properties",
+        "tags": ["Components"]
+      },
       "patch": {
         "consumes": ["application/json"],
         "description": "Updates settings (e.g. enabled status) for a component of a tenant",
@@ -3026,69 +4430,6 @@
         "tags": ["Components"]
       }
     },
-    "/v1/partners/{partnerId}/tenants/{tenantId}/components/{component}": {
-      "get": {
-        "description": "Get the current status (enabled/disabled) and properties of a component for a tenant",
-        "operationId": "GetComponent",
-        "parameters": [
-          {
-            "description": "Partner ID",
-            "in": "path",
-            "name": "partnerId",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "description": "Tenant ID",
-            "in": "path",
-            "name": "tenantId",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "description": "Component name (S3, Compute, Auth)",
-            "in": "path",
-            "name": "component",
-            "required": true,
-            "type": "string"
-          }
-        ],
-        "produces": ["application/json"],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "schema": {
-              "$ref": "#/definitions/models.Component"
-            }
-          },
-          "400": {
-            "description": "Bad request",
-            "schema": {
-              "$ref": "#/definitions/common.ReturnMessage"
-            }
-          },
-          "404": {
-            "description": "Tenant Not found",
-            "schema": {
-              "$ref": "#/definitions/common.ReturnMessage"
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "schema": {
-              "$ref": "#/definitions/common.ReturnMessage"
-            }
-          }
-        },
-        "security": [
-          {
-            "Bearer": []
-          }
-        ],
-        "summary": "Get component status and properties",
-        "tags": ["Components"]
-      }
-    },
     "/v1/partners/{partnerId}/tenants/{tenantId}/members": {
       "get": {
         "description": "Returns users that are members of given org",
@@ -3158,11 +4499,10 @@
         "tags": ["Tenants"]
       }
     },
-    "/v1/partners/{partnerId}/tenants/{tenantId}/setup": {
-      "post": {
-        "deprecated": true,
-        "description": "Initiates the setup process for a tenant",
-        "operationId": "SetupTenant",
+    "/v1/partners/{partnerId}/tenants/{tenantId}/messages": {
+      "delete": {
+        "description": "Deletes tenant messages",
+        "operationId": "DeleteTenantMessages",
         "parameters": [
           {
             "description": "Partner ID",
@@ -3177,24 +4517,31 @@
             "name": "tenantId",
             "required": true,
             "type": "string"
+          },
+          {
+            "collectionFormat": "csv",
+            "description": "Message tags",
+            "in": "query",
+            "items": {
+              "type": "string"
+            },
+            "name": "tags",
+            "required": true,
+            "type": "array"
           }
         ],
-        "produces": ["application/json"],
         "responses": {
-          "200": {
-            "description": "Setup response",
-            "schema": {
-              "$ref": "#/definitions/models.TenantSetupResponse"
-            }
+          "204": {
+            "description": "No content"
           },
-          "400": {
-            "description": "Bad request",
+          "404": {
+            "description": "Message not found",
             "schema": {
               "$ref": "#/definitions/common.ReturnMessage"
             }
           },
           "500": {
-            "description": "Internal server error",
+            "description": "Error deleting message",
             "schema": {
               "$ref": "#/definitions/common.ReturnMessage"
             }
@@ -3205,7 +4552,445 @@
             "ApiKeyAuth": []
           }
         ],
-        "summary": "Setup tenant",
+        "summary": "Delete tenant messages by tag",
+        "tags": ["Tenants"]
+      },
+      "get": {
+        "description": "Returns tenant messages, including dismissed messages",
+        "operationId": "ListTenantMessagesBackoffice",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          },
+          {
+            "in": "query",
+            "maxLength": 32,
+            "name": "templateId",
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Tenant messages",
+            "schema": {
+              "$ref": "#/definitions/templates.BackofficeMessageListResponse"
+            }
+          },
+          "500": {
+            "description": "Error listing messages",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List tenant messages",
+        "tags": ["Tenants"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a tenant message from a predefined template",
+        "operationId": "CreateTenantMessage",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Message creation request",
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/templates.AddMessageRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Message created successfully",
+            "schema": {
+              "$ref": "#/definitions/templates.AddMessageResponse"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Template not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Error creating message",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Create tenant message",
+        "tags": ["Tenants"]
+      },
+      "put": {
+        "consumes": ["application/json"],
+        "description": "Updates existing tenant messages for provided templates and tags, creates missing ones, and deletes tagged messages not present in request templates",
+        "operationId": "MassUpdateTenantMessages",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Mass update request",
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/templates.MassUpdateMessageRequest"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Template not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Error mass updating messages",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Mass update tenant messages by tags",
+        "tags": ["Tenants"]
+      }
+    },
+    "/v1/partners/{partnerId}/tenants/{tenantId}/messages/{messageId}": {
+      "delete": {
+        "description": "Deletes a tenant message",
+        "operationId": "DeleteTenantMessage",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Message ID",
+            "in": "path",
+            "name": "messageId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "404": {
+            "description": "Message not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Error deleting message",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete tenant message",
+        "tags": ["Tenants"]
+      },
+      "get": {
+        "description": "Returns a specific tenant message, including dismissed messages",
+        "operationId": "GetTenantMessage",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Message ID",
+            "in": "path",
+            "name": "messageId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Tenant message",
+            "schema": {
+              "$ref": "#/definitions/templates.BackofficeMessageResponse"
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Error getting message",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get tenant message",
+        "tags": ["Tenants"]
+      },
+      "patch": {
+        "consumes": ["application/json"],
+        "description": "Updates a tenant message, if message was dismissed before, it will be shown again",
+        "operationId": "UpdateTenantMessage",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Message ID",
+            "in": "path",
+            "name": "messageId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "New message values",
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/templates.UpdateMessageRequest"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Message created successfully"
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Message not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Error updating message",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Update tenant message",
+        "tags": ["Tenants"]
+      }
+    },
+    "/v1/partners/{partnerId}/tenants/{tenantId}/messages/{messageId}/preview": {
+      "get": {
+        "description": "Renders a specific tenant message for preview",
+        "operationId": "GetTenantMessagePreview",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Message ID",
+            "in": "path",
+            "name": "messageId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": "en-US",
+            "description": "Preview locale",
+            "in": "query",
+            "name": "locale",
+            "type": "string"
+          },
+          {
+            "default": "UTC",
+            "description": "Preview timezone",
+            "in": "query",
+            "name": "timezone",
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Tenant message preview",
+            "schema": {
+              "$ref": "#/definitions/templates.BackofficeMessagePreview"
+            }
+          },
+          "400": {
+            "description": "Invalid preview options",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Message or template not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Error rendering message preview",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Preview tenant message",
         "tags": ["Tenants"]
       }
     },
@@ -3602,7 +5387,7 @@
       },
       "post": {
         "consumes": ["application/json"],
-        "description": "Creates a new user and assigns them to a tenant. If a user with provided email already exists, creation will be skipped and that user will be assigned to a tenant.",
+        "description": "Creates a new user WITHOUT assigning them to a tenant. Used for self-service flows.",
         "operationId": "CreateUser",
         "parameters": [
           {
@@ -3619,6 +5404,65 @@
             "required": true,
             "schema": {
               "$ref": "#/definitions/users.RegisterParams"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "User created successfully",
+            "schema": {
+              "$ref": "#/definitions/models.CreateUserResponse"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "409": {
+            "description": "User already exists",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Failed to create user",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Create user",
+        "tags": ["Users"]
+      }
+    },
+    "/v1/partners/{partnerId}/users/invite": {
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new user and assigns them to a tenant. If a user with provided email already exists, creation will be skipped and that user will be assigned to a tenant.",
+        "operationId": "InviteUser",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "User invite parameters",
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/users.InviteParams"
             }
           }
         ],
@@ -3654,7 +5498,7 @@
             "ApiKeyAuth": []
           }
         ],
-        "summary": "Create user",
+        "summary": "Invite user",
         "tags": ["Users"]
       }
     },
@@ -3705,6 +5549,54 @@
           }
         ],
         "summary": "Get user",
+        "tags": ["Users"]
+      }
+    },
+    "/v1/partners/{partnerId}/users/{userId}/resend-email": {
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Resends a verification email to a user who has not yet verified their email address",
+        "operationId": "ResendVerificationEmail",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "User ID",
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Email verification sent successfully"
+          },
+          "404": {
+            "description": "User not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "409": {
+            "description": "Email already verified",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "summary": "Resend verification email",
         "tags": ["Users"]
       }
     },
@@ -3924,6 +5816,170 @@
         ],
         "summary": "Get warm tier credential",
         "tags": ["Warm Tier Credentials"]
+      }
+    },
+    "/v2/partners/{partnerId}/tenants": {
+      "get": {
+        "description": "Returns a paginated list of tenants for the partner",
+        "operationId": "ListTenantsV2",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "default": 1,
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "type": "integer"
+          },
+          {
+            "default": 20,
+            "description": "Page size",
+            "in": "query",
+            "name": "pageSize",
+            "type": "integer"
+          },
+          {
+            "in": "query",
+            "maxLength": 50,
+            "name": "orgName",
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "List of tenants",
+            "schema": {
+              "$ref": "#/definitions/models.PaginatedTenantsResponseV2"
+            }
+          },
+          "500": {
+            "description": "Error getting tenants",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List partner tenants v2",
+        "tags": ["Tenants"]
+      },
+      "post": {
+        "consumes": ["application/json"],
+        "description": "Creates a new tenant for the partner. Created tenant must be initialized with the Setup endpoint before it's ready to use.",
+        "operationId": "CreateTenantV2",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant creation parameters",
+            "in": "body",
+            "name": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/models.CreateTenantRequest"
+            }
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "201": {
+            "description": "Tenant created successfully",
+            "schema": {
+              "$ref": "#/definitions/models.CreateTenantResponse"
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "404": {
+            "description": "Region not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Error creating tenant",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Create tenant v2",
+        "tags": ["Tenants"]
+      }
+    },
+    "/v2/partners/{partnerId}/tenants/{tenantId}": {
+      "get": {
+        "description": "Returns details of a specific tenant by ID",
+        "operationId": "GetTenantV2",
+        "parameters": [
+          {
+            "description": "Partner ID",
+            "in": "path",
+            "name": "partnerId",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID",
+            "in": "path",
+            "name": "tenantId",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "produces": ["application/json"],
+        "responses": {
+          "200": {
+            "description": "Tenant details",
+            "schema": {
+              "$ref": "#/definitions/models.TenantWithMetricsBackofficeResponseV2"
+            }
+          },
+          "404": {
+            "description": "Tenant not found",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          },
+          "500": {
+            "description": "Error getting tenant",
+            "schema": {
+              "$ref": "#/definitions/common.ReturnMessage"
+            }
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get tenant v2",
+        "tags": ["Tenants"]
       }
     }
   },
