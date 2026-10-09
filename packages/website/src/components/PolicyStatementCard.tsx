@@ -1,12 +1,12 @@
 import { PencilSimpleIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
-import type { PolicyAction, PolicyStatement } from '@filone/shared';
+import type { PolicyActionOrWildcard, PolicyStatement } from '@filone/shared';
 import {
   POLICY_ACTION_GROUPS,
   POLICY_ACTION_GROUP_LABELS,
   POLICY_ACTION_LABELS,
   POLICY_ACTION_WILDCARD,
   POLICY_WILDCARD_PRINCIPAL,
-  policyActionsInGroup,
+  getPolicyActionsInGroup,
 } from '@filone/shared';
 
 import { Badge } from './Badge.js';
@@ -14,14 +14,19 @@ import { Card } from './Card.js';
 import { IconButton } from './IconButton.js';
 
 /** How many members a statement names before the rest fold into one badge. */
-const NAMED_MEMBERS_SHOWN = 3;
+const MAX_MEMBER_BADGES = 3;
+
+/** A statement's Sid, otherwise "Statement N". */
+export function getStatementTitle(statement: Pick<PolicyStatement, 'Sid'>, index: number): string {
+  return statement.Sid ?? `Statement ${index + 1}`;
+}
 
 export type PolicyStatementCardProps = {
   statement: PolicyStatement;
-  /** Position in the policy, for the label of a statement with no `sid`. */
+  /** Position in the policy, for the title of a statement with no `Sid`. */
   index: number;
-  /** How a member is named where a person reads it; a removed member has no name. */
-  memberName: (userId: string) => string | undefined;
+  /** A member's display name; `undefined` shows as "Unknown member". */
+  getMemberName: (userId: string) => string | undefined;
   onEdit?: () => void;
   onRemove?: () => void;
 };
@@ -34,32 +39,26 @@ export type PolicyStatementCardProps = {
 export function PolicyStatementCard({
   statement,
   index,
-  memberName,
+  getMemberName,
   onEdit,
   onRemove,
 }: PolicyStatementCardProps) {
-  const label = statement.sid ?? `Statement ${index + 1}`;
+  const title = getStatementTitle(statement, index);
   return (
     <Card padding="md" shadow={false} data-testid="policy-statement">
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          {statement.Effect === 'Allow' ? (
-            <Badge color="green" size="sm" weight="medium">
-              Allow
-            </Badge>
-          ) : (
-            <Badge color="red" size="sm" weight="medium">
-              Deny
-            </Badge>
-          )}
-          <span className="text-ui font-medium text-zinc-900">{label}</span>
+          <Badge color={statement.Effect === 'Allow' ? 'green' : 'red'} size="sm" weight="medium">
+            {statement.Effect}
+          </Badge>
+          <span className="text-ui font-medium text-zinc-900">{title}</span>
           {(onEdit || onRemove) && (
             <div className="ml-auto flex items-center gap-1">
               {onEdit && (
                 <IconButton
                   icon={PencilSimpleIcon}
                   size="sm"
-                  aria-label={`Edit ${label}`}
+                  aria-label={`Edit ${title}`}
                   tooltip="Edit statement"
                   onClick={onEdit}
                 />
@@ -68,7 +67,7 @@ export function PolicyStatementCard({
                 <IconButton
                   icon={TrashIcon}
                   size="sm"
-                  aria-label={`Remove ${label}`}
+                  aria-label={`Remove ${title}`}
                   tooltip="Remove statement"
                   onClick={onRemove}
                 />
@@ -77,18 +76,18 @@ export function PolicyStatementCard({
           )}
         </div>
 
-        <Row label="Who">
-          <PrincipalBadges principal={statement.Principal} memberName={memberName} />
-        </Row>
-        <Row label="Actions">
+        <StatementField label="Who">
+          <PrincipalBadges principal={statement.Principal} getMemberName={getMemberName} />
+        </StatementField>
+        <StatementField label="Actions">
           <ActionBadges actions={statement.Action} />
-        </Row>
+        </StatementField>
       </div>
     </Card>
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function StatementField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:gap-3">
       <span className="w-16 shrink-0 pt-0.5 text-meta font-medium uppercase tracking-wider text-zinc-400">
@@ -101,10 +100,10 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 function PrincipalBadges({
   principal,
-  memberName,
+  getMemberName,
 }: {
   principal: PolicyStatement['Principal'];
-  memberName: (userId: string) => string | undefined;
+  getMemberName: (userId: string) => string | undefined;
 }) {
   if (principal === POLICY_WILDCARD_PRINCIPAL) {
     return (
@@ -113,32 +112,32 @@ function PrincipalBadges({
       </Badge>
     );
   }
-  const names = principal.map((userId) => memberName(userId) ?? 'Unknown member');
-  const shown = names.slice(0, NAMED_MEMBERS_SHOWN);
-  const rest = names.slice(NAMED_MEMBERS_SHOWN);
+  const memberNames = principal.map((userId) => getMemberName(userId) ?? 'Unknown member');
+  const visibleNames = memberNames.slice(0, MAX_MEMBER_BADGES);
+  const foldedNames = memberNames.slice(MAX_MEMBER_BADGES);
   return (
     <>
-      {shown.map((name, i) => (
+      {visibleNames.map((name, i) => (
         <Badge key={principal[i]} color="grey" size="sm">
           {name}
         </Badge>
       ))}
-      {rest.length > 0 && (
+      {foldedNames.length > 0 && (
         <Badge
           color="grey"
           size="sm"
           data-testid="policy-more-members"
           description={
             <ul className="flex flex-col gap-0.5">
-              {rest.map((name, i) => (
-                <li key={principal[NAMED_MEMBERS_SHOWN + i]} className="text-xs text-zinc-700">
+              {foldedNames.map((name, i) => (
+                <li key={principal[MAX_MEMBER_BADGES + i]} className="text-xs text-zinc-700">
                   {name}
                 </li>
               ))}
             </ul>
           }
         >
-          +{rest.length} more
+          +{foldedNames.length} more
         </Badge>
       )}
     </>
@@ -148,7 +147,7 @@ function PrincipalBadges({
 /**
  * Actions by display group, one badge per group touched, listing the group's
  * members in the badge's tooltip. `s3:*` collapses to one badge, because
- * listing sixteen actions says less than "all of them".
+ * listing every action says less than "all of them".
  */
 function ActionBadges({ actions }: { actions: PolicyStatement['Action'] }) {
   if (actions.includes(POLICY_ACTION_WILDCARD)) {
@@ -158,12 +157,14 @@ function ActionBadges({ actions }: { actions: PolicyStatement['Action'] }) {
       </Badge>
     );
   }
-  const granted = new Set(actions as PolicyAction[]);
+  const grantedActions = new Set<PolicyActionOrWildcard>(actions);
   return (
     <>
       {POLICY_ACTION_GROUPS.map((group) => {
-        const inGroup = policyActionsInGroup(group).filter((action) => granted.has(action));
-        if (inGroup.length === 0) return null;
+        const grantedInGroup = getPolicyActionsInGroup(group).filter((action) =>
+          grantedActions.has(action),
+        );
+        if (grantedInGroup.length === 0) return null;
         return (
           <Badge
             key={group}
@@ -172,7 +173,7 @@ function ActionBadges({ actions }: { actions: PolicyStatement['Action'] }) {
             data-testid={`policy-actions-${group}`}
             description={
               <ul className="flex flex-col gap-0.5">
-                {inGroup.map((action) => (
+                {grantedInGroup.map((action) => (
                   <li key={action} className="text-xs text-zinc-700">
                     {POLICY_ACTION_LABELS[action].label}
                   </li>
