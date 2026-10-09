@@ -7,15 +7,15 @@ import { isPolicyConflict } from '../lib/bucket-policy-api.js';
 import { listMembers } from '../lib/members-api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { useBucketPolicy } from '../lib/use-bucket-policy.js';
+import { getMemberNameLookup } from '../lib/use-member-scope.js';
 import { usePolicyDraft } from '../lib/use-policy-draft.js';
 import { Alert } from './Alert.js';
 import { Button } from './Button.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { EmptyStateCard } from './EmptyStateCard.js';
 import { Heading } from './Heading/Heading.js';
-import { memberNamesFrom } from './PolicyPrincipalFields.js';
 import { PolicyStatementCard } from './PolicyStatementCard.js';
-import { PolicyStatementModal, deniesEveryone } from './PolicyStatementModal.js';
+import { PolicyStatementModal, isDenyForEveryone } from './PolicyStatementModal.js';
 import { SlowOperationIndicator } from './SlowOperationIndicator.js';
 import { Spinner } from './Spinner.js';
 import { useToast } from './Toast/index.js';
@@ -25,8 +25,8 @@ export type BucketPolicyTabProps = {
   region: S3Region;
 };
 
-/** Which statement the modal is editing: an index, or none for a new one. */
-type Editing = { index?: number } | null;
+/** Which statement the modal edits: a new one, or an existing one by its index. */
+type StatementEditTarget = { kind: 'new' } | { kind: 'existing'; index: number };
 
 /**
  * The bucket's policy on an `iam` region: its statements as cards, an editor
@@ -35,21 +35,20 @@ type Editing = { index?: number } | null;
  * The policy is one ETag-versioned document held at the storage system, so
  * every edit lands in a local draft and "Save policy" writes it once under the
  * ETag it was read at. A save that lost to another writer is shown in place
- * with the draft intact, so the admin can reload and apply their edit to what
- * is there now. Saving a draft with no statements removes the policy, since
- * the storage system stores no empty document.
+ * with the draft intact, so the user can reload and apply their edit to what
+ * is there now.
  */
 export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
-  const editor = usePolicyEditor(bucketName, region);
+  const editor = useBucketPolicyEditor(bucketName, region);
   const { policy, draft } = editor;
   const roster = useQuery({ queryKey: queryKeys.members, queryFn: listMembers });
-  const nameOf = memberNamesFrom(roster.data?.members);
-  const [editing, setEditing] = useState<Editing>(null);
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const ready = !policy.loading && !policy.failed;
+  const getMemberName = getMemberNameLookup(roster.data?.members);
+  const [editTarget, setEditTarget] = useState<StatementEditTarget | null>(null);
+  const [isRemoveDialogOpen, setIsRemoveDialogOpen] = useState(false);
+  const isPolicyLoaded = !policy.isLoading && !policy.hasLoadFailed;
 
   function submitStatement(statement: PolicyStatement) {
-    const index = editing?.index;
+    const index = editTarget?.kind === 'existing' ? editTarget.index : undefined;
     draft.setStatements(
       index === undefined
         ? [...draft.statements, statement]
@@ -68,31 +67,36 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
         >
           Bucket policy
         </Heading>
-        {ready && (
+        {isPolicyLoaded && (
           <div className="flex items-center gap-2">
             {policy.snapshot && (
               <Button
                 variant="tertiary"
                 size="sm"
-                disabled={draft.stale}
-                onClick={() => setConfirmRemove(true)}
+                disabled={draft.isStale}
+                onClick={() => setIsRemoveDialogOpen(true)}
               >
                 Remove policy
               </Button>
             )}
-            <Button variant="primary" size="sm" icon={PlusIcon} onClick={() => setEditing({})}>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={PlusIcon}
+              onClick={() => setEditTarget({ kind: 'new' })}
+            >
               Add statement
             </Button>
           </div>
         )}
       </div>
 
-      {policy.loading && (
+      {policy.isLoading && (
         <div className="flex items-center justify-center py-8">
           <Spinner ariaLabel="Loading bucket policy" size={24} />
         </div>
       )}
-      {policy.failed && (
+      {policy.hasLoadFailed && (
         <Alert
           variant="red"
           description={policy.errorMessage ?? 'Failed to load the bucket policy'}
@@ -103,24 +107,24 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
           }
         />
       )}
-      {ready && (
-        <PolicyBody
+      {isPolicyLoaded && (
+        <LoadedPolicyView
           editor={editor}
-          memberName={nameOf}
-          onAdd={() => setEditing({})}
-          onEdit={(index) => setEditing({ index })}
+          getMemberName={getMemberName}
+          onAdd={() => setEditTarget({ kind: 'new' })}
+          onEdit={(index) => setEditTarget({ kind: 'existing', index })}
         />
       )}
 
       <PolicyStatementModal
-        open={editing !== null}
-        onClose={() => setEditing(null)}
-        initial={editing?.index === undefined ? undefined : draft.statements[editing.index]}
+        open={editTarget !== null}
+        onClose={() => setEditTarget(null)}
+        initial={editTarget?.kind === 'existing' ? draft.statements[editTarget.index] : undefined}
         onSubmit={submitStatement}
       />
       <ConfirmDialog
-        open={confirmRemove}
-        onClose={() => setConfirmRemove(false)}
+        open={isRemoveDialogOpen}
+        onClose={() => setIsRemoveDialogOpen(false)}
         onConfirm={editor.removePolicy}
         title="Remove bucket policy"
         description="Access to this bucket will fall back to service keys. The statements in this policy cannot be recovered."
@@ -130,47 +134,46 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
   );
 }
 
-/** The policy, the draft over it, and the three things the tab does to them. */
-function usePolicyEditor(bucketName: string, region: S3Region) {
+/** The policy, the draft over it, and the writes the tab makes. */
+function useBucketPolicyEditor(bucketName: string, region: S3Region) {
   const { toast } = useToast();
   const policy = useBucketPolicy(bucketName, region);
   const draft = usePolicyDraft(policy.snapshot);
 
-  // Every write goes under the draft's ETag rather than the query's: the user
-  // edited the document they read, and a newer one the query has since fetched
-  // is exactly the write the compare-and-set exists to refuse.
-  async function write(change: () => Promise<void>, failure: string) {
+  async function runPolicyWrite(performWrite: () => Promise<void>, fallbackErrorMessage: string) {
     try {
-      await change();
+      await performWrite();
     } catch (err) {
       // A conflict renders in place; anything else is a failed request.
-      if (!isPolicyConflict(err)) toast.error(err instanceof Error ? err.message : failure);
+      if (!isPolicyConflict(err)) {
+        toast.error(err instanceof Error ? err.message : fallbackErrorMessage);
+      }
     }
   }
 
-  async function removeDraft() {
+  async function deleteStoredPolicy() {
     if (!draft.etag) return;
     await policy.remove.mutateAsync({ etag: draft.etag });
     draft.acceptSaved(null);
     toast.success('Policy removed');
   }
 
-  const removePolicy = () => write(removeDraft, 'Failed to remove the policy');
+  const removePolicy = () => runPolicyWrite(deleteStoredPolicy, 'Failed to remove the policy');
 
-  const save = () =>
-    write(async () => {
+  const savePolicy = () =>
+    runPolicyWrite(async () => {
       // A draft with no statements removes the policy: the storage system
       // stores no empty document.
-      if (draft.statements.length === 0) return removeDraft();
-      const document = { Statement: draft.statements };
-      const written = await policy.save.mutateAsync({ policy: document, etag: draft.etag });
-      draft.acceptSaved({ policy: document, etag: written.etag });
+      if (draft.statements.length === 0) return deleteStoredPolicy();
+      const nextPolicy = { Statement: draft.statements };
+      const saveResult = await policy.save.mutateAsync({ policy: nextPolicy, etag: draft.etag });
+      draft.acceptSaved({ policy: nextPolicy, etag: saveResult.etag });
       toast.success('Policy saved');
     }, 'Failed to save the policy');
 
   // A reload that fails keeps the draft and the conflict, so nothing is lost
   // to a network error.
-  async function reload() {
+  async function reloadPolicy() {
     const result = await policy.refetch();
     if (result.isError) {
       toast.error('Could not reload the policy. Try again.');
@@ -181,33 +184,33 @@ function usePolicyEditor(bucketName: string, region: S3Region) {
     draft.reset();
   }
 
-  return { policy, draft, save, removePolicy, reload };
+  return { policy, draft, savePolicy, removePolicy, reloadPolicy };
 }
 
-type Editor = ReturnType<typeof usePolicyEditor>;
+type BucketPolicyEditor = ReturnType<typeof useBucketPolicyEditor>;
 
-/** The loaded tab: the conflict alert, the statements or the empty state, the warnings, the save bar. */
-function PolicyBody({
-  editor: { policy, draft, save, reload },
-  memberName,
+/** Everything shown once the policy has loaded. */
+function LoadedPolicyView({
+  editor: { policy, draft, savePolicy, reloadPolicy },
+  getMemberName,
   onAdd,
   onEdit,
 }: {
-  editor: Editor;
-  memberName: (userId: string) => string | undefined;
+  editor: BucketPolicyEditor;
+  getMemberName: (userId: string) => string | undefined;
   onAdd: () => void;
   onEdit: (index: number) => void;
 }) {
   const hasPolicy = Boolean(policy.snapshot);
   return (
     <>
-      {(policy.conflict || draft.stale) && (
+      {(policy.hasConflict || draft.isStale) && (
         <Alert
           variant="amber"
           title="This policy changed elsewhere"
           description="Someone else saved a new version. Reload the policy, then apply your changes again."
           action={
-            <Button variant="ghost" size="sm" onClick={() => void reload()}>
+            <Button variant="ghost" size="sm" onClick={() => void reloadPolicy()}>
               Reload policy
             </Button>
           }
@@ -217,9 +220,9 @@ function PolicyBody({
       {draft.statements.length === 0 ? (
         <EmptyStateCard
           icon={ShieldCheckIcon}
-          title={draft.dirty ? 'This policy has no statements' : 'No policy yet'}
+          title={draft.hasUnsavedEdits ? 'This policy has no statements' : 'No policy yet'}
           description={
-            draft.dirty
+            draft.hasUnsavedEdits
               ? 'Saving removes the policy, and only service keys will reach this bucket.'
               : 'Without a policy, only service keys can reach this bucket. Add a statement to grant members access.'
           }
@@ -235,7 +238,7 @@ function PolicyBody({
               key={`${statement.Sid ?? 'statement'}-${index}`}
               statement={statement}
               index={index}
-              memberName={memberName}
+              getMemberName={getMemberName}
               onEdit={() => onEdit(index)}
               onRemove={() => draft.setStatements(draft.statements.filter((_, i) => i !== index))}
             />
@@ -243,7 +246,7 @@ function PolicyBody({
         </div>
       )}
 
-      {draft.statements.some(deniesEveryone) && (
+      {draft.statements.some(isDenyForEveryone) && (
         <Alert
           variant="amber"
           assertive={false}
@@ -252,27 +255,27 @@ function PolicyBody({
         />
       )}
 
-      {draft.dirty && (
+      {draft.hasUnsavedEdits && (
         <div className="flex flex-col gap-2" data-testid="policy-save-bar">
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
             <span className="text-ui text-zinc-700">Unsaved changes</span>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={draft.reset} disabled={policy.saving}>
+              <Button variant="ghost" size="sm" onClick={draft.reset} disabled={policy.isWriting}>
                 Discard changes
               </Button>
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => void save()}
+                onClick={() => void savePolicy()}
                 disabled={
-                  policy.saving || draft.stale || (draft.statements.length === 0 && !hasPolicy)
+                  policy.isWriting || draft.isStale || (draft.statements.length === 0 && !hasPolicy)
                 }
               >
-                {policy.saving ? 'Saving...' : 'Save policy'}
+                {policy.isWriting ? 'Saving...' : 'Save policy'}
               </Button>
             </div>
           </div>
-          <SlowOperationIndicator isLoading={policy.saving} operation="Saving bucket policy" />
+          <SlowOperationIndicator isLoading={policy.isWriting} operation="Saving bucket policy" />
         </div>
       )}
     </>

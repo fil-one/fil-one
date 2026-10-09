@@ -62,13 +62,21 @@ describe('PolicyStatementCard', () => {
   });
 
   it.each([
-    ['read', 's3:GetObject', 'brand'],
-    ['write', 's3:PutObject', 'amber'],
-    ['delete', 's3:DeleteObject', 'red'],
-  ] as const)('colours the %s group badge by risk', (group, action, colour) => {
+    ['read', 's3:GetObject', 'bg-brand-50'],
+    ['list', 's3:ListBucket', 'bg-brand-50'],
+    ['write', 's3:PutObject', 'bg-amber-50'],
+    ['delete', 's3:DeleteObject', 'bg-red-50'],
+    ['protect', 's3:GetObjectRetention', 'bg-red-50'],
+  ] as const)('colours the %s group badge by risk', (group, action, colourClass) => {
     renderCard({ ...allowTeam, Action: [action] });
 
-    expect(screen.getByTestId(`policy-actions-${group}`).className).toContain(colour);
+    expect(screen.getByTestId(`policy-actions-${group}`)).toHaveClass(colourClass);
+  });
+
+  it('colours the All actions badge red', () => {
+    renderCard({ ...allowTeam, Action: ['s3:*'] });
+
+    expect(screen.getByText('All actions')).toHaveClass('bg-red-50');
   });
 
   it('titles a statement with no Sid "Statement N" by its 1-based position', () => {

@@ -21,8 +21,12 @@ export function getStatementTitle(statement: Pick<PolicyStatement, 'Sid'>, index
   return statement.Sid ?? `Statement ${index + 1}`;
 }
 
-/** Badge colour by risk: delete and data protection are the widest grants. */
-const ACTION_GROUP_COLOR: Record<PolicyActionGroup, BadgeColor> = {
+/**
+ * Badge colour by risk. Reading and listing change nothing, writing can
+ * overwrite objects, deleting can lose them, and changing data protection can
+ * lift or lock retention.
+ */
+const ACTION_GROUP_BADGE_COLORS: Record<PolicyActionGroup, BadgeColor> = {
   read: 'blue',
   list: 'blue',
   write: 'amber',
@@ -206,7 +210,7 @@ function ActionBadges({ actions }: { actions: PolicyStatement['Action'] }) {
         return (
           <Badge
             key={group}
-            color={ACTION_GROUP_COLOR[group]}
+            color={ACTION_GROUP_BADGE_COLORS[group]}
             size="sm"
             data-testid={`policy-actions-${group}`}
             description={

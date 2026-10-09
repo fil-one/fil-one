@@ -71,8 +71,8 @@ export function usePolicyDraft(snapshot: BucketPolicySnapshot | null | undefined
     /** Drop the edits and take the snapshot's statements again. */
     reset: () => dispatch({ type: 'seed', snapshot }),
     /**
-     * A save landed: seed from what was written, so the draft is clean under
-     * the new ETag before the refetch confirms it.
+     * A save or removal landed: seed from what was written, so the draft is
+     * clean under the new ETag before the refetch confirms it.
      */
     acceptSaved: (saved: BucketPolicySnapshot | null) =>
       dispatch({ type: 'seed', snapshot: saved }),

@@ -347,7 +347,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   // The policy tab exists where a policy can: a region serving the `iam`
   // access model, for a role that may edit one. Reading takes the same
   // permission as editing, so the tab is absent rather than read-only.
-  const showPolicyTab = useHasPermission('buckets.policy_manage') && isIamRegion(region);
+  const isPolicyTabVisible = useHasPermission('buckets.policy_manage') && isIamRegion(region);
 
   const setCurrentPrefix = useCallback(
     (newPrefix: string) => {
@@ -510,7 +510,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
           )}
           {/* Headless UI pairs tabs to panels by order, so this and its panel
               below sit behind the identical condition. */}
-          {showPolicyTab && <Tab testId="bucket-policy-tab">Policy</Tab>}
+          {isPolicyTabVisible && <Tab testId="bucket-policy-tab">Policy</Tab>}
         </TabList>
 
         <TabPanels>
@@ -545,7 +545,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               />
             </TabPanel>
           )}
-          {showPolicyTab && (
+          {isPolicyTabVisible && (
             <TabPanel>
               <BucketPolicyTab bucketName={bucketName} region={region} />
             </TabPanel>

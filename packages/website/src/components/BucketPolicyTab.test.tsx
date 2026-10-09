@@ -8,16 +8,16 @@ import { S3Region } from '@filone/shared';
 import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
-const mockGet = vi.fn();
-const mockPut = vi.fn();
-const mockDelete = vi.fn();
+const mockGetBucketPolicy = vi.fn();
+const mockPutBucketPolicy = vi.fn();
+const mockDeleteBucketPolicy = vi.fn();
 vi.mock('../lib/bucket-policy-api.js', async () => ({
   ...(await vi.importActual<typeof import('../lib/bucket-policy-api.js')>(
     '../lib/bucket-policy-api.js',
   )),
-  getBucketPolicy: (...a: unknown[]) => mockGet(...a),
-  putBucketPolicy: (...a: unknown[]) => mockPut(...a),
-  deleteBucketPolicy: (...a: unknown[]) => mockDelete(...a),
+  getBucketPolicy: (...a: unknown[]) => mockGetBucketPolicy(...a),
+  putBucketPolicy: (...a: unknown[]) => mockPutBucketPolicy(...a),
+  deleteBucketPolicy: (...a: unknown[]) => mockDeleteBucketPolicy(...a),
 }));
 vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => true }));
 vi.mock('../lib/api.js', async () => ({
@@ -37,7 +37,7 @@ vi.mock('../lib/members-api.js', () => ({
 import { BucketPolicyTab } from './BucketPolicyTab.js';
 import { ToastProvider } from './Toast/ToastProvider.js';
 
-const policy: BucketPolicy = {
+const grantReadAndListToBen: BucketPolicy = {
   Statement: [
     {
       Sid: 'team',
@@ -48,9 +48,9 @@ const policy: BucketPolicy = {
   ],
 };
 
-function renderTab(role: OrgRole = OrgRole.Owner) {
+function renderTab() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, role);
+  seedPermissions(client, OrgRole.Owner);
   const view = render(
     <QueryClientProvider client={client}>
       <ToastProvider>
@@ -61,159 +61,224 @@ function renderTab(role: OrgRole = OrgRole.Owner) {
   return { ...view, client };
 }
 
+function getEmptyState(title: string) {
+  return screen.getByText(title).parentElement!;
+}
+
+async function removeTeamStatement() {
+  await screen.findByText('team');
+  fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
+  await screen.findByTestId('policy-save-bar');
+}
+
+async function addEveryoneMayReadStatement(addButton: HTMLElement) {
+  fireEvent.click(addButton);
+  fireEvent.click(await screen.findByRole('radio', { name: 'Everyone in this organization' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
+  fireEvent.click(
+    within(screen.getByTestId('policy-statement-modal')).getByRole('button', {
+      name: 'Add statement',
+    }),
+  );
+}
+
+async function saveAndLoseToAnotherWriter() {
+  mockPutBucketPolicy.mockRejectedValue(
+    Object.assign(new Error('changed'), { status: 409, code: ApiErrorCode.POLICY_CONFLICT }),
+  );
+  await removeTeamStatement();
+  await addEveryoneMayReadStatement(
+    within(getEmptyState('This policy has no statements')).getByRole('button', {
+      name: 'Add statement',
+    }),
+  );
+  await waitFor(() => expect(screen.getAllByTestId('policy-statement')).toHaveLength(1));
+  fireEvent.click(screen.getByRole('button', { name: 'Save policy' }));
+  await screen.findByText('This policy changed elsewhere');
+}
+
+async function refetchNewerPolicy(client: QueryClient) {
+  mockGetBucketPolicy.mockResolvedValue({ policy: grantReadAndListToBen, etag: '"v2"' });
+  await act(async () => {
+    await client.refetchQueries({ queryKey: queryKeys.bucketPolicy('photos', S3Region.UsEast9) });
+  });
+  await screen.findByText('This policy changed elsewhere');
+}
+
+async function confirmRemovePolicy() {
+  await screen.findByText('team');
+  fireEvent.click(screen.getByRole('button', { name: 'Remove policy' }));
+  fireEvent.click(
+    within(await screen.findByTestId('confirm-dialog')).getByRole('button', {
+      name: 'Remove policy',
+    }),
+  );
+}
+
 describe('BucketPolicyTab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGet.mockResolvedValue({ policy, etag: '"v1"' });
-    mockPut.mockResolvedValue({ etag: '"v2"', created: false });
+    mockGetBucketPolicy.mockResolvedValue({ policy: grantReadAndListToBen, etag: '"v1"' });
+    mockPutBucketPolicy.mockResolvedValue({ etag: '"v2"', created: false });
+    mockDeleteBucketPolicy.mockResolvedValue(undefined);
   });
 
-  it('shows the statements with their members named, once the policy loads', async () => {
+  it('titles each statement by its Sid', async () => {
     renderTab();
 
     expect(await screen.findByText('team')).toBeInTheDocument();
+  });
+
+  it('names the members a statement grants', async () => {
+    renderTab();
+
     expect(await screen.findByText('Ben')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remove policy' })).toBeInTheDocument();
+  });
+
+  it('offers Remove policy when the bucket has a policy', async () => {
+    renderTab();
+
+    expect(await screen.findByRole('button', { name: 'Remove policy' })).toBeInTheDocument();
+  });
+
+  it('shows no save bar before any edit', async () => {
+    renderTab();
+    await screen.findByText('team');
+
     expect(screen.queryByTestId('policy-save-bar')).not.toBeInTheDocument();
   });
 
-  it('offers the first statement on a bucket with no policy', async () => {
-    mockGet.mockResolvedValue(null);
+  it('shows the No policy yet empty state with an Add statement button when the bucket has no policy', async () => {
+    mockGetBucketPolicy.mockResolvedValue(null);
     renderTab();
 
-    expect(await screen.findByText('No policy yet')).toBeInTheDocument();
+    await screen.findByText('No policy yet');
+    expect(
+      within(getEmptyState('No policy yet')).getByRole('button', { name: 'Add statement' }),
+    ).toBeInTheDocument();
+  });
+
+  it('hides Remove policy when the bucket has no policy', async () => {
+    mockGetBucketPolicy.mockResolvedValue(null);
+    renderTab();
+    await screen.findByText('No policy yet');
+
     expect(screen.queryByRole('button', { name: 'Remove policy' })).not.toBeInTheDocument();
   });
 
-  it('says a request failed rather than calling the bucket policy-less', async () => {
-    mockGet.mockRejectedValue(new Error('Service unavailable'));
+  it('shows the load error and Try again when reading the policy fails', async () => {
+    mockGetBucketPolicy.mockRejectedValue(new Error('Service unavailable'));
     renderTab();
 
     expect(await screen.findByText('Service unavailable')).toBeInTheDocument();
-    expect(screen.queryByText('No policy yet')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    expect(screen.queryByText('No policy yet')).not.toBeInTheDocument();
   });
 
-  it('removes a statement into the draft and saves the document under the etag it read', async () => {
+  it('Try again re-reads the policy', async () => {
+    mockGetBucketPolicy.mockRejectedValueOnce(new Error('Service unavailable'));
     renderTab();
-    await screen.findByText('team');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
-    expect(await screen.findByText('This policy has no statements')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByText('team')).toBeInTheDocument();
+    expect(mockGetBucketPolicy).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows the save bar and the no-statements state after removing the last statement', async () => {
+    renderTab();
+    await removeTeamStatement();
+
     expect(screen.getByTestId('policy-save-bar')).toBeInTheDocument();
+    expect(screen.getByText('This policy has no statements')).toBeInTheDocument();
+  });
 
-    // A draft with no statements removes the policy: the storage system holds no empty document.
-    mockDelete.mockResolvedValue(undefined);
+  it('deletes the policy under the ETag it read when an empty draft is saved', async () => {
+    renderTab();
+    await removeTeamStatement();
+
     fireEvent.click(screen.getByRole('button', { name: 'Save policy' }));
 
-    await waitFor(() =>
-      expect(mockDelete).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"'),
-    );
-    await waitFor(() => expect(screen.queryByTestId('policy-save-bar')).not.toBeInTheDocument());
+    expect(await screen.findByText('Policy removed')).toBeInTheDocument();
+    expect(mockDeleteBucketPolicy).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"');
+    expect(mockPutBucketPolicy).not.toHaveBeenCalled();
   });
 
-  it('adds a statement through the modal and writes the whole document once', async () => {
+  it('adds the new statement as a card', async () => {
     renderTab();
     await screen.findByText('team');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add statement' }));
-    fireEvent.click(await screen.findByRole('radio', { name: 'Everyone in this organization' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
-    fireEvent.click(
-      within(screen.getByTestId('policy-statement-modal')).getByRole('button', {
-        name: 'Add statement',
-      }),
-    );
+    await addEveryoneMayReadStatement(screen.getByRole('button', { name: 'Add statement' }));
 
     await waitFor(() => expect(screen.getAllByTestId('policy-statement')).toHaveLength(2));
-    fireEvent.click(screen.getByRole('button', { name: 'Save policy' }));
-
-    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
-    expect(mockPut).toHaveBeenCalledWith('photos', S3Region.UsEast9, {
-      policy: {
-        Statement: [
-          ...policy.Statement,
-          { Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] },
-        ],
-      },
-      etag: '"v1"',
-    });
-    await waitFor(() => expect(screen.queryByTestId('policy-save-bar')).not.toBeInTheDocument());
   });
 
-  it('keeps the draft and offers a reload when the save lost to another writer', async () => {
-    mockPut.mockRejectedValue(
-      Object.assign(new Error('changed'), { status: 409, code: ApiErrorCode.POLICY_CONFLICT }),
-    );
+  it('saves the whole document under the ETag it read', async () => {
     renderTab();
     await screen.findByText('team');
+    await addEveryoneMayReadStatement(screen.getByRole('button', { name: 'Add statement' }));
+    await waitFor(() => expect(screen.getAllByTestId('policy-statement')).toHaveLength(2));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
-    fireEvent.click(screen.getAllByRole('button', { name: 'Add statement' })[0]!);
-    fireEvent.click(await screen.findByRole('radio', { name: 'Everyone in this organization' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
-    fireEvent.click(
-      within(screen.getByTestId('policy-statement-modal')).getByRole('button', {
-        name: 'Add statement',
-      }),
-    );
-    await waitFor(() => expect(screen.getAllByTestId('policy-statement')).toHaveLength(1));
     fireEvent.click(screen.getByRole('button', { name: 'Save policy' }));
 
-    expect(await screen.findByText('This policy changed elsewhere')).toBeInTheDocument();
-    // The draft is still the edited one.
+    expect(await screen.findByText('Policy saved')).toBeInTheDocument();
+    expect(mockPutBucketPolicy.mock.calls).toStrictEqual([
+      [
+        'photos',
+        S3Region.UsEast9,
+        {
+          policy: {
+            Statement: [
+              ...grantReadAndListToBen.Statement,
+              { Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] },
+            ],
+          },
+          etag: '"v1"',
+        },
+      ],
+    ]);
+  });
+
+  it('keeps the edited draft when the save is refused as a conflict', async () => {
+    renderTab();
+    await saveAndLoseToAnotherWriter();
+
     expect(
       within(screen.getByTestId('policy-statement')).getByText('Everyone in this organization'),
     ).toBeInTheDocument();
     expect(screen.getByTestId('policy-save-bar')).toBeInTheDocument();
+  });
 
-    mockGet.mockResolvedValue({ policy, etag: '"v2"' });
+  it('Reload policy replaces the draft with the stored policy', async () => {
+    renderTab();
+    await saveAndLoseToAnotherWriter();
+
+    mockGetBucketPolicy.mockResolvedValue({ policy: grantReadAndListToBen, etag: '"v2"' });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reload policy' }));
     });
+
     await waitFor(() => expect(screen.getByText('team')).toBeInTheDocument());
     expect(screen.queryByText('This policy changed elsewhere')).not.toBeInTheDocument();
-  });
-
-  it('sends the etag the draft was read at, and stops saving once a newer document arrived', async () => {
-    const { client } = renderTab();
-    await screen.findByText('team');
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
-    await screen.findByTestId('policy-save-bar');
-
-    // Another writer landed and a background refetch picked it up.
-    mockGet.mockResolvedValue({ policy, etag: '"v2"' });
-    await act(async () => {
-      await client.refetchQueries({ queryKey: queryKeys.bucketPolicy('photos', S3Region.UsEast9) });
-    });
-
-    expect(await screen.findByText('This policy changed elsewhere')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save policy' })).toBeDisabled();
-    // The draft still shows the edit, and reloading takes the newer document.
-    expect(screen.getByText('This policy has no statements')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Reload policy' }));
-    await waitFor(() => expect(screen.getByText('team')).toBeInTheDocument());
     expect(screen.queryByTestId('policy-save-bar')).not.toBeInTheDocument();
   });
 
-  it('keeps the draft when a reload fails, and will not remove the newer document behind it', async () => {
+  it('disables Save policy once a newer policy arrives under unsaved edits', async () => {
     const { client } = renderTab();
-    await screen.findByText('team');
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
-    await screen.findByTestId('policy-save-bar');
+    await removeTeamStatement();
 
-    mockGet.mockResolvedValue({ policy, etag: '"v2"' });
-    await act(async () => {
-      await client.refetchQueries({ queryKey: queryKeys.bucketPolicy('photos', S3Region.UsEast9) });
-    });
-    expect(await screen.findByText('This policy changed elsewhere')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Remove policy' })).toBeDisabled();
+    await refetchNewerPolicy(client);
 
-    mockGet.mockRejectedValue(new Error('Service unavailable'));
+    expect(screen.getByRole('button', { name: 'Save policy' })).toBeDisabled();
+  });
+
+  it('keeps the draft and the conflict alert when Reload policy fails', async () => {
+    const { client } = renderTab();
+    await removeTeamStatement();
+    await refetchNewerPolicy(client);
+
+    mockGetBucketPolicy.mockRejectedValue(new Error('Service unavailable'));
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reload policy' }));
     });
@@ -223,31 +288,70 @@ describe('BucketPolicyTab', () => {
     expect(screen.getByText('This policy has no statements')).toBeInTheDocument();
   });
 
-  it('removes the policy under the etag it read, and says why when the removal fails', async () => {
-    mockDelete.mockRejectedValue(new Error('Service unavailable'));
-    renderTab();
-    await screen.findByText('team');
+  it('disables Remove policy while the draft is stale', async () => {
+    const { client } = renderTab();
+    await removeTeamStatement();
 
+    await refetchNewerPolicy(client);
+
+    expect(screen.getByRole('button', { name: 'Remove policy' })).toBeDisabled();
+  });
+
+  it('deletes under the ETag the draft was read at even after a newer policy arrives', async () => {
+    const { client } = renderTab();
+    await removeTeamStatement();
     fireEvent.click(screen.getByRole('button', { name: 'Remove policy' }));
-    fireEvent.click(
-      within(await screen.findByTestId('confirm-dialog')).getByRole('button', {
-        name: 'Remove policy',
-      }),
+    const dialog = await screen.findByTestId('confirm-dialog');
+
+    await refetchNewerPolicy(client);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove policy' }));
+
+    await waitFor(() =>
+      expect(mockDeleteBucketPolicy).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"'),
     );
+  });
+
+  it('deletes the policy under the ETag it read', async () => {
+    renderTab();
+
+    await confirmRemovePolicy();
+
+    await waitFor(() =>
+      expect(mockDeleteBucketPolicy).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"'),
+    );
+  });
+
+  it('shows the error and keeps the statements when removal fails', async () => {
+    mockDeleteBucketPolicy.mockRejectedValue(new Error('Service unavailable'));
+    renderTab();
+
+    await confirmRemovePolicy();
 
     expect(await screen.findByText('Service unavailable')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument());
-    expect(mockDelete).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"');
     expect(screen.getByText('team')).toBeInTheDocument();
   });
 
-  it('warns when a deny names everyone', async () => {
-    mockGet.mockResolvedValue({
+  it('warns when a Deny statement applies to everyone', async () => {
+    mockGetBucketPolicy.mockResolvedValue({
       policy: { Statement: [{ Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] }] },
       etag: '"v1"',
     });
     renderTab();
 
     expect(await screen.findByText('This policy denies everyone')).toBeInTheDocument();
+  });
+
+  it('does not warn for a Deny that names members', async () => {
+    mockGetBucketPolicy.mockResolvedValue({
+      policy: {
+        Statement: [{ Effect: 'Deny', Principal: ['user-2'], Action: ['s3:DeleteObject'] }],
+      },
+      etag: '"v1"',
+    });
+    renderTab();
+    await screen.findByText('Ben');
+
+    expect(screen.queryByText('This policy denies everyone')).not.toBeInTheDocument();
   });
 });
