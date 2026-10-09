@@ -51,12 +51,15 @@ vi.mock('./aurora-backoffice.ts', async (importOriginal) => {
     ...original,
     updateTenantStatus: (...args: unknown[]) => mockUpdateAuroraTenantStatusApi(...args),
     getTenantStatus: (...args: unknown[]) => mockGetAuroraTenantStatusApi(...args),
-    getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
-    getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
-    getBucketStorageSamples: (...args: unknown[]) => mockGetBucketStorageSamples(...args),
     getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...args),
   };
 });
+
+vi.mock('./aurora-backoffice-metrics.ts', () => ({
+  getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
+  getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
+  getBucketStorageSamples: (...args: unknown[]) => mockGetBucketStorageSamples(...args),
+}));
 
 const mockPortalListBuckets = vi.fn();
 const mockPortalGetBucketInfo = vi.fn();
