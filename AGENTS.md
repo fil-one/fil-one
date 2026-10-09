@@ -21,7 +21,7 @@ These rules apply to new names; leave existing names alone. In React code, React
 
 - Model mutually exclusive shapes as a union of interfaces (`ServiceAccessKey | PrincipalAccessKey`), each with only the fields valid for it.
 - When a type does not fit the code using it, fix the type definition so that code compiles without a cast. Cast only for a fact the compiler cannot know, with a comment naming that fact.
-- Every package compiles for ES2022 (`tsconfig.base.json` explains why). Use ES2022 built-ins such as `Object.hasOwn` and `Array.prototype.at` over hand-written equivalents.
+- Every package compiles for ES2022 (`tsconfig.base.json` explains why). Use ES2022 built-ins such as `Object.hasOwn` and `Array.prototype.at` over hand-written equivalents. In `packages/cloudfront-functions`, use only the [CloudFront Functions runtime features](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/functions-javascript-runtime-20.html).
 
 ### Comments
 
