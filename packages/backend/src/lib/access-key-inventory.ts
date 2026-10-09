@@ -74,8 +74,12 @@ function buildQueryInput(
 
   // When a bucket filter is provided, only return keys that have access to that bucket:
   // either keys with bucketScope = 'all' or keys that include the bucket in their buckets list.
+  // A principal-bound key stores neither: what it reaches follows the bucket's
+  // policy, which the list route asks, so every such row comes through.
   if (bucketFilter) {
-    filterExpressions.push('(bucketScope = :all OR contains(buckets, :bucket))');
+    filterExpressions.push(
+      '(bucketScope = :all OR contains(buckets, :bucket) OR attribute_exists(principalId))',
+    );
     values[':all'] = { S: 'all' };
     values[':bucket'] = { S: bucketFilter };
   }
@@ -131,18 +135,12 @@ async function runQuery(
 }
 
 function toAccessKey(record: Record<string, unknown>): AccessKey {
-  return {
+  const base = {
     id: (record.sk as string).replace(AccessKeyKeys.keySkPrefix(), ''),
     keyName: record.keyName as string,
     accessKeyId: record.accessKeyId as string,
     createdAt: record.createdAt as string,
-    type: 'service',
     status: record.status as AccessKey['status'],
-    permissions: record.permissions as ServiceAccessKey['permissions'],
-    granularPermissions:
-      (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
-    bucketScope: record.bucketScope as ServiceAccessKey['bucketScope'],
-    buckets: record.buckets as string[] | undefined,
     region: (record.region as AccessKey['region']) ?? DEFAULT_ACCESS_KEY_REGION,
     expiresAt: (record.expiresAt as string | undefined) ?? null,
     // Shipped so the console can gate the per-row revoke button on the same
@@ -151,6 +149,20 @@ function toAccessKey(record: Record<string, unknown>): AccessKey {
     ...(record.rotatedBy
       ? { rotatedBy: record.rotatedBy as string, rotatedAt: record.rotatedAt as string }
       : {}),
+  };
+  // A principal-bound key: the console shows it following the bucket
+  // policies rather than a permission set, which such a row does not carry.
+  if (record.principalId) {
+    return { ...base, type: 'principal', principalId: record.principalId as string };
+  }
+  return {
+    ...base,
+    type: 'service',
+    permissions: record.permissions as ServiceAccessKey['permissions'],
+    granularPermissions:
+      (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
+    bucketScope: record.bucketScope as ServiceAccessKey['bucketScope'],
+    buckets: record.buckets as string[] | undefined,
   };
 }
 

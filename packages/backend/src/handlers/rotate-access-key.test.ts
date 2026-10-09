@@ -520,6 +520,48 @@ describe('rotate-access-key baseHandler', () => {
     expect(mockIssueAccessKey).not.toHaveBeenCalled();
   });
 
+  it('rotates a principal-bound key into one bound to the same principal', async () => {
+    stubStoredKey({
+      permissions: undefined,
+      bucketScope: undefined,
+      buckets: undefined,
+      principalId: 'user-1',
+      expiresAt: '2099-01-01',
+    });
+    stubWrites();
+
+    const result = await baseHandler(eventFor());
+
+    expect(result.statusCode).toBe(201);
+    expect(body(result)).toMatchObject({ id: 'aurora-key-2', keyName: 'My Key' });
+    const opts = mockIssueAccessKey.mock.calls[0][1] as Record<string, unknown>;
+    expect(opts).toMatchObject({ principalId: 'user-1', expiresAt: '2099-01-01' });
+    expect(opts.keyName).toMatch(/^My Key\.r[0-9a-f]{6}$/);
+    expect(opts).not.toHaveProperty('permissions');
+    expect(opts).not.toHaveProperty('buckets');
+
+    const row = replacementRow();
+    expect(row).toMatchObject({
+      keyName: 'My Key',
+      principalId: 'user-1',
+      expiresAt: '2099-01-01',
+    });
+    expect(row).not.toHaveProperty('permissions');
+    expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, KEY_ID);
+  });
+
+  it('records in the rotation audit that the key is principal-bound', async () => {
+    stubStoredKey({ permissions: undefined, principalId: 'user-1' });
+    stubWrites();
+
+    await baseHandler(eventFor());
+
+    const intent = standaloneEvents().find(
+      (event) => event.type === 'key.rotated' && event.phase === 'intent',
+    );
+    expect(intent?.details).toMatchObject({ keyName: 'My Key', principalBound: true });
+  });
+
   it('refuses a row that never recorded what its key carries', async () => {
     stubStoredKey({ permissions: undefined });
 
