@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, POLICY_ACTIONS } from '@filone/shared';
 import type { PolicyActionOrWildcard } from '@filone/shared';
@@ -22,61 +22,100 @@ function renderFields(value: PolicyActionOrWildcard[], role: OrgRole = OrgRole.O
 }
 
 describe('PolicyActionFields', () => {
-  it('offers every action to an Owner, grouped, plus all actions', () => {
+  it.each(POLICY_ACTIONS)('offers %s to an Owner', (action) => {
     renderFields([]);
 
-    expect(screen.getByTestId('policy-action-all')).toBeInTheDocument();
-    for (const action of POLICY_ACTIONS) {
-      expect(screen.getByTestId(`policy-action-${action}`)).toBeInTheDocument();
-    }
-    expect(screen.getByText('Data protection')).toBeInTheDocument();
+    expect(screen.getByTestId(`policy-action-${action}`)).toBeInTheDocument();
   });
 
-  it('hides the retention writes and all actions from an Admin, and prunes them from the selection', () => {
-    const onChange = renderFields(['s3:GetObject', 's3:PutObjectRetention'], OrgRole.Admin);
+  it('offers the all actions row to an Owner', () => {
+    renderFields([]);
 
-    expect(screen.queryByTestId('policy-action-all')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('policy-action-s3:PutObjectRetention')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('policy-action-s3:PutObjectLegalHold')).not.toBeInTheDocument();
-    expect(screen.getByTestId('policy-action-s3:GetObjectRetention')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'All actions' })).toBeInTheDocument();
+  });
+
+  it('shows the Manage data protection group heading', () => {
+    renderFields([]);
+
+    expect(screen.getByText('Manage data protection')).toBeInTheDocument();
+  });
+
+  it.each(['All actions', 'Set retention', 'Set legal hold'])('hides %s from an Admin', (label) => {
+    renderFields([], OrgRole.Admin);
+
+    expect(screen.queryByRole('checkbox', { name: label })).not.toBeInTheDocument();
+  });
+
+  it('still offers Read retention settings to an Admin', () => {
+    renderFields([], OrgRole.Admin);
+
+    expect(screen.getByRole('checkbox', { name: 'Read retention settings' })).toBeInTheDocument();
+  });
+
+  it("removes retention writes from an Admin's selection", () => {
+    const onChange = renderFields(
+      ['s3:GetObject', 's3:PutObjectRetention', 's3:PutObjectLegalHold'],
+      OrgRole.Admin,
+    );
+
     expect(onChange).toHaveBeenCalledWith(['s3:GetObject']);
   });
 
-  it('collapses to the wildcard and checks every row while it holds', () => {
+  it('selects s3:* when all actions is clicked', () => {
     const onChange = renderFields(['s3:GetObject']);
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'All actions' }));
     expect(onChange).toHaveBeenCalledWith(['s3:*']);
   });
 
-  it('shows every row checked and disabled under the wildcard, and clears it from all actions', () => {
-    const onChange = renderFields(['s3:*']);
+  it.each(POLICY_ACTIONS)('shows %s checked and disabled while s3:* is selected', (action) => {
+    renderFields(['s3:*']);
 
-    const read = screen.getByRole('checkbox', { name: 'Read objects' });
-    expect(read).toHaveAttribute('aria-checked', 'true');
-    expect(read).toHaveAttribute('aria-disabled', 'true');
+    const checkbox = within(screen.getByTestId(`policy-action-${action}`)).getByRole('checkbox');
+    expect(checkbox).toHaveAttribute('aria-checked', 'true');
+    expect(checkbox).toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('clears the selection when all actions is unchecked', () => {
+    const onChange = renderFields(['s3:*']);
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'All actions' }));
     expect(onChange).toHaveBeenCalledWith([]);
   });
 
-  it('adds and removes single actions', () => {
+  it('adds an unselected action', () => {
     const onChange = renderFields(['s3:GetObject']);
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'List objects' }));
     expect(onChange).toHaveBeenCalledWith(['s3:GetObject', 's3:ListBucket']);
+  });
+
+  it('removes a selected action', () => {
+    const onChange = renderFields(['s3:GetObject', 's3:ListBucket']);
+
     fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
-    expect(onChange).toHaveBeenCalledWith([]);
+    expect(onChange).toHaveBeenCalledWith(['s3:ListBucket']);
   });
 
   it('toggles an action once when its visible text is clicked', () => {
     const onChange = renderFields([]);
 
     fireEvent.click(screen.getByText('Browse and list objects'));
-    expect(onChange).toHaveBeenCalledTimes(1);
-    expect(onChange).toHaveBeenCalledWith(['s3:ListBucket']);
+    expect(onChange.mock.calls).toEqual([[['s3:ListBucket']]]);
+  });
+
+  it('toggles an action once when its checkbox is clicked', () => {
+    const onChange = renderFields([]);
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'List objects' }));
-    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onChange.mock.calls).toEqual([[['s3:ListBucket']]]);
+  });
+
+  it('selects s3:* when an Owner picks every action one by one', () => {
+    const lastAction = POLICY_ACTIONS[POLICY_ACTIONS.length - 1];
+    const onChange = renderFields(POLICY_ACTIONS.filter((action) => action !== lastAction));
+
+    fireEvent.click(screen.getByTestId(`policy-action-${lastAction}`));
+    expect(onChange).toHaveBeenCalledWith(['s3:*']);
   });
 });
