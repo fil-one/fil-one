@@ -1,6 +1,6 @@
 import { ClockCounterClockwiseIcon, HourglassIcon, LockIcon } from '@phosphor-icons/react/dist/ssr';
 
-import type { Bucket } from '@filone/shared';
+import type { BucketDetail } from '@filone/shared';
 
 import { PropertyCard } from './PropertyCard';
 import { formatRetention } from '../lib/retention.js';
@@ -28,7 +28,7 @@ import { formatRetention } from '../lib/retention.js';
  * buckets table's Visibility column had. A product-wide guarantee belongs in the
  * docs, stated once, not repeated on every resource.
  */
-export function BucketPropertyCards({ bucket }: { bucket: Bucket }) {
+export function BucketPropertyCards({ bucket }: { bucket: BucketDetail }) {
   // "None" rather than the old `?? 'N/A'`, which printed jargon at a bucket that
   // simply has no default policy.
   const retention = formatRetention(
