@@ -75,6 +75,7 @@ const REGION = S3Region.EuWest1;
 
 const ACCESS_KEY = {
   id: 'key-1',
+  type: 'service',
   keyName: 'ci key',
   accessKeyId: 'AKIAOWN',
   createdAt: '2026-01-01T00:00:00Z',

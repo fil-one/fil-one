@@ -1,6 +1,6 @@
 import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import type { AccessKey, GranularPermission } from '@filone/shared';
+import type { AccessKey, GranularPermission, ServiceAccessKey } from '@filone/shared';
 import { S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
@@ -136,11 +136,12 @@ function toAccessKey(record: Record<string, unknown>): AccessKey {
     keyName: record.keyName as string,
     accessKeyId: record.accessKeyId as string,
     createdAt: record.createdAt as string,
+    type: 'service',
     status: record.status as AccessKey['status'],
-    permissions: record.permissions as AccessKey['permissions'],
+    permissions: record.permissions as ServiceAccessKey['permissions'],
     granularPermissions:
       (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
-    bucketScope: record.bucketScope as AccessKey['bucketScope'],
+    bucketScope: record.bucketScope as ServiceAccessKey['bucketScope'],
     buckets: record.buckets as string[] | undefined,
     region: (record.region as AccessKey['region']) ?? DEFAULT_ACCESS_KEY_REGION,
     expiresAt: (record.expiresAt as string | undefined) ?? null,

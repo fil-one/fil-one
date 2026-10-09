@@ -10,7 +10,7 @@ import {
 
 import { IconBox } from './IconBox';
 
-import type { AccessKey, GranularPermission } from '@filone/shared';
+import type { AccessKey, AccessKeyPermission, GranularPermission } from '@filone/shared';
 import {
   BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSION_LABELS,
@@ -44,7 +44,7 @@ function PermissionBadges({
   permissions,
   granularPermissions,
 }: {
-  permissions: AccessKey['permissions'];
+  permissions: AccessKeyPermission[];
   granularPermissions: GranularPermission[];
 }) {
   const objectPermissions = permissions.filter(isObjectPermission);
@@ -383,7 +383,7 @@ export function AccessKeysTable({
             {showBuckets && (
               <Table.Cell className="hidden lg:table-cell">
                 <div className="flex flex-wrap gap-1">
-                  {key.bucketScope === 'all' ? (
+                  {key.type === 'principal' ? null : key.bucketScope === 'all' ? (
                     <Badge color="grey" size="sm">
                       All Buckets
                     </Badge>
@@ -401,10 +401,12 @@ export function AccessKeysTable({
             {/* Permissions */}
             {showPermissions && (
               <Table.Cell className="hidden md:table-cell">
-                <PermissionBadges
-                  permissions={key.permissions ?? []}
-                  granularPermissions={key.granularPermissions ?? []}
-                />
+                {key.type === 'service' && (
+                  <PermissionBadges
+                    permissions={key.permissions ?? []}
+                    granularPermissions={key.granularPermissions ?? []}
+                  />
+                )}
               </Table.Cell>
             )}
 

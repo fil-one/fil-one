@@ -4,6 +4,8 @@ import type {
   GranularPermission,
   ObjectPermission,
 } from './api/access-keys.ts';
+import { getRegionAccessModel } from './constants.ts';
+import type { S3Region } from './constants.ts';
 import { permissionsForRole, roleHasPermission } from './permissions.ts';
 import type { Permission } from './permissions.ts';
 
@@ -137,12 +139,20 @@ function requirementFor(
 export interface AccessKeyPermissions {
   permissions?: readonly string[] | undefined;
   granularPermissions?: readonly string[] | undefined;
+  /**
+   * The member a key is bound to on an `iam` region. Such a key records no
+   * permission set because it has none of its own.
+   */
+  principalId?: string | undefined;
+  /** Where the key lives; on an `iam` region a key with no principal is a service key. */
+  region?: S3Region | undefined;
 }
 
 /**
  * Why a role cannot keep a key, and therefore why the key is revoked.
  *
- * `role_cannot_mint`: the role holds no `keys.create`, so it can hold no key.
+ * `role_cannot_mint`: the role holds no `keys.create`, so it can hold no key,
+ * or the key is a service key and the role holds no `keys.create_service`.
  * `permissions_unrecorded`: the row records no permission set.
  * `exceeds_role`: the role could not grant everything the row carries.
  *
@@ -178,15 +188,27 @@ export type KeyRetentionResult =
  * nor revoke it, since `keys.manage_own` is what scopes the list and the
  * delete.
  *
- * A row recording no permission set cannot be placed inside the new role, so it
- * goes. Bucket scope is never compared: it is the creator's choice at mint time
- * and no role caps it.
+ * A principal-bound key is kept by any role that can mint: it carries nothing
+ * of its own, so a narrowing has nothing to compare, and what its holder may do
+ * follows the bucket policies live. A row recording no permission set and no
+ * principal cannot be placed inside the new role, so it goes. A key with no
+ * principal on an `iam` region is a service key, kept only by a role that holds
+ * `keys.create_service`, since the bucket policies never see it. Bucket scope is
+ * never compared: it is the creator's choice at mint time and no role caps it.
  *
  * The caller decides whose keys to ask about. A row with no `createdBy` belongs
  * to nobody the console can name and is outside this rule entirely.
  */
 export function canRetainAccessKey(role: string, key: AccessKeyPermissions): KeyRetentionResult {
   if (!roleHasPermission(role, 'keys.create')) {
+    return { retained: false, reason: 'role_cannot_mint' };
+  }
+  if (key.principalId) return { retained: true };
+  if (
+    key.region &&
+    getRegionAccessModel(key.region) === 'iam' &&
+    !roleHasPermission(role, 'keys.create_service')
+  ) {
     return { retained: false, reason: 'role_cannot_mint' };
   }
   if (!key.permissions) return { retained: false, reason: 'permissions_unrecorded' };

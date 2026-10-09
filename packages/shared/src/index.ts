@@ -114,6 +114,7 @@ export type {
   ListMembersResponse,
   MemberSummary,
   AccessKeySummary,
+  PolicySyncReport,
   RemoveMemberResponse,
   RoleChangePreviewResponse,
   UpdateMemberRoleFailure,
@@ -174,6 +175,8 @@ export type {
   AuditPhaseFields,
   AuditSinglePhase,
   AuditSubject,
+  BucketPolicyChangeTrigger,
+  BucketPolicyEventDetails,
   CommittableAuditEvent,
   StandaloneAuditEvent,
   TwoPhaseAuditEvent,
@@ -216,6 +219,41 @@ export type {
 } from './route-manifest.ts';
 export { ApiErrorCode } from './api/coreInterfaces.ts';
 export type { ErrorResponse } from './api/coreInterfaces.ts';
+
+export {
+  POLICY_ACTIONS,
+  POLICY_ACTION_WILDCARD,
+  POLICY_ACTION_GROUPS,
+  POLICY_ACTION_GROUP_LABELS,
+  POLICY_ACTION_LABELS,
+  POLICY_EFFECTS,
+  POLICY_WILDCARD_PRINCIPAL,
+  RETENTION_WRITE_ACTIONS,
+  ROSTER_ADMIN_ACTIONS,
+  ROSTER_ADMINS_SID,
+  ROSTER_CREATOR_SID,
+  ROSTER_OWNERS_SID,
+  BucketPolicySchema,
+  PolicyStatementSchema,
+  PutBucketPolicyRequestSchema,
+  addsRetentionGrants,
+  defaultBucketPolicy,
+  effectiveActions,
+  policyActionsInGroup,
+  rosterStatements,
+  withRosterStatements,
+} from './api/bucket-policies.ts';
+export type {
+  BucketPolicy,
+  GetBucketPolicyResponse,
+  MemberBucketAccess,
+  PolicyAction,
+  PolicyActionGroup,
+  PolicyActionOrWildcard,
+  PolicyEffect,
+  PolicyStatement,
+  PutBucketPolicyRequest,
+} from './api/bucket-policies.ts';
 export {
   DELETION_CODE_LENGTH,
   DELETION_CODE_TTL_MINUTES,
@@ -333,6 +371,7 @@ export {
   RESERVED_KEY_NAME_PREFIX,
   isReservedKeyName,
   CreateAccessKeySchema,
+  CreatePrincipalAccessKeySchema,
 } from './api/access-keys.ts';
 export type {
   AccessKeyStatus,
@@ -343,11 +382,14 @@ export type {
   BucketInfoPermission,
   GranularPermission,
   AccessKey,
+  ServiceAccessKey,
+  PrincipalAccessKey,
   ListAccessKeysResponse,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   RotateAccessKeyResponse,
   DeleteAccessKeyRequest,
+  CreatePrincipalAccessKeyRequest,
 } from './api/access-keys.ts';
 
 export {

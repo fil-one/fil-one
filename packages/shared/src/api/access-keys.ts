@@ -211,17 +211,30 @@ export const CreateAccessKeySchema = z
 
 export type CreateAccessKeyRequest = z.infer<typeof CreateAccessKeySchema>;
 
-export interface AccessKey {
+/**
+ * The create request on a region serving the `iam` access model. A key there
+ * belongs to the caller's principal and carries no permissions or bucket list,
+ * so the form asks for a name and an expiry and nothing else. The name rules
+ * are {@link CreateAccessKeySchema}'s; the region is validated by the handler
+ * against the access model it serves.
+ */
+export const CreatePrincipalAccessKeySchema = z
+  .object({
+    keyName: CreateAccessKeySchema.shape.keyName,
+    region: z.enum(S3Region),
+    expiresAt: CreateAccessKeySchema.shape.expiresAt,
+  })
+  .strict();
+
+export type CreatePrincipalAccessKeyRequest = z.infer<typeof CreatePrincipalAccessKeySchema>;
+
+interface AccessKeyBase {
   id: string;
   keyName: string;
   accessKeyId: string;
   createdAt: string;
   lastUsedAt?: string;
   status: AccessKeyStatus;
-  permissions: AccessKeyPermission[];
-  granularPermissions?: GranularPermission[];
-  bucketScope: AccessKeyBucketScope;
-  buckets?: string[];
   region?: S3Region;
   expiresAt?: string | null;
   /**
@@ -239,6 +252,28 @@ export interface AccessKey {
   rotatedAt?: string;
 }
 
+/** A key that carries its own permissions and bucket list. */
+export interface ServiceAccessKey extends AccessKeyBase {
+  type: 'service';
+  /** Absent on a recovered row, whose grant was never recorded. */
+  permissions?: AccessKeyPermission[];
+  granularPermissions?: GranularPermission[];
+  bucketScope?: AccessKeyBucketScope;
+  buckets?: string[];
+}
+
+/**
+ * A key bound to a member on a region serving the `iam` access model. It holds
+ * no permissions or bucket list; the bucket policies naming its member decide
+ * what it may do at request time.
+ */
+export interface PrincipalAccessKey extends AccessKeyBase {
+  type: 'principal';
+  principalId: string;
+}
+
+export type AccessKey = ServiceAccessKey | PrincipalAccessKey;
+
 export interface ListAccessKeysResponse {
   keys: AccessKey[];
 }
@@ -249,6 +284,8 @@ export interface CreateAccessKeyResponse {
   accessKeyId: string;
   secretAccessKey: string;
   createdAt: string;
+  /** Set when the key was bound to the caller's principal. See {@link PrincipalAccessKey.principalId}. */
+  principalId?: string;
 }
 
 export interface DeleteAccessKeyRequest {
