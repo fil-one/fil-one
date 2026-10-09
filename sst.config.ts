@@ -118,6 +118,18 @@ export default $config({
     });
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
+    // Point-in-time recovery on the stages that carry real data, stated here
+    // so it does not depend on the SST default. A table with its own table
+    // transform states the setting there (OrgTable, AuditTable).
+    $transform(sst.aws.Dynamo, (args) => {
+      args.transform = {
+        ...args.transform,
+        table: args.transform?.table ?? {
+          pointInTimeRecovery: { enabled: isProduction || isStaging },
+        },
+      };
+    });
+
     const billingTable = new sst.aws.Dynamo('BillingTable', {
       fields: {
         pk: 'string',
