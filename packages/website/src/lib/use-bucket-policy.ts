@@ -15,33 +15,31 @@ import { useHasPermission } from './use-permissions.js';
 /**
  * The bucket's policy and the two writes against it.
  *
- * The read runs only where it can answer: a caller holding
- * `buckets.policy_manage` on a region serving the `iam` model. Elsewhere the
- * query stays disabled and `snapshot` is `undefined`, which the page reads as
- * "no tab" rather than "no policy".
+ * The read runs only for a caller holding `buckets.policy_manage` on an `iam`
+ * region. Otherwise `isAvailable` is false and `snapshot` is `undefined`; a
+ * bucket with no policy reads as `null`, so `hasLoadFailed` means only that the
+ * request failed.
  *
- * A save writes the answer into the cache and invalidates the bucket's keys,
- * since a principal-bound key's row now reads "follows bucket policy". A save
- * that lost to another writer reports `conflict` rather than toasting: the tab
- * shows the conflict in place, beside a reload, and keeps the draft.
+ * A successful write caches the new snapshot and invalidates the bucket's access
+ * keys, whose effective permissions follow the policy.
  */
 export function useBucketPolicy(bucketName: string, region: S3Region) {
   const queryClient = useQueryClient();
-  const mayManage = useHasPermission('buckets.policy_manage');
-  const enabled = mayManage && isIamRegion(region);
-  const key = queryKeys.bucketPolicy(bucketName, region);
+  const canManagePolicy = useHasPermission('buckets.policy_manage');
+  const isAvailable = canManagePolicy && isIamRegion(region);
+  const policyQueryKey = queryKeys.bucketPolicy(bucketName, region);
 
   const query = useQuery({
-    queryKey: key,
-    enabled,
+    queryKey: policyQueryKey,
+    enabled: isAvailable,
     staleTime: LIST_STALE_TIME,
     gcTime: LIST_GC_TIME,
     queryFn: () => getBucketPolicy(bucketName, region),
   });
 
-  function afterWrite(snapshot: BucketPolicySnapshot | null) {
-    queryClient.setQueryData<BucketPolicySnapshot | null>(key, snapshot);
-    void queryClient.invalidateQueries({ queryKey: key });
+  function cacheWrittenPolicy(snapshot: BucketPolicySnapshot | null) {
+    queryClient.setQueryData<BucketPolicySnapshot | null>(policyQueryKey, snapshot);
+    void queryClient.invalidateQueries({ queryKey: policyQueryKey });
     void queryClient.invalidateQueries({
       queryKey: queryKeys.bucketAccessKeys(bucketName, region),
     });
@@ -50,29 +48,28 @@ export function useBucketPolicy(bucketName: string, region: S3Region) {
   const save = useMutation({
     mutationFn: ({ policy, etag }: { policy: BucketPolicy; etag?: string }) =>
       putBucketPolicy(bucketName, region, { policy, etag }),
-    onSuccess: (written, { policy }) => afterWrite({ policy, etag: written.etag }),
+    onSuccess: (written, { policy }) => cacheWrittenPolicy({ policy, etag: written.etag }),
   });
 
   const remove = useMutation({
     mutationFn: ({ etag }: { etag: string }) => deleteBucketPolicy(bucketName, region, etag),
-    onSuccess: () => afterWrite(null),
+    onSuccess: () => cacheWrittenPolicy(null),
   });
 
   return {
-    enabled,
-    // Read through `enabled`, not just the query: react-query keeps serving a
-    // disabled query's cached rows, and a mid-session downgrade must not leave
-    // the document on screen.
-    snapshot: enabled ? query.data : undefined,
-    // A disabled query stays pending forever, which is not "loading".
-    loading: enabled && query.isPending,
-    failed: enabled && query.isError,
+    isAvailable,
+    // react-query keeps serving a disabled query's cached data, so a caller who
+    // loses access mid-session must not keep seeing the policy.
+    snapshot: isAvailable ? query.data : undefined,
+    // A disabled query stays pending forever, which is not loading.
+    isLoading: isAvailable && query.isPending,
+    hasLoadFailed: isAvailable && query.isError,
     errorMessage: query.error instanceof Error ? query.error.message : undefined,
     refetch: () => query.refetch(),
     save,
     remove,
-    saving: save.isPending || remove.isPending,
+    isWriting: save.isPending || remove.isPending,
     /** The last save or delete lost to another writer. Clears on the next attempt. */
-    conflict: isPolicyConflict(save.error) || isPolicyConflict(remove.error),
+    hasConflict: isPolicyConflict(save.error) || isPolicyConflict(remove.error),
   };
 }

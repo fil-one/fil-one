@@ -316,13 +316,12 @@ export interface SentOrg {
  * Every Fil.one API call, up to the point where the body is read.
  *
  * Cookies, the CSRF token, the org header, and the whole error ladder live here
- * so a caller that wants something other than JSON — the audit CSV — gets the
- * same 401 step-up, 403, and 410 handling rather than a second copy of it.
- * {@link apiRequest} and {@link apiDownload} are the two ways to read what it
- * returns.
+ * so a caller that wants something other than a JSON body, such as the audit
+ * CSV or a bucket policy's `ETag` header, gets the same 401 step-up, 403, and
+ * 410 handling rather than a second copy of it.
  */
 // eslint-disable-next-line complexity/complexity
-async function sendApiRequest(
+export async function sendApiRequest(
   path: string,
   options: RequestInit = {},
   behavior: ApiRequestBehavior = {},
@@ -461,11 +460,6 @@ export async function apiRequest<T>(
   }
 
   return response.json() as Promise<T>;
-}
-
-/** The raw response, for a caller that reads its headers, such as a bucket policy's `ETag`. */
-export function apiResponse(path: string, options: RequestInit = {}): Promise<Response> {
-  return sendApiRequest(path, options);
 }
 
 /**
