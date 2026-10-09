@@ -34,8 +34,8 @@ vi.mock('jose', () => ({
 // suite has no reason to stand up.
 const mockDeleteAccessKey = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  // No region serves the `iam` access model here, so the roster fan-out and
-  // the principal removal find nothing to reach.
+  // No region serves the `iam` access model here, so the principal removal
+  // finds nothing to reach.
   getAvailableOrchestrators: () => [],
   getOrchestratorForRegion: (region: string) => ({
     id: region === 'us-east-1' ? 'fth' : 'aurora',
@@ -55,7 +55,7 @@ vi.mock('../lib/iam-policy-fanout.ts', async () => ({
   ...(await vi.importActual<typeof import('../lib/iam-policy-fanout.ts')>(
     '../lib/iam-policy-fanout.ts',
   )),
-  removeMemberPrincipals: (args: unknown) => mockRemovePrincipals(args),
+  removeMemberPrincipalFromIamRegions: (args: unknown) => mockRemovePrincipals(args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -1142,7 +1142,7 @@ describe('the principal on iam regions', () => {
     targetHolds(OrgRole.Member);
   });
 
-  it('removes the principal before the rows go, and names the regions it reached', async () => {
+  it('removes the principal before writing the membership transaction', async () => {
     const order: string[] = [];
     mockRemovePrincipals.mockImplementation(async () => {
       order.push('principal');
@@ -1157,9 +1157,9 @@ describe('the principal on iam regions', () => {
 
     expect(result).toMatchObject({ statusCode: 200 });
     expect(order).toStrictEqual(['principal', 'transaction']);
-    expect(mockRemovePrincipals).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: TARGET_ID }),
-    );
+    expect(mockRemovePrincipals.mock.calls).toStrictEqual([
+      [{ orgId: ORG_ID, orgProfile: undefined, userId: TARGET_ID }],
+    ]);
   });
 
   it('resolves the iam regions from a consistent read of the org profile', async () => {
@@ -1187,6 +1187,9 @@ describe('the principal on iam regions', () => {
     const result = await handler(removeEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 502 });
+    expect(body(result)).toStrictEqual({
+      message: `The member could not be removed from ${S3Region.UsEast9}, so they are still in this organization. Try again.`,
+    });
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 });

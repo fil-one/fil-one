@@ -1280,9 +1280,9 @@ export default $config({
       // design — the role is unwritten and the retry finds fewer keys.
       'update-member-role': {
         extraEnv: orchestratorEnv,
-        // The roster fan-out lists and rewrites bucket policies on iam
-        // regions, signed with the tenant's console S3 key. Only Forge
-        // regions carry bucket policies, so only their key parameters.
+        // The roster fan-out lists and rewrites bucket policies, signed with
+        // the tenant's console S3 key, so it reads the S3 key parameters of
+        // regions with `accessModel: 'iam'`.
         permissions: [
           {
             actions: ['ssm:GetParameter'],

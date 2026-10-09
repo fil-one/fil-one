@@ -115,7 +115,7 @@ export function orgNotDeletingCheck(orgId: string): TransactWriteItem {
 // A condition on a missing item reads every attribute as absent, so
 // attribute_not_exists(deleting) alone would pass for an org that has no profile
 // row. attribute_exists(pk) refuses that case instead.
-const ORG_NOT_DELETING = 'attribute_exists(pk) AND attribute_not_exists(deleting)';
+const ORG_NOT_DELETING_CONDITION = 'attribute_exists(pk) AND attribute_not_exists(deleting)';
 
 /**
  * The same guard against a named UserInfoTable, for operator scripts that run
@@ -126,7 +126,7 @@ export function orgNotDeletingCheckIn(userInfoTableName: string, orgId: string):
     ConditionCheck: {
       TableName: userInfoTableName,
       Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-      ConditionExpression: ORG_NOT_DELETING,
+      ConditionExpression: ORG_NOT_DELETING_CONDITION,
     },
   };
 }
@@ -195,7 +195,7 @@ export async function resolveOrgSummary(orgId: string): Promise<OrgProfileSummar
   }
 }
 
-/*
+/**
  * Updates the org's own PROFILE row, refusing the write while the org is being
  * deleted.
  *
@@ -215,7 +215,7 @@ async function updateProfileIfNotDeleting(
       new UpdateItemCommand({
         TableName: Resource.UserInfoTable.name,
         Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
-        ConditionExpression: ORG_NOT_DELETING,
+        ConditionExpression: ORG_NOT_DELETING_CONDITION,
         ...update,
       }),
     );
@@ -230,7 +230,7 @@ async function updateProfileIfNotDeleting(
  * orchestrator. Per-orchestrator, matching the `${id}TenantId` convention
  * tenant-setup writes to the same row.
  */
-function principalsAttribute(orchestratorId: string): string {
+function getPrincipalsAttributeName(orchestratorId: string): string {
   return `${orchestratorId}Principals`;
 }
 
@@ -238,11 +238,11 @@ function principalsAttribute(orchestratorId: string): string {
  * The members already registered as principals at this orchestrator. Reads the
  * pre-fetched profile row, so callers that already hold one pay nothing.
  */
-export function registeredPrincipals(
+export function getRegisteredPrincipals(
   profile: OrgProfileItem | undefined,
   orchestratorId: string,
 ): Set<string> {
-  return new Set(profile?.[principalsAttribute(orchestratorId)]?.SS ?? []);
+  return new Set(profile?.[getPrincipalsAttributeName(orchestratorId)]?.SS ?? []);
 }
 
 /**
@@ -258,7 +258,7 @@ export async function addRegisteredPrincipals(
   if (userIds.length === 0) return;
   await updateProfileIfNotDeleting(orgId, {
     UpdateExpression: 'ADD #principals :ids',
-    ExpressionAttributeNames: { '#principals': principalsAttribute(orchestratorId) },
+    ExpressionAttributeNames: { '#principals': getPrincipalsAttributeName(orchestratorId) },
     ExpressionAttributeValues: { ':ids': { SS: [...new Set(userIds)] } },
   });
 }
@@ -266,7 +266,7 @@ export async function addRegisteredPrincipals(
 /**
  * Drops one id, keeping the set in step with the orchestrator after a principal
  * is removed. `DELETE` that empties the set removes the attribute, which
- * {@link registeredPrincipals} reads back as empty.
+ * {@link getRegisteredPrincipals} reads back as empty.
  */
 export async function removeRegisteredPrincipal(
   orgId: string,
@@ -275,7 +275,7 @@ export async function removeRegisteredPrincipal(
 ): Promise<void> {
   await updateProfileIfNotDeleting(orgId, {
     UpdateExpression: 'DELETE #principals :ids',
-    ExpressionAttributeNames: { '#principals': principalsAttribute(orchestratorId) },
+    ExpressionAttributeNames: { '#principals': getPrincipalsAttributeName(orchestratorId) },
     ExpressionAttributeValues: { ':ids': { SS: [userId] } },
   });
 }

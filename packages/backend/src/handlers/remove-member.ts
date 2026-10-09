@@ -4,8 +4,6 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { Resource } from 'sst';
 import { NO_ROLE, OrgRole } from '@filone/shared';
-import { prepareFloorOrg } from '../lib/account-creation.ts';
-import type { FloorOrgPreparation } from '../lib/account-creation.ts';
 import type {
   AccessKeySummary,
   ErrorResponse,
@@ -13,8 +11,10 @@ import type {
   S3Region,
 } from '@filone/shared';
 import { AuditSubjects, auditPut, userActor } from '../lib/audit.ts';
+import { prepareFloorOrg } from '../lib/account-creation.ts';
+import type { FloorOrgPreparation } from '../lib/account-creation.ts';
 import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
-import { removeMemberPrincipals } from '../lib/iam-policy-fanout.ts';
+import { removeMemberPrincipalFromIamRegions } from '../lib/iam-policy-fanout.ts';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
 import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
 import { requireManageableMember } from '../lib/manageable-member.ts';
@@ -54,7 +54,7 @@ import {
   ownerCountUnavailableResponse,
   refusedKeysSubject,
 } from '../lib/response-builder.ts';
-import type { ErrorWithRevokedKeys } from '../lib/response-builder.ts';
+import type { ErrorWithKeysRevoked } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -187,8 +187,14 @@ export async function baseHandler(
   // leaves the member in the org, like a vendor refusing a key below: a
   // re-invited member keeps the same user id, and statements left behind would
   // hand their old access back on the new invitation.
-  const principals = await removeMemberPrincipals({ orgId, orgProfile, userId: targetUserId });
-  if (principals.failed.length > 0) return principalRemovalRefusedResponse(principals.failed);
+  const principalRemoval = await removeMemberPrincipalFromIamRegions({
+    orgId,
+    orgProfile,
+    userId: targetUserId,
+  });
+  if (principalRemoval.failed.length > 0) {
+    return principalRemovalRefusedResponse(principalRemoval.failed);
+  }
 
   const committed = await commitAfterRevokingKeys({
     items,
@@ -205,7 +211,7 @@ export async function baseHandler(
       ...(invitationsToRevoke.length > 0 ? { revokedInvitations: invitationsToRevoke.length } : {}),
     },
     source: SOURCE,
-    onCancelled: (err, revokedKeys) => removalFailureResponse(err, { ...failure, revokedKeys }),
+    onCancelled: (err, keysRevoked) => removalFailureResponse(err, { ...failure, keysRevoked }),
     onRefused: (refused, revoked) => vendorRefusedResponse(revoked, refused),
     // The member is still here with their clients already broken. The caller
     // sees it in the response; this is the only thing that reaches the member.
@@ -333,7 +339,7 @@ async function finishRemoval({
     .body<RemoveMemberResponse>(
       // Named only when there are any, so removing somebody who held no key
       // answers with the empty body rather than an empty list.
-      revoked.length > 0 ? { revokedKeys: revoked } : {},
+      revoked.length > 0 ? { keysRevoked: revoked } : {},
     )
     .build();
 }
@@ -344,14 +350,14 @@ async function finishRemoval({
  * keys.
  */
 function vendorRefusedResponse(
-  revokedKeys: AccessKeySummary[],
+  keysRevoked: AccessKeySummary[],
   failedKeys: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(502)
-    .body<ErrorWithRevokedKeys>({
+    .body<ErrorWithKeysRevoked>({
       message: `${refusedKeysSubject(failedKeys)} could not be revoked, so the member is still in this organization. Try again.`,
-      revokedKeys,
+      keysRevoked,
     })
     .build();
 }
@@ -400,7 +406,7 @@ function removalTransaction({
   wasOwner: boolean;
   invitations: InvitationRecord[];
   lastMembership: { floorOrg?: FloorOrgPreparation; remainingCheck?: TransactWriteItem };
-}): { items: TransactWriteItem[]; failure: Omit<RemovalFailure, 'revokedKeys'> } {
+}): { items: TransactWriteItem[]; failure: Omit<RemovalFailure, 'keysRevoked'> } {
   const floorOrgItems = floorOrg ? [...floorOrg.items, auditPut(floorOrg.event)] : [];
   return {
     items: [
@@ -437,7 +443,7 @@ interface RemovalFailure {
    * revocation leaves a member in the org whose clients have stopped working,
    * and an answer that mentions only the membership hides that.
    */
-  revokedKeys: AccessKeySummary[];
+  keysRevoked: AccessKeySummary[];
 }
 
 /**
@@ -517,7 +523,7 @@ async function removalFailureResponse(
     revocations,
     floorOrgItems,
     remainingCheck,
-    revokedKeys,
+    keysRevoked,
   }: RemovalFailure,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   // The floor org's items (its rows and the audit Put appended alongside them)
@@ -534,7 +540,7 @@ async function removalFailureResponse(
     ...(remainingCheck ? ['accountChanged'] : []),
   ]);
   if (failed.length === 0) throw err;
-  if (failed.includes('accountChanged')) return accountChangedResponse(revokedKeys);
+  if (failed.includes('accountChanged')) return accountChangedResponse(keysRevoked);
 
   // The decrement's own condition, which is the whole last-Owner invariant:
   // the org's only Owner cannot be removed, including by themselves. Unless
@@ -543,27 +549,27 @@ async function removalFailureResponse(
   // diagnosis of an org we cannot diagnose.
   if (failed.includes('ownerCount')) {
     return (await readOwnerCount(orgId)) === undefined
-      ? refuseWithoutOwnerCount(orgId, revokedKeys)
-      : lastOwnerResponse(LAST_OWNER_REMEDY, revokedKeys);
+      ? refuseWithoutOwnerCount(orgId, keysRevoked)
+      : lastOwnerResponse(LAST_OWNER_REMEDY, keysRevoked);
   }
-  if (failed.includes('invitation')) return invitationRaceResponse(revokedKeys);
+  if (failed.includes('invitation')) return invitationRaceResponse(keysRevoked);
   // The membership delete carries both the row's existence and its role, so a
   // cancellation here is one of two things and the row says which: gone, which
   // is the outcome the caller wanted, or still there under a role somebody
   // changed while this was in flight — and that one must not read as removed,
   // because the transaction's owner-count delta was decided from the old role.
   return (await resolveMembership(orgId, targetUserId))
-    ? memberRoleChangedResponse('while the removal was in flight — try again', revokedKeys)
-    : notAMemberResponse(revokedKeys);
+    ? memberRoleChangedResponse('while the removal was in flight — try again', keysRevoked)
+    : notAMemberResponse(keysRevoked);
 }
 
 /** Loud, because the org needs its META row repaired before an Owner can leave. */
 function refuseWithoutOwnerCount(
   orgId: string,
-  revokedKeys?: AccessKeySummary[],
+  keysRevoked?: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   console.error('[remove-member] ownerCount missing — removal of an Owner refused', { orgId });
-  return ownerCountUnavailableResponse('updated', revokedKeys);
+  return ownerCountUnavailableResponse('updated', keysRevoked);
 }
 
 /**
@@ -575,13 +581,13 @@ function refuseWithoutOwnerCount(
  * refusal here.
  */
 function accountChangedResponse(
-  revokedKeys?: AccessKeySummary[],
+  keysRevoked?: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse | ErrorWithRevokedKeys>({
+    .body<ErrorResponse | ErrorWithKeysRevoked>({
       message: 'That member’s account changed while this was in flight — try again.',
-      ...(revokedKeys ? { revokedKeys } : {}),
+      ...(keysRevoked ? { keysRevoked } : {}),
     })
     .build();
 }

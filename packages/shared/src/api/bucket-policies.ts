@@ -272,6 +272,12 @@ export const CREATOR_ACTIONS: PolicyAction[] = POLICY_ACTIONS.filter(
   (action) => !RETENTION_WRITE_ACTIONS.includes(action),
 );
 
+/** The org's Owners and Admins by user id, as the roster statements name them. */
+export interface Roster {
+  owners: readonly string[];
+  admins: readonly string[];
+}
+
 /**
  * The policy a new bucket carries in its create request: one Allow naming the
  * creator, whatever their role. An ordinary statement, shown under its Sid and

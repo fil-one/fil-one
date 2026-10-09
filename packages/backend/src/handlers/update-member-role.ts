@@ -12,7 +12,12 @@ import type {
 } from '@filone/shared';
 import { AuditSubjects, userActor } from '../lib/audit.ts';
 import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
-import { isRosterRole, rosterAfterChange, syncRosterStatements } from '../lib/iam-policy-fanout.ts';
+import type { CommitOutcome } from '../lib/commit-after-revoking-keys.ts';
+import {
+  getRosterAfterChange,
+  isRosterRole,
+  syncRosterStatements,
+} from '../lib/iam-policy-fanout.ts';
 import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
 import { pendingInvitationsFrom, planRevocations, revokeDeferred } from '../lib/invitations.ts';
@@ -61,17 +66,15 @@ const SOURCE = 'update-member-role';
 const LAST_OWNER_REMEDY = 'Promote another member to owner first.';
 
 /**
- * The two profiles only a narrowing reads: the org's, so the revocation pass
- * knows which tenant holds each key, and the member's, so a fence refusal can
- * name whose key was minted.
+ * The org's profile, so the revocation pass knows which tenant holds each key
+ * and the roster rewrite knows each `iam` region's tenant, and the member's, so
+ * a fence refusal can name whose key was minted.
  *
  * One call holding the condition rather than two entries in the caller's wave,
- * because they share it — a widening strands no key, so it reads neither and
- * answers with both absent. The org profile also resolves each `iam` region's
- * tenant for the roster rewrite, which a widening into Owner or Admin needs as
- * much as a narrowing, so the caller asks for both then too.
+ * because they share it: a change that neither narrows nor rewrites the roster
+ * reads neither and answers with both absent.
  */
-async function readProfilesForNarrowing(
+async function readProfilesIfNeeded(
   narrows: boolean,
   orgId: string,
   targetUserId: string,
@@ -142,28 +145,28 @@ export async function baseHandler(
   const narrows = roleNarrows(target.role, role);
   const delta = ownerCountDeltaFor(target.role, role);
   // Owners and Admins are named on every bucket policy of an `iam` region, so
-  // a change into, out of, or between those roles rewrites them.
+  // a change where either role is a roster role rewrites them.
   const rewritesRoster = isRosterRole(target.role) || isRosterRole(role);
 
   // Independent, so one wave rather than three.
   const [pending, { orgProfile, targetProfile }, owners] = await Promise.all([
     pendingInvitationsFrom(orgId, targetUserId),
-    readProfilesForNarrowing(narrows || rewritesRoster, orgId, targetUserId),
+    readProfilesIfNeeded(narrows || rewritesRoster, orgId, targetUserId),
     delta === 'decrement' ? readOwnerCount(orgId) : undefined,
   ]);
 
   const refused = refuseBeforeRevokingKeys(orgId, delta, owners);
   if (refused) return refused;
 
-  const roster: RosterChange = {
+  const rosterChange: RoleChangeRosterContext = {
     orgId,
     orgProfile,
     actor,
-    change: { userId: targetUserId, role },
-    rewrites: rewritesRoster,
+    target: { userId: targetUserId, role },
+    rewritesRoster,
     narrows,
   };
-  const syncedBefore = await syncRosterBeforeCommit(roster);
+  const reportsBeforeCommit = await syncRosterBeforeCommit(rosterChange);
 
   const invitationsToRevoke = pending.filter(
     (invitation) => !canManageTargetRole(role, invitation.role),
@@ -178,38 +181,41 @@ export async function baseHandler(
   const changedBy = actorEmail ?? userId;
   const failure = { orgId, delta, labels: change.labels };
 
-  const { committed, policySync } = await commitWithRoster(roster, syncedBefore, () =>
-    commitAfterRevokingKeys({
-      items: change.items,
-      keys: review.keysToRevoke,
-      fence: review.fence,
-      orgId,
-      orgProfile,
-      actor,
-      trigger: 'role_narrowing',
-      auditEventType: 'member.role_changed',
-      subject: AuditSubjects.user(targetUserId),
-      details: {
-        role,
-        previousRole: target.role,
-        ...(invitationsToRevoke.length > 0
-          ? { revokedInvitations: invitationsToRevoke.length }
-          : {}),
-      },
-      source: SOURCE,
-      onCancelled: (err, revokedKeys) => changeFailureResponse(err, { ...failure, revokedKeys }),
-      onRefused: (refused, revoked) => vendorRefusedResponse(revoked, refused),
-      notifyMember: (revoked) =>
-        notifyRevokedKeys({
-          orgId,
-          orgProfile,
-          userId: targetUserId,
-          changedBy,
-          revoked,
-          cause: { kind: 'change_failed' },
-          source: SOURCE,
-        }),
-    }),
+  const { committed, policySyncReports } = await commitAndSyncRoster(
+    rosterChange,
+    reportsBeforeCommit,
+    () =>
+      commitAfterRevokingKeys({
+        items: change.items,
+        keys: review.keysToRevoke,
+        fence: review.fence,
+        orgId,
+        orgProfile,
+        actor,
+        trigger: 'role_narrowing',
+        auditEventType: 'member.role_changed',
+        subject: AuditSubjects.user(targetUserId),
+        details: {
+          role,
+          previousRole: target.role,
+          ...(invitationsToRevoke.length > 0
+            ? { revokedInvitations: invitationsToRevoke.length }
+            : {}),
+        },
+        source: SOURCE,
+        onCancelled: (err, keysRevoked) => changeFailureResponse(err, { ...failure, keysRevoked }),
+        onRefused: (refused, revoked) => vendorRefusedResponse(revoked, refused),
+        notifyMember: (revoked) =>
+          notifyRevokedKeys({
+            orgId,
+            orgProfile,
+            userId: targetUserId,
+            changedBy,
+            revoked,
+            cause: { kind: 'change_failed' },
+            source: SOURCE,
+          }),
+      }),
   );
   if ('response' in committed) return committed.response;
   // Named by address: an admin told a key was created "for that member" cannot
@@ -226,31 +232,31 @@ export async function baseHandler(
     changedBy,
     later,
     revoked: committed.revoked,
-    policySync,
+    policySyncReports,
   });
 }
 
 /** A role change as the roster statements on each `iam` region's policies see it. */
-interface RosterChange {
+interface RoleChangeRosterContext {
   orgId: string;
   orgProfile: OrgProfileItem | undefined;
   actor: AuditActor;
-  change: { userId: string; role: OrgRole };
-  /** Whether the change moves into, out of, or between Owner and Admin. */
-  rewrites: boolean;
+  target: { userId: string; role: OrgRole };
+  /** Whether either role in the change is a roster role. */
+  rewritesRoster: boolean;
   narrows: boolean;
 }
 
 /**
- * Rewrites the roster statements from the membership rows, with `change`
+ * Rewrites the roster statements from the membership rows, with `target`
  * applied when given. Buckets a write did not reach are reported, and the same
  * request reaches them again.
  */
-async function syncRoster(
-  { orgId, orgProfile, actor }: Pick<RosterChange, 'orgId' | 'orgProfile' | 'actor'>,
-  change?: RosterChange['change'],
+async function rewriteRosterFromMembership(
+  { orgId, orgProfile, actor }: Pick<RoleChangeRosterContext, 'orgId' | 'orgProfile' | 'actor'>,
+  target?: RoleChangeRosterContext['target'],
 ): Promise<PolicySyncReport[]> {
-  const roster = await rosterAfterChange(orgId, change);
+  const roster = await getRosterAfterChange(orgId, target);
   return syncRosterStatements({ orgId, orgProfile, roster, actor });
 }
 
@@ -259,43 +265,49 @@ async function syncRoster(
  * wider at the storage system than the role that authorized them.
  */
 async function syncRosterBeforeCommit(
-  roster: RosterChange,
+  rosterChange: RoleChangeRosterContext,
 ): Promise<PolicySyncReport[] | undefined> {
-  return roster.rewrites && roster.narrows ? syncRoster(roster, roster.change) : undefined;
+  return rosterChange.rewritesRoster && rosterChange.narrows
+    ? rewriteRosterFromMembership(rosterChange, rosterChange.target)
+    : undefined;
 }
 
 /**
  * The commit, then the roster: a widening rewrites it after the row lands, for
- * the same reason a narrowing rewrites it before. A narrowing whose row does
- * not land (cancelled, refused, or thrown) has already taken the member off the
- * policies, so the roster is put back from the membership rows as they stand.
+ * the same reason a narrowing rewrites it before. A narrowing whose commit
+ * throws or ends in any outcome without `revoked` has already taken the member
+ * off the policies, so the roster is put back from the membership rows as they
+ * stand.
  * The restore is best effort like the rewrite: what it does not reach, the
  * next role change does.
  */
-async function commitWithRoster(
-  roster: RosterChange,
-  syncedBefore: PolicySyncReport[] | undefined,
-  commit: () => ReturnType<typeof commitAfterRevokingKeys>,
-) {
-  const restore = async () => {
-    if (!syncedBefore) return;
+async function commitAndSyncRoster(
+  rosterChange: RoleChangeRosterContext,
+  reportsBeforeCommit: PolicySyncReport[] | undefined,
+  commit: () => Promise<CommitOutcome>,
+): Promise<{ committed: CommitOutcome; policySyncReports: PolicySyncReport[] | undefined }> {
+  const restoreRoster = async () => {
+    if (!reportsBeforeCommit) return;
     console.error(
       '[update-member-role] The role row did not land; restoring the roster statements',
-      { orgId: roster.orgId, userId: roster.change.userId },
+      { orgId: rosterChange.orgId, userId: rosterChange.target.userId },
     );
-    await syncRoster(roster);
+    await rewriteRosterFromMembership(rosterChange);
   };
   const committed = await commit().catch(async (err: unknown) => {
-    await restore();
+    await restoreRoster();
     throw err;
   });
   if (!('revoked' in committed)) {
-    await restore();
-    return { committed, policySync: undefined };
+    await restoreRoster();
+    return { committed, policySyncReports: undefined };
   }
-  const policySync =
-    syncedBefore ?? (roster.rewrites ? await syncRoster(roster, roster.change) : undefined);
-  return { committed, policySync };
+  const policySyncReports =
+    reportsBeforeCommit ??
+    (rosterChange.rewritesRoster
+      ? await rewriteRosterFromMembership(rosterChange, rosterChange.target)
+      : undefined);
+  return { committed, policySyncReports };
 }
 
 /** A role already held, with the roster rewritten from the membership rows as they stand. */
@@ -306,12 +318,12 @@ async function unchangedRoleResponse(
   actor: AuditActor,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
-  const policySync = await syncRoster({ orgId, orgProfile, actor });
+  const policySyncReports = await rewriteRosterFromMembership({ orgId, orgProfile, actor });
   return roleResponse({
     userId: targetUserId,
     role,
     previousRole: role,
-    ...(policySync.length ? { policySync } : {}),
+    ...(policySyncReports.length ? { policySyncReports } : {}),
   });
 }
 
@@ -332,7 +344,7 @@ async function finishRoleChange({
   changedBy,
   later,
   revoked,
-  policySync,
+  policySyncReports,
 }: {
   orgId: string;
   orgProfile: OrgProfileItem | undefined;
@@ -345,7 +357,7 @@ async function finishRoleChange({
   later: InvitationRecord[];
   revoked: AccessKeySummary[];
   /** What the change reached at each `iam` region's policies, when any region serves them. */
-  policySync?: PolicySyncReport[];
+  policySyncReports?: PolicySyncReport[];
 }): Promise<APIGatewayProxyStructuredResultV2> {
   await revokeDeferred(later);
   await notifyRevokedKeys({
@@ -363,8 +375,8 @@ async function finishRoleChange({
     role: toRole,
     previousRole: fromRole,
     // Named only when there are any, so a widening and a no-op read alike.
-    ...(revoked.length > 0 ? { revokedKeys: revoked } : {}),
-    ...(policySync?.length ? { policySync } : {}),
+    ...(revoked.length > 0 ? { keysRevoked: revoked } : {}),
+    ...(policySyncReports?.length ? { policySyncReports } : {}),
   });
 }
 
@@ -422,14 +434,14 @@ function roleChangeBase({
   ]);
 }
 
-/** The answer when the role transaction cancels; every answer carries `revokedKeys`. */
+/** The answer when the role transaction cancels; every answer carries `keysRevoked`. */
 async function changeFailureResponse(
   err: unknown,
   context: {
     orgId: string;
     delta: ReturnType<typeof ownerCountDeltaFor>;
     labels: string[];
-    revokedKeys: AccessKeySummary[];
+    keysRevoked: AccessKeySummary[];
   },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   // The fence, at its own index. A role change into an org being torn down has
@@ -441,11 +453,11 @@ async function changeFailureResponse(
     return unattributableFailure(err, {
       source: SOURCE,
       orgId: context.orgId,
-      revokedKeys: context.revokedKeys,
+      keysRevoked: context.keysRevoked,
     });
   }
 
-  const { revokedKeys } = context;
+  const { keysRevoked } = context;
 
   if (failed.includes('ownerCount')) {
     // The decrement's condition IS the last-Owner invariant: an org at one Owner
@@ -458,15 +470,15 @@ async function changeFailureResponse(
       context.delta === 'decrement' &&
       (await readOwnerCountForDiagnosis(context.orgId)) !== undefined
     ) {
-      return lastOwnerResponse(LAST_OWNER_REMEDY, revokedKeys);
+      return lastOwnerResponse(LAST_OWNER_REMEDY, keysRevoked);
     }
     console.error('[update-member-role] ownerCount unreadable — role change refused', {
       orgId: context.orgId,
     });
-    return ownerCountUnavailableResponse('updated', revokedKeys);
+    return ownerCountUnavailableResponse('updated', keysRevoked);
   }
-  if (failed.includes('invitation')) return invitationRaceResponse(revokedKeys);
-  return memberRoleChangedResponse('while you were editing it', revokedKeys);
+  if (failed.includes('invitation')) return invitationRaceResponse(keysRevoked);
+  return memberRoleChangedResponse('while you were editing it', keysRevoked);
 }
 
 function roleResponse(body: UpdateMemberRoleResponse): APIGatewayProxyStructuredResultV2 {
@@ -478,14 +490,14 @@ function roleResponse(body: UpdateMemberRoleResponse): APIGatewayProxyStructured
  * revoked are named. Retrying is the same PATCH, which finds fewer keys.
  */
 function vendorRefusedResponse(
-  revokedKeys: AccessKeySummary[],
+  keysRevoked: AccessKeySummary[],
   failedKeys: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(502)
     .body<UpdateMemberRoleFailure>({
       message: `${refusedKeysSubject(failedKeys)} could not be revoked, so the role is unchanged. Try again.`,
-      revokedKeys,
+      keysRevoked,
       failedKeys,
     })
     .build();
