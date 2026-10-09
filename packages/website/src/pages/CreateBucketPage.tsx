@@ -14,7 +14,6 @@ import {
   CreateAccessKeySchema,
   DOCS_URL,
   getRegionLabel,
-  CreatePrincipalAccessKeySchema,
 } from '@filone/shared';
 import type {
   CreateBucketResponse,
@@ -114,7 +113,7 @@ export function CreateBucketPage() {
 
   // eslint-disable-next-line complexity/complexity
   async function handleSubmit() {
-    if (createKeyToggled && !form.principal && form.permissions.length === 0) return;
+    if (createKeyToggled && form.keyType === 'service' && form.permissions.length === 0) return;
 
     const bucketBody = {
       bucketName: bucketName.trim(),
@@ -163,14 +162,9 @@ export function CreateBucketPage() {
       return;
     }
 
-    // Step 2: Optionally create API key scoped to this bucket
+    // Step 2: optionally create an access key
     if (createKeyToggled) {
-      // The form's own payload: for a personal key on an `iam` region a name and
-      // an expiry, since the key carries whatever the bucket policies give its
-      // holder. A service key sends the scoped-key shape.
-      const parsed = (
-        form.principal ? CreatePrincipalAccessKeySchema : CreateAccessKeySchema
-      ).safeParse(form.payload);
+      const parsed = form.schema.safeParse(form.request);
       if (!parsed.success) {
         toast.error(parsed.error.issues[0].message);
         setCreating(false);
@@ -221,7 +215,7 @@ export function CreateBucketPage() {
   const accessKeyFormValid =
     !createKeyToggled ||
     (accessKeyNameValid &&
-      (form.principal ||
+      (form.keyType === 'principal' ||
         (form.permissions.length > 0 &&
           (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0))));
 

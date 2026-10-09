@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type {
+  AccessKey,
   AccessKeyBucketScope,
   AccessKeyPermission,
   CreateAccessKeyRequest,
@@ -61,7 +62,7 @@ export function useAccessKeyForm({
   );
   const [expiration, setExpiration] = useState<ExpirationOption>('never');
   const [customDate, setCustomDate] = useState<string | null>(null);
-  const [serviceKey, setServiceKey] = useState(false);
+  const [chosenKeyType, setKeyType] = useState<AccessKey['type']>('principal');
   const [creating, setCreating] = useState(false);
 
   const prevRegionRef = useRef(region);
@@ -75,15 +76,12 @@ export function useAccessKeyForm({
     }
   }, [region]);
 
-  // On a region serving the `iam` access model the key belongs to the caller's
-  // principal by default and carries no permission set or bucket list of its
-  // own, so the request is a name and an expiry and the schema is the
-  // principal-bound one. A caller who chooses a service key instead sends the
-  // scoped-key shape, which every region takes.
-  const iam = isIamRegion(region);
-  const principal = iam && !serviceKey;
+  // On an `iam` region a key is personal unless the caller chooses a service
+  // key. Every other region takes only service keys.
+  const isOnIamRegion = isIamRegion(region);
+  const keyType = isOnIamRegion ? chosenKeyType : 'service';
   const expiresAt = expiresAtFromForm(expiration, customDate);
-  const candidatePayload = buildPayload(principal, {
+  const request = buildCreateKeyRequest(keyType, {
     keyName,
     permissions,
     granularPermissions,
@@ -92,8 +90,8 @@ export function useAccessKeyForm({
     region,
     expiresAt,
   });
-  const schema = principal ? CreatePrincipalAccessKeySchema : CreateAccessKeySchema;
-  const canSubmit = !creating && schema.safeParse(candidatePayload).success;
+  const schema = keyType === 'principal' ? CreatePrincipalAccessKeySchema : CreateAccessKeySchema;
+  const canSubmit = !creating && schema.safeParse(request).success;
 
   function handlePermissionsChange(newPermissions: AccessKeyPermission[]) {
     setPermissions(newPermissions);
@@ -112,7 +110,7 @@ export function useAccessKeyForm({
     setSelectedBuckets(defaultBucket ? [defaultBucket] : []);
     setExpiration('never');
     setCustomDate(null);
-    setServiceKey(false);
+    setKeyType('principal');
     setCreating(false);
   }
 
@@ -140,7 +138,7 @@ export function useAccessKeyForm({
 
   function handleSubmit(e?: { preventDefault(): void }) {
     e?.preventDefault();
-    createKeyMutation.mutate(candidatePayload);
+    createKeyMutation.mutate(request);
   }
 
   return {
@@ -159,15 +157,14 @@ export function useAccessKeyForm({
     customDate,
     setCustomDate,
     expiresAt,
-    /** Whether the region serves the `iam` access model, where a key is bound to the caller unless it is a service key. */
-    iam,
-    /** Whether the request is for a key bound to the caller, which takes no permissions or bucket scope. */
-    principal,
-    /** On an `iam` region, whether the caller chose a service key over one bound to them. */
-    serviceKey,
-    setServiceKey,
+    isOnIamRegion,
+    /** Always `'service'` outside an `iam` region. */
+    keyType,
+    setKeyType,
     /** The request as it would be sent, for a caller that submits it alongside another write. */
-    payload: candidatePayload,
+    request,
+    /** The schema that validates `request`. */
+    schema,
     creating,
     canSubmit,
     handleSubmit,
@@ -175,9 +172,8 @@ export function useAccessKeyForm({
   };
 }
 
-/** The request the form's state amounts to, in the shape the region's model takes. */
-function buildPayload(
-  principal: boolean,
+function buildCreateKeyRequest(
+  keyType: AccessKey['type'],
   fields: {
     keyName: string;
     permissions: AccessKeyPermission[];
@@ -190,7 +186,7 @@ function buildPayload(
 ): CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest {
   const keyName = fields.keyName.trim();
   const { region, expiresAt } = fields;
-  if (principal) return { keyName, region, expiresAt };
+  if (keyType === 'principal') return { keyName, region, expiresAt };
   return {
     keyName,
     permissions: fields.permissions,

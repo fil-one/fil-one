@@ -1,10 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { S3_REGION, S3Region } from '@filone/shared';
 import { ToastProvider } from '../components/Toast';
-const mockIsIam = vi.fn(() => false);
-vi.mock('./access-model.js', () => ({ isIamRegion: () => mockIsIam() }));
+const mockIsIamRegion = vi.fn(() => false);
+vi.mock('./access-model.js', () => ({ isIamRegion: () => mockIsIamRegion() }));
 
 import { useAccessKeyForm } from './use-access-key-form.js';
 
@@ -216,54 +216,71 @@ describe('useAccessKeyForm — granular permission filtering', () => {
 });
 
 describe('useAccessKeyForm — on a region serving the iam access model', () => {
-  it('sends a name and an expiry only, and needs no permission to submit', () => {
-    mockIsIam.mockReturnValue(true);
-    try {
-      const { result } = renderForm();
-      act(() => {
-        result.current.setKeyName('laptop');
-        result.current.setPermissions([]);
-      });
+  beforeEach(() => mockIsIamRegion.mockReturnValue(true));
+  afterEach(() => mockIsIamRegion.mockReturnValue(false));
 
-      expect(result.current.iam).toBe(true);
-      expect(result.current.principal).toBe(true);
-      expect(result.current.canSubmit).toBe(true);
-      expect(result.current.payload).toStrictEqual({
-        keyName: 'laptop',
-        region: S3_REGION,
-        expiresAt: null,
-      });
-    } finally {
-      mockIsIam.mockReturnValue(false);
-    }
+  function renderServiceKeyForm() {
+    const rendered = renderForm();
+    act(() => {
+      rendered.result.current.setKeyName('nightly-backup');
+      rendered.result.current.setKeyType('service');
+    });
+    return rendered;
+  }
+
+  it('builds a name-region-expiry request for a personal key', () => {
+    const { result } = renderForm();
+    act(() => result.current.setKeyName('laptop'));
+
+    expect(result.current.request).toStrictEqual({
+      keyName: 'laptop',
+      region: S3_REGION,
+      expiresAt: null,
+    });
   });
 
-  it('sends the scoped-key shape once a service key is chosen, and needs its permissions', () => {
-    mockIsIam.mockReturnValue(true);
-    try {
-      const { result } = renderForm();
-      act(() => {
-        result.current.setKeyName('nightly-backup');
-        result.current.setServiceKey(true);
-      });
+  it('allows submit with no permissions for a personal key', () => {
+    const { result } = renderForm();
+    act(() => {
+      result.current.setKeyName('laptop');
+      result.current.setPermissions([]);
+    });
 
-      expect(result.current.principal).toBe(false);
-      expect(result.current.payload).toMatchObject({
-        keyName: 'nightly-backup',
-        permissions: expect.arrayContaining(['read', 'write', 'list']),
-        bucketScope: 'all',
-        region: S3_REGION,
-      });
-      expect(result.current.canSubmit).toBe(true);
+    expect(result.current.canSubmit).toBe(true);
+  });
 
-      act(() => result.current.setPermissions([]));
-      expect(result.current.canSubmit).toBe(false);
+  it('builds the scoped-key request once Service key is chosen', () => {
+    const { result } = renderServiceKeyForm();
 
-      // Back to a key bound to the caller: no permissions needed again.
-      act(() => result.current.setServiceKey(false));
-      expect(result.current.canSubmit).toBe(true);
-    } finally {
-      mockIsIam.mockReturnValue(false);
-    }
+    expect(result.current.request).toStrictEqual({
+      keyName: 'nightly-backup',
+      permissions: [
+        'read',
+        'write',
+        'list',
+        'GetBucketVersioning',
+        'GetBucketObjectLockConfiguration',
+      ],
+      granularPermissions: undefined,
+      bucketScope: 'all',
+      buckets: undefined,
+      region: S3_REGION,
+      expiresAt: null,
+    });
+  });
+
+  it('blocks submit when a service key has no permissions', () => {
+    const { result } = renderServiceKeyForm();
+    act(() => result.current.setPermissions([]));
+
+    expect(result.current.canSubmit).toBe(false);
+  });
+
+  it('allows submit again after switching back to a personal key', () => {
+    const { result } = renderServiceKeyForm();
+    act(() => result.current.setPermissions([]));
+    act(() => result.current.setKeyType('principal'));
+
+    expect(result.current.canSubmit).toBe(true);
   });
 });

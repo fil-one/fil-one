@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
@@ -8,8 +8,8 @@ import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyFormFields } from './AccessKeyFormFields.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
-const mockIsIam = vi.fn(() => false);
-vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => mockIsIam() }));
+const mockIsIamRegion = vi.fn(() => false);
+vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => mockIsIamRegion() }));
 
 function Harness({ apply }: { apply: (form: ReturnType<typeof useAccessKeyForm>) => void }) {
   const form = useAccessKeyForm({ region: S3Region.UsEast1, onSuccess: () => {} });
@@ -63,53 +63,39 @@ describe('AccessKeyFormFields — reserved key name', () => {
 });
 
 describe('AccessKeyFormFields — on a region serving the iam access model', () => {
-  it('asks for no permissions or bucket scope, and says what the key follows instead', async () => {
-    mockIsIam.mockReturnValue(true);
-    try {
-      renderForm(() => {});
-      expect(
-        await screen.findByText(
-          "This key acts as you. What it can reach is decided by each bucket's policy.",
-        ),
-      ).toBeInTheDocument();
-      expect(screen.queryByText('What can this key do?')).not.toBeInTheDocument();
-      expect(screen.queryByText('Which buckets can this key access?')).not.toBeInTheDocument();
-      expect(screen.getByText('Key name')).toBeInTheDocument();
-    } finally {
-      mockIsIam.mockReturnValue(false);
-    }
+  const PERSONAL_KEY_NOTE =
+    "This key acts as you. What it can reach is decided by each bucket's policy.";
+
+  beforeEach(() => mockIsIamRegion.mockReturnValue(true));
+  afterEach(() => mockIsIamRegion.mockReturnValue(false));
+
+  it('hides the permission and bucket fields for a personal key', async () => {
+    renderForm(() => {});
+    expect(await screen.findByText('Key name')).toBeInTheDocument();
+    expect(screen.queryByText('What can this key do?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Which buckets can this key access?')).not.toBeInTheDocument();
   });
 
-  it('lets an Owner choose a service key, which asks for permissions and bucket scope', async () => {
-    mockIsIam.mockReturnValue(true);
-    try {
-      renderForm(() => {});
+  it("explains that a personal key follows each bucket's policy", async () => {
+    renderForm(() => {});
+    expect(await screen.findByText(PERSONAL_KEY_NOTE)).toBeInTheDocument();
+  });
+
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'shows permission and bucket fields once %s picks Service key',
+    async (role) => {
+      renderForm(() => {}, role);
       fireEvent.click(await screen.findByLabelText(/Service key/));
 
       expect(await screen.findByText('What can this key do?')).toBeInTheDocument();
       expect(screen.getByText('Which buckets can this key access?')).toBeInTheDocument();
-      expect(
-        screen.queryByText(
-          "This key acts as you. What it can reach is decided by each bucket's policy.",
-        ),
-      ).not.toBeInTheDocument();
-    } finally {
-      mockIsIam.mockReturnValue(false);
-    }
-  });
+      expect(screen.queryByText(PERSONAL_KEY_NOTE)).not.toBeInTheDocument();
+    },
+  );
 
-  it('offers a Member no choice: their key follows the policies', async () => {
-    mockIsIam.mockReturnValue(true);
-    try {
-      renderForm(() => {}, OrgRole.Member);
-      expect(
-        await screen.findByText(
-          "This key acts as you. What it can reach is decided by each bucket's policy.",
-        ),
-      ).toBeInTheDocument();
-      expect(screen.queryByText('What kind of key?')).not.toBeInTheDocument();
-    } finally {
-      mockIsIam.mockReturnValue(false);
-    }
+  it('hides the key-type choice from a Member', async () => {
+    renderForm(() => {}, OrgRole.Member);
+    expect(await screen.findByText(PERSONAL_KEY_NOTE)).toBeInTheDocument();
+    expect(screen.queryByText('What kind of key?')).not.toBeInTheDocument();
   });
 });

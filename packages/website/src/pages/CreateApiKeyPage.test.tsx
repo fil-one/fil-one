@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { seedPermissions } from '../lib/test-permissions.js';
@@ -14,25 +14,28 @@ vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => true }));
 
 import { CreateApiKeyPage } from './CreateApiKeyPage.js';
 
-describe('CreateApiKeyPage — on an iam region', () => {
-  it('does not tell a personal key to scope by bucket', async () => {
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    seedPermissions(qc);
-    render(
-      <QueryClientProvider client={qc}>
-        <ToastProvider>
-          <CreateApiKeyPage />
-        </ToastProvider>
-      </QueryClientProvider>,
-    );
+function renderPage() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  seedPermissions(qc);
+  return render(
+    <QueryClientProvider client={qc}>
+      <ToastProvider>
+        <CreateApiKeyPage />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+}
 
-    // The form offers no bucket scope for the default personal key...
-    expect(
-      await screen.findByText(
-        "This key acts as you. What it can reach is decided by each bucket's policy.",
-      ),
-    ).toBeInTheDocument();
-    // ...so the sidebar should not advise scoping it by bucket.
+describe('CreateApiKeyPage — on an iam region', () => {
+  it('hides the Scope by bucket advice for a personal key', async () => {
+    renderPage();
+    expect(await screen.findByText('Follows the bucket policies')).toBeInTheDocument();
     expect(screen.queryByText('Scope by bucket')).not.toBeInTheDocument();
+  });
+
+  it('shows Scope by bucket once Service key is chosen', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByLabelText(/Service key/));
+    expect(await screen.findByText('Scope by bucket')).toBeInTheDocument();
   });
 });
