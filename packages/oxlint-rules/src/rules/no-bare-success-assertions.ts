@@ -18,7 +18,8 @@ const FAILURE_ONLY_MESSAGE =
   'List the issues the rejection should have: ' +
   "`expect(result).toMatchZodValidationError({ code: 'invalid_type', path: ['name'] })`. " +
   `${MATCHER_SETUP} ` +
-  '`{ success: false }` alone passes on any rejection, including one the test does not name.';
+  '`{ success: false }` alone names no issue: `toMatchObject` accepts any rejection, ' +
+  'and `toEqual` or `toStrictEqual` fail on every real one, which also carries an `error`.';
 
 export const noBareSuccessAssertions = defineRule({
   meta: {
@@ -63,11 +64,12 @@ function isExpectCall(callee: ESTree.Node): boolean {
 }
 
 // Returns every `success` reference inside an expect() argument: `x.success`,
-// `x?.success`, `x['success']`, and a variable destructured as
-// `const { success } = x`, also when wrapped (`!x.success`,
-// `x.success === false`, `Boolean(success)`). Any `success` property counts,
-// whatever object it belongs to. A plain variable that happens to be named
-// `success` does not, since tests use the name for unrelated values.
+// `x?.success`, `x['success']`, and a variable destructured from a `success`
+// property (`const { success } = x`, `const { success: ok } = x`), also when
+// wrapped (`!x.success`, `x.success === false`, `Boolean(ok)`). Any `success`
+// property counts, whatever object it belongs to. A plain variable that
+// happens to be named `success` does not, since tests use the name for
+// unrelated values.
 function findSuccessReferences(root: ESTree.Node, sourceCode: SourceCode): ESTree.Node[] {
   const references: ESTree.Node[] = [];
   visit(root);
@@ -75,9 +77,7 @@ function findSuccessReferences(root: ESTree.Node, sourceCode: SourceCode): ESTre
 
   function visit(node: ESTree.Node): void {
     if (node.type === 'Identifier') {
-      if (node.name === 'success' && isDestructuredProperty(node, sourceCode)) {
-        references.push(node);
-      }
+      if (isDestructuredFromSuccess(node, sourceCode)) references.push(node);
       return;
     }
     if (node.type === 'MemberExpression') {
@@ -95,14 +95,19 @@ function findSuccessReferences(root: ESTree.Node, sourceCode: SourceCode): ESTre
   }
 }
 
-// Matches a variable bound by `const { success } = x` or `const { success = false } = x`.
-function isDestructuredProperty(identifier: ESTree.Node, sourceCode: SourceCode): boolean {
+// Matches a variable bound by `const { success } = x`, `const { success: ok } = x`,
+// or either form with a default value.
+function isDestructuredFromSuccess(identifier: ESTree.Node, sourceCode: SourceCode): boolean {
   const variable = findReference(sourceCode.getScope(identifier), identifier)?.resolved;
   if (!variable) return false;
   return variable.defs.some((definition) => {
     let binding: ESTree.Node | null = definition.name.parent;
     if (binding?.type === 'AssignmentPattern') binding = binding.parent;
-    return binding?.type === 'Property' && binding.parent?.type === 'ObjectPattern';
+    return (
+      binding?.type === 'Property' &&
+      binding.parent?.type === 'ObjectPattern' &&
+      isSuccessKey(binding.key, binding.computed)
+    );
   });
 }
 
@@ -114,39 +119,55 @@ function findReference(scope: Scope | null, identifier: ESTree.Node) {
   return undefined;
 }
 
-// Matches `expect(...).toMatchObject`, also after `.not`, `.resolves` or `.rejects`.
+// Matches `expect(...).toMatchObject` and `expect(...)['toMatchObject']`, also
+// after `.not`, `.resolves` or `.rejects`.
 function isObjectMatcherCall(callee: ESTree.Node): boolean {
-  if (callee.type !== 'MemberExpression' || callee.computed) return false;
-  if (callee.property.type !== 'Identifier' || !OBJECT_MATCHERS.has(callee.property.name)) {
-    return false;
-  }
+  if (callee.type !== 'MemberExpression') return false;
+  const matcherName = getStaticKeyName(callee.property, callee.computed);
+  if (matcherName === undefined || !OBJECT_MATCHERS.has(matcherName)) return false;
   let target: ESTree.Node = callee.object;
   while (target.type === 'MemberExpression') target = target.object;
   return target.type === 'CallExpression' && isExpectCall(target.callee);
 }
 
-// Matches an object literal whose only property is `success: false`.
+// Matches an object literal whose only property is `success: false`, also
+// inside `as const` or `satisfies`.
 function isFailureOnly(expected: ESTree.Node): boolean {
-  if (expected.type !== 'ObjectExpression' || expected.properties.length !== 1) return false;
-  const [property] = expected.properties;
-  return (
-    property.type === 'Property' &&
-    isSuccessKey(property.key, property.computed) &&
-    property.value.type === 'Literal' &&
-    property.value.value === false
-  );
+  const object = unwrapTypeScript(expected);
+  if (object.type !== 'ObjectExpression' || object.properties.length !== 1) return false;
+  const [property] = object.properties;
+  if (property.type !== 'Property' || !isSuccessKey(property.key, property.computed)) return false;
+  const value = unwrapTypeScript(property.value);
+  return value.type === 'Literal' && value.value === false;
 }
 
-// Matches `success`, `'success'` and `` `success` `` as a key. A computed
-// `[success]` is a variable reference, which findSuccessReferences reports.
 function isSuccessKey(key: ESTree.Node, computed: boolean): boolean {
-  if (key.type === 'Identifier') return !computed && key.name === 'success';
-  if (key.type === 'Literal') return key.value === 'success';
-  return (
-    key.type === 'TemplateLiteral' &&
-    key.expressions.length === 0 &&
-    key.quasis[0]?.value.cooked === 'success'
-  );
+  return getStaticKeyName(key, computed) === 'success';
+}
+
+// Returns the name a member or property key spells out: `name`, `'name'` or
+// `` `name` ``. A computed `[name]` is a variable reference, so it has none.
+function getStaticKeyName(key: ESTree.Node, computed: boolean): string | undefined {
+  if (key.type === 'Identifier') return computed ? undefined : key.name;
+  if (key.type === 'Literal') return typeof key.value === 'string' ? key.value : undefined;
+  if (key.type === 'TemplateLiteral' && key.expressions.length === 0) {
+    return key.quasis[0]?.value.cooked ?? undefined;
+  }
+  return undefined;
+}
+
+// Strips TypeScript syntax that wraps an expression without changing its value.
+function unwrapTypeScript(node: ESTree.Node): ESTree.Node {
+  let current = node;
+  while (
+    current.type === 'TSAsExpression' ||
+    current.type === 'TSSatisfiesExpression' ||
+    current.type === 'TSNonNullExpression' ||
+    current.type === 'TSTypeAssertion'
+  ) {
+    current = current.expression;
+  }
+  return current;
 }
 
 function getChildNodes(node: ESTree.Node): ESTree.Node[] {
