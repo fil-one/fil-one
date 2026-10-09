@@ -65,6 +65,14 @@ function getStage(): string {
   return process.env.FILONE_STAGE!;
 }
 
+/**
+ * Aurora serves tenant DELETE on its dev backoffice only; sst.config.ts sets the
+ * flag on every stage except production. Read per call so tests can flip it.
+ */
+function isTenantDeleteEnabled(): boolean {
+  return process.env.AURORA_TENANT_DELETE_ENABLED === 'true';
+}
+
 /** Object-lock and retention fields off a portal single-bucket response. */
 function toBucketProtection(data: BucketBucketResponse): BucketProtection {
   return {
@@ -126,10 +134,8 @@ export const auroraOrchestrator = {
           signal: opts?.signal,
         });
         // Disabling first cuts access even when Aurora refuses the DELETE (409:
-        // component setup incomplete, or another update in progress). The
-        // DELETE is live on Aurora's dev backoffice only, so production keeps
-        // the disable-only teardown until the flag is turned on there.
-        if (process.env.AURORA_TENANT_DELETE_ENABLED === 'true') {
+        // component setup incomplete, or another update in progress).
+        if (isTenantDeleteEnabled()) {
           await deleteAuroraTenant({ tenantId, signal: opts?.signal });
         }
       },
