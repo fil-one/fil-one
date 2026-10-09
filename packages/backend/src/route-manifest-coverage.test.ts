@@ -55,7 +55,7 @@ process.env.FILONE_STAGE ??= 'test';
 process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
 
 const ORG_ID = 'org-1';
-const USER_ID = 'user-1';
+const USER_ID = '00000000-0000-4000-8000-000000000001';
 /** Not a foundation address, so the RAG gate's answer hinges on the allowlist. */
 const OUTSIDER_EMAIL = 'outsider@example.com';
 /** The refusal `ragAccessMiddleware` writes, verbatim. */
@@ -195,6 +195,7 @@ type LambdaModule = {
 /** The parts of a request an in-handler route reads to decide its permission. */
 type RouteRequest = {
   body?: string;
+  headers?: Record<string, string>;
   queryStringParameters?: Record<string, string>;
   pathParameters?: Record<string, string>;
 };
@@ -223,7 +224,7 @@ async function invokeRoute(
   },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const module = (await import(`./handlers/${route.handler}.ts`)) as LambdaModule;
-  const { pathParameters, ...eventProps } = request;
+  const { pathParameters, headers, ...eventProps } = request;
   const event = buildEvent({
     ...eventProps,
     method: route.method,
@@ -233,6 +234,7 @@ async function invokeRoute(
   // Assigned rather than passed: the shared builder takes no path parameters,
   // and the handler tests set them on the built event the same way.
   if (pathParameters) event.pathParameters = pathParameters;
+  if (headers) Object.assign(event.headers, headers);
   if (csrf) event.headers['x-csrf-token'] = CSRF_TOKEN;
   // Every route here answers with a ResponseBuilder, so the union's string arm
   // never occurs; middy's declared return type carries it anyway.
@@ -599,6 +601,7 @@ describe('the caps routes apply on top of their declared permission', () => {
     // A roster rather than a count, so a route that starts declaring a cap
     // arrives here and has to be given cases rather than passing on a number.
     expect(capped).toStrictEqual([
+      'put-bucket-policy',
       'create-access-key',
       'rotate-access-key',
       'update-member-role',
@@ -729,6 +732,58 @@ describe('the caps routes apply on top of their declared permission', () => {
       expect(result.body).toContain(keyPermission);
     },
   );
+
+  /**
+   * Writing a bucket policy clears `buckets.policy_manage` in the chain and
+   * then reads the body: a statement that grants a retention or legal-hold
+   * write, or `s3:*` which covers both, needs `privileged.grant`. On a first
+   * policy (`If-None-Match: *`) the cap runs before the region is consulted,
+   * which is why it answers while no region
+   * serves policies: an Owner is let through to the region check, an Admin is
+   * refused with the code the console renders.
+   */
+  describe('granting a retention write through a policy needs privileged.grant', () => {
+    const policyWrite = (action: string): RouteRequest => ({
+      body: JSON.stringify({
+        policy: { Statement: [{ Effect: 'Allow', Principal: [USER_ID], Action: [action] }] },
+      }),
+      headers: { 'if-none-match': '*' },
+      pathParameters: { name: 'photos' },
+      queryStringParameters: { region: 'eu-west-1' },
+    });
+    const editors = Object.values(OrgRole).filter((role) =>
+      roleHasPermission(role, 'buckets.policy_manage'),
+    );
+
+    it.each(editors)('%s may grant an ordinary read', async (role) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: policyWrite('s3:GetObject'),
+      });
+
+      expect(errorCode(result)).not.toBe(ApiErrorCode.RETENTION_GRANT_FORBIDDEN);
+    });
+
+    it.each(
+      editors.flatMap((role) =>
+        ['s3:PutObjectRetention', 's3:PutObjectLegalHold', 's3:*'].map(
+          (action) => [role, action] as const,
+        ),
+      ),
+    )('%s granting %s only with privileged.grant', async (role, action) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: policyWrite(action),
+      });
+
+      if (roleHasPermission(role, 'privileged.grant')) {
+        expect(errorCode(result)).not.toBe(ApiErrorCode.RETENTION_GRANT_FORBIDDEN);
+        return;
+      }
+      expect(result.statusCode).toBe(403);
+      expect(errorCode(result)).toBe(ApiErrorCode.RETENTION_GRANT_FORBIDDEN);
+    });
+  });
 
   /**
    * The other cap in this stack is a ceiling on who the caller may reach.

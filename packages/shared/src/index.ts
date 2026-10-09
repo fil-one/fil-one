@@ -239,6 +239,7 @@ export {
   addsRetentionGrants,
   defaultBucketPolicy,
   effectiveActions,
+  isRosterSid,
   policyActionsInGroup,
   rosterStatements,
   withRosterStatements,

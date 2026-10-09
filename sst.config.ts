@@ -461,7 +461,9 @@ export default $config({
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         // Authorization carries RAG API key bearer tokens (query endpoint);
-        // X-Org-Id names the organization each request operates on. Deployed
+        // X-Org-Id names the organization each request operates on; If-Match
+        // and If-None-Match condition a bucket policy write, and ETag answers
+        // the version it reads or writes. Deployed
         // stages serve the console and the API from one origin through the
         // Router, so CORS never applies there — local dev at
         // https://localhost:5173 is cross-origin, and a preflight that omitted
@@ -473,7 +475,10 @@ export default $config({
           'X-Requested-With',
           'Authorization',
           'X-Org-Id',
+          'If-Match',
+          'If-None-Match',
         ],
+        exposeHeaders: ['ETag'],
         allowCredentials: true,
         maxAge: '1 day',
       },
@@ -1102,6 +1107,17 @@ export default $config({
     // Minting a key reaches the orchestrator and its SSM-held credentials and
     // waits on a vendor call. Rotation does the same and then revokes, so both
     // routes take one grant set; rotation takes more time.
+    const bucketPolicyWriteRoute: RouteInfraConfig = {
+      extraEnv: orchestratorEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn],
+        },
+      ],
+      timeout: '30 seconds',
+    };
+
     const accessKeyMintRoute: RouteInfraConfig = {
       extraEnv: orchestratorEnv,
       permissions: [
@@ -1165,6 +1181,19 @@ export default $config({
         permissions: bucketReadPermissions,
         extraEnv: orchestratorEnv,
       },
+      // Bucket policies are S3 operations signed with the tenant's console S3
+      // key, which getConsoleS3Credentials reads from SSM. A write may first
+      // provision the tenant (ensureTenantReady), which stores that key. Only
+      // Forge regions carry bucket policies, so only their key parameters.
+      // Dark until a region declares the `iam` access model.
+      'get-bucket-policy': {
+        extraEnv: orchestratorEnv,
+        permissions: [
+          { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
+        ],
+      },
+      'put-bucket-policy': bucketPolicyWriteRoute,
+      'delete-bucket-policy': bucketPolicyWriteRoute,
 
       // ── Keys ───────────────────────────────────────────────────────
       // The RAG API key routes take no entry: they are named bearer tokens
