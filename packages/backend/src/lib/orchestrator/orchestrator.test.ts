@@ -960,7 +960,7 @@ describe('findAccessKeyByName', () => {
   it("looks only among a principal's keys when given one", async () => {
     mockListAccessKeys.mockResolvedValue(ok({ items: [] }));
 
-    await orchestrator.findAccessKeyByName(tenantId, 'target', undefined, 'user-1');
+    await orchestrator.findAccessKeyByName(tenantId, 'target', { principalId: 'user-1' });
 
     expect(mockListAccessKeys).toHaveBeenCalledWith(
       expect.objectContaining({ path: { tenantId }, query: { principalId: 'user-1' } }),
@@ -1217,7 +1217,7 @@ describe('signal forwarding', () => {
       name: 'findAccessKeyByName',
       run: (requestOptions) => {
         mockListAccessKeys.mockResolvedValue(ok({ items: [] }));
-        return orchestrator.findAccessKeyByName(tenantId, 'k', requestOptions);
+        return orchestrator.findAccessKeyByName(tenantId, 'k', undefined, requestOptions);
       },
       mocks: [mockListAccessKeys],
     },

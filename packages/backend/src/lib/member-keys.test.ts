@@ -167,19 +167,19 @@ describe('reviewAccessKeysForRole', () => {
     expect(review.retainedKeyCount).toBe(3);
   });
 
-  it('keeps a principal-bound key under any role that can mint, and takes it from one that cannot', () => {
-    // The key carries nothing of its own, so a narrowing has nothing to compare;
-    // what its holder may do follows the bucket policies live.
-    const bound = [key({ id: 'bound', permissions: undefined, principalId: MEMBER })];
+  it.each([
+    ['Member', OrgRole.Member],
+    ['ReadOnly', OrgRole.ReadOnly],
+    ['NO_ROLE', NO_ROLE],
+  ] as const)('never revokes a principal-bound key when the role becomes %s', (_name, role) => {
+    // The key carries no authority of its own; bucket policies decide.
+    const boundToPrincipal = [key({ permissions: undefined, principalId: MEMBER })];
 
-    expect(reviewAccessKeysForRole(bound, MEMBER, OrgRole.Member).keysToRevoke).toStrictEqual([]);
-    expect(reviewAccessKeysForRole(bound, MEMBER, OrgRole.Member).retainedKeyCount).toBe(1);
-    expect(
-      reviewAccessKeysForRole(bound, MEMBER, OrgRole.ReadOnly).keysToRevoke.map((k) => [
-        k.id,
-        k.reason,
-      ]),
-    ).toStrictEqual([['bound', 'role_cannot_mint']]);
+    expect(reviewAccessKeysForRole(boundToPrincipal, MEMBER, role)).toStrictEqual({
+      keysToRevoke: [],
+      retainedKeyCount: 1,
+      unattributedKeyCount: 0,
+    });
   });
 
   it('counts an org with no keys as nothing to do', () => {

@@ -1039,7 +1039,7 @@ describe('auroraOrchestrator signal forwarding', () => {
       name: 'findAccessKeyByName',
       run: () => {
         mockFindAuroraAccessKeyByName.mockResolvedValue(undefined);
-        return auroraOrchestrator.findAccessKeyByName('t', 'k', { signal });
+        return auroraOrchestrator.findAccessKeyByName('t', 'k', undefined, { signal });
       },
       mocks: [mockFindAuroraAccessKeyByName],
     },

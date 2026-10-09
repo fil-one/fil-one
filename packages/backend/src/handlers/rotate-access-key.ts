@@ -11,6 +11,7 @@ import {
   auditKeyIdSuffix,
   canRetainAccessKey,
   isSupportedRegion,
+  roleHasPermission,
 } from '@filone/shared';
 import type { ErrorResponse, KeyRetentionResult, RotateAccessKeyResponse } from '@filone/shared';
 import { Resource } from 'sst';
@@ -68,9 +69,7 @@ const dynamo = getDynamoClient();
  * other way — revoke, then mint under the freed name — would leave a caller
  * whose mint then failed with no credential at all.
  *
- * What carries over is everything the row records: permissions, granulars,
- * bucket scope, buckets, expiry, region, owner, and the principal a
- * principal-bound key is bound to. What changes is the credential.
+ * Everything the row records carries over; only the credential changes.
  *
  * The order of everything before the vendor call is `create-access-key.ts`'s,
  * for its reasons. What is new is that the key already exists, so the cap is
@@ -143,14 +142,7 @@ async function prepareRotation(
   // not. The replacement is the key to use; this one is only left to delete.
   if (stored.replacedBy) return alreadyReplacedResponse();
 
-  // The same question a role narrowing asks of a key its holder already has,
-  // and the same answer: a key is reissued when its holder could mint it today.
-  const retention = canRetainAccessKey(membership?.role ?? NO_ROLE, {
-    permissions,
-    granularPermissions: stored.granularPermissions,
-    region: stored.region,
-    principalId,
-  });
+  const retention = getRotatorRetention(membership?.role ?? NO_ROLE, stored);
   if (!retention.retained) return refusedRotation(retention);
 
   if (hasExpired(stored.expiresAt)) {
@@ -202,7 +194,11 @@ async function issueReplacement({
   // grant nothing here that the owner did not already hold. A row naming no
   // owner falls back to the rotator, who is the only member it can be about.
   const owner = stored.createdBy ?? userId;
-  const minter: KeyMinter = { orgId, userId: owner, key: stored };
+  const minter: KeyMinter = {
+    orgId,
+    userId: owner,
+    key: stored.principalId ? { type: 'principal' } : { type: 'service', grant: stored },
+  };
   const ownedByCaller = owner === userId;
 
   // Fail-closed and ahead of the vendor, for the mint's reason: no SigV4 key may
@@ -222,7 +218,7 @@ async function issueReplacement({
       keyName: stored.keyName,
       region: stored.region,
       replacedKeyIdSuffix: auditKeyIdSuffix('s3', stored.accessKeyId ?? keyId),
-      ...(stored.principalId ? { principalBound: true } : {}),
+      ...(stored.principalId ? { boundToPrincipal: true } : {}),
     },
   });
 
@@ -232,7 +228,7 @@ async function issueReplacement({
   try {
     replacement = await orchestrator.issueAccessKey(
       tenantId,
-      replacementOpts(stored, vendorKeyName),
+      buildReplacementOpts(stored, vendorKeyName),
     );
   } catch (err) {
     return await handleMintRefusal(err, mint);
@@ -267,7 +263,7 @@ async function issueReplacement({
         ? []
         : [
             {
-              item: rotatorStillAuthorizedCheck({ orgId, userId, key: stored }),
+              item: rotatorStillAuthorizedCheck({ orgId, userId, key: minter.key }),
               label: 'rotatorRole',
             },
           ]),
@@ -355,7 +351,7 @@ function readStoredKey(item: Record<string, AttributeValue>, keyId: string): Sto
  * What the replacement is minted with: a principal-bound key is bound to the
  * same principal and carries nothing else, a service key what the row records.
  */
-function replacementOpts(stored: StoredKey, keyName: string): IssueAccessKeyOpts {
+function buildReplacementOpts(stored: StoredKey, keyName: string): IssueAccessKeyOpts {
   const expiresAt = stored.expiresAt ?? null;
   if (stored.principalId) return { keyName, principalId: stored.principalId, expiresAt };
   return {
@@ -423,6 +419,24 @@ function carriedAttribution(
     ...keyAttribution({ userId: stored.createdBy, creatorEmail: stored.creatorEmail }),
     ...(stored.recovered ? { recovered: stored.recovered } : {}),
   };
+}
+
+/**
+ * Whether the rotator could mint the key today. The two kinds are checked
+ * separately: a principal-bound key carries no authority of its own, so
+ * `keys.create` is enough; a service key must fit inside the role.
+ */
+function getRotatorRetention(role: string, stored: StoredKey): KeyRetentionResult {
+  if (stored.principalId) {
+    return roleHasPermission(role, 'keys.create')
+      ? { retained: true }
+      : { retained: false, reason: 'role_cannot_mint' };
+  }
+  return canRetainAccessKey(role, {
+    permissions: stored.permissions,
+    granularPermissions: stored.granularPermissions,
+    region: stored.region,
+  });
 }
 
 /** Whether the key's own expiry date has already passed, in UTC days. */

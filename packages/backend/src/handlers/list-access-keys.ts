@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
-import { effectiveActions, isSupportedRegion } from '@filone/shared';
+import { getEffectiveActions, isSupportedRegion } from '@filone/shared';
 import { getAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
@@ -36,22 +36,23 @@ export async function baseHandler(
     regionFilter,
   });
   const keys = bucketFilter
-    ? await reachingBucket(inScope, { orgId, bucketName: bucketFilter, region: regionFilter })
+    ? await filterKeysWithBucketAccess(inScope, {
+        orgId,
+        bucketName: bucketFilter,
+        region: regionFilter,
+      })
     : inScope;
 
   return new ResponseBuilder().status(200).body<ListAccessKeysResponse>({ keys }).build();
 }
 
 /**
- * Which of the bucket-filtered rows reach the bucket. A service key answers
- * from its stored scope, which the query already applied. A principal-bound
- * key stores none: on a region serving the `iam` access model a member who can
- * see the bucket can act on it with their principal-bound key, so the key is
- * listed when the bucket's policy gives its principal any action. The policy is
- * read once per request; with no `iam` region to ask, or no policy on the
- * bucket, no principal-bound key reaches it.
+ * Keeps the keys that can access the bucket. A service key answers from its
+ * stored scope, which the query already applied. A principal-bound key stores
+ * none: it is kept when the bucket's policy gives its principal any action, and
+ * the policy is read once per request.
  */
-async function reachingBucket(
+async function filterKeysWithBucketAccess(
   keys: AccessKey[],
   { orgId, bucketName, region }: { orgId: string; bucketName: string; region?: string },
 ): Promise<AccessKey[]> {
@@ -60,14 +61,16 @@ async function reachingBucket(
     region && isSupportedRegion(region, process.env.FILONE_STAGE!)
       ? getOrchestratorForRegion(region)
       : undefined;
+  // No `iam` region to ask, so no bucket policy can give a principal-bound key access.
   if (orchestrator?.accessModel !== 'iam') return keys.filter((key) => key.type !== 'principal');
-  // Read path: never provisions.
+  // Uses `isTenantReady`: a list must not create a tenant.
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
+  // No tenant or no policy on the bucket: no principal-bound key has access.
   const stored = tenantId ? await orchestrator.iam.getBucketPolicy(tenantId, bucketName) : null;
   return keys.filter(
     (key) =>
       key.type !== 'principal' ||
-      (stored !== null && effectiveActions(stored.policy, key.principalId).length > 0),
+      (stored !== null && getEffectiveActions(stored.policy, key.principalId).length > 0),
   );
 }
 

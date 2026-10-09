@@ -51,8 +51,8 @@ export interface AccessKeyOrchestrator {
   findAccessKeyByName(
     tenantId: string,
     keyName: string,
+    lookup?: { principalId?: string },
     requestOptions?: OrchestratorRequestOptions,
-    principalId?: string,
   ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;
 
   /**

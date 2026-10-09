@@ -274,7 +274,12 @@ export const auroraOrchestrator = {
     };
   },
 
-  async findAccessKeyByName(tenantId: string, keyName: string, opts?: OrchestratorRequestOptions) {
+  async findAccessKeyByName(
+    tenantId: string,
+    keyName: string,
+    _lookup?: { principalId?: string },
+    opts?: OrchestratorRequestOptions,
+  ) {
     return findAuroraAccessKeyByName({ tenantId, keyName, signal: opts?.signal });
   },
 
