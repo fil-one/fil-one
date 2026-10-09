@@ -573,6 +573,7 @@ describe('issueAccessKey', () => {
     accessKeyId: 'AKIAFORGE',
     secretAccessKey: 'sk-secret',
     name: 'My Key',
+    type: 'service',
     permissions: [],
     buckets: [],
     createdAt: '2026-03-10T00:00:00Z',
@@ -610,6 +611,22 @@ describe('issueAccessKey', () => {
         throwOnError: false,
       }),
     );
+  });
+
+  it('maps read, write and list onto the multipart actions the contract carries', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
+
+    await orchestrator.issueAccessKey(tenantId, {
+      keyName: 'My Key',
+      permissions: ['read', 'write', 'list'],
+    });
+
+    const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
+    // Parity with FTH_BASE_PERMISSIONS (fth-orchestrator.ts): the console's
+    // read/write/list promise multipart support, so scoped keys get it too.
+    expect(permissions).toContain('s3:ListMultipartUploadParts');
+    expect(permissions).toContain('s3:AbortMultipartUpload');
+    expect(permissions).toContain('s3:ListBucketMultipartUploads');
   });
 
   it('maps granular permissions and bucket scopes', async () => {
@@ -699,10 +716,17 @@ describe('findAccessKeyByName', () => {
     mockListAccessKeys.mockResolvedValue(
       ok({
         items: [
-          { accessKeyId: 'AK1', name: 'other', createdAt: '2026-01-01T00:00:00Z', permissions: [] },
+          {
+            accessKeyId: 'AK1',
+            name: 'other',
+            type: 'service',
+            createdAt: '2026-01-01T00:00:00Z',
+            permissions: [],
+          },
           {
             accessKeyId: 'AK2',
             name: 'target',
+            type: 'service',
             createdAt: '2026-01-02T00:00:00Z',
             permissions: [],
           },
@@ -951,7 +975,15 @@ describe('signal forwarding', () => {
       name: 'issueAccessKey',
       run: (requestOptions) => {
         mockCreateAccessKey.mockResolvedValue(
-          ok({ accessKeyId: 'AK', secretAccessKey: 'SK', createdAt: '2026-01-01T00:00:00Z' }, 201),
+          ok(
+            {
+              accessKeyId: 'AK',
+              type: 'service',
+              secretAccessKey: 'SK',
+              createdAt: '2026-01-01T00:00:00Z',
+            },
+            201,
+          ),
         );
         return orchestrator.issueAccessKey(
           tenantId,

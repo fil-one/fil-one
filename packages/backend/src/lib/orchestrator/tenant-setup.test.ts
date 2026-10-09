@@ -68,6 +68,7 @@ function stubHappyPath() {
       accessKeyId: 'AKIATEST',
       secretAccessKey: 'SKTEST',
       name: CONSOLE_KEY_NAME,
+      type: 'service',
       permissions: [],
       buckets: [],
       createdAt: '2026-01-01T00:00:00Z',
@@ -256,12 +257,13 @@ describe('ensureTenantReady', () => {
     await ensureTenantReady(deps, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).toHaveLength(15);
+    expect(permissions).toHaveLength(17);
     expect(permissions).toContain('s3:ListBucketMultipartUploads');
-    // The contract enum (unlike FTH) has no bucket-config actions.
+    // The contract enum carries no bucket-config actions at all: the reads
+    // classify as ListBucket (fil-one/RFC#30) and there are no writes.
     expect(permissions).not.toContain('s3:GetBucketVersioning');
-    expect(permissions).not.toContain('s3:PutBucketVersioning');
     expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
+    expect(permissions).not.toContain('s3:PutBucketVersioning');
     expect(permissions).not.toContain('s3:PutBucketObjectLockConfiguration');
   });
 
@@ -279,6 +281,7 @@ describe('ensureTenantReady', () => {
             accessKeyId: 'AKIAFRESH',
             secretAccessKey: 'SKFRESH',
             name: CONSOLE_KEY_NAME,
+            type: 'service',
             permissions: [],
             buckets: [],
             createdAt: '2026-01-02T00:00:00Z',
@@ -293,6 +296,7 @@ describe('ensureTenantReady', () => {
                 {
                   accessKeyId: existingAccessKeyId,
                   name: CONSOLE_KEY_NAME,
+                  type: 'service',
                   permissions: [],
                   createdAt: '2026-01-01T00:00:00Z',
                 },
@@ -480,6 +484,7 @@ describe('signal forwarding', () => {
           accessKeyId: 'AKIAFRESH',
           secretAccessKey: 'SKFRESH',
           name: CONSOLE_KEY_NAME,
+          type: 'service',
           permissions: [],
           buckets: [],
           createdAt: '2026-01-02T00:00:00Z',
@@ -493,6 +498,7 @@ describe('signal forwarding', () => {
           {
             accessKeyId: 'AKIAOLD',
             name: CONSOLE_KEY_NAME,
+            type: 'service',
             permissions: [],
             createdAt: '2026-01-01T00:00:00Z',
           },

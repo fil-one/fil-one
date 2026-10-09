@@ -5,8 +5,26 @@ info:
   description: |
     Management API that a Service Orchestrator must implement so FilOne
     can integrate it as a new region. Covers tenant lifecycle, S3
-    access-key management, and usage metering (storage, egress,
-    ingress).
+    access-key management, usage metering (storage, egress, ingress),
+    and, for orchestrators serving the `iam` access model, principals
+    and bucket policies.
+
+    ## Access models
+
+    Every orchestrator serves the *scoped-keys* model: an access key
+    carries its own permission set and optional bucket list, fixed at
+    creation. An orchestrator may additionally serve the *iam* model,
+    in which each FilOne member is a **principal**, each bucket holds at
+    most one **bucket policy** naming principals and the S3 actions they
+    may or may not perform, and an access key may be **bound to a
+    principal**, in which case it carries no permissions of its own and
+    is authorized on every request from the bucket policies. Bucket
+    policies themselves are read and written over S3 (`GetBucketPolicy`,
+    `PutBucketPolicy`, `DeleteBucketPolicy`) with a service key holding
+    the matching permission, as fil-one/RFC#30 specifies; this contract
+    carries the principals and the two reads computed from the policies.
+    The principal endpoints below are the `iam` capability set; an
+    orchestrator that serves only scoped keys may answer them with 404.
 
     The Service Orchestrator must also operate an S3 Gateway for
     bucket and object operations; that surface is outside this
@@ -34,6 +52,9 @@ info:
         `name`; the caller can recover via list + get.
       * `DELETE /tenants/{tenantId}/access-keys/{accessKeyId}` returns 204
         even if the key was already deleted.
+      * `PUT /tenants/{tenantId}/principals/{principalId}` returns 200 when
+        the principal exists, and `DELETE` returns 204 when it is already
+        gone.
 
 servers:
   - url: https://api.example.com/
@@ -49,6 +70,8 @@ tags:
     description: S3 access-key CRUD scoped to a single tenant.
   - name: Metrics
     description: Usage metering for storage, egress, and ingress.
+  - name: Principals
+    description: FilOne members as the orchestrator knows them (`iam` access model).
 
 paths:
   /tenants/{tenantId}:
@@ -195,9 +218,24 @@ paths:
       tags: [Access Keys]
       summary: Create an S3 access key
       description: |
-        Provisions an AWS Sig V4 access-key pair scoped by the supplied
-        permissions and (optionally) a list of buckets. The
-        `secretAccessKey` is returned only in this response.
+        Provisions an AWS Sig V4 access-key pair. The `secretAccessKey`
+        is returned only in this response.
+
+        The body takes one of two shapes, and the shape decides the kind
+        of key:
+
+          * `{ name, permissions, buckets?, expiresAt? }` — a **service
+            key**, authorized from the permissions and buckets it was
+            created with.
+          * `{ name, principalId, expiresAt? }` — a **principal-bound
+            key** (`iam` access model), authorized on every request from
+            the bucket policies naming that principal. The orchestrator
+            must reject (422) a body carrying `principalId` together with
+            `permissions` or `buckets`, and a `principalId` that is not a
+            live principal of the tenant.
+
+        A service key's name is unique within the tenant; a
+        principal-bound key's name is unique within its principal.
       security:
         - PartnerKey: []
       requestBody:
@@ -224,12 +262,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: |
+            The body fails semantic validation, or `principalId` names no
+            live principal of the tenant; the latter carries the error
+            `code` `UnknownPrincipal` so a client can tell it apart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     get:
       tags: [Access Keys]
       summary: List S3 access keys
+      description: |
+        Every key of the tenant, or only the keys bound to one principal
+        when `principalId` is given.
       security:
         - PartnerKey: []
+      parameters:
+        - in: query
+          name: principalId
+          required: false
+          schema:
+            $ref: '#/components/schemas/PrincipalId'
       responses:
         '200':
           description: List of access keys (without secrets).
@@ -276,6 +330,153 @@ paths:
       responses:
         '204':
           description: Deleted (or already deleted).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tenants/{tenantId}/principals:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      tags: [Principals]
+      summary: List principals
+      security:
+        - PartnerKey: []
+      responses:
+        '200':
+          description: The tenant's live principals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrincipalList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tenants/{tenantId}/principals/{principalId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/PrincipalId'
+    put:
+      tags: [Principals]
+      summary: Create a principal
+      description: |
+        Creates the principal, or answers 200 when it already exists.
+        Idempotent. A principal carries no permissions, no role, and no
+        key material: it is the identity a key can bind to and a policy
+        statement can name. Creating one after it was removed revives
+        the id with no keys and named in no statement.
+      security:
+        - PartnerKey: []
+      responses:
+        '200':
+          description: The principal already existed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Principal'
+        '201':
+          description: Principal created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Principal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ConcurrentChange'
+        '422':
+          description: The `principalId` path value is not a valid principal id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      tags: [Principals]
+      summary: Get a principal
+      security:
+        - PartnerKey: []
+      responses:
+        '200':
+          description: Principal details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Principal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Principals]
+      summary: Remove a principal
+      description: |
+        Removes the principal, deletes every access key bound to it, and
+        strips it from every bucket policy statement naming it. A
+        statement left with no principal is dropped, and a policy left
+        with no statement is deleted. Answers 204 for a principal that is
+        already gone or never existed.
+      security:
+        - PartnerKey: []
+      responses:
+        '204':
+          description: Removed (or already absent).
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ConcurrentChange'
+
+  /tenants/{tenantId}/principals/{principalId}/policies:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/PrincipalId'
+    get:
+      tags: [Principals]
+      summary: Bucket policies naming a principal
+      description: Every bucket policy with a statement naming the principal or `*`.
+      security:
+        - PartnerKey: []
+      responses:
+        '200':
+          description: The policies, each with its bucket.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrincipalPolicies'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tenants/{tenantId}/principals/{principalId}/access:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/PrincipalId'
+    get:
+      tags: [Principals]
+      summary: A principal's effective actions per bucket
+      description: |
+        For every bucket whose policy gives the principal at least one
+        action, the sorted effective set: the union of the `Allow`
+        statements naming them or `*`, minus the union of the `Deny`
+        statements naming them or `*`. Buckets with an empty set are
+        omitted. Computed from the orchestrator's own tables on every
+        call, so the answer is consistent with its last write.
+      security:
+        - PartnerKey: []
+      responses:
+        '200':
+          description: The principal's reach.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrincipalAccess'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -381,6 +582,12 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/BucketName'
+    PrincipalId:
+      in: path
+      name: principalId
+      required: true
+      schema:
+        $ref: '#/components/schemas/PrincipalId'
     MetricsFrom:
       in: query
       name: from
@@ -448,7 +655,15 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-
+    ConcurrentChange:
+      description: |
+        The write could not take its lock within the orchestrator's
+        timeout, because another change to the same principal or policy
+        is in flight. Nothing was written; the caller retries.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
     TenantId:
       type: string
@@ -545,8 +760,13 @@ components:
         - s3:ListBucket
         - s3:ListBucketVersions
         - s3:ListBucketMultipartUploads
+        - s3:ListMultipartUploadParts
+        - s3:AbortMultipartUpload
         - s3:DeleteObject
         - s3:DeleteObjectVersion
+        - s3:GetBucketPolicy
+        - s3:PutBucketPolicy
+        - s3:DeleteBucketPolicy
       description: |
         Permission scope expressed as an AWS S3 IAM action.
 
@@ -555,6 +775,10 @@ components:
           * `s3:CreateBucket` — create a bucket.
           * `s3:ListAllMyBuckets` — list the tenant's buckets.
           * `s3:DeleteBucket` — delete a bucket.
+          * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
+            `s3:DeleteBucketPolicy` — read, write and delete a bucket's
+            policy (`iam` access model). A bucket policy never grants
+            them; only a service key holds them.
 
         **Object-level** — operating on objects within buckets. The
         basic actions (`s3:GetObject`, `s3:PutObject`, `s3:ListBucket`,
@@ -579,11 +803,162 @@ components:
             uploads in a bucket. (Same AWS quirk as `s3:ListBucket`
             above: the name says "Bucket" but the action operates on
             uploads within it.)
+          * `s3:ListMultipartUploadParts` — list the parts of an
+            in-progress multipart upload.
+          * `s3:AbortMultipartUpload` — abort an in-progress multipart
+            upload.
           * `s3:DeleteObject` — delete an object.
           * `s3:DeleteObjectVersion` — delete a specific object version.
 
-    CreateAccessKeyRequest:
+    PrincipalId:
+      type: string
+      minLength: 1
+      maxLength: 255
+      description: |
+        Caller-supplied, opaque, unique within the tenant. FilOne uses
+        its member user id. The value `*` is reserved for the policy
+        wildcard and must be rejected (422).
+
+    Principal:
       type: object
+      required: [principalId, createdAt]
+      properties:
+        principalId:
+          $ref: '#/components/schemas/PrincipalId'
+        createdAt:
+          type: string
+          format: date-time
+
+    PrincipalList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Principal'
+
+    PolicyConcreteAction:
+      type: string
+      description: |
+        A concrete `PolicyAction`: every value except `s3:*`. A
+        principal's effective actions are always reported in this form.
+      enum:
+        - s3:GetObject
+        - s3:GetObjectVersion
+        - s3:GetObjectRetention
+        - s3:GetObjectLegalHold
+        - s3:ListBucket
+        - s3:ListBucketVersions
+        - s3:ListBucketMultipartUploads
+        - s3:ListMultipartUploadParts
+        - s3:PutObject
+        - s3:AbortMultipartUpload
+        - s3:PutObjectRetention
+        - s3:PutObjectLegalHold
+        - s3:DeleteObject
+        - s3:DeleteObjectVersion
+
+    PolicyAction:
+      anyOf:
+        - $ref: '#/components/schemas/PolicyConcreteAction'
+        - type: string
+          enum: ['s3:*']
+      description: |
+        An action a bucket policy statement may carry: every
+        `AccessKeyPermission` except the six bucket-level actions
+        (`s3:CreateBucket`, `s3:DeleteBucket`, `s3:ListAllMyBuckets`,
+        `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
+        `s3:DeleteBucketPolicy`), plus `s3:*`, which stands for exactly
+        the concrete `PolicyAction` values and never for those six.
+
+    PolicyStatement:
+      type: object
+      required: [Effect, Principal, Action]
+      additionalProperties: false
+      properties:
+        Sid:
+          type: string
+          description: Optional label. Stored and returned; nothing evaluates it.
+        Effect:
+          type: string
+          enum: [Allow, Deny]
+        Principal:
+          description: |
+            The principals the statement applies to: a list of principal
+            ids, or the bare string `*` for every live principal of the
+            tenant. `*` inside a list is rejected (422).
+          oneOf:
+            - type: string
+              enum: ['*']
+            - type: array
+              minItems: 1
+              items:
+                $ref: '#/components/schemas/PrincipalId'
+        Action:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PolicyAction'
+
+    BucketPolicy:
+      type: object
+      required: [Statement]
+      additionalProperties: false
+      description: |
+        A bucket's policy, reduced to what the orchestrator evaluates.
+        There is no `Resource` field: the document governs the bucket it
+        is stored on. A principal's effective actions are the union of
+        the `Allow` statements naming them minus the union of the `Deny`
+        statements naming them; an explicit deny wins.
+      properties:
+        Statement:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PolicyStatement'
+
+    PrincipalPolicies:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [bucketName, policy]
+            properties:
+              bucketName:
+                $ref: '#/components/schemas/BucketName'
+              policy:
+                $ref: '#/components/schemas/BucketPolicy'
+
+    PrincipalAccess:
+      type: object
+      required: [buckets]
+      properties:
+        buckets:
+          type: array
+          items:
+            type: object
+            required: [name, actions]
+            properties:
+              name:
+                $ref: '#/components/schemas/BucketName'
+              actions:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PolicyConcreteAction'
+
+    CreateAccessKeyRequest:
+      description: A service key with its own permissions, or a key bound to a principal that carries none.
+      oneOf:
+        - $ref: '#/components/schemas/CreateServiceAccessKeyRequest'
+        - $ref: '#/components/schemas/CreatePrincipalAccessKeyRequest'
+
+    CreateServiceAccessKeyRequest:
+      type: object
+      additionalProperties: false
       required: [name, permissions]
       properties:
         name:
@@ -605,23 +980,50 @@ components:
           items:
             $ref: '#/components/schemas/BucketName'
         expiresAt:
-          type: [string, 'null']
-          format: date-time
-          description: |
-            Optional expiration. The Service Orchestrator must reject the credentials
-            after this time.
+          $ref: '#/components/schemas/AccessKeyExpiresAt'
+
+    CreatePrincipalAccessKeyRequest:
+      type: object
+      additionalProperties: false
+      required: [name, principalId]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Unique within the principal.
+        principalId:
+          $ref: '#/components/schemas/PrincipalId'
+        expiresAt:
+          $ref: '#/components/schemas/AccessKeyExpiresAt'
+
+    AccessKeyExpiresAt:
+      type: [string, 'null']
+      format: date-time
+      description: |
+        Optional expiration. The Service Orchestrator must reject the credentials
+        after this time.
 
     AccessKey:
       type: object
-      required: [accessKeyId, name, permissions, createdAt]
+      required: [accessKeyId, name, type, createdAt]
       properties:
         accessKeyId:
           type: string
           description: AWS-style access key ID, used by S3 clients.
         name:
           type: string
+        type:
+          type: string
+          enum: [service, principal]
+          description: A `service` key carries `permissions` and `buckets`; a `principal` key carries `principal`.
+        principal:
+          description: Set on a principal-bound key. Such a key carries no `permissions` or `buckets`.
+          allOf:
+            - $ref: '#/components/schemas/PrincipalId'
         permissions:
           type: array
+          description: Present on a service key, absent on a principal-bound key.
           items:
             $ref: '#/components/schemas/AccessKeyPermission'
         buckets:

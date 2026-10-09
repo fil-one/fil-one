@@ -65,7 +65,7 @@ import {
   postTenantsByTenantIdAccessKeys,
   postTenantsByTenantIdStatus,
   type Client,
-  type CreateAccessKeyRequest,
+  type CreateServiceAccessKeyRequest,
   type Metrics,
 } from '@filone/orchestrator-client';
 import { instrumentClient } from './metrics.ts';
@@ -378,7 +378,7 @@ class FilOneOrchestrator implements ServiceOrchestrator {
       body: {
         name: keyOpts.keyName,
         // buildPermissions only emits actions from the contract's enum.
-        permissions: permissions as CreateAccessKeyRequest['permissions'],
+        permissions: permissions as CreateServiceAccessKeyRequest['permissions'],
         buckets,
         expiresAt: keyOpts.expiresAt ?? null,
       },

@@ -8,6 +8,9 @@ import type {
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdResponses,
   DeleteTenantsByTenantIdData,
   DeleteTenantsByTenantIdErrors,
+  DeleteTenantsByTenantIdPrincipalsByPrincipalIdData,
+  DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+  DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponses,
   DeleteTenantsByTenantIdResponses,
   GetTenantsByTenantIdAccessKeysByAccessKeyIdData,
   GetTenantsByTenantIdAccessKeysByAccessKeyIdErrors,
@@ -23,6 +26,18 @@ import type {
   GetTenantsByTenantIdMetricsData,
   GetTenantsByTenantIdMetricsErrors,
   GetTenantsByTenantIdMetricsResponses,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessData,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdData,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesData,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses,
+  GetTenantsByTenantIdPrincipalsByPrincipalIdResponses,
+  GetTenantsByTenantIdPrincipalsData,
+  GetTenantsByTenantIdPrincipalsErrors,
+  GetTenantsByTenantIdPrincipalsResponses,
   GetTenantsByTenantIdResponses,
   PostTenantsByTenantIdAccessKeysData,
   PostTenantsByTenantIdAccessKeysErrors,
@@ -32,6 +47,9 @@ import type {
   PostTenantsByTenantIdStatusResponses,
   PutTenantsByTenantIdData,
   PutTenantsByTenantIdErrors,
+  PutTenantsByTenantIdPrincipalsByPrincipalIdData,
+  PutTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+  PutTenantsByTenantIdPrincipalsByPrincipalIdResponses,
   PutTenantsByTenantIdResponses,
 } from './types.gen.ts';
 
@@ -176,6 +194,10 @@ export const postTenantsByTenantIdStatus = <ThrowOnError extends boolean = false
 
 /**
  * List S3 access keys
+ *
+ * Every key of the tenant, or only the keys bound to one principal
+ * when `principalId` is given.
+ *
  */
 export const getTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = false>(
   options: Options<GetTenantsByTenantIdAccessKeysData, ThrowOnError>,
@@ -193,9 +215,24 @@ export const getTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = fa
 /**
  * Create an S3 access key
  *
- * Provisions an AWS Sig V4 access-key pair scoped by the supplied
- * permissions and (optionally) a list of buckets. The
- * `secretAccessKey` is returned only in this response.
+ * Provisions an AWS Sig V4 access-key pair. The `secretAccessKey`
+ * is returned only in this response.
+ *
+ * The body takes one of two shapes, and the shape decides the kind
+ * of key:
+ *
+ * * `{ name, permissions, buckets?, expiresAt? }` — a **service
+ * key**, authorized from the permissions and buckets it was
+ * created with.
+ * * `{ name, principalId, expiresAt? }` — a **principal-bound
+ * key** (`iam` access model), authorized on every request from
+ * the bucket policies naming that principal. The orchestrator
+ * must reject (422) a body carrying `principalId` together with
+ * `permissions` or `buckets`, and a `principalId` that is not a
+ * live principal of the tenant.
+ *
+ * A service key's name is unique within the tenant; a
+ * principal-bound key's name is unique within its principal.
  *
  */
 export const postTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = false>(
@@ -254,6 +291,132 @@ export const getTenantsByTenantIdAccessKeysByAccessKeyId = <ThrowOnError extends
   >({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/tenants/{tenantId}/access-keys/{accessKeyId}',
+    ...options,
+  });
+
+/**
+ * List principals
+ */
+export const getTenantsByTenantIdPrincipals = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantsByTenantIdPrincipalsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantsByTenantIdPrincipalsResponses,
+    GetTenantsByTenantIdPrincipalsErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals',
+    ...options,
+  });
+
+/**
+ * Remove a principal
+ *
+ * Removes the principal, deletes every access key bound to it, and
+ * strips it from every bucket policy statement naming it. A
+ * statement left with no principal is dropped, and a policy left
+ * with no statement is deleted. Answers 204 for a principal that is
+ * already gone or never existed.
+ *
+ */
+export const deleteTenantsByTenantIdPrincipalsByPrincipalId = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<DeleteTenantsByTenantIdPrincipalsByPrincipalIdData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<
+    DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponses,
+    DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}',
+    ...options,
+  });
+
+/**
+ * Get a principal
+ */
+export const getTenantsByTenantIdPrincipalsByPrincipalId = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantsByTenantIdPrincipalsByPrincipalIdData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantsByTenantIdPrincipalsByPrincipalIdResponses,
+    GetTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}',
+    ...options,
+  });
+
+/**
+ * Create a principal
+ *
+ * Creates the principal, or answers 200 when it already exists.
+ * Idempotent. A principal carries no permissions, no role, and no
+ * key material: it is the identity a key can bind to and a policy
+ * statement can name. Creating one after it was removed revives
+ * the id with no keys and named in no statement.
+ *
+ */
+export const putTenantsByTenantIdPrincipalsByPrincipalId = <ThrowOnError extends boolean = false>(
+  options: Options<PutTenantsByTenantIdPrincipalsByPrincipalIdData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    PutTenantsByTenantIdPrincipalsByPrincipalIdResponses,
+    PutTenantsByTenantIdPrincipalsByPrincipalIdErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}',
+    ...options,
+  });
+
+/**
+ * Bucket policies naming a principal
+ *
+ * Every bucket policy with a statement naming the principal or `*`.
+ */
+export const getTenantsByTenantIdPrincipalsByPrincipalIdPolicies = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses,
+    GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}/policies',
+    ...options,
+  });
+
+/**
+ * A principal's effective actions per bucket
+ *
+ * For every bucket whose policy gives the principal at least one
+ * action, the sorted effective set: the union of the `Allow`
+ * statements naming them or `*`, minus the union of the `Deny`
+ * statements naming them or `*`. Buckets with an empty set are
+ * omitted. Computed from the orchestrator's own tables on every
+ * call, so the answer is consistent with its last write.
+ *
+ */
+export const getTenantsByTenantIdPrincipalsByPrincipalIdAccess = <
+  ThrowOnError extends boolean = false,
+>(
+  options: Options<GetTenantsByTenantIdPrincipalsByPrincipalIdAccessData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses,
+    GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/tenants/{tenantId}/principals/{principalId}/access',
     ...options,
   });
 
