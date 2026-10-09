@@ -1,8 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
+import { ROSTER_OWNERS_SID } from '@filone/shared';
+
 import { PolicyStatementCard } from './PolicyStatementCard';
 
-const names: Record<string, string> = {
+const memberNamesById: Record<string, string> = {
   owner: 'Ada Lovelace',
   admin: 'Ben Okri',
   m1: 'Cy Twombly',
@@ -15,7 +17,7 @@ const meta: Meta<typeof PolicyStatementCard> = {
   component: PolicyStatementCard,
   args: {
     index: 0,
-    memberName: (id: string) => names[id],
+    getMemberName: (id: string) => memberNamesById[id],
     onEdit: () => {},
     onRemove: () => {},
   },
@@ -24,7 +26,7 @@ const meta: Meta<typeof PolicyStatementCard> = {
 export default meta;
 type Story = StoryObj<typeof PolicyStatementCard>;
 
-export const Allow: Story = {
+export const AllowStatement: Story = {
   args: {
     statement: {
       Sid: 'team',
@@ -35,7 +37,7 @@ export const Allow: Story = {
   },
 };
 
-export const Deny: Story = {
+export const DenyStatement: Story = {
   args: {
     statement: {
       Effect: 'Deny',
@@ -46,16 +48,16 @@ export const Deny: Story = {
   },
 };
 
-export const Everyone: Story = {
+export const EveryoneInOrganization: Story = {
   args: {
     statement: { Effect: 'Allow', Principal: '*', Action: ['s3:GetObject', 's3:ListBucket'] },
   },
 };
 
-export const ManyMembersAllActions: Story = {
+export const RosterStatementWithFoldedMembers: Story = {
   args: {
     statement: {
-      Sid: 'filone-owners',
+      Sid: ROSTER_OWNERS_SID,
       Effect: 'Allow',
       Principal: ['owner', 'admin', 'm1', 'm2', 'm3', 'unknown-id'],
       Action: ['s3:*'],
@@ -63,7 +65,28 @@ export const ManyMembersAllActions: Story = {
   },
 };
 
-export const WithoutControls: Story = {
+export const UnknownMember: Story = {
+  args: {
+    statement: { Effect: 'Allow', Principal: ['m1', 'removed-id'], Action: ['s3:GetObject'] },
+  },
+};
+
+export const ProtectGroup: Story = {
+  args: {
+    statement: {
+      Effect: 'Allow',
+      Principal: ['m1'],
+      Action: [
+        's3:GetObjectRetention',
+        's3:GetObjectLegalHold',
+        's3:PutObjectRetention',
+        's3:PutObjectLegalHold',
+      ],
+    },
+  },
+};
+
+export const ReadOnly: Story = {
   name: 'Without edit and remove',
   args: {
     statement: { Effect: 'Allow', Principal: ['m1'], Action: ['s3:GetObject'] },
