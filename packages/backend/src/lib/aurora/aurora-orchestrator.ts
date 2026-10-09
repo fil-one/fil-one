@@ -25,15 +25,17 @@ import {
   findAuroraAccessKeyByName,
 } from '../aurora/aurora-portal.ts';
 import {
-  getOperationsSamples,
-  getStorageSamples,
   getTenantStatus as getAuroraTenantStatusApi,
   mapFromModelsTenantStatus,
   mapToModelsTenantStatus,
   updateTenantStatus as updateAuroraTenantStatusApi,
-  getBucketStorageSamples,
   getTenantInfo,
 } from '../aurora/aurora-backoffice.ts';
+import {
+  getBucketStorageSamples,
+  getOperationsSamples,
+  getStorageSamples,
+} from './aurora-backoffice-metrics.ts';
 import { isOrgSetupComplete } from '../org-setup-status.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
