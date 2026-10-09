@@ -251,6 +251,15 @@ describe('auroraOrchestrator', () => {
       expect(mockDeleteAuroraTenant).not.toHaveBeenCalled();
     });
 
+    it('only disables the tenant when the flag is set to anything but true', async () => {
+      vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'false');
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.deleteTenant('aurora-t-1');
+
+      expect(mockDeleteAuroraTenant).not.toHaveBeenCalled();
+    });
+
     it('disables, then deletes the tenant while tenant deletion is on', async () => {
       vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'true');
       mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
