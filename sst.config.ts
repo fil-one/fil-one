@@ -1072,6 +1072,48 @@ export default $config({
       function: accountDeletionSweeper.arn,
     });
 
+    // ── Stripe events (webhook → FIFO queue → worker) ────────────────
+    // The webhook verifies Stripe's signature, enqueues the event and returns
+    // 200, so Stripe's delivery never waits on a Stripe lookup or an
+    // orchestrator status sync. The worker does that processing. Events that
+    // fail every delivery land in the DLQ, where they can be inspected and
+    // redriven. See packages/backend/src/lib/stripe-event-queue.ts.
+    const stripeEventDlq = new sst.aws.Queue('StripeEventDlq', {
+      fifo: true,
+      // The SQS maximum, 14 days rather than the default 4. Stripe has its 200
+      // and will not redeliver, so an event parked here is the only copy left.
+      transform: { queue: { messageRetentionSeconds: 14 * 24 * 60 * 60 } },
+    });
+
+    // FIFO so the message group (the Stripe customer) admits one in-flight
+    // event per customer: a payment success cannot race the cancellation it
+    // follows.
+    const stripeEventQueue = new sst.aws.Queue('StripeEventQueue', {
+      fifo: true,
+      // At least six times the worker's timeout, AWS's guidance for a queue
+      // driving a Lambda, so SQS never redelivers an event still in progress.
+      visibilityTimeout: '6 minutes',
+      dlq: { queue: stripeEventDlq.arn, retry: 3 },
+    });
+
+    const stripeEventWorker = createFn('StripeEventWorker', {
+      handler: 'packages/backend/src/jobs/stripe-event-worker.handler',
+      // Billing and user tables, Stripe secrets and orchestrator tokens, plus
+      // the queue it consumes.
+      link: [...allResources, stripeEventQueue],
+      environment: {
+        ...orchestratorEnv,
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
+      },
+      // Each region's status sync retries with 1s/2s/4s backoff on both its
+      // probe and its update.
+      timeout: '60 seconds',
+      permissions: [{ actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] }],
+    });
+    // Subscribed by ARN so the worker keeps the logging and defaults createFn
+    // applies. One event at a time, so a failure redelivers only that event.
+    stripeEventQueue.subscribe(stripeEventWorker.arn, { batch: { size: 1 } });
+
     // ── Routes ───────────────────────────────────────────────────────
     // The manifest is the route list: every entry becomes a Lambda and an API
     // Gateway route below, so a handler cannot reach the internet without a
@@ -1417,10 +1459,9 @@ export default $config({
       },
       'stripe-webhook': {
         extraEnv: {
-          ...orchestratorEnv,
           STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
-          ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
         },
+        extraLink: [stripeEventQueue],
         permissions: [
           {
             actions: ['ssm:GetParameter'],
@@ -1428,7 +1469,6 @@ export default $config({
               $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
             ],
           },
-          { actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] },
         ],
       },
     };

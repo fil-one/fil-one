@@ -47,7 +47,8 @@ export async function resolveOrgIdFromSubscription(userId: string): Promise<stri
  * given. Metadata alone: the billing row is keyed by org now, so there is no
  * row to look an org up FROM without already having the answer. An event whose
  * objects name no org cannot be written — `updateSubscriptionByUser` throws,
- * the webhook 500s, and Stripe retries until somebody repairs the metadata.
+ * the Stripe event worker fails the delivery, and the event lands in the DLQ to
+ * be redriven once somebody repairs the metadata.
  */
 export function resolveOrgId(
   ...metadata: Array<Stripe.Metadata | null | undefined>

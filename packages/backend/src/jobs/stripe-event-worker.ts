@@ -1,6 +1,14 @@
 // Processing for verified Stripe webhook events: the billing-table writes,
 // Stripe lookups and per-region tenant status syncs each event type triggers.
+//
+// The webhook verifies Stripe's signature, drops events it has already
+// received, and enqueues the rest (see lib/stripe-event-queue.ts); this worker
+// consumes the queue one event per invocation. An error fails the delivery,
+// and SQS retries it before parking it in the dead-letter queue. The handlers
+// tolerate running twice (conditional writes, superseded checks, and a status
+// sync that probes before it updates).
 
+import type { SQSEvent } from 'aws-lambda';
 import Stripe from 'stripe';
 import {
   PAID_GRACE_DAYS,
@@ -13,7 +21,6 @@ import { startDeletionFromStripe } from '../lib/deletion-from-stripe.ts';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
-  WEBHOOK_STATUS_SYNC_RETRY,
 } from '../lib/region-helpers.ts';
 import {
   invoiceSubscriptionId,
@@ -30,7 +37,15 @@ import {
   emitInvoicePaid,
 } from '../lib/stripe-webhook-metrics.ts';
 
-export async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
+export async function handler(event: SQSEvent): Promise<void> {
+  // One message per invocation (batch size 1), so an error escaping this
+  // handler returns exactly the failed event to the queue.
+  for (const record of event.Records) {
+    await processStripeEvent(JSON.parse(record.body) as Stripe.Event);
+  }
+}
+
+async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
   switch (stripeEvent.type) {
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
@@ -130,8 +145,8 @@ async function handleCustomerUpdated(customer: Stripe.Customer): Promise<void> {
   if (!orgId) {
     // Not a throw. The rows with no `orgId` were enumerated and dispositioned
     // by name before the re-key (docs/BillingRekeyRunbook.md), so no retry
-    // converges on an answer — Stripe would redeliver this for three days and
-    // then disable the endpoint over a card that no row can record.
+    // converges on an answer — a throw would spend every delivery and park the
+    // event in the DLQ over a card that no row can record.
     console.error('[stripe-webhook] customer.updated resolves to no org; payment method dropped', {
       customerId: customer.id,
       userId,
@@ -149,10 +164,10 @@ async function updatePaymentMethod(
   owner: { userId: string; orgId: string },
   pm: Stripe.PaymentMethod,
 ): Promise<void> {
-  // A missing row is swallowed here rather than failing the webhook. The store
+  // A missing row is swallowed here rather than failing the delivery. The store
   // refuses to create one, and every other writer treats that refusal as an
   // error — but this one carries a card's last four digits and expiry, and a
-  // 500 buys three days of Stripe retries and alert noise to redeliver them.
+  // throw buys retries and a DLQ entry to redeliver them.
   // Post-verify the state is near-impossible; the metric is how anyone would
   // learn it happened at all.
   const { written } = await updateSubscriptionByUser(owner, {
@@ -239,7 +254,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Prom
   // subscription created before the metadata stamped an orgId names none, and
   // the org is the key the row is written under. Fetch the customer and resolve
   // against both — writing with no org resolves nothing and throws
-  // MissingOrgIdError, which Stripe would retry forever.
+  // MissingOrgIdError, which no retry can fix.
   const stripe = getStripeClient();
   const customer = await stripe.customers.retrieve(customerId);
   if ('deleted' in customer && customer.deleted) {
@@ -332,8 +347,14 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
 
   const graceDays = subscription.trial_end ? TRIAL_GRACE_DAYS : PAID_GRACE_DAYS;
 
+  // Dated from when Stripe ended the subscription, so a redelivered event
+  // writes the same deadline. Stripe sets ended_at on a deleted subscription;
+  // the clock covers one that arrives without it.
   const now = new Date();
-  const gracePeriodEndsAt = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
+  const canceledAt = subscription.ended_at ? new Date(subscription.ended_at * 1000) : now;
+  const gracePeriodEndsAt = new Date(
+    canceledAt.getTime() + graceDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
 
   // Resolved once: the same org id keys the write below and the tenant
   // write-lock after it.
@@ -353,9 +374,10 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   await updateSubscriptionByUser(
     { userId, orgId },
     {
-      UpdateExpression: `SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
+      UpdateExpression: `SET subscriptionStatus = :status, canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.GracePeriod },
+        ':canceledAt': { S: canceledAt.toISOString() },
         ':now': { S: now.toISOString() },
         ':grace': { S: gracePeriodEndsAt },
         ...backfill.values,
@@ -364,6 +386,17 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
     },
   );
 
+  // Write-lock the tenant on every orchestrator during grace period. A failure
+  // fails the delivery, so SQS retries the event and parks it in the DLQ once
+  // retries are spent; the daily grace-period-enforcer cron also attempts
+  // WRITE_LOCK for active grace periods missing it. The sync never downgrades a
+  // tenant that is already disabled.
+  if (orgId) {
+    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'write-locked'));
+    console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
+  }
+
+  // Emitted once the delivery can no longer fail, so a retried event counts once.
   const latestInvoice = subscription.latest_invoice;
   const attemptCount =
     latestInvoice && typeof latestInvoice !== 'string' ? latestInvoice.attempt_count : undefined;
@@ -372,25 +405,6 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
     reason: subscription.cancellation_details?.reason ?? 'unknown',
     attemptCount: attemptCount ?? 0,
   });
-
-  // Best-effort: write-lock the tenant on every orchestrator during grace
-  // period. If this fails, the daily grace-period-enforcer cron will also
-  // attempt WRITE_LOCK for active grace periods missing it. The sync never
-  // downgrades a tenant that is already disabled.
-  try {
-    if (orgId) {
-      assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(
-          orgId,
-          'write-locked',
-          WEBHOOK_STATUS_SYNC_RETRY,
-        ),
-      );
-      console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
-    }
-  } catch (error) {
-    console.error('[stripe-webhook] Failed to write-lock tenant', { userId, error });
-  }
 }
 
 async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
@@ -451,22 +465,17 @@ async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
     });
   }
 
-  emitInvoicePaid();
-
-  // Best-effort: re-enable the tenant on every orchestrator if recovering from
-  // PastDue/GracePeriod. If this fails, the tenant may remain locked until
-  // manual intervention. A refused write means the teardown owns this account:
-  // the tenant it disabled stays disabled.
-  try {
-    if (orgId && !updateResult.refused) {
-      assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(orgId, 'active', WEBHOOK_STATUS_SYNC_RETRY),
-      );
-      console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
-    }
-  } catch (error) {
-    console.error('[stripe-webhook] Failed to re-activate tenant', { userId, error });
+  // Re-enable the tenant on every orchestrator if recovering from
+  // PastDue/GracePeriod. A failure fails the delivery, so SQS retries the event
+  // and parks it in the DLQ once retries are spent. A refused write means the
+  // teardown owns this account: the tenant it disabled stays disabled.
+  if (orgId && !updateResult.refused) {
+    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'active'));
+    console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
   }
+
+  // Emitted once the delivery can no longer fail, so a retried event counts once.
+  emitInvoicePaid();
 }
 
 async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
