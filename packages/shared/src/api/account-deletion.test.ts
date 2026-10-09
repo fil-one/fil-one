@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { ExpectedZodIssue } from '../testing/zod-matchers.ts';
 import {
   DeleteAccountSchema,
   DeletionCodeSchema,
@@ -58,7 +59,7 @@ describe('DeleteAccountSchema', () => {
     );
   });
 
-  it.each([
+  it.each<[string, unknown, ExpectedZodIssue]>([
     ['a missing code', { orgName: 'Acme' }, { code: 'invalid_type', path: ['code'] }],
     ['a missing org name', { code: '123456' }, { code: 'invalid_type', path: ['orgName'] }],
     [

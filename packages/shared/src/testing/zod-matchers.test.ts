@@ -1,14 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { stripVTControlCharacters } from 'node:util';
 import { z } from 'zod';
+import type { ExpectedZodIssue } from './zod-matchers.ts';
 
 const PersonSchema = z.object({
   name: z.string().min(2, 'Name is too short'),
   age: z.number(),
 });
 
-const shortName = { code: 'too_small', path: ['name'] };
-const missingAge = { code: 'invalid_type', path: ['age'] };
+const shortName: ExpectedZodIssue = { code: 'too_small', path: ['name'] };
+const missingAge: ExpectedZodIssue = { code: 'invalid_type', path: ['age'] };
 
 describe('toMatchZodValidationError', () => {
   it('passes when the rejection has exactly the listed issues', () => {
@@ -54,15 +55,23 @@ describe('toMatchZodValidationError', () => {
     ).toThrow(/toMatchZodValidationError/);
   });
 
-  it('shows only the fields the expected issue lists in the diff', () => {
+  it('shows every field of the received issues in the diff', () => {
     const message = getFailureMessage(() =>
       expect(PersonSchema.safeParse({ name: 'A', age: 1 })).toMatchZodValidationError({
         code: 'too_big',
       }),
     );
-    expect(message).toContain(
-      '  [\n    {\n-     "code": "too_big",\n+     "code": "too_small",\n    },\n  ]',
-    );
+    expect(message).toContain('+     "minimum": 2,');
+  });
+
+  it('allows only the fields of the issue kind its code names', () => {
+    expect(() =>
+      expect(PersonSchema.safeParse({ name: 'A', age: 1 })).toMatchZodValidationError({
+        code: 'too_small',
+        // @ts-expect-error A too_small issue has `minimum`, not `maximum`.
+        maximum: 2,
+      }),
+    ).toThrow(/toMatchZodValidationError/);
   });
 
   it('throws when no expected issue is given', () => {

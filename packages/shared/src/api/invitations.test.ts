@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { ExpectedZodIssue } from '../testing/zod-matchers.ts';
 import { OrgRole } from './org.ts';
 import {
   AcceptInvitationSchema,
@@ -26,7 +27,7 @@ describe('CreateInvitationSchema', () => {
     expect(parsed.email).toBe('Person@Example.com');
   });
 
-  it.each([
+  it.each<[string, unknown, ExpectedZodIssue]>([
     [
       'a role that is not one of the four',
       { email: 'a@b.com', role: 'billing' },
@@ -73,7 +74,7 @@ describe('AcceptInvitationSchema', () => {
     });
   });
 
-  it.each([
+  it.each<[string, unknown, ExpectedZodIssue]>([
     ['a token too short to be one', { token: 'short' }, { code: 'too_small', path: ['token'] }],
     ['no token', {}, { code: 'invalid_type', path: ['token'] }],
     ['a pasted blob', { token: 'x'.repeat(500) }, { code: 'too_big', path: ['token'] }],

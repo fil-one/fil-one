@@ -1,8 +1,16 @@
 import { expect } from 'vitest';
+import type { z } from 'zod';
 
-// Each issue is matched like `toMatchObject`: list the fields that identify
-// the rejection, such as `code`, `path` and `message`.
-type ExpectedZodIssue = Record<string, unknown>;
+/**
+ * Some fields of one zod issue, matched like `toMatchObject`: list the fields
+ * that identify the rejection, such as `code`, `path` and `message`. A field
+ * can hold an asymmetric matcher such as `expect.stringContaining()`.
+ */
+export type ExpectedZodIssue = PartialIssue<z.core.$ZodIssue>;
+
+// Applies Partial to each issue kind separately, so `code` decides which
+// other fields are allowed.
+type PartialIssue<Issue> = Issue extends unknown ? Partial<Issue> : never;
 
 declare module 'vitest' {
   // The type parameter must match vitest's own declaration for the merge to work.
@@ -53,7 +61,7 @@ expect.extend({
         pass
           ? `${hint}\n\nThe parse failed with the issues it should not have:\n` +
             this.utils.printReceived(receivedIssues)
-          : `${hint}\n\n` + this.utils.diff(issues, pickExpectedFields(receivedIssues, issues)),
+          : `${hint}\n\n` + this.utils.diff(issues, receivedIssues),
     };
   },
 });
@@ -72,19 +80,4 @@ function getIssues(received: unknown): unknown {
   const { error } = received;
   if (typeof error !== 'object' || error === null || !('issues' in error)) return received;
   return error.issues;
-}
-
-// Drops the fields an expected issue does not mention, so the diff shows only
-// what the test checks. Issues beyond the expected count are kept whole.
-function pickExpectedFields(receivedIssues: unknown, expectedIssues: ExpectedZodIssue[]): unknown {
-  if (!Array.isArray(receivedIssues)) return receivedIssues;
-  return receivedIssues.map((issue: unknown, index) => {
-    const expectedIssue = expectedIssues[index];
-    if (expectedIssue === undefined || typeof issue !== 'object' || issue === null) return issue;
-    return Object.fromEntries(
-      Object.keys(expectedIssue)
-        .filter((key) => key in issue)
-        .map((key) => [key, (issue as Record<string, unknown>)[key]]),
-    );
-  });
 }
