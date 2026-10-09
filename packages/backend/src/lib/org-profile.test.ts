@@ -259,15 +259,17 @@ describe('registered principals', () => {
     });
   });
 
-  it('de-duplicates ids and writes nothing for an empty list', async () => {
+  it('de-duplicates the ids it adds', async () => {
     await addRegisteredPrincipals('org-1', 'forgeDev', ['user-1', 'user-1']);
+
     expect(
       ddbMock.commandCalls(UpdateItemCommand)[0]!.args[0].input.ExpressionAttributeValues,
     ).toStrictEqual({ ':ids': { SS: ['user-1'] } });
+  });
 
-    ddbMock.reset();
-    ddbMock.on(UpdateItemCommand).resolves({});
+  it('writes nothing for an empty list', async () => {
     await addRegisteredPrincipals('org-1', 'forgeDev', []);
+
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
@@ -287,17 +289,15 @@ describe('registered principals', () => {
     });
   });
 
-  it('reports a refused condition as the org being deleted', async () => {
+  it.each([
+    { update: 'add', write: () => addRegisteredPrincipals('org-1', 'forgeDev', ['user-1']) },
+    { update: 'remove', write: () => removeRegisteredPrincipal('org-1', 'forgeDev', 'user-1') },
+  ])('reports a refused condition on $update as the org being deleted', async ({ write }) => {
     ddbMock
       .on(UpdateItemCommand)
       .rejects(new ConditionalCheckFailedException({ message: 'refused', $metadata: {} }));
 
-    await expect(addRegisteredPrincipals('org-1', 'forgeDev', ['user-1'])).rejects.toBeInstanceOf(
-      OrgDeletingError,
-    );
-    await expect(removeRegisteredPrincipal('org-1', 'forgeDev', 'user-1')).rejects.toBeInstanceOf(
-      OrgDeletingError,
-    );
+    await expect(write()).rejects.toBeInstanceOf(OrgDeletingError);
   });
 
   it('rethrows unrelated failures', async () => {

@@ -12,8 +12,8 @@
 // retry is the same request.
 
 import pRetry from 'p-retry';
-import { OrgRole, withRosterStatements } from '@filone/shared';
-import type { AuditActor, BucketPolicy, PolicySyncReport, S3Region } from '@filone/shared';
+import { OrgRole, replaceRosterStatements } from '@filone/shared';
+import type { AuditActor, BucketPolicy, PolicySyncReport, Roster, S3Region } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit } from './audit.ts';
 import { PolicyPreconditionFailedError } from './errors.ts';
 import type { StoredBucketPolicy } from './iam-orchestrator.ts';
@@ -23,25 +23,19 @@ import { removeRegisteredPrincipal } from './org-profile.ts';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.ts';
 import type { IamOrchestrator } from './service-orchestrator.ts';
 
-/** The org's Owners and Admins by user id, as the roster statements name them. */
-export interface Roster {
-  owners: string[];
-  admins: string[];
-}
-
 /**
  * The roster as the storage system should see it after a role change. Read
  * from the membership rows, with the changing member placed at the role they
  * are moving to, so the same function serves a demotion written before the role
  * row and a promotion written after it.
  */
-export async function rosterAfterChange(
+export async function getRosterAfterChange(
   orgId: string,
   change?: { userId: string; role: OrgRole },
 ): Promise<Roster> {
   const members = (await listMembers(orgId))
     .filter((member) => member.userId !== change?.userId)
-    .map((member) => ({ userId: member.userId, role: member.role as string }));
+    .map((member) => ({ userId: member.userId, role: member.role }));
   if (change) members.push(change);
   return {
     owners: members.filter((m) => m.role === OrgRole.Owner).map((m) => m.userId),
@@ -50,12 +44,12 @@ export async function rosterAfterChange(
 }
 
 /** Whether a role is one the console names on every bucket's policy. */
-export function isRosterRole(role: string): boolean {
+export function isRosterRole(role: OrgRole): boolean {
   return role === OrgRole.Owner || role === OrgRole.Admin;
 }
 
 /** The ready `iam` orchestrators for this org, with the tenant each resolved. */
-function readyIamRegions(
+function getReadyIamOrchestrators(
   orgProfile: OrgProfileItem | undefined,
 ): Array<{ orchestrator: IamOrchestrator; tenantId: string }> {
   return getAvailableOrchestrators().flatMap((orchestrator) => {
@@ -82,15 +76,15 @@ export async function syncRosterStatements({
   roster: Roster;
   actor: AuditActor;
 }): Promise<PolicySyncReport[]> {
-  const regions = readyIamRegions(orgProfile);
+  const regions = getReadyIamOrchestrators(orgProfile);
   return Promise.all(
     regions.map(({ orchestrator, tenantId }) =>
-      syncRegion({ orgId, orchestrator, tenantId, roster, actor }),
+      syncRosterStatementsInRegion({ orgId, orchestrator, tenantId, roster, actor }),
     ),
   );
 }
 
-async function syncRegion({
+async function syncRosterStatementsInRegion({
   orgId,
   orchestrator,
   tenantId,
@@ -105,8 +99,9 @@ async function syncRegion({
 }): Promise<PolicySyncReport> {
   const report: PolicySyncReport = {
     region: orchestrator.region,
-    bucketsReached: 0,
+    bucketsUpdated: 0,
     bucketsFailed: [],
+    bucketListFailed: false,
   };
   let buckets: string[];
   try {
@@ -121,13 +116,20 @@ async function syncRegion({
       region: orchestrator.region,
       error: err,
     });
-    return { ...report, bucketsFailed: ['*'] };
+    return { ...report, bucketListFailed: true };
   }
 
   for (const bucketName of buckets) {
     try {
-      await writeRosterStatements({ orgId, orchestrator, tenantId, bucketName, roster, actor });
-      report.bucketsReached += 1;
+      await replaceRosterStatementsOnBucket({
+        orgId,
+        orchestrator,
+        tenantId,
+        bucketName,
+        roster,
+        actor,
+      });
+      report.bucketsUpdated += 1;
     } catch (err) {
       console.error('[iam-policy-fanout] Could not rewrite a bucket policy', {
         orgId,
@@ -142,11 +144,13 @@ async function syncRegion({
 }
 
 /**
- * One bucket: read, replace the roster statements, write under the ETag read.
- * A policy already carrying the roster is left alone, so a change that reaches
- * a bucket twice costs no second revocation round at the storage system.
+ * One bucket: read, replace the roster statements, write under the ETag read,
+ * or delete the policy when no statement is left. A policy already carrying
+ * the roster is not written again: each write makes the storage system revoke
+ * and reissue the delegations of every key bound to a principal it changes, and
+ * a bucket reached twice would pay for that a second time.
  */
-async function writeRosterStatements({
+async function replaceRosterStatementsOnBucket({
   orgId,
   orchestrator,
   tenantId,
@@ -165,9 +169,9 @@ async function writeRosterStatements({
   await pRetry(
     async () => {
       const current = await iam.getBucketPolicy(tenantId, bucketName);
-      const next = withRosterStatements(current?.policy ?? null, roster);
+      const next = replaceRosterStatements(current?.policy ?? null, roster);
       if (JSON.stringify(current?.policy ?? null) === JSON.stringify(next)) return;
-      await auditedWrite({ orgId, region, bucketName, actor, current, next }, () =>
+      await writeBucketPolicyWithAudit({ orgId, region, bucketName, actor, current, next }, () =>
         next
           ? iam.putBucketPolicy(
               tenantId,
@@ -191,11 +195,11 @@ async function writeRosterStatements({
 }
 
 /**
- * The intent-and-completion pair around one rewritten policy, with `trigger:
- * role_change`. Best-effort: the role change is the recorded act, and an audit
- * outage must not stop its consequences reaching the storage system.
+ * The intent-and-completion pair around one rewritten policy, with the
+ * role-change trigger. Best-effort: the role change is the recorded act, and
+ * an audit outage must not stop its consequences reaching the storage system.
  */
-async function auditedWrite(
+async function writeBucketPolicyWithAudit(
   {
     orgId,
     region,
@@ -213,18 +217,18 @@ async function auditedWrite(
   },
   write: () => Promise<unknown>,
 ): Promise<void> {
-  const type = !next
+  const auditEventType = !next
     ? 'bucket_policy.deleted'
     : current
       ? 'bucket_policy.updated'
       : 'bucket_policy.created';
   const audit = await twoPhaseAudit({
-    type,
+    type: auditEventType,
     mode: 'best-effort',
     actor,
     orgId,
     subject: AuditSubjects.bucket(region, bucketName),
-    details: { region, bucketName, trigger: 'role_change' },
+    details: { region, bucketName, trigger: 'role_changed' },
   });
   try {
     await write();
@@ -244,7 +248,7 @@ async function auditedWrite(
  * regions reached and the ones that refused; the caller decides whether the
  * membership change proceeds.
  */
-export async function removeMemberPrincipals({
+export async function removeMemberPrincipalFromIamRegions({
   orgId,
   orgProfile,
   userId,
@@ -253,10 +257,11 @@ export async function removeMemberPrincipals({
   orgProfile: OrgProfileItem | undefined;
   userId: string;
 }): Promise<{ removed: S3Region[]; failed: S3Region[] }> {
-  const regions = readyIamRegions(orgProfile);
-  // The PROFILE set is pruned as part of the region's removal: an id left
-  // behind would make a later ensureTenantReady skip registering a re-invited
-  // member, so a prune that fails refuses the region and the retry runs both.
+  const regions = getReadyIamOrchestrators(orgProfile);
+  // The member's id leaves the PROFILE row's `${id}Principals` set as part of
+  // the region's removal: an id left behind would make
+  // {@link registerMemberPrincipals} skip a re-invited member, so a failed
+  // update refuses the region and the retry runs both steps again.
   const outcomes = await Promise.all(
     regions.map(async ({ orchestrator, tenantId }) => {
       const { region } = orchestrator;
@@ -274,6 +279,7 @@ export async function removeMemberPrincipals({
       }
     }),
   );
-  const regionsWhere = (ok: boolean) => outcomes.filter((o) => o.ok === ok).map((o) => o.region);
-  return { removed: regionsWhere(true), failed: regionsWhere(false) };
+  const getRegionsWithOutcome = (ok: boolean) =>
+    outcomes.filter((o) => o.ok === ok).map((o) => o.region);
+  return { removed: getRegionsWithOutcome(true), failed: getRegionsWithOutcome(false) };
 }

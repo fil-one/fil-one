@@ -130,6 +130,8 @@ export interface PolicySyncReport {
   bucketsUpdated: number;
   /** The buckets whose policy could not be written, by name. */
   bucketsFailed: string[];
+  /** True when the region's buckets could not be listed, so none was attempted. */
+  bucketListFailed: boolean;
 }
 
 /**

@@ -7,8 +7,9 @@ const mockGetOrgProfile = vi.fn();
 const mockAddRegistered = vi.fn(async (_orgId: string, _id: string, _ids: string[]) => {});
 const mockListMembers = vi.fn();
 
-// `registeredPrincipals` stays real: the test then covers how the marker is
-// read off the PROFILE row, not just that a helper was called.
+// `getRegisteredPrincipals` stays real: the test then covers how the
+// `${id}Principals` set is read off the PROFILE row, not just that a helper was
+// called.
 vi.mock('../org-profile.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../org-profile.ts')>()),
   getOrgProfile: (orgId: string) => mockGetOrgProfile(orgId),
@@ -19,12 +20,12 @@ vi.mock('../org-membership.ts', () => ({ listMembers: (orgId: string) => mockLis
 
 const { registerMemberPrincipals } = await import('./principals.ts');
 
-const member = (userId: string, role: OrgRole = OrgRole.Owner) => ({
+const member = (userId: string, role: OrgRole) => ({
   orgId: 'org-1',
   userId,
   role,
 });
-const iam = () =>
+const createFakeIamMethods = () =>
   ({ syncMember: vi.fn(async () => {}) }) as unknown as Parameters<
     typeof registerMemberPrincipals
   >[0] & { syncMember: ReturnType<typeof vi.fn> };
@@ -37,37 +38,46 @@ describe('registerMemberPrincipals', () => {
 
   it('registers every member the profile does not already record', async () => {
     mockGetOrgProfile.mockResolvedValue(undefined);
-    mockListMembers.mockResolvedValue([member('alice'), member('bob', OrgRole.Member)]);
-    const arm = iam();
+    mockListMembers.mockResolvedValue([
+      member('alice', OrgRole.Owner),
+      member('bob', OrgRole.Member),
+    ]);
+    const iamMethods = createFakeIamMethods();
 
-    await registerMemberPrincipals(arm, 'forgeDev', 'org-1', 'tenant-1');
+    await registerMemberPrincipals(iamMethods, 'forgeDev', 'org-1', 'tenant-1');
 
-    expect(arm.syncMember.mock.calls).toEqual([
+    expect(iamMethods.syncMember.mock.calls).toEqual([
       ['tenant-1', 'alice'],
       ['tenant-1', 'bob'],
     ]);
     expect(mockAddRegistered).toHaveBeenCalledWith('org-1', 'forgeDev', ['alice', 'bob']);
   });
 
-  it('sends nothing once the profile records them all', async () => {
+  it('syncs no principal when every member is already registered', async () => {
     mockGetOrgProfile.mockResolvedValue({ forgeDevPrincipals: { SS: ['alice', 'bob'] } });
-    mockListMembers.mockResolvedValue([member('alice'), member('bob', OrgRole.Member)]);
-    const arm = iam();
+    mockListMembers.mockResolvedValue([
+      member('alice', OrgRole.Owner),
+      member('bob', OrgRole.Member),
+    ]);
+    const iamMethods = createFakeIamMethods();
 
-    await registerMemberPrincipals(arm, 'forgeDev', 'org-1', 'tenant-1');
+    await registerMemberPrincipals(iamMethods, 'forgeDev', 'org-1', 'tenant-1');
 
-    expect(arm.syncMember).not.toHaveBeenCalled();
+    expect(iamMethods.syncMember).not.toHaveBeenCalled();
     expect(mockAddRegistered).not.toHaveBeenCalled();
   });
 
   it('registers only the member missing from the set', async () => {
     mockGetOrgProfile.mockResolvedValue({ forgeDevPrincipals: { SS: ['alice'] } });
-    mockListMembers.mockResolvedValue([member('alice'), member('carol', OrgRole.Admin)]);
-    const arm = iam();
+    mockListMembers.mockResolvedValue([
+      member('alice', OrgRole.Owner),
+      member('carol', OrgRole.Admin),
+    ]);
+    const iamMethods = createFakeIamMethods();
 
-    await registerMemberPrincipals(arm, 'forgeDev', 'org-1', 'tenant-1');
+    await registerMemberPrincipals(iamMethods, 'forgeDev', 'org-1', 'tenant-1');
 
-    expect(arm.syncMember.mock.calls).toEqual([['tenant-1', 'carol']]);
+    expect(iamMethods.syncMember.mock.calls).toEqual([['tenant-1', 'carol']]);
     expect(mockAddRegistered).toHaveBeenCalledWith('org-1', 'forgeDev', ['carol']);
   });
 });

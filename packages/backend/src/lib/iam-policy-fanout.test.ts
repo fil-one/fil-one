@@ -1,8 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { DynamoDBClient, PutItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { mockClient } from 'aws-sdk-client-mock';
-import { OrgRole, ROSTER_ADMINS_SID, ROSTER_OWNERS_SID, S3Region } from '@filone/shared';
-import type { BucketPolicy } from '@filone/shared';
+import {
+  OrgRole,
+  POLICY_ACTION_WILDCARD,
+  ROSTER_ADMIN_ACTIONS,
+  ROSTER_ADMINS_SID,
+  ROSTER_OWNERS_SID,
+  S3Region,
+} from '@filone/shared';
+import type { BucketPolicy, PolicyStatement } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
 import { fakeOrchestrator, tenantFor } from '../test/fake-orchestrator.ts';
@@ -29,19 +36,38 @@ vi.mock('./org-membership.ts', () => ({ listMembers: (orgId: string) => mockList
 
 import { PolicyPreconditionFailedError } from './errors.ts';
 import {
+  getRosterAfterChange,
   isRosterRole,
-  removeMemberPrincipals,
-  rosterAfterChange,
+  removeMemberPrincipalFromIamRegions,
   syncRosterStatements,
 } from './iam-policy-fanout.ts';
 
 const ddbMock = mockClient(DynamoDBClient);
 const orgProfile = { pk: { S: `ORG#${ORG_ID}` } };
 const roster = { owners: ['owner-1'], admins: ['admin-1'] };
+const noRoster = { owners: [], admins: [] };
 
-const team: BucketPolicy = {
+const rosterStatements: PolicyStatement[] = [
+  {
+    Sid: ROSTER_OWNERS_SID,
+    Effect: 'Allow',
+    Principal: ['owner-1'],
+    Action: [POLICY_ACTION_WILDCARD],
+  },
+  { Sid: ROSTER_ADMINS_SID, Effect: 'Allow', Principal: ['admin-1'], Action: ROSTER_ADMIN_ACTIONS },
+];
+
+const grantGetObjectToMember: BucketPolicy = {
   Statement: [{ Sid: 'team', Effect: 'Allow', Principal: ['member-1'], Action: ['s3:GetObject'] }],
 };
+
+function syncRoster(rosterToWrite = roster) {
+  return syncRosterStatements({ orgId: ORG_ID, orgProfile, roster: rosterToWrite, actor: ACTOR });
+}
+
+function photosPuts() {
+  return iam.calls.filter((c) => c.method === 'putBucketPolicy' && c.target === 'photos');
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -55,147 +81,250 @@ beforeEach(() => {
   iamRegion.listBuckets.mockResolvedValue([{ bucketName: 'photos' }, { bucketName: 'backups' }]);
 });
 
-describe('rosterAfterChange', () => {
-  it('places the changing member at the role they are moving to', async () => {
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('getRosterAfterChange', () => {
+  it.each([
+    [
+      'Admin',
+      'admins',
+      { userId: 'member-1', role: OrgRole.Admin },
+      { owners: ['owner-1'], admins: ['member-1'] },
+    ],
+    ['Member', 'neither', { userId: 'owner-1', role: OrgRole.Member }, { owners: [], admins: [] }],
+  ])('puts a member moving to %s in the %s list', async (_role, _list, target, expected) => {
     mockListMembers.mockResolvedValue([
       { userId: 'owner-1', role: OrgRole.Owner },
       { userId: 'member-1', role: OrgRole.Member },
     ]);
 
-    await expect(
-      rosterAfterChange(ORG_ID, { userId: 'member-1', role: OrgRole.Admin }),
-    ).resolves.toStrictEqual({ owners: ['owner-1'], admins: ['member-1'] });
-    await expect(
-      rosterAfterChange(ORG_ID, { userId: 'owner-1', role: OrgRole.Member }),
-    ).resolves.toStrictEqual({ owners: [], admins: [] });
+    await expect(getRosterAfterChange(ORG_ID, target)).resolves.toStrictEqual(expected);
   });
+});
 
-  it('names the two roles the console writes onto every policy', () => {
-    expect([OrgRole.Owner, OrgRole.Admin].every(isRosterRole)).toBe(true);
-    expect([OrgRole.Member, OrgRole.ReadOnly].some(isRosterRole)).toBe(false);
+describe('isRosterRole', () => {
+  it.each([
+    { role: OrgRole.Owner, expected: true },
+    { role: OrgRole.Admin, expected: true },
+    { role: OrgRole.Member, expected: false },
+    { role: OrgRole.ReadOnly, expected: false },
+  ])('returns $expected for $role', ({ role, expected }) => {
+    expect(isRosterRole(role), role).toBe(expected);
   });
 });
 
 describe('syncRosterStatements', () => {
-  it('writes the roster statements on every bucket of every iam region and keeps the rest', async () => {
-    iam.seedPolicy(TENANT, 'photos', team);
+  it('reports every bucket as updated', async () => {
+    iam.seedPolicy(TENANT, 'photos', grantGetObjectToMember);
 
-    const report = await syncRosterStatements({ orgId: ORG_ID, orgProfile, roster, actor: ACTOR });
-
-    expect(report).toStrictEqual([
-      { region: S3Region.UsEast9, bucketsReached: 2, bucketsFailed: [] },
+    await expect(syncRoster()).resolves.toStrictEqual([
+      { region: S3Region.UsEast9, bucketsUpdated: 2, bucketsFailed: [], bucketListFailed: false },
     ]);
-    const photos = iam.policies.get(TENANT)!.get('photos')!.policy;
-    expect(photos.Statement.map((s) => s.Sid)).toStrictEqual([
-      ROSTER_OWNERS_SID,
-      ROSTER_ADMINS_SID,
-      'team',
-    ]);
-    expect(photos.Statement[0]!.Principal).toStrictEqual(['owner-1']);
-    // A bucket with no policy gets one holding the roster alone.
-    expect(iam.policies.get(TENANT)!.get('backups')!.policy.Statement).toHaveLength(2);
-    // The members the statements name were synced first.
-    expect(iam.principals.get(TENANT)!.has('owner-1')).toBe(true);
   });
 
-  it('leaves a policy that already carries the roster alone', async () => {
-    iam.seedPolicy(TENANT, 'photos', team);
-    await syncRosterStatements({ orgId: ORG_ID, orgProfile, roster, actor: ACTOR });
-    const writes = () => iam.calls.filter((c) => c.method === 'putBucketPolicy').length;
-    const after = writes();
+  it("puts the roster statements ahead of a policy's other statements", async () => {
+    iam.seedPolicy(TENANT, 'photos', grantGetObjectToMember);
 
-    await syncRosterStatements({ orgId: ORG_ID, orgProfile, roster, actor: ACTOR });
+    await syncRoster();
 
-    expect(writes()).toBe(after);
-  });
-
-  it('deletes a policy the roster emptied and reports a bucket a write could not reach', async () => {
-    iam.seedPolicy(TENANT, 'photos', {
-      Statement: [
-        { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: ['owner-1'], Action: ['s3:*'] },
-      ],
+    expect(iam.policies.get(TENANT)!.get('photos')!.policy).toStrictEqual({
+      Statement: [...rosterStatements, ...grantGetObjectToMember.Statement],
     });
+  });
+
+  it('creates a roster-only policy on a bucket with none', async () => {
+    await syncRoster();
+
+    expect(iam.policies.get(TENANT)!.get('backups')!.policy).toStrictEqual({
+      Statement: rosterStatements,
+    });
+  });
+
+  it('adds each roster member as a principal before writing', async () => {
+    await syncRoster();
+
+    expect(iam.calls.map((c) => `${c.method}:${c.target}`)).toStrictEqual([
+      'syncMember:owner-1',
+      'syncMember:admin-1',
+      'getBucketPolicy:photos',
+      'putBucketPolicy:photos',
+      'getBucketPolicy:backups',
+      'putBucketPolicy:backups',
+    ]);
+  });
+
+  it('skips scoped-keys regions', async () => {
+    const reports = await syncRoster();
+
+    expect(reports.map((report) => report.region)).toStrictEqual([S3Region.UsEast9]);
+    expect(scopedRegion.listBuckets).not.toHaveBeenCalled();
+  });
+
+  it('does not rewrite a policy that already carries the roster', async () => {
+    await syncRoster();
+    iam.calls.length = 0;
+    ddbMock.resetHistory();
+
+    await syncRoster();
+
+    expect(iam.calls.filter((c) => c.method === 'putBucketPolicy')).toStrictEqual([]);
+    expect(ddbMock.commandCalls(PutItemCommand)).toStrictEqual([]);
+  });
+
+  it('reports a bucket whose policy read failed', async () => {
     iam.failNext('getBucketPolicy', new Error('vendor down'));
 
-    const report = await syncRosterStatements({
-      orgId: ORG_ID,
-      orgProfile,
-      roster: { owners: [], admins: [] },
-      actor: ACTOR,
-    });
-
-    // `photos` was read first and failed; `backups` had nothing and needed nothing.
-    expect(report[0]).toStrictEqual({
-      region: S3Region.UsEast9,
-      bucketsReached: 1,
-      bucketsFailed: ['photos'],
-    });
-
-    const again = await syncRosterStatements({
-      orgId: ORG_ID,
-      orgProfile,
-      roster: { owners: [], admins: [] },
-      actor: ACTOR,
-    });
-    expect(again[0]!.bucketsFailed).toStrictEqual([]);
-    expect(iam.policies.get(TENANT)!.has('photos')).toBe(false);
+    await expect(syncRoster()).resolves.toStrictEqual([
+      {
+        region: S3Region.UsEast9,
+        bucketsUpdated: 1,
+        bucketsFailed: ['photos'],
+        bucketListFailed: false,
+      },
+    ]);
   });
 
-  it('reads again and rewrites when another writer landed first', async () => {
-    iam.seedPolicy(TENANT, 'photos', team);
-    iam.failNext('putBucketPolicy', new PolicyPreconditionFailedError('photos'));
+  it('deletes a policy left with no statements', async () => {
+    iam.seedPolicy(TENANT, 'photos', { Statement: [rosterStatements[0]!] });
 
-    const report = await syncRosterStatements({ orgId: ORG_ID, orgProfile, roster, actor: ACTOR });
+    await syncRoster(noRoster);
 
-    expect(report[0]!.bucketsFailed).toStrictEqual([]);
+    expect([...iam.policies.get(TENANT)!.keys()]).toStrictEqual([]);
+  });
+
+  it('retries with a fresh read when the ETag is stale', async () => {
+    const firstEtag = iam.seedPolicy(TENANT, 'photos', grantGetObjectToMember);
+    const put = iam.putBucketPolicy.bind(iam);
+    let secondEtag = '';
+    const putSpy = vi.spyOn(iam, 'putBucketPolicy').mockImplementationOnce(async (...args) => {
+      // Another writer lands between this sync's read and its write.
+      secondEtag = iam.seedPolicy(TENANT, 'photos', grantGetObjectToMember);
+      return put(...args);
+    });
+
+    const reports = await syncRoster();
+
+    expect(reports).toStrictEqual([
+      { region: S3Region.UsEast9, bucketsUpdated: 2, bucketsFailed: [], bucketListFailed: false },
+    ]);
     expect(
-      iam.calls.filter((c) => c.method === 'putBucketPolicy' && c.target === 'photos'),
-    ).toHaveLength(2);
+      putSpy.mock.calls.filter(([, bucketName]) => bucketName === 'photos').map((call) => call[3]),
+    ).toStrictEqual([{ ifMatch: firstEtag }, { ifMatch: secondEtag }]);
   });
 
-  it('records each rewritten policy as a role-change write', async () => {
-    await syncRosterStatements({ orgId: ORG_ID, orgProfile, roster, actor: ACTOR });
+  it('reports the bucket after the retries run out', async () => {
+    const put = iam.putBucketPolicy.bind(iam);
+    const putSpy = vi
+      .spyOn(iam, 'putBucketPolicy')
+      .mockImplementation(async (tenantId, bucketName, ...rest) => {
+        if (bucketName === 'photos') throw new PolicyPreconditionFailedError(bucketName);
+        return put(tenantId, bucketName, ...rest);
+      });
+
+    const reports = await syncRoster();
+
+    expect(reports).toStrictEqual([
+      {
+        region: S3Region.UsEast9,
+        bucketsUpdated: 1,
+        bucketsFailed: ['photos'],
+        bucketListFailed: false,
+      },
+    ]);
+    expect(putSpy.mock.calls.filter(([, bucketName]) => bucketName === 'photos')).toHaveLength(4);
+  });
+
+  it('does not retry an error other than a failed precondition', async () => {
+    iam.failNext('putBucketPolicy', new Error('vendor down'));
+
+    const reports = await syncRoster();
+
+    expect(reports).toStrictEqual([
+      {
+        region: S3Region.UsEast9,
+        bucketsUpdated: 1,
+        bucketsFailed: ['photos'],
+        bucketListFailed: false,
+      },
+    ]);
+    expect(photosPuts()).toHaveLength(1);
+  });
+
+  it("reports bucketListFailed when the region's buckets cannot be listed", async () => {
+    iamRegion.listBuckets.mockRejectedValue(new Error('vendor down'));
+
+    await expect(syncRoster()).resolves.toStrictEqual([
+      { region: S3Region.UsEast9, bucketsUpdated: 0, bucketsFailed: [], bucketListFailed: true },
+    ]);
+  });
+
+  it('audits a created policy with trigger role_changed', async () => {
+    iamRegion.listBuckets.mockResolvedValue([{ bucketName: 'photos' }]);
+
+    await syncRoster();
 
     const events = ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input.Item!);
-    const created = events.filter((item) => item.type?.S === 'bucket_policy.created');
-    expect(created).toHaveLength(4); // two buckets, intent and completion each
-    expect(created[0]!.details?.M?.trigger?.S).toBe('role_change');
+    expect(
+      events.map((item) => ({ type: item.type?.S, trigger: item.details?.M?.trigger?.S })),
+    ).toStrictEqual([
+      { type: 'bucket_policy.created', trigger: 'role_changed' },
+      { type: 'bucket_policy.created', trigger: 'role_changed' },
+    ]);
   });
 });
 
-describe('removeMemberPrincipals', () => {
-  it('removes the principal on every ready iam region and names the ones that refused', async () => {
-    iam.seedPrincipal(TENANT, 'member-1');
+describe('removeMemberPrincipalFromIamRegions', () => {
+  function removeMemberPrincipal() {
+    return removeMemberPrincipalFromIamRegions({ orgId: 'org-1', orgProfile, userId: 'member-1' });
+  }
 
-    await expect(
-      removeMemberPrincipals({ orgId: 'org-1', orgProfile, userId: 'member-1' }),
-    ).resolves.toStrictEqual({
+  it('removes the principal in each ready iam region', async () => {
+    await expect(removeMemberPrincipal()).resolves.toStrictEqual({
       removed: [S3Region.UsEast9],
       failed: [],
     });
     expect(iam.principals.get(TENANT)!.has('member-1')).toBe(false);
+    expect(ddbMock.commandCalls(UpdateItemCommand).map((call) => call.args[0].input)).toStrictEqual(
+      [
+        {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'PROFILE' } },
+          ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+          UpdateExpression: 'DELETE #principals :ids',
+          ExpressionAttributeNames: { '#principals': 'forgeDevPrincipals' },
+          ExpressionAttributeValues: { ':ids': { SS: ['member-1'] } },
+        },
+      ],
+    );
+  });
 
+  it('reports a region whose removal failed', async () => {
     iam.failNext('removeMember', new Error('vendor down'));
-    await expect(
-      removeMemberPrincipals({ orgId: 'org-1', orgProfile, userId: 'member-1' }),
-    ).resolves.toStrictEqual({
+
+    await expect(removeMemberPrincipal()).resolves.toStrictEqual({
       removed: [],
       failed: [S3Region.UsEast9],
     });
   });
 
-  it('names a region as refused when its principal marker could not be pruned', async () => {
-    iam.seedPrincipal(TENANT, 'member-1');
+  it('reports the region as failed when its registered-principals set cannot be updated', async () => {
     ddbMock.on(UpdateItemCommand).rejects(new Error('ProvisionedThroughputExceededException'));
 
-    await expect(
-      removeMemberPrincipals({ orgId: 'org-1', orgProfile, userId: 'member-1' }),
-    ).resolves.toStrictEqual({ removed: [], failed: [S3Region.UsEast9] });
+    await expect(removeMemberPrincipal()).resolves.toStrictEqual({
+      removed: [],
+      failed: [S3Region.UsEast9],
+    });
   });
 
   it('skips a region whose tenant is not provisioned', async () => {
     await expect(
-      removeMemberPrincipals({ orgId: 'org-1', orgProfile: undefined, userId: 'member-1' }),
+      removeMemberPrincipalFromIamRegions({
+        orgId: 'org-1',
+        orgProfile: undefined,
+        userId: 'member-1',
+      }),
     ).resolves.toStrictEqual({ removed: [], failed: [] });
   });
 });
