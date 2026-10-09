@@ -19,8 +19,12 @@ const mockApiRequest = vi.fn();
 /** The single object the listing returns; hoisted so a mock factory can name it. */
 const { OBJECT_KEY } = vi.hoisted(() => ({ OBJECT_KEY: 'README.md' }));
 
-vi.mock('../lib/api.js', () => ({
+vi.mock('../lib/api.js', async () => ({
+  ...(await vi.importActual<typeof import('../lib/api.js')>('../lib/api.js')),
   apiRequest: (...a: unknown[]) => mockApiRequest(...a),
+  // The policy client reads the ETag header, so its path answers a Response.
+  apiResponse: async (...a: unknown[]) =>
+    new Response(JSON.stringify(await mockApiRequest(...a)), { headers: { ETag: '"v1"' } }),
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -47,6 +51,11 @@ vi.mock('../components/AddBucketKeyModal', () => ({
   AddBucketKeyModal: ({ open }: { open: boolean }) =>
     open ? <div data-testid="add-bucket-key-modal" /> : null,
 }));
+
+// The policy tab exists only on a region serving the `iam` access model; the
+// suite about it flips this on, every other suite runs against `scoped-keys`.
+const mockIsIam = vi.fn(() => false);
+vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => mockIsIam() }));
 
 vi.mock('../lib/use-presign.js', () => ({
   batchPresign: () => Promise.resolve({ items: [{ url: 'https://s3.test/list', method: 'GET' }] }),
@@ -88,8 +97,16 @@ const ACCESS_KEY = {
 };
 
 /** Route each of the page's reads by its path; the object listing is stubbed out. */
+const POLICY = {
+  policy: {
+    Statement: [{ Sid: 'team', Effect: 'Allow', Principal: ['user-1'], Action: ['s3:*'] }],
+  },
+};
+
 function respond(path: string) {
   if (path.startsWith('/access-keys')) return Promise.resolve({ keys: [ACCESS_KEY] });
+  if (path.includes('/policy')) return Promise.resolve(POLICY);
+  if (path.startsWith('/org/members')) return Promise.resolve({ members: [] });
   if (path.includes('/analytics')) {
     return Promise.resolve({ objectCount: 0, bytesUsed: 0 });
   }
@@ -113,7 +130,44 @@ function renderPage(role: OrgRole = OrgRole.Owner) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockIsIam.mockReturnValue(false);
   mockApiRequest.mockImplementation((path: string) => respond(path));
+});
+
+describe('BucketDetailPage — the policy tab', () => {
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'shows the tab to %s on an iam region, and its panel holds the policy',
+    async (role) => {
+      mockIsIam.mockReturnValue(true);
+      renderPage(role);
+
+      fireEvent.click(await screen.findByTestId('bucket-policy-tab'));
+      expect(await screen.findByText('Bucket policy')).toBeInTheDocument();
+      expect(await screen.findByText('team')).toBeInTheDocument();
+    },
+  );
+
+  it.each([OrgRole.Member, OrgRole.ReadOnly])(
+    'is absent for %s, and no policy is read',
+    async (role) => {
+      mockIsIam.mockReturnValue(true);
+      renderPage(role);
+
+      await screen.findByTestId('bucket-objects-tab');
+      expect(screen.queryByTestId('bucket-policy-tab')).not.toBeInTheDocument();
+      const paths = mockApiRequest.mock.calls.map((call) => String(call[0]));
+      expect(paths.filter((path) => path.includes('/policy'))).toHaveLength(0);
+    },
+  );
+
+  it('is absent on a scoped-keys region even for an Owner', async () => {
+    renderPage(OrgRole.Owner);
+
+    await screen.findByTestId('bucket-objects-tab');
+    expect(screen.queryByTestId('bucket-policy-tab')).not.toBeInTheDocument();
+    const paths = mockApiRequest.mock.calls.map((call) => String(call[0]));
+    expect(paths.filter((path) => path.includes('/policy'))).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
