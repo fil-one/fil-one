@@ -112,6 +112,7 @@ export function PolicyStatementModal({
               <RadioOption
                 name="policy-effect"
                 value="Allow"
+                testId="policy-effect-allow"
                 checked={statement.Effect === 'Allow'}
                 onChange={() => setStatement({ ...statement, Effect: 'Allow' })}
                 description="Grant the actions below"
@@ -121,6 +122,7 @@ export function PolicyStatementModal({
               <RadioOption
                 name="policy-effect"
                 value="Deny"
+                testId="policy-effect-deny"
                 checked={statement.Effect === 'Deny'}
                 onChange={() => setStatement({ ...statement, Effect: 'Deny' })}
                 description="Withhold them, even if another statement grants them"
@@ -141,12 +143,14 @@ export function PolicyStatementModal({
           </FormField>
 
           {deniesEveryone(statement) && (
-            <Alert
-              variant="amber"
-              assertive={false}
-              title="This statement denies everyone"
-              description="Nobody in the organization can use this bucket while it is saved. Only an Owner can edit the policy to undo it."
-            />
+            <div data-testid="policy-statement-denies-everyone">
+              <Alert
+                variant="amber"
+                assertive={false}
+                title="This statement denies everyone"
+                description="Nobody in the organization can use this bucket while it is saved. Only an Owner can edit the policy to undo it."
+              />
+            </div>
           )}
 
           <FormField
@@ -162,10 +166,15 @@ export function PolicyStatementModal({
       </ModalBody>
       <ModalFooter>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
+          <Button id="policy-statement-cancel" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" disabled={!canSubmit} onClick={submit}>
+          <Button
+            id="policy-statement-submit"
+            variant="primary"
+            disabled={!canSubmit}
+            onClick={submit}
+          >
             {initial ? 'Save statement' : 'Add statement'}
           </Button>
         </div>

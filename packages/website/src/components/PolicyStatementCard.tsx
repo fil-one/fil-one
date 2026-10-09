@@ -59,7 +59,7 @@ export function PolicyStatementCard({
 }: PolicyStatementCardProps) {
   const label = statementLabel(statement, index);
   return (
-    <Card padding="md" shadow={false} data-testid="policy-statement">
+    <Card padding="md" shadow={false} data-testid="policy-statement" data-statement-label={label}>
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
           {statement.Effect === 'Allow' ? (
@@ -76,9 +76,17 @@ export function PolicyStatementCard({
             <div className="ml-auto">
               <RowActionsMenu
                 aria-label={`Actions for ${label}`}
+                testId="policy-statement-actions"
                 actions={[
                   ...(onEdit
-                    ? [{ label: 'Edit statement', icon: PencilSimpleIcon, onSelect: onEdit }]
+                    ? [
+                        {
+                          label: 'Edit statement',
+                          icon: PencilSimpleIcon,
+                          testId: 'policy-statement-edit',
+                          onSelect: onEdit,
+                        },
+                      ]
                     : []),
                   ...(onRemove
                     ? [
@@ -86,6 +94,7 @@ export function PolicyStatementCard({
                           label: 'Remove statement',
                           icon: TrashIcon,
                           destructive: true,
+                          testId: 'policy-statement-remove',
                           onSelect: onRemove,
                         },
                       ]
