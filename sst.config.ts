@@ -1236,7 +1236,15 @@ export default $config({
       // design — the role is unwritten and the retry finds fewer keys.
       'update-member-role': {
         extraEnv: orchestratorEnv,
-        permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
+        // The roster fan-out lists and rewrites bucket policies on iam
+        // regions, signed with the tenant's console S3 key. Only Forge
+        // regions carry bucket policies, so only their key parameters.
+        permissions: [
+          {
+            actions: ['ssm:GetParameter'],
+            resources: [auroraApiKeySsmArn, forgeS3KeySsmArn, forgeDevS3KeySsmArn],
+          },
+        ],
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
         timeout: '30 seconds',
       },

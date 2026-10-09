@@ -4,11 +4,17 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { Resource } from 'sst';
 import { NO_ROLE, OrgRole } from '@filone/shared';
-import type { AccessKeySummary, ErrorResponse, RemoveMemberResponse } from '@filone/shared';
-import { AuditSubjects, auditPut, userActor } from '../lib/audit.ts';
 import { prepareFloorOrg } from '../lib/account-creation.ts';
 import type { FloorOrgPreparation } from '../lib/account-creation.ts';
+import type {
+  AccessKeySummary,
+  ErrorResponse,
+  RemoveMemberResponse,
+  S3Region,
+} from '@filone/shared';
+import { AuditSubjects, auditPut, userActor } from '../lib/audit.ts';
 import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
+import { removeMemberPrincipals } from '../lib/iam-policy-fanout.ts';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
 import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
 import { requireManageableMember } from '../lib/manageable-member.ts';
@@ -172,9 +178,17 @@ export async function baseHandler(
     lastMembership,
   });
 
-  const orgProfile = await getOrgProfile(orgId);
+  const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   const { keysToRevoke, fence } = await reviewKeysForRoleChange(orgId, targetUserId, NO_ROLE);
   const changedBy = actorEmail ?? userId;
+
+  // On an `iam` region the principal goes first, taking its keys and every
+  // statement naming it with it at the storage system. A region that refuses
+  // leaves the member in the org, like a vendor refusing a key below: a
+  // re-invited member keeps the same user id, and statements left behind would
+  // hand their old access back on the new invitation.
+  const principals = await removeMemberPrincipals({ orgId, orgProfile, userId: targetUserId });
+  if (principals.failed.length > 0) return principalRemovalRefusedResponse(principals.failed);
 
   const committed = await commitAfterRevokingKeys({
     items,
@@ -218,6 +232,16 @@ export async function baseHandler(
     later,
     revoked: committed.revoked,
   });
+}
+
+/** A region would not remove the principal, so the membership stays; the same DELETE tries again. */
+function principalRemovalRefusedResponse(regions: S3Region[]): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(502)
+    .body<ErrorResponse>({
+      message: `The member could not be removed from ${regions.join(', ')}, so they are still in this organization. Try again.`,
+    })
+    .build();
 }
 
 /**
