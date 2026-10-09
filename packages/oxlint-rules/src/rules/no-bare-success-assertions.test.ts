@@ -22,6 +22,8 @@ tester.run('no-bare-success-assertions', noBareSuccessAssertions, {
     'assertLike(result).toMatchObject({ success: false });',
     'const success = calls.find(isIdle); expect(success).toBeDefined();',
     'function check(success: boolean) { expect(success).toBe(true); }',
+    'const { data: success } = result; expect(success).toEqual({ name: "a" });',
+    'expect(result)[matcherName]({ success: false });',
   ],
   invalid: [
     {
@@ -94,6 +96,30 @@ tester.run('no-bare-success-assertions', noBareSuccessAssertions, {
     },
     {
       code: 'expect(result).not.toMatchObject({ success: false });',
+      errors: 1,
+    },
+    {
+      code: 'const { success: parsed } = schema.safeParse(input); expect(parsed).toBe(false);',
+      errors: 1,
+    },
+    {
+      code: "const { 'success': ok = true } = result; expect(!ok).toBe(true);",
+      errors: 1,
+    },
+    {
+      code: 'expect(result).toMatchObject({ success: false } as const);',
+      errors: 1,
+    },
+    {
+      code: 'expect(result).toMatchObject({ success: false as const } satisfies object);',
+      errors: 1,
+    },
+    {
+      code: "expect(result)['toMatchObject']({ success: false });",
+      errors: 1,
+    },
+    {
+      code: 'expect(result)[`toStrictEqual`]({ success: false });',
       errors: 1,
     },
   ],
