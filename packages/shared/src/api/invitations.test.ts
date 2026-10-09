@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { ExpectedZodIssue } from '../testing/zod-matchers.ts';
 import { OrgRole } from './org.ts';
 import {
   AcceptInvitationSchema,
@@ -14,7 +15,7 @@ describe('CreateInvitationSchema', () => {
     // the CALLER may invite that role is the ceiling check in the handler.
     const parsed = CreateInvitationSchema.safeParse({ email: 'person@example.com', role });
 
-    expect(parsed.success).toBe(true);
+    expect(parsed).toMatchObject({ success: true });
   });
 
   it('trims the address but keeps its case, which is what the email goes to', () => {
@@ -26,15 +27,31 @@ describe('CreateInvitationSchema', () => {
     expect(parsed.email).toBe('Person@Example.com');
   });
 
-  it.each([
-    ['a role that is not one of the four', { email: 'a@b.com', role: 'billing' }],
-    ['no role', { email: 'a@b.com' }],
-    ['an address that is not one', { email: 'not-an-email', role: OrgRole.Member }],
-    ['no address', { role: OrgRole.Member }],
-    ['an empty address', { email: '', role: OrgRole.Member }],
-    ['an absurd address', { email: `${'a'.repeat(400)}@example.com`, role: OrgRole.Member }],
-  ])('rejects %s', (_label, body) => {
-    expect(CreateInvitationSchema.safeParse(body).success).toBe(false);
+  it.each<[string, unknown, ExpectedZodIssue]>([
+    [
+      'a role that is not one of the four',
+      { email: 'a@b.com', role: 'billing' },
+      { code: 'invalid_value', path: ['role'] },
+    ],
+    ['no role', { email: 'a@b.com' }, { code: 'invalid_value', path: ['role'] }],
+    [
+      'an address that is not one',
+      { email: 'not-an-email', role: OrgRole.Member },
+      { code: 'invalid_format', format: 'email', path: ['email'] },
+    ],
+    ['no address', { role: OrgRole.Member }, { code: 'invalid_type', path: ['email'] }],
+    [
+      'an empty address',
+      { email: '', role: OrgRole.Member },
+      { code: 'invalid_format', format: 'email', path: ['email'] },
+    ],
+    [
+      'an absurd address',
+      { email: `${'a'.repeat(400)}@example.com`, role: OrgRole.Member },
+      { code: 'too_big', path: ['email'] },
+    ],
+  ])('rejects %s', (_label, body, issue) => {
+    expect(CreateInvitationSchema.safeParse(body)).toMatchZodValidationError(issue);
   });
 
   it('answers a rejected address with something a form can show', () => {
@@ -43,24 +60,26 @@ describe('CreateInvitationSchema', () => {
       role: OrgRole.Member,
     });
 
-    expect(parsed.success).toBe(false);
-    if (!parsed.success) {
-      expect(parsed.error.issues[0].message).toContain('valid email address');
-    }
+    expect(parsed).toMatchZodValidationError({
+      path: ['email'],
+      message: expect.stringContaining('valid email address'),
+    });
   });
 });
 
 describe('AcceptInvitationSchema', () => {
   it('accepts a token of the shape the mailer sends', () => {
-    expect(AcceptInvitationSchema.safeParse({ token: 'a'.repeat(43) }).success).toBe(true);
+    expect(AcceptInvitationSchema.safeParse({ token: 'a'.repeat(43) })).toMatchObject({
+      success: true,
+    });
   });
 
-  it.each([
-    ['a token too short to be one', { token: 'short' }],
-    ['no token', {}],
-    ['a pasted blob', { token: 'x'.repeat(500) }],
-  ])('rejects %s', (_label, body) => {
-    expect(AcceptInvitationSchema.safeParse(body).success).toBe(false);
+  it.each<[string, unknown, ExpectedZodIssue]>([
+    ['a token too short to be one', { token: 'short' }, { code: 'too_small', path: ['token'] }],
+    ['no token', {}, { code: 'invalid_type', path: ['token'] }],
+    ['a pasted blob', { token: 'x'.repeat(500) }, { code: 'too_big', path: ['token'] }],
+  ])('rejects %s', (_label, body, issue) => {
+    expect(AcceptInvitationSchema.safeParse(body)).toMatchZodValidationError(issue);
   });
 
   it('trims a token a mail client wrapped in whitespace', () => {
