@@ -64,8 +64,9 @@ import {
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
+  PrincipalNotFoundError,
 } from '../errors.ts';
-import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
+import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
 import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
@@ -85,13 +86,16 @@ function fail(status: number, message = 'error') {
   return { data: undefined, error: { message }, response: { status } };
 }
 
-function buildOrchestrator(overrides?: { api?: FilOneOrchestratorConfig['api'] }) {
+function buildOrchestrator(
+  overrides?: Pick<Partial<FilOneOrchestratorConfig>, 'api' | 'accessModel'>,
+) {
   return createFilOneOrchestrator({
     id: 'forge',
     region: S3Region.UsEast1,
     stage: 'test',
     s3EndpointUrl: 'https://us-east-1.s3.test.example.com',
     api: overrides?.api ?? { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
+    accessModel: overrides?.accessModel,
   });
 }
 
@@ -565,6 +569,135 @@ describe('getBucket', () => {
       retentionDuration: 7,
       retentionDurationType: 'd',
     });
+  });
+});
+
+describe('issueAccessKey bound to a principal', () => {
+  // Only the iam arm mints a principal-bound key.
+  const orchestrator = buildOrchestrator({ accessModel: 'iam' });
+  const created = {
+    accessKeyId: 'did:key:z6Mk',
+    name: 'laptop',
+    type: 'principal',
+    principal: 'alice',
+    secretAccessKey: 'sk-secret',
+    createdAt: '2026-09-16T12:00:00Z',
+    expiresAt: null,
+  };
+
+  it('sends the principal-bound shape and returns the credential with its principal', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(created, 201));
+
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).resolves.toStrictEqual({
+      id: 'did:key:z6Mk',
+      accessKeyId: 'did:key:z6Mk',
+      accessKeySecret: 'sk-secret',
+      createdAt: '2026-09-16T12:00:00Z',
+      principalId: 'alice',
+    });
+    const { body } = mockCreateAccessKey.mock.calls[0]![0] as { body: Record<string, unknown> };
+    expect(body).toStrictEqual({ name: 'laptop', principalId: 'alice', expiresAt: null });
+  });
+
+  it('reads the key kind from the type, not from a principal field', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok({ ...created, type: 'service' }, 201));
+
+    const issued = await orchestrator.issueAccessKey(tenantId, {
+      keyName: 'laptop',
+      permissions: ['read'],
+    });
+
+    expect(issued).not.toHaveProperty('principalId');
+  });
+
+  it('maps a duplicate name and an unknown principal to their errors', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(fail(409, 'name conflict'));
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
+
+    mockCreateAccessKey.mockResolvedValueOnce({
+      data: undefined,
+      error: { message: 'unknown principal', code: 'UnknownPrincipal' },
+      response: { status: 422 },
+    });
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).rejects.toBeInstanceOf(PrincipalNotFoundError);
+  });
+});
+
+describe('issueAccessKey 422 classification', () => {
+  const orchestrator = buildOrchestrator({ accessModel: 'iam' });
+  function fail422(message: string, code: string) {
+    return { data: undefined, error: { message, code }, response: { status: 422 } };
+  }
+
+  it('maps an absent principal by its code even when the message omits the word', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(fail422('no such member', 'UnknownPrincipal'));
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).rejects.toBeInstanceOf(PrincipalNotFoundError);
+  });
+
+  it('maps a 422 that mentions the principal under another code to a validation error', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(
+      fail422(
+        'a principal-bound access key takes no permissions or buckets',
+        'PrincipalScopedAccessKey',
+      ),
+    );
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).rejects.toBeInstanceOf(AccessKeyValidationError);
+  });
+});
+
+describe('issueAccessKey with a mixed shape', () => {
+  const orchestrator = buildOrchestrator({ accessModel: 'iam' });
+
+  it('refuses principalId together with service-key fields instead of dropping them', async () => {
+    mockCreateAccessKey.mockResolvedValue(
+      ok(
+        {
+          accessKeyId: 'k',
+          name: 'laptop',
+          type: 'principal',
+          principal: 'alice',
+          secretAccessKey: 's',
+          createdAt: 'now',
+        },
+        201,
+      ),
+    );
+    const mixed = {
+      keyName: 'laptop',
+      principalId: 'alice',
+      permissions: ['read' as const],
+      buckets: ['photos'],
+    };
+    await expect(orchestrator.issueAccessKey(tenantId, mixed)).rejects.toBeInstanceOf(
+      AccessKeyValidationError,
+    );
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
+  });
+
+  it('does not type-check a mixed shape', () => {
+    // @ts-expect-error a principal-bound key carries no permissions of its own
+    const opts: IssueAccessKeyOpts = { keyName: 'k', principalId: 'alice', permissions: ['read'] };
+    expect(opts).toBeDefined();
+  });
+});
+
+describe('issueAccessKey on the scoped-keys arm', () => {
+  it('refuses a principal-bound key without calling the storage system, as Aurora and FTH do', async () => {
+    expect(orchestrator.accessModel).toBe('scoped-keys');
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+    ).rejects.toThrow(/iam access model/);
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
   });
 });
 
