@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { SpinnerIcon } from '@phosphor-icons/react/dist/ssr';
-import type { MemberSummary, PolicyStatement } from '@filone/shared';
+import type { PolicyStatement } from '@filone/shared';
 import { POLICY_WILDCARD_PRINCIPAL } from '@filone/shared';
 
 import { listMembers } from '../lib/members-api.js';
@@ -17,27 +17,28 @@ export type PolicyPrincipalFieldsProps = {
 
 /**
  * Who a statement applies to: everyone in the organization, or members picked
- * from the roster. The same shape as the key form's bucket scope: a radio pair,
- * then a checklist when the specific option is chosen.
+ * from the organization's member list.
  *
- * A selected id the roster no longer lists stays in the list as an unknown
- * member, so editing a statement cannot silently drop someone from it.
+ * A selected id the member list no longer has stays as an unknown member, so
+ * editing a statement cannot silently drop someone from it.
  */
 export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFieldsProps) {
-  const everyone = value === POLICY_WILDCARD_PRINCIPAL;
-  const selected = everyone ? [] : value;
+  const isEveryoneSelected = value === POLICY_WILDCARD_PRINCIPAL;
+  const selectedIds = isEveryoneSelected ? [] : value;
   const { data, isPending, isError, error } = useQuery({
     queryKey: queryKeys.members,
     queryFn: listMembers,
-    enabled: !everyone,
+    enabled: !isEveryoneSelected,
   });
   const members = data?.members ?? [];
-  const unknown = selected.filter((id) => !members.some((m) => m.userId === id));
-  const loading = !everyone && isPending;
+  const unknownMemberIds = selectedIds.filter((id) => !members.some((m) => m.userId === id));
+  const isLoadingMembers = !isEveryoneSelected && isPending;
 
   function toggle(userId: string) {
     onChange(
-      selected.includes(userId) ? selected.filter((id) => id !== userId) : [...selected, userId],
+      selectedIds.includes(userId)
+        ? selectedIds.filter((id) => id !== userId)
+        : [...selectedIds, userId],
     );
   }
 
@@ -47,7 +48,7 @@ export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFields
         <RadioOption
           name="policy-principal"
           value="everyone"
-          checked={everyone}
+          checked={isEveryoneSelected}
           onChange={() => onChange(POLICY_WILDCARD_PRINCIPAL)}
         >
           Everyone in this organization
@@ -55,16 +56,16 @@ export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFields
         <RadioOption
           name="policy-principal"
           value="specific"
-          checked={!everyone}
+          checked={!isEveryoneSelected}
           onChange={() => onChange([])}
         >
           Specific members
         </RadioOption>
       </div>
 
-      {!everyone && (
+      {!isEveryoneSelected && (
         <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
-          {loading && (
+          {isLoadingMembers && (
             <div className="flex items-center justify-center py-4" role="status">
               <span className="animate-spin text-brand-700">
                 <Icon component={SpinnerIcon} size={20} />
@@ -75,21 +76,24 @@ export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFields
           {isError && (
             <p className="text-sm text-red-600">{error?.message ?? 'Failed to load members'}</p>
           )}
-          {!loading && !isError && members.length === 0 && unknown.length === 0 && (
-            <p className="text-sm text-zinc-500">No members found.</p>
-          )}
-          {!loading && (members.length > 0 || unknown.length > 0) && (
+          {!isLoadingMembers &&
+            !isError &&
+            members.length === 0 &&
+            unknownMemberIds.length === 0 && (
+              <p className="text-sm text-zinc-500">No members found.</p>
+            )}
+          {!isLoadingMembers && (members.length > 0 || unknownMemberIds.length > 0) && (
             <div className="flex flex-col gap-1.5">
               {members.map((member) => (
                 <MemberRow
                   key={member.userId}
                   label={memberName(member)}
                   detail={roleLabel(member.role)}
-                  checked={selected.includes(member.userId)}
+                  checked={selectedIds.includes(member.userId)}
                   onChange={() => toggle(member.userId)}
                 />
               ))}
-              {unknown.map((userId) => (
+              {unknownMemberIds.map((userId) => (
                 <MemberRow
                   key={userId}
                   label="Unknown member"
@@ -130,12 +134,4 @@ function MemberRow({
       <span className="text-meta text-zinc-500">{detail}</span>
     </div>
   );
-}
-
-/** Members by id, for the card's names. Exported so the tab reads the roster once. */
-export function memberNamesFrom(members: readonly MemberSummary[] | undefined) {
-  return (userId: string): string | undefined => {
-    const member = members?.find((m) => m.userId === userId);
-    return member ? memberName(member) : undefined;
-  };
 }

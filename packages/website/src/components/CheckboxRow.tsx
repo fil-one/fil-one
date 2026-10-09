@@ -12,11 +12,7 @@ export type CheckboxRowProps = {
   onChange?: () => void;
 };
 
-/**
- * One option in a permission or action list: a checkbox, its name, and the
- * line under it. Shared by the key form's permission fields and the policy
- * editor's action fields, so the two lists cannot drift apart.
- */
+/** One option in a checklist: a checkbox, its name, and the line under it. */
 export function CheckboxRow({
   testId,
   label,

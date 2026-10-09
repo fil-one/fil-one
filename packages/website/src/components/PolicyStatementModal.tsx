@@ -3,7 +3,7 @@ import type { PolicyStatement } from '@filone/shared';
 import {
   POLICY_SID_MAX_LENGTH,
   POLICY_WILDCARD_PRINCIPAL,
-  ROSTER_SID_LABELS,
+  getRosterSidLabel,
   isRosterSid,
 } from '@filone/shared';
 
@@ -24,39 +24,32 @@ export type PolicyStatementModalProps = {
   onSubmit: (statement: PolicyStatement) => void;
 };
 
-const EMPTY: PolicyStatement = { Effect: 'Allow', Principal: [], Action: [] };
+const EMPTY_STATEMENT: PolicyStatement = { Effect: 'Allow', Principal: [], Action: [] };
 
 /**
- * The refusal a typed name earns. A roster statement's own fixed name earns
- * none; any other statement may not take a roster sid, or the next role change
- * would replace it.
+ * The error for a name reserved for a statement Fil One writes. A roster
+ * statement keeps its own Sid; any other statement cannot use one, or the next
+ * role change would overwrite it.
  */
-function reservedNameError(statement: PolicyStatement, rosterLabel: string | undefined) {
+function getReservedNameError(statement: PolicyStatement, rosterLabel: string | undefined) {
   if (rosterLabel || !isRosterSid(statement.Sid?.trim())) return undefined;
   return 'This name is reserved for a statement Fil One writes.';
 }
 
 /**
- * A name of their own, or none. The schema is strict and takes `sid` only as a
- * non-empty string, so a name that is empty or all spaces drops the key rather
- * than sending one the backend refuses. Held untrimmed while it is being typed,
- * since trimming each keystroke would swallow the space between two words.
+ * Sets the statement's Sid, or removes it when the name is empty or only
+ * spaces, since the schema accepts only a non-empty Sid. The name is kept
+ * untrimmed while it is typed, so a space between two words is not lost.
  */
-function withSid(statement: PolicyStatement, name: string): PolicyStatement {
+function replaceSid(statement: PolicyStatement, name: string): PolicyStatement {
   const { Sid: _dropped, ...rest } = statement;
   return name.trim() ? { ...rest, Sid: name } : rest;
 }
 
-/**
- * The label a roster statement shows in place of its sid. That sid is how the
- * fan-out finds the statement again, so its name is fixed.
- */
-function rosterLabelOf(initial: PolicyStatement | undefined): string | undefined {
-  return initial?.Sid ? ROSTER_SID_LABELS[initial.Sid] : undefined;
-}
-
 /** Whether a deny names everyone, which locks the org out of the bucket until an Owner edits it. */
-export function deniesEveryone(statement: Pick<PolicyStatement, 'Effect' | 'Principal'>): boolean {
+export function isDenyForEveryone(
+  statement: Pick<PolicyStatement, 'Effect' | 'Principal'>,
+): boolean {
   return statement.Effect === 'Deny' && statement.Principal === POLICY_WILDCARD_PRINCIPAL;
 }
 
@@ -70,24 +63,23 @@ export function PolicyStatementModal({
   initial,
   onSubmit,
 }: PolicyStatementModalProps) {
-  const [statement, setStatement] = useState<PolicyStatement>(initial ?? EMPTY);
-  // Re-seed each time the modal opens, so a cancelled edit leaves no trace.
-  // A layout effect, so it lands before the action fields' effect prunes what
-  // the caller may not hold; run after it, the re-seed would put the pruned
-  // action back into a draft that no longer shows it.
+  const [statement, setStatement] = useState<PolicyStatement>(initial ?? EMPTY_STATEMENT);
+  // Reset the draft each time the modal opens, in a layout effect so it runs
+  // before the action fields' effect removes actions the caller cannot grant.
   useLayoutEffect(() => {
-    if (open) setStatement(initial ?? EMPTY);
+    if (open) setStatement(initial ?? EMPTY_STATEMENT);
   }, [open, initial]);
 
-  const rosterLabel = rosterLabelOf(initial);
-  const noPrincipal =
+  // The roster sync finds the statement by its Sid, so a roster statement's name is fixed.
+  const rosterLabel = getRosterSidLabel(initial?.Sid);
+  const hasNoPrincipal =
     statement.Principal !== POLICY_WILDCARD_PRINCIPAL && statement.Principal.length === 0;
-  const noAction = statement.Action.length === 0;
-  const nameError = reservedNameError(statement, rosterLabel);
-  const canSubmit = !noPrincipal && !noAction && !nameError;
+  const hasNoAction = statement.Action.length === 0;
+  const nameError = getReservedNameError(statement, rosterLabel);
+  const canSubmit = !hasNoPrincipal && !hasNoAction && !nameError;
 
   function submit() {
-    onSubmit(withSid(statement, statement.Sid?.trim() ?? ''));
+    onSubmit(replaceSid(statement, statement.Sid?.trim() ?? ''));
     onClose();
   }
 
@@ -103,7 +95,7 @@ export function PolicyStatementModal({
               disabled={Boolean(rosterLabel)}
               maxLength={POLICY_SID_MAX_LENGTH}
               placeholder="Analytics team read"
-              onChange={(value) => setStatement(withSid(statement, value))}
+              onChange={(value) => setStatement(replaceSid(statement, value))}
             />
           </FormField>
 
@@ -132,7 +124,7 @@ export function PolicyStatementModal({
 
           <FormField
             label="Who does this apply to?"
-            error={noPrincipal ? 'Pick at least one member, or everyone.' : undefined}
+            error={hasNoPrincipal ? 'Pick at least one member, or everyone.' : undefined}
           >
             <PolicyPrincipalFields
               value={statement.Principal}
@@ -140,7 +132,7 @@ export function PolicyStatementModal({
             />
           </FormField>
 
-          {deniesEveryone(statement) && (
+          {isDenyForEveryone(statement) && (
             <Alert
               variant="amber"
               assertive={false}
@@ -151,7 +143,7 @@ export function PolicyStatementModal({
 
           <FormField
             label="What can they do?"
-            error={noAction ? 'Pick at least one action.' : undefined}
+            error={hasNoAction ? 'Pick at least one action.' : undefined}
           >
             <PolicyActionFields
               value={statement.Action}
