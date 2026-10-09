@@ -1,0 +1,175 @@
+import { describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { OrgRole, ROSTER_OWNERS_SID } from '@filone/shared';
+import type { PolicyStatement } from '@filone/shared';
+
+vi.mock('../lib/api.js', () => ({ getMe: vi.fn(() => new Promise(() => {})) }));
+vi.mock('../lib/members-api.js', () => ({
+  listMembers: () =>
+    Promise.resolve({ members: [{ userId: 'a', role: OrgRole.Member, name: 'Ada' }] }),
+}));
+
+import { PolicyStatementModal, deniesEveryone } from './PolicyStatementModal.js';
+import { seedPermissions } from '../lib/test-permissions.js';
+
+function renderModal(
+  props: Partial<React.ComponentProps<typeof PolicyStatementModal>> = {},
+  role: OrgRole = OrgRole.Owner,
+) {
+  const onSubmit = vi.fn();
+  const onClose = vi.fn();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  seedPermissions(client, role);
+  render(
+    <QueryClientProvider client={client}>
+      <PolicyStatementModal open onClose={onClose} onSubmit={onSubmit} {...props} />
+    </QueryClientProvider>,
+  );
+  return { onSubmit, onClose };
+}
+
+describe('PolicyStatementModal', () => {
+  it('refuses an empty statement and hands back a complete one', async () => {
+    const { onSubmit, onClose } = renderModal();
+    const submit = screen.getByRole('button', { name: 'Add statement' });
+    expect(submit).toBeDisabled();
+    expect(screen.getByText('Pick at least one member, or everyone.')).toBeInTheDocument();
+    expect(screen.getByText('Pick at least one action.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      Effect: 'Allow',
+      Principal: '*',
+      Action: ['s3:GetObject'],
+    } satisfies PolicyStatement);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('starts from the statement being edited and keeps its label', async () => {
+    const initial: PolicyStatement = {
+      Sid: 'team',
+      Effect: 'Deny',
+      Principal: ['a'],
+      Action: ['s3:DeleteObject'],
+    };
+    const { onSubmit } = renderModal({ initial });
+
+    expect(screen.getByText('Edit statement')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Ada' })).toBeChecked());
+    fireEvent.click(screen.getByRole('button', { name: 'Save statement' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(initial);
+  });
+
+  it('carries a name it was given and drops one cleared to nothing', async () => {
+    const { onSubmit } = renderModal();
+    const name = screen.getByLabelText('Name (optional)');
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
+    fireEvent.change(name, { target: { value: '  Analytics team read  ' } });
+    const submit = screen.getByRole('button', { name: 'Add statement' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+
+    fireEvent.change(name, { target: { value: '   ' } });
+    fireEvent.click(submit);
+
+    expect(onSubmit.mock.calls.flat()).toEqual([
+      {
+        Sid: 'Analytics team read',
+        Effect: 'Allow',
+        Principal: '*',
+        Action: ['s3:GetObject'],
+      },
+      { Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] },
+    ] satisfies PolicyStatement[]);
+  });
+
+  it('takes a name that starts like the ones Fil One writes', () => {
+    renderModal();
+    fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
+    fireEvent.change(screen.getByLabelText('Name (optional)'), {
+      target: { value: 'filone-team' },
+    });
+
+    expect(screen.getByRole('button', { name: 'Add statement' })).toBeEnabled();
+  });
+
+  it('refuses the names of the statements Fil One writes', () => {
+    renderModal();
+    fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
+    const name = screen.getByLabelText('Name (optional)');
+    const submit = screen.getByRole('button', { name: 'Add statement' });
+
+    for (const reserved of ['filone-owners', 'filone-admins', ' filone-creator ']) {
+      fireEvent.change(name, { target: { value: reserved } });
+      expect(submit).toBeDisabled();
+      expect(
+        screen.getByText('This name is reserved for a statement Fil One writes.'),
+      ).toBeInTheDocument();
+    }
+
+    fireEvent.change(name, { target: { value: 'filone-x' } });
+    expect(submit).toBeEnabled();
+  });
+
+  it('shows a roster statement its label and will not let it be renamed', async () => {
+    const initial: PolicyStatement = {
+      Sid: ROSTER_OWNERS_SID,
+      Effect: 'Allow',
+      Principal: ['a'],
+      Action: ['s3:*'],
+    };
+    const { onSubmit } = renderModal({ initial });
+
+    const name = screen.getByLabelText('Name (optional)');
+    expect(name).toHaveValue('Owners');
+    expect(name).toBeDisabled();
+
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Ada' })).toBeChecked());
+    fireEvent.click(screen.getByRole('button', { name: 'Save statement' }));
+
+    expect(onSubmit).toHaveBeenCalledWith(initial);
+  });
+
+  it('stacks the effect and principal choices below the sm breakpoint', () => {
+    renderModal();
+
+    for (const name of [/^Allow/, 'Everyone in this organization']) {
+      const pair = screen.getByRole('radio', { name }).closest('label')?.parentElement;
+      expect(pair).toHaveClass('flex-col', 'sm:flex-row');
+    }
+  });
+
+  it('hands an Admin back only the actions it showed them, even saved at once', () => {
+    const initial: PolicyStatement = {
+      Effect: 'Allow',
+      Principal: ['a'],
+      Action: ['s3:GetObject', 's3:PutObjectRetention'],
+    };
+    const { onSubmit } = renderModal({ initial }, OrgRole.Admin);
+
+    expect(screen.queryByTestId('policy-action-s3:PutObjectRetention')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save statement' }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ ...initial, Action: ['s3:GetObject'] });
+  });
+
+  it('warns as soon as a deny names everyone', () => {
+    renderModal();
+    fireEvent.click(screen.getByRole('radio', { name: /^Deny/ }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
+
+    expect(screen.getByText('This statement denies everyone')).toBeInTheDocument();
+    expect(deniesEveryone({ Effect: 'Deny', Principal: '*' })).toBe(true);
+    expect(deniesEveryone({ Effect: 'Allow', Principal: '*' })).toBe(false);
+  });
+});
