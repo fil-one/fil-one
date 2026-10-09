@@ -40,20 +40,27 @@ describe('AccessKeysTable — bucket-info permissions', () => {
 });
 
 describe('AccessKeysTable — a principal-bound key', () => {
-  it('shows the key following the bucket policies rather than a permission set', () => {
-    const keys: AccessKey[] = [
-      {
-        id: '1',
-        type: 'principal',
-        principalId: 'user-1',
-        keyName: 'Test Key',
-        accessKeyId: 'ACCESS_KEY_12345EXAMPL',
-        createdAt: '2026-01-15T10:00:00Z',
-        status: 'active',
-      },
-    ];
-    renderWithProviders(<AccessKeysTable keys={keys} showPermissions showBuckets />);
-    expect(screen.getByTestId('permission-badge-follows-policy')).toBeInTheDocument();
+  const keys: AccessKey[] = [
+    {
+      id: '1',
+      type: 'principal',
+      principalId: 'user-1',
+      keyName: 'Test Key',
+      accessKeyId: 'ACCESS_KEY_12345EXAMPL',
+      createdAt: '2026-01-15T10:00:00Z',
+      status: 'active',
+    },
+  ];
+
+  it('shows Follows bucket policy in Permissions for a principal key', () => {
+    renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
+    expect(screen.getByTestId('permission-badge-follows-bucket-policy')).toHaveTextContent(
+      'Follows bucket policy',
+    );
+  });
+
+  it('shows Per bucket policy in Buckets for a principal key', () => {
+    renderWithProviders(<AccessKeysTable keys={keys} showBuckets />);
     expect(screen.getByText('Per bucket policy')).toBeInTheDocument();
     expect(screen.queryByText('All Buckets')).not.toBeInTheDocument();
   });

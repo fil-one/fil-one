@@ -45,9 +45,9 @@ export function AccessKeyFormFields({
     setCustomDate,
   } = form;
 
-  // A service key answers to no bucket policy, so only a role holding this may
-  // mint one on a region that has them.
-  const mayMintServiceKey = useHasPermission('keys.create_service');
+  // Bucket policies do not apply to a service key, so on an iam region only
+  // roles with `keys.create_service` may mint one.
+  const canMintServiceKey = useHasPermission('keys.create_service');
   const invalidChars = [...new Set(keyName.match(INVALID_KEY_CHAR) ?? [])];
   const overLimit = keyName.length > KEY_NAME_MAX_LENGTH;
   const reservedName = isReservedKeyName(keyName);
@@ -90,16 +90,17 @@ export function AccessKeyFormFields({
       )}
 
       {/* On an `iam` region the key belongs to the caller by default and
-          carries nothing of its own. An Owner or Admin may instead mint a
-          service key, which carries its own permissions and bucket list. */}
-      {form.iam && mayMintServiceKey && (
+          carries nothing of its own. A caller with `keys.create_service` may
+          instead mint a service key, which carries its own permissions and
+          bucket list. */}
+      {form.isOnIamRegion && canMintServiceKey && (
         <FormField label="What kind of key?">
           <div className="flex gap-2">
             <RadioOption
               name="key-kind"
               value="principal"
-              checked={!form.serviceKey}
-              onChange={() => form.setServiceKey(false)}
+              checked={form.keyType === 'principal'}
+              onChange={() => form.setKeyType('principal')}
               description="Acts as you. Each bucket's policy decides what it can reach."
             >
               Personal key
@@ -107,8 +108,8 @@ export function AccessKeyFormFields({
             <RadioOption
               name="key-kind"
               value="service"
-              checked={form.serviceKey}
-              onChange={() => form.setServiceKey(true)}
+              checked={form.keyType === 'service'}
+              onChange={() => form.setKeyType('service')}
               description="Carries its own permissions and buckets. Bucket policies do not apply."
             >
               Service key
@@ -117,7 +118,7 @@ export function AccessKeyFormFields({
         </FormField>
       )}
 
-      {form.principal ? (
+      {form.keyType === 'principal' ? (
         <Alert
           variant="blue"
           assertive={false}

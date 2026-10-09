@@ -387,7 +387,7 @@ export function AccessKeysTable({
                     <Badge
                       color="grey"
                       size="sm"
-                      description="The buckets whose policy names its holder."
+                      description="Buckets whose policy grants this key's owner access."
                     >
                       Per bucket policy
                     </Badge>
@@ -414,7 +414,7 @@ export function AccessKeysTable({
                   <Badge
                     color="grey"
                     size="sm"
-                    data-testid="permission-badge-follows-policy"
+                    data-testid="permission-badge-follows-bucket-policy"
                     description="This key inherits the policy of every bucket it touches."
                   >
                     Follows bucket policy

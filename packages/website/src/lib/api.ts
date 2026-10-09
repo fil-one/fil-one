@@ -788,9 +788,8 @@ import type {
 } from '@filone/shared';
 
 /**
- * Mint an S3 access key. On a region serving the `iam` access model the body
- * is the principal-bound shape: a name and an expiry, since the key carries
- * whatever the bucket policies give its member.
+ * Mint an S3 access key. The body is the principal-bound shape for a personal
+ * key on an `iam` region, and the scoped-key shape otherwise.
  */
 export function createAccessKey(
   body: CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest,

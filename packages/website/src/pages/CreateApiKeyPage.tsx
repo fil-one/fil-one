@@ -94,7 +94,7 @@ export function CreateApiKeyPage() {
                   or secrets vault.
                 </p>
               </div>
-              {form.principal ? (
+              {form.keyType === 'principal' ? (
                 <div>
                   <p className="mb-1 font-medium text-zinc-800">Follows the bucket policies</p>
                   <p>
