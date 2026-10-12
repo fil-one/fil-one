@@ -13,8 +13,6 @@ For any UI work in `packages/website` (the console, the authenticated product; t
 These rules apply to new names; leave existing names alone. Names a framework or platform dictates follow it, such as React components and hooks or a CloudFront Function's `handler`.
 
 - Start function names with a verb: `getDefaultBucketPolicy`, `isPrincipalCoveredByStatement`. Predicates use `is`, `has` or `can`.
-- Give sibling names one grammatical form. Permission groups are verbs (`read`, `write`, `protect`). Audit event types are `<subject>.<past-tense verb>` (`key.created`, `member.role_changed`). Result fields put the noun first (`keysRevoked`, `bucketsUpdated`).
-- Name the exact meaning. `bucketsUpdated` counts successes where `bucketsReached` is vague; `boundToPrincipal` describes the key where `principalBound` reads as the principal.
 - Reserve the plural of a type name for a collection of that type. `AccessKeyPermissions` reads as `AccessKeyPermission[]`, so an object holding `{ permissions, granularPermissions }` needs a name of its own.
 
 ### Types
