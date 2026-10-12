@@ -9,7 +9,7 @@ import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 import { EmptyStateCard } from './EmptyStateCard';
 import { Table } from './Table/Table';
-import { FolderRow, ObjectEntryRows } from './ObjectBrowserRows';
+import { FolderRow, ObjectEntryRows, SECONDARY_COLUMN } from './ObjectBrowserRows';
 import { BulkActionsBar } from './BulkActionsBar';
 import type { RowActions, RowSelection } from './ObjectBrowserRows';
 import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
@@ -186,12 +186,12 @@ function ObjectTable({
           <Table.Head>Name</Table.Head>
           {versioningEnabled && (
             <>
-              <Table.Head>Version</Table.Head>
-              <Table.Head>Status</Table.Head>
+              <Table.Head className={SECONDARY_COLUMN}>Version</Table.Head>
+              <Table.Head className={SECONDARY_COLUMN}>Status</Table.Head>
             </>
           )}
-          <Table.Head>Size</Table.Head>
-          <Table.Head>Last Modified</Table.Head>
+          <Table.Head className={SECONDARY_COLUMN}>Size</Table.Head>
+          <Table.Head className={SECONDARY_COLUMN}>Last Modified</Table.Head>
           <Table.Head aria-label="Actions" />
         </Table.Row>
       </Table.Header>
