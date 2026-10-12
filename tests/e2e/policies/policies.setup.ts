@@ -25,13 +25,14 @@ for (const user of ['owner', 'admin', 'member', 'readonly', 'leaver'] as PolicyU
     await expect(page).toHaveURL(/\/dashboard$/);
 
     if (user === 'owner') {
-      // The suite creates and deletes buckets, so refuse a region that does not
-      // serve the `iam` access model before anything is created. The read
-      // names no real bucket and writes nothing.
+      // The suite creates and deletes buckets, so refuse a region whose network
+      // does not serve the `iam` access model before anything is created. The
+      // read names no real bucket and writes nothing; such a network answers 501.
       const probe = await page.request.get(`/api/buckets/pol-probe/policy?region=${REGION}`);
-      expect((await probe.json()).message, `${REGION} is not an iam region`).not.toBe(
-        'Bucket policies are not available in this region',
-      );
+      expect(
+        probe.status(),
+        `${REGION} is not on an iam network: set VITE_FORGE_DEV_ACCESS_MODEL=iam in packages/website/.env.local, redeploy and restart Vite`,
+      ).not.toBe(501);
       // An org's billing row is written by its first claim of the trial, which
       // GET /api/billing makes; the seat step below then activates it.
       expect((await page.request.get('/api/billing')).status()).toBe(200);

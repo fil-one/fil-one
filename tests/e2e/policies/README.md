@@ -5,7 +5,7 @@ End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run agains
 ## What they need
 
 - **smelt**, running Hilt, Ingot and Swarf from source. Run `SMELT_WORKSPACE=1` with `hilt`, `ingot` and `swarf` in `go.work`, and `INGOT_REGION=us-east-9`. Hilt must be at fil-forge/hilt#89 and Ingot at fil-forge/ingot#194 or later: the console writes policies through `PutBucketPolicy`, which Hilt receives as `/s3/bucket/policy`. Ingot's config must allow `https://localhost:5173` as a CORS origin.
-- **The console**, deployed to floci with `SMELT=true pnpm deploy:local`, with `getRegionAccessModel` returning `'iam'` for `us-east-9`. Serve it with `pnpm --filter @filone/website dev`.
+- **The console**, with `VITE_FORGE_DEV_ACCESS_MODEL=iam` in `packages/website/.env.local`, so the dev network behind `us-east-9` serves the `iam` access model. Deploy it to floci with `SMELT=true pnpm deploy:local`, which hands the backend the same value, and serve it with `pnpm --filter @filone/website dev`.
 - **Five Auth0 dev-tenant accounts** in `.env.e2e.local`: an Owner, an Admin, a Member, a ReadOnly user, and a Leaver (a second Member that only the removal case uses). That file is gitignored and `playwright.config.ts` loads it. Create the accounts once:
 
   ```bash
