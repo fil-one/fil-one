@@ -10,7 +10,6 @@ vi.mock('./service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: S3Region) => ({
     id: 'aurora',
     region,
-    accessModel: 'scoped-keys',
     isTenantReady: () => (regionsWithoutTenant.includes(region) ? null : `tenant:${region}`),
     deleteAccessKey: vi.fn(),
   }),
