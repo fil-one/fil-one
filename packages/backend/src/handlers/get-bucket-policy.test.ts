@@ -21,7 +21,7 @@ import {
   BUCKET_NAME,
   IAM_REGION,
   ORG_ID,
-  SCOPED_KEYS_REGION,
+  SERVICE_KEYS_REGION,
   TENANT_ID,
   USER_ID,
   ensureTenantReady,
@@ -76,7 +76,7 @@ describe('get-bucket-policy baseHandler', () => {
   });
 
   it('answers 404 POLICY_NOT_FOUND in a region without the iam access model', async () => {
-    const result = await baseHandler(buildGetEvent(SCOPED_KEYS_REGION));
+    const result = await baseHandler(buildGetEvent(SERVICE_KEYS_REGION));
 
     expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
       statusCode: 404,

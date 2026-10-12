@@ -2,6 +2,7 @@
 // the request names, deciding whether the region serves policies at all, and
 // turning the orchestrator's refusals into the console's answers.
 
+import { supportsBucketPolicies } from './service-orchestrator.ts';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import {
   ApiErrorCode,
@@ -31,7 +32,7 @@ import {
   unsupportedRegionResponse,
 } from './response-builder.ts';
 import { getOrchestratorForRegion } from './service-orchestrator-registry.ts';
-import type { IamOrchestrator } from './service-orchestrator.ts';
+import type { ServiceOrchestrator } from './service-orchestrator.ts';
 import type { AuthenticatedEvent } from './user-context.ts';
 
 /** The bucket and region a policy route is about. */
@@ -103,14 +104,14 @@ export async function resolveIamWriteTarget(
   orgId: string,
   region: S3Region,
 ): Promise<
-  | { orchestrator: IamOrchestrator; tenantId: string }
+  | { orchestrator: ServiceOrchestrator; tenantId: string }
   | { response: APIGatewayProxyStructuredResultV2 }
 > {
   const orchestrator = getOrchestratorForRegion(region);
   // A region without the `iam` access model has no policies. It answers as a
   // bucket with no policy, so the routes stay hidden until a region declares
   // `iam` through `getRegionAccessModel`.
-  if (orchestrator.accessModel !== 'iam') {
+  if (!supportsBucketPolicies(orchestrator)) {
     return { response: policyNotFoundResponse(POLICIES_UNAVAILABLE_MESSAGE) };
   }
   if (await isOrgDeleting(orgId, { consistent: true }))

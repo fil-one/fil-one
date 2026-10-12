@@ -20,7 +20,7 @@ import {
   toPolicyErrorResponse,
 } from '../lib/bucket-policy-route.ts';
 import type {
-  IamMethods,
+  BucketPolicyOrchestrator,
   PolicyPrecondition,
   StoredBucketPolicy,
 } from '../lib/iam-orchestrator.ts';
@@ -89,7 +89,7 @@ export async function baseHandler(
 
   if (!isFirstPolicyWrite && !canGrantRetention) {
     const retentionCheck = await checkNewRetentionGrants(
-      orchestrator.iam,
+      orchestrator,
       tenantId,
       bucketName,
       policy,
@@ -112,12 +112,7 @@ export async function baseHandler(
   });
 
   try {
-    const written = await orchestrator.iam.putBucketPolicy(
-      tenantId,
-      bucketName,
-      policy,
-      precondition,
-    );
+    const written = await orchestrator.putBucketPolicy(tenantId, bucketName, policy, precondition);
     await audit.complete({
       outcome: 'succeeded',
       details: { statements: policy.Statement.length, principals: countNamedPrincipals(policy) },
@@ -162,7 +157,7 @@ function getFirstPolicyRetentionRefusal({
  * grant past the cap.
  */
 async function checkNewRetentionGrants(
-  iam: IamMethods,
+  policies: BucketPolicyOrchestrator,
   tenantId: string,
   bucketName: string,
   next: BucketPolicy,
@@ -171,7 +166,7 @@ async function checkNewRetentionGrants(
 > {
   let stored: StoredBucketPolicy | null;
   try {
-    stored = await iam.getBucketPolicy(tenantId, bucketName);
+    stored = await policies.getBucketPolicy(tenantId, bucketName);
   } catch (err) {
     const response = toPolicyErrorResponse(err);
     if (!response) throw err;

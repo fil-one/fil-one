@@ -1,4 +1,5 @@
 import middy from '@middy/core';
+import { supportsBucketPolicies } from '../lib/service-orchestrator.ts';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { GetBucketPolicyResponse } from '@filone/shared';
@@ -36,7 +37,7 @@ export async function baseHandler(
   const { bucketName, region } = routeTarget.target;
 
   const orchestrator = getOrchestratorForRegion(region);
-  if (orchestrator.accessModel !== 'iam') {
+  if (!supportsBucketPolicies(orchestrator)) {
     return policyNotFoundResponse(POLICIES_UNAVAILABLE_MESSAGE);
   }
 
@@ -46,7 +47,7 @@ export async function baseHandler(
   if (!tenantId) return tenantNotReadyResponse();
 
   try {
-    const stored = await orchestrator.iam.getBucketPolicy(tenantId, bucketName);
+    const stored = await orchestrator.getBucketPolicy(tenantId, bucketName);
     if (!stored) return policyNotFoundResponse();
     return new ResponseBuilder()
       .status(200)

@@ -749,7 +749,7 @@ describe('the caps routes apply on top of their declared permission', () => {
       }),
       headers: { 'if-none-match': '*' },
       pathParameters: { name: 'photos' },
-      // A scoped-keys region, which serves no bucket policies.
+      // A service-keys region, which serves no bucket policies.
       queryStringParameters: { region: S3Region.EuWest1 },
     });
     const editors = Object.values(OrgRole).filter((role) =>
