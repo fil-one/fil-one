@@ -631,7 +631,7 @@ describe('listBuckets', () => {
     ]);
   });
 
-  it('returns every tenant bucket on a scoped-keys region even when a member is named', async () => {
+  it('returns every tenant bucket on a service-keys region even when a member is named', async () => {
     stubTenantListing();
 
     const result = await orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
