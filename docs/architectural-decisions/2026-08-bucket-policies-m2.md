@@ -1,4 +1,4 @@
-# Bucket access by region: IAM policies on Forge, scoped keys on Aurora and FTH
+# Bucket access by region: IAM policies on Forge, service keys on Aurora and FTH
 
 **Status:** Draft (design exploration, awaiting acceptance)
 **Created:** 2026-08-26
@@ -53,8 +53,8 @@ its creator's authority. It left bucket scope to this milestone.
 
 ## Proposed access model
 
-Each orchestrator declares the model its backend serves, `accessModel:
-'scoped-keys' | 'iam'`.
+Each region declares the model its backend serves, `getRegionAccessModel(region)`
+returning `'service-keys' | 'iam'`.
 
 A **principal** is a member as the storage system knows them, `(tenantId,
 userId)` and nothing more. It carries no permissions of its own: the storage
@@ -64,7 +64,7 @@ who reaches a bucket only when a statement names them. Owners and Admins are
 **unscoped**: on an IAM region the console writes them onto every bucket's
 policy.
 
-### Scoped keys (Aurora and FTH)
+### Service keys (Aurora and FTH)
 
 An access key carries its own permissions and bucket list, the creator's role
 caps the permission set at creation, and a role narrowing revokes the keys the
@@ -78,13 +78,13 @@ Each member is a principal. Bucket policies are the only thing that grants a
 principal access. A key belongs to a member and carries whatever the policies
 give that member, evaluated per request. An Owner or Admin may also mint a
 service key from the console: it carries its own permissions and bucket list,
-answers to no policy, and the creator cap bounds it as on a scoped-key region.
+answers to no policy, and the creator cap bounds it as on a service-key region.
 The role decides who may edit a policy and what may go into a statement; it
 never crosses the interface. Until Hilt ships the
-contract a Forge region declares `scoped-keys` and behaves as FTH does, which is
+contract a Forge region declares `service-keys` and behaves as FTH does, which is
 what its integration does today.
 
-A Forge network moves from scoped keys to IAM once and does not move back.
+A Forge network moves from service keys to IAM once and does not move back.
 
 Enumeration over S3 is a name listing in both models: `aws s3 ls` reaches the
 storage gateway directly, every key we mint carries `s3:ListAllMyBuckets`, and
@@ -164,7 +164,7 @@ refuses a document that grants either action to a principal the stored policy
 does not already grant it to. An Admin's edit keeps the grants an Owner wrote. Once written, the grant reaches whoever
 the statement names. The storage system enforces the statement without knowing
 that either action was privileged, which is why the rule has to hold at the
-console. On scoped-key regions the Owner-only cap stands, since no policy exists
+console. On service-key regions the Owner-only cap stands, since no policy exists
 there.
 
 **A scoped member reaches no bucket until a statement names them.** There is no
@@ -211,7 +211,7 @@ first policy is the same check against no policy existing.
 ## Architectural changes
 
 Our goal is to leave most of the console alone. The membership rows, the audit
-path, the key attribution, and the whole scoped-key flow are untouched.
+path, the key attribution, and the whole service-key flow are untouched.
 
 ### One console credential per tenant
 
@@ -252,14 +252,16 @@ console shows one thing whichever path a request took.
 
 ### The orchestrator interface
 
-The interface becomes a discriminated union on `accessModel` over a core both
-arms share: tenant lifecycle, buckets, the S3 client context, usage, and key
-deletion.
+The interface splits by feature: `TenantOrchestrator`, `BucketOrchestrator`
+(with the S3 client context), `AccessKeyOrchestrator` and `UsageOrchestrator`,
+which every orchestrator serves, plus `BucketPolicyOrchestrator` and
+`MemberOrchestrator`. `ServiceOrchestrator` extends all six.
+`LegacyServiceOrchestrator` extends only the first four; Aurora, FTH and a Forge
+region not yet on IAM implement it, and it goes once every deployment implements
+`ServiceOrchestrator`. A caller narrows with `supportsBucketPolicies`, and a
+caller holding only a region asks `getRegionAccessModel`.
 
-The scoped-keys arm is today's `issueAccessKey` and `findAccessKeyByName`,
-unchanged.
-
-The IAM arm is shaped after AWS IAM, minus its request bodies:
+The policy and member methods are shaped after AWS IAM, minus its request bodies:
 
 | Method                                                     | Contract                                                                                                                                                                                                              |
 | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -272,9 +274,9 @@ The IAM arm is shaped after AWS IAM, minus its request bodies:
 | `listAccessKeys(tenantId, opts)`                           | identity fields plus each key's `type`, `service` or `principal`, with the principal on a principal-bound key and the permissions and buckets on a service key; filterable by principal; access is read per principal |
 
 A vendor that grows principals and policies moves its region to `iam` by
-implementing that arm, with no console change.
+implementing those methods, with no console change.
 
-Tests get two fakes typed against the union. The IAM fake is an in-memory
+Tests get two fakes, one per interface. The IAM fake is an in-memory
 implementation of the contract below, and it is what the console work builds
 against while Forge implements the real thing.
 
@@ -320,12 +322,12 @@ log.
 
 **A role narrowing.** The admin sees what will happen before confirming.
 
-1. The console computes the preview: on scoped-key regions, which of the
+1. The console computes the preview: on service-key regions, which of the
    member's keys the new role could not mint; on IAM regions, the member's
    policy count and what their keys will follow.
 2. Every local precondition, the owner count included, is checked before the
    first vendor call.
-3. On scoped-key regions the excess keys are revoked at the vendor, each through
+3. On service-key regions the excess keys are revoked at the vendor, each through
    the existing per-key deletion flow, before the role is written.
 4. On IAM regions a demotion out of an unscoped role rewrites the statements
    naming that member on every bucket in the region, before the console row, and
@@ -465,7 +467,7 @@ production-safe and a migration ships as a script-only PR before anything that
 depends on it.
 
 1. The `accessModel` discriminant and the interface split, with every region
-   declaring `scoped-keys`. Merged, no behavior change.
+   declaring `service-keys`. Merged, no behavior change.
 2. Role-narrowing revocation with its preview route, dialogs, email, and audit
    shape. Merged. It revokes nothing by itself; a key is revoked only by a later
    narrowing that leaves it above the new role.
@@ -517,7 +519,7 @@ to exactly one input is worth the fan-out.
 
 **Per-member FTH storage users.** FTH is the one vendor with a user object, and
 keys already hang off one. Those keys would still carry their own permissions
-and nothing would follow the member live, so it is the scoped-key model under a
+and nothing would follow the member live, so it is the service-key model under a
 second name.
 
 ## Open questions
@@ -569,7 +571,7 @@ lifecycle feed from an orchestrator is what would close the rest.
   for the contract enum gap and the console key's lifecycle.
 - `docs/service-orchestrator-integration/management-openapi.yaml`, the contract
   the IAM revision lands in.
-- The scoped-key half is merged, in PRs #669 through #675: `AccessModel` in
+- The service-key half is merged, in PRs #669 through #675: `AccessModel` in
   `packages/shared/src/constants.ts`, the retention test in
   `packages/shared/src/access-key-permissions.ts`, and the revocation pass in
   `packages/backend/src/lib/revoke-member-keys.ts`.
