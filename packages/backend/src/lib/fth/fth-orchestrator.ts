@@ -307,7 +307,9 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
     if ('principalId' in keyOpts) {
-      throw new Error('FTH serves service keys only; a principal-bound key needs bucket policies');
+      throw new Error(
+        'FTH supports service keys only; a principal-bound key needs the IAM access model',
+      );
     }
     const storageUserId = await this.getFthConsoleStorageUserId(tenantId, requestOptions);
 

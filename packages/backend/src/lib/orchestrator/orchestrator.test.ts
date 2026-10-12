@@ -708,7 +708,7 @@ describe('issueAccessKey on a legacy orchestrator', () => {
     expect(supportsBucketPolicies(orchestrator)).toBe(false);
     await expect(
       orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
-    ).rejects.toThrow(/needs bucket policies/);
+    ).rejects.toThrow(/needs the IAM access model/);
     expect(mockCreateAccessKey).not.toHaveBeenCalled();
   });
 });

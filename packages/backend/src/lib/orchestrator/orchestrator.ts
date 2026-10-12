@@ -95,8 +95,8 @@ export interface FilOneOrchestratorConfig {
   api: { client: Client } | { baseUrl: string; accessToken: string; fetch?: typeof fetch };
   /**
    * `iam` builds the orchestrator with bucket policies and members; the
-   * registry passes the shared `getRegionAccessModel(region)` so the two never
-   * disagree. Defaults to `service-keys`.
+   * registry passes the model its Forge network is configured with. Defaults
+   * to `service-keys`.
    */
   accessModel?: AccessModel;
 }

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { S3Region, Stage, getRegionAccessModel } from '@filone/shared';
-import { supportsBucketPolicies } from './service-orchestrator.ts';
+import { S3Region, Stage } from '@filone/shared';
 
 // The registry builds every non-Aurora orchestrator lazily, on the first lookup
 // for its region. The FTH client reads its baseUrl from the environment and its
@@ -80,15 +79,38 @@ describe('getAvailableOrchestrators', () => {
     // (eu-west-1, eu-central-3, us-east-1, us-east-9) rather than by service.
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'forge', 'fth', 'forgeDev']);
   });
+});
 
-  // The console reads a region's model without an orchestrator in hand, so the
-  // registry must build the orchestrator that model promises.
-  it('serves bucket policies exactly on the regions getRegionAccessModel calls iam', () => {
-    process.env.FILONE_STAGE = Stage.Staging;
-    const orchestrators = getAvailableOrchestrators();
-
-    expect(orchestrators.map((o) => [o.region, supportsBucketPolicies(o)])).toStrictEqual(
-      orchestrators.map((o) => [o.region, getRegionAccessModel(o.region) === 'iam']),
-    );
+describe('the access model of each Forge network', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
+
+  // The registry caches each Forge orchestrator, so every case loads it afresh.
+  it.each([
+    ['iam', 'service-keys', { eu: true, us: false }],
+    ['service-keys', 'iam', { eu: false, us: true }],
+  ] as const)(
+    'serves bucket policies on the network set to iam (FORGE_ACCESS_MODEL=%s, FORGE_DEV_ACCESS_MODEL=%s)',
+    async (forge, forgeDev, expected) => {
+      process.env.FILONE_STAGE = Stage.Staging;
+      vi.stubEnv('FORGE_ACCESS_MODEL', forge);
+      vi.stubEnv('FORGE_DEV_ACCESS_MODEL', forgeDev);
+      vi.resetModules();
+      const registry = await import('./service-orchestrator-registry.ts');
+      const { supportsBucketPolicies } = await import('./service-orchestrator.ts');
+
+      const served = registry
+        .getAvailableOrchestrators()
+        .map((orchestrator) => [orchestrator.region, supportsBucketPolicies(orchestrator)]);
+
+      // Aurora and FTH never serve them, whatever the Forge networks run.
+      expect(served).toStrictEqual([
+        [S3Region.EuWest1, false],
+        [S3Region.EuCentral3, expected.eu],
+        [S3Region.UsEast1, false],
+        [S3Region.UsEast9, expected.us],
+      ]);
+    },
+  );
 });
