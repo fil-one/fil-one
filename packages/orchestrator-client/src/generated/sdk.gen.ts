@@ -401,8 +401,8 @@ export const getTenantsByTenantIdPrincipalsByPrincipalIdPolicies = <
  * action, the sorted effective set: the union of the `Allow`
  * statements naming them or `*`, minus the union of the `Deny`
  * statements naming them or `*`. Buckets with an empty set are
- * omitted. Computed from the orchestrator's own tables on every
- * call, so the answer is consistent with its last write.
+ * omitted. The orchestrator must ensure the answer is consistent with
+ * the last writes.
  *
  */
 export const getTenantsByTenantIdPrincipalsByPrincipalIdAccess = <

@@ -24,7 +24,8 @@ info:
     the matching permission, as fil-one/RFC#30 specifies; this contract
     carries the principals and the two reads computed from the policies.
     The principal endpoints below are the `iam` capability set; an
-    orchestrator that serves only service keys may answer them with 404.
+    orchestrator that serves only service keys answers them with 501 Not
+    Implemented.
 
     The Service Orchestrator must also operate an S3 Gateway for
     bucket and object operations; that surface is outside this
@@ -270,6 +271,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '501':
+          description: |
+            The body carries `principalId` and the orchestrator does not
+            serve the `iam` access model.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
     get:
       tags: [Access Keys]
       summary: List S3 access keys
@@ -355,6 +364,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+        '501':
+          $ref: '#/components/responses/NotImplemented'
   /tenants/{tenantId}/principals/{principalId}:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -395,6 +406,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     get:
       tags: [Principals]
       summary: Get a principal
@@ -411,6 +424,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     delete:
       tags: [Principals]
       summary: Remove a principal
@@ -432,6 +447,8 @@ paths:
         '409':
           $ref: '#/components/responses/ConcurrentChange'
 
+        '501':
+          $ref: '#/components/responses/NotImplemented'
   /tenants/{tenantId}/principals/{principalId}/policies:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -454,6 +471,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+        '501':
+          $ref: '#/components/responses/NotImplemented'
   /tenants/{tenantId}/principals/{principalId}/access:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -466,8 +485,8 @@ paths:
         action, the sorted effective set: the union of the `Allow`
         statements naming them or `*`, minus the union of the `Deny`
         statements naming them or `*`. Buckets with an empty set are
-        omitted. Computed from the orchestrator's own tables on every
-        call, so the answer is consistent with its last write.
+        omitted. The orchestrator must ensure the answer is consistent with
+        the last writes.
       security:
         - PartnerKey: []
       responses:
@@ -482,6 +501,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+        '501':
+          $ref: '#/components/responses/NotImplemented'
   /tenants/{tenantId}/metrics:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -645,6 +666,12 @@ components:
             $ref: '#/components/schemas/Error'
     NotFound:
       description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotImplemented:
+      description: The orchestrator does not serve the `iam` access model.
       content:
         application/json:
           schema:
