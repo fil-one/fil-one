@@ -54,7 +54,7 @@ vi.mock('../components/AddBucketKeyModal', () => ({
 }));
 
 // The policy tab exists only on a region serving the `iam` access model; the
-// suite about it flips this on, every other suite runs against `scoped-keys`.
+// suite about it flips this on, every other suite runs against `service-keys`.
 const mockIsIamRegion = vi.fn(() => false);
 vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => mockIsIamRegion() }));
 
@@ -169,7 +169,7 @@ describe('BucketDetailPage — the policy tab', () => {
     expect(screen.queryByTestId('bucket-policy-tab')).not.toBeInTheDocument();
   });
 
-  it('hides the Policy tab on a scoped-keys region even from an Owner', async () => {
+  it('hides the Policy tab on a service-keys region even from an Owner', async () => {
     renderPage(OrgRole.Owner);
 
     await screen.findByTestId('bucket-objects-tab');
