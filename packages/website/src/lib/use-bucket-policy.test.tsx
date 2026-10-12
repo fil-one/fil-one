@@ -17,7 +17,7 @@ vi.mock('./bucket-policy-api.js', async () => ({
   deleteBucketPolicy: (...args: unknown[]) => mockDelete(...args),
 }));
 vi.mock('./access-model.js', () => ({
-  isIamRegion: (region: string) => region === 'us-east-9',
+  supportsIamMethods: (region: string) => region === 'us-east-9',
 }));
 vi.mock('./api.js', async () => ({
   ...(await vi.importActual<typeof import('./api.js')>('./api.js')),
