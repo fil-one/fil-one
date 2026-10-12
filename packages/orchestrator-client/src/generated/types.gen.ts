@@ -184,6 +184,12 @@ export type PolicyConcreteAction =
  */
 export type PolicyAction = PolicyConcreteAction | 's3:*';
 
+/**
+ * One statement of an AWS bucket policy. `Condition` and
+ * `NotPrincipal` are rejected (422). `Action` and `Resource` are
+ * accepted as a string or a list and returned as a list.
+ *
+ */
 export type PolicyStatement = {
   /**
    * Optional label. Stored and returned; nothing evaluates it.
@@ -191,24 +197,47 @@ export type PolicyStatement = {
   Sid?: string;
   Effect: 'Allow' | 'Deny';
   /**
-   * The principals the statement applies to: a list of principal
-   * ids, or the bare string `*` for every live principal of the
-   * tenant. `*` inside a list is rejected (422).
+   * The principals the statement applies to: the bare string `*`
+   * (or `{"AWS": "*"}`) for every live principal of the tenant, or
+   * `{"AWS": ...}` naming principals by user ARN,
+   * `arn:aws:iam:::user/<principalId>`, with an empty account
+   * field since the bucket already fixes the tenant. One ARN or a
+   * list is accepted; a list is returned. `*` inside the list is
+   * rejected (422).
    *
    */
-  Principal: '*' | Array<PrincipalId>;
-  Action: Array<PolicyAction>;
+  Principal:
+    | '*'
+    | {
+        AWS: string | Array<string>;
+      };
+  Action: PolicyAction | Array<PolicyAction>;
+  /**
+   * The bucket the policy is stored on: `arn:aws:s3:::<bucket>` for
+   * `s3:ListBucket`, `s3:ListBucketVersions` and
+   * `s3:ListBucketMultipartUploads`, `arn:aws:s3:::<bucket>*` for
+   * every other action, and both for `s3:*`. A key prefix, a
+   * wildcard in the bucket name or another bucket is rejected
+   * (422).
+   *
+   */
+  Resource: string | Array<string>;
 };
 
 /**
- * A bucket's policy, reduced to what the orchestrator evaluates.
- * There is no `Resource` field: the document governs the bucket it
- * is stored on. A principal's effective actions are the union of
- * the `Allow` statements naming them minus the union of the `Deny`
- * statements naming them; an explicit deny wins.
+ * A bucket's policy: an AWS bucket policy document, reduced to what
+ * the orchestrator evaluates. A principal's effective actions are
+ * the union of the `Allow` statements naming them minus the union
+ * of the `Deny` statements naming them; an explicit deny wins. Reads
+ * return the canonical form: lists sorted and deduplicated,
+ * statements reordered, `*` for the wildcard principal.
  *
  */
 export type BucketPolicy = {
+  /**
+   * The policy language version. Both are evaluated the same way.
+   */
+  Version: '2012-10-17' | '2008-10-17';
   Statement: Array<PolicyStatement>;
 };
 

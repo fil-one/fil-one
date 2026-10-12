@@ -100,23 +100,35 @@ would then stop matching the invoice.
 ## Bucket policies
 
 A bucket policy is the bucket's own policy document, held by the storage system
-and addressed by the bucket it belongs to:
+and addressed by the bucket it belongs to. It is an AWS bucket policy, so
+`aws s3api put-bucket-policy` and IAM policy linters work on it:
 
 ```ts
-// Addressed {region}/{bucketName}. AWS's field names.
+// Addressed {region}/{bucketName}.
 type BucketPolicy = {
+  Version: '2012-10-17';
   Statement: {
     Sid?: string; // a label; stored and returned, never evaluated
     Effect: 'Allow' | 'Deny';
-    Principal: string[] | '*'; // console user ids, or '*' for every member
+    // Console user ids as user ARNs, arn:aws:iam:::user/<userId> (the bucket
+    // fixes the tenant, so the account field is empty), or '*' for every member
+    Principal: { AWS: string[] } | '*';
     Action: string[]; // the s3 vocabulary below, or ['s3:*'] for all of it
+    // The bucket itself: arn:aws:s3:::<bucket> for the three bucket actions
+    // (s3:ListBucket*), arn:aws:s3:::<bucket>/* for object actions, both for s3:*
+    Resource: string[];
   }[];
 };
 ```
 
 This is S3's shape: one policy per bucket, statements naming individual members,
-and both effects, written and read with the S3 bucket-policy operations. A
-policy has no id or name of its own and dies with its bucket.
+and both effects, written and read with the S3 bucket-policy operations. The
+storage system refuses a `Resource` that names a key prefix or another bucket,
+and returns the document in canonical form (lists sorted and deduplicated,
+statements reordered). The console converts between user ids and user ARNs at
+the document boundary and derives each statement's `Resource` from its actions,
+so the editor shows member names and nothing else. A policy has no id or name
+of its own and dies with its bucket.
 
 The console keeps no copy of any policy, so there is no table to add and nothing
 to backfill. It stores orgs, memberships, roles, key attribution, and the audit
