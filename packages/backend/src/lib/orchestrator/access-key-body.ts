@@ -1,4 +1,5 @@
-// Builds the body of the storage system's create-access-key request.
+// Builds the body of the storage system's create-access-key request. Both
+// access-model orchestrators use it.
 
 import type {
   CreateAccessKeyRequest,
