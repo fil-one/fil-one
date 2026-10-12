@@ -3,8 +3,8 @@ import { renderHook, act } from '@testing-library/react';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { S3_REGION, S3Region } from '@filone/shared';
 import { ToastProvider } from '../components/Toast';
-const mockIsIamRegion = vi.fn(() => false);
-vi.mock('./access-model.js', () => ({ isIamRegion: () => mockIsIamRegion() }));
+const mockSupportsIamMethods = vi.fn(() => false);
+vi.mock('./access-model.js', () => ({ supportsIamMethods: () => mockSupportsIamMethods() }));
 
 import { useAccessKeyForm } from './use-access-key-form.js';
 
@@ -216,8 +216,8 @@ describe('useAccessKeyForm — granular permission filtering', () => {
 });
 
 describe('useAccessKeyForm — on a region serving the iam access model', () => {
-  beforeEach(() => mockIsIamRegion.mockReturnValue(true));
-  afterEach(() => mockIsIamRegion.mockReturnValue(false));
+  beforeEach(() => mockSupportsIamMethods.mockReturnValue(true));
+  afterEach(() => mockSupportsIamMethods.mockReturnValue(false));
 
   function renderServiceKeyForm() {
     const rendered = renderForm();

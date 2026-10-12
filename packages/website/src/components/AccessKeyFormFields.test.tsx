@@ -8,8 +8,8 @@ import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 import { AccessKeyFormFields } from './AccessKeyFormFields.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
-const mockIsIamRegion = vi.fn(() => false);
-vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => mockIsIamRegion() }));
+const mockSupportsIamMethods = vi.fn(() => false);
+vi.mock('../lib/access-model.js', () => ({ supportsIamMethods: () => mockSupportsIamMethods() }));
 
 function Harness({ apply }: { apply: (form: ReturnType<typeof useAccessKeyForm>) => void }) {
   const form = useAccessKeyForm({ region: S3Region.UsEast1, onSuccess: () => {} });
@@ -66,8 +66,8 @@ describe('AccessKeyFormFields — on a region serving the iam access model', () 
   const PERSONAL_KEY_NOTE =
     "This key acts as you. What it can reach is decided by each bucket's policy.";
 
-  beforeEach(() => mockIsIamRegion.mockReturnValue(true));
-  afterEach(() => mockIsIamRegion.mockReturnValue(false));
+  beforeEach(() => mockSupportsIamMethods.mockReturnValue(true));
+  afterEach(() => mockSupportsIamMethods.mockReturnValue(false));
 
   it('hides the permission and bucket fields for a personal key', async () => {
     renderForm(() => {});
