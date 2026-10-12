@@ -63,6 +63,8 @@ function VersionActions({
           <IconButton
             icon={DownloadSimpleIcon}
             aria-label={`Download ${label}`}
+            tooltip="Download"
+            tooltipSide="top"
             size="md"
             onClick={() => onDownload(groupKey, version.versionId)}
           />
@@ -71,6 +73,8 @@ function VersionActions({
         <IconButton
           icon={TrashIcon}
           aria-label={`Delete ${label}`}
+          tooltip="Delete"
+          tooltipSide="top"
           size="md"
           // Same IconButton as the others, but the hover keeps a danger cue since
           // this deletes directly (twMerge lets it win over the base zinc hover).
