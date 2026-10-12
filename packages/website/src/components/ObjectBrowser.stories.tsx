@@ -9,7 +9,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router';
 
-import { S3Region, type S3ObjectVersion } from '@filone/shared';
+import { S3Region, SubscriptionStatus, type S3ObjectVersion } from '@filone/shared';
 
 import { ObjectBrowser, type ObjectBrowserProps } from './ObjectBrowser';
 
@@ -160,6 +160,8 @@ const meta: Meta<typeof ObjectBrowser> = {
   title: 'Components/ObjectBrowser',
   component: ObjectBrowser,
   decorators: [withRouter],
+  // Rows offer Share only on a paid plan; an unknown plan would show it disabled.
+  parameters: { billingStatus: SubscriptionStatus.Active },
 };
 
 export default meta;

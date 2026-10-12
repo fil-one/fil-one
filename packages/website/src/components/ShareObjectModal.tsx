@@ -68,7 +68,7 @@ export function ShareObjectModal({
     }
   }
 
-  const description = 'Anyone with this link can access the object — no API key required.';
+  const description = 'Anyone with this link can access the object. No API key required.';
 
   if (generated) {
     return (
