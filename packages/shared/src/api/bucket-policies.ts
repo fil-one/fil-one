@@ -169,7 +169,7 @@ export type PolicyEffect = (typeof POLICY_EFFECTS)[number];
 export const POLICY_WILDCARD_PRINCIPAL = '*';
 
 /** The policy language version the console writes. The storage system also reads the 2008 one. */
-export const POLICY_VERSION = '2012-10-17';
+export const POLICY_VERSION = '2012-10-17' as const;
 const POLICY_VERSIONS = [POLICY_VERSION, '2008-10-17'] as const;
 
 export const PRINCIPAL_ID_MAX_LENGTH = 255;
@@ -260,9 +260,9 @@ export function getPrincipalIds(principal: PolicyPrincipal): string[] {
   return principal === POLICY_WILDCARD_PRINCIPAL ? [] : principal.AWS.map(fromPrincipalArn);
 }
 
-/** The principal naming the given members. */
-export function toPolicyPrincipal(userIds: readonly string[]): PolicyPrincipal {
-  return { AWS: userIds.map(toPrincipalArn) };
+/** The principal naming the given members, or everyone for `*`. */
+export function toPolicyPrincipal(userIds: '*' | readonly string[]): PolicyPrincipal {
+  return userIds === POLICY_WILDCARD_PRINCIPAL ? userIds : { AWS: userIds.map(toPrincipalArn) };
 }
 
 /**
@@ -363,17 +363,27 @@ export const CREATOR_ACTIONS: PolicyAction[] = POLICY_ACTIONS.filter(
   (action) => !RETENTION_WRITE_ACTIONS.includes(action),
 );
 
-/** An Allow statement for `userIds` on `bucketName`, its Resource derived from the actions. */
-function buildAllowStatement(
-  sid: string,
-  userIds: readonly string[],
-  actions: PolicyActionOrWildcard[],
-  bucketName: string,
-): PolicyStatement {
+/**
+ * A statement on `bucketName` for `principal` (member ids, or `*`), its
+ * Resource derived from the actions.
+ */
+export function buildStatement({
+  bucketName,
+  effect = 'Allow',
+  principal,
+  actions,
+  sid,
+}: {
+  bucketName: string;
+  effect?: PolicyEffect;
+  principal: '*' | readonly string[];
+  actions: PolicyActionOrWildcard[];
+  sid?: string;
+}): PolicyStatement {
   return {
-    Sid: sid,
-    Effect: 'Allow',
-    Principal: toPolicyPrincipal(userIds),
+    ...(sid === undefined ? {} : { Sid: sid }),
+    Effect: effect,
+    Principal: toPolicyPrincipal(principal),
     Action: actions,
     Resource: getStatementResources(bucketName, actions),
   };
@@ -394,7 +404,14 @@ export function getCreatorBucketPolicy({
 }): BucketPolicy {
   return {
     Version: POLICY_VERSION,
-    Statement: [buildAllowStatement('creator', [creatorId], [...CREATOR_ACTIONS], bucketName)],
+    Statement: [
+      buildStatement({
+        bucketName,
+        principal: [creatorId],
+        actions: [...CREATOR_ACTIONS],
+        sid: 'creator',
+      }),
+    ],
   };
 }
 

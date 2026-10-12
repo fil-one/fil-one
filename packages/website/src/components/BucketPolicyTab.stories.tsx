@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { S3Region } from '@filone/shared';
+import { POLICY_VERSION, S3Region, buildStatement } from '@filone/shared';
 import type { BucketPolicy, PolicyStatement } from '@filone/shared';
 
 import type { BucketPolicySnapshot } from '../lib/bucket-policy-api';
@@ -11,25 +11,29 @@ import type { LoadedPolicyEditor } from './BucketPolicyTab';
 const BUCKET = 'photos';
 const REGION = S3Region.UsEast9;
 
-const teamReads: PolicyStatement = {
-  Sid: 'team',
-  Effect: 'Allow',
-  Principal: [ADA_ID, BEN_ID],
-  Action: ['s3:GetObject', 's3:ListBucket'],
+const teamReads: PolicyStatement = buildStatement({
+  bucketName: BUCKET,
+  principal: [ADA_ID, BEN_ID],
+  actions: ['s3:GetObject', 's3:ListBucket'],
+  sid: 'team',
+});
+const everyoneReads: PolicyStatement = buildStatement({
+  bucketName: BUCKET,
+  principal: '*',
+  actions: ['s3:GetObject'],
+  sid: 'everyone',
+});
+const nobodyDeletes: PolicyStatement = buildStatement({
+  bucketName: BUCKET,
+  effect: 'Deny',
+  principal: [BEN_ID],
+  actions: ['s3:DeleteObject'],
+  sid: 'no-deletes',
+});
+const storedPolicy: BucketPolicy = {
+  Version: POLICY_VERSION,
+  Statement: [teamReads, everyoneReads, nobodyDeletes],
 };
-const everyoneReads: PolicyStatement = {
-  Sid: 'everyone',
-  Effect: 'Allow',
-  Principal: '*',
-  Action: ['s3:GetObject'],
-};
-const nobodyDeletes: PolicyStatement = {
-  Sid: 'no-deletes',
-  Effect: 'Deny',
-  Principal: [BEN_ID],
-  Action: ['s3:DeleteObject'],
-};
-const storedPolicy: BucketPolicy = { Statement: [teamReads, everyoneReads, nobodyDeletes] };
 const storedSnapshot: BucketPolicySnapshot = { policy: storedPolicy, etag: '"v1"' };
 
 /** Seeds the stored policy the tab reads. */
@@ -60,7 +64,16 @@ export const DenyEveryone: Story = {
   decorators: [
     withPolicy({
       policy: {
-        Statement: [{ Sid: 'lockdown', Effect: 'Deny', Principal: '*', Action: ['s3:*'] }],
+        Version: POLICY_VERSION,
+        Statement: [
+          buildStatement({
+            bucketName: BUCKET,
+            effect: 'Deny',
+            principal: '*',
+            actions: ['s3:*'],
+            sid: 'lockdown',
+          }),
+        ],
       },
       etag: '"v1"',
     }),

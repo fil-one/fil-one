@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ApiErrorCode, S3Region } from '@filone/shared';
+import { ApiErrorCode, POLICY_VERSION, S3Region, buildStatement } from '@filone/shared';
 import type { BucketPolicy } from '@filone/shared';
 
 const mockSendApiRequest = vi.fn();
@@ -18,7 +18,10 @@ import {
 const USER_1 = '00000000-0000-0000-0000-000000000001';
 
 const policy: BucketPolicy = {
-  Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: ['s3:GetObject'] }],
+  Version: POLICY_VERSION,
+  Statement: [
+    buildStatement({ bucketName: 'photos', principal: [USER_1], actions: ['s3:GetObject'] }),
+  ],
 };
 const createApiError = (status: number, code?: string) =>
   Object.assign(new Error('refused'), { status, ...(code ? { code } : {}) });

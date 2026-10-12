@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { ApiErrorCode, OrgRole, POLICY_VERSION, buildStatement } from '@filone/shared';
 import type { BucketPolicy } from '@filone/shared';
 import { S3Region } from '@filone/shared';
 
@@ -40,14 +40,28 @@ import { ToastProvider } from './Toast/ToastProvider.js';
 const USER_1 = '00000000-0000-0000-0000-000000000001';
 const USER_2 = '00000000-0000-0000-0000-000000000002';
 
-const grantReadAndListToBen: BucketPolicy = {
+/** A policy whose one statement denies deleting to `principal`. */
+const denyDeleteTo = (principal: '*' | string[]): BucketPolicy => ({
+  Version: POLICY_VERSION,
   Statement: [
-    {
-      Sid: 'team',
-      Effect: 'Allow',
-      Principal: [USER_2],
-      Action: ['s3:GetObject', 's3:ListBucket'],
-    },
+    buildStatement({
+      bucketName: 'photos',
+      effect: 'Deny',
+      principal,
+      actions: ['s3:DeleteObject'],
+    }),
+  ],
+});
+
+const grantReadAndListToBen: BucketPolicy = {
+  Version: POLICY_VERSION,
+  Statement: [
+    buildStatement({
+      bucketName: 'photos',
+      principal: [USER_2],
+      actions: ['s3:GetObject', 's3:ListBucket'],
+      sid: 'team',
+    }),
   ],
 };
 
@@ -262,9 +276,10 @@ describe('BucketPolicyTab', () => {
         S3Region.UsEast9,
         {
           policy: {
+            Version: POLICY_VERSION,
             Statement: [
               ...grantReadAndListToBen.Statement,
-              { Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] },
+              buildStatement({ bucketName: 'photos', principal: '*', actions: ['s3:GetObject'] }),
             ],
           },
           etag: '"v1"',
@@ -368,22 +383,14 @@ describe('BucketPolicyTab conflicts and removal', () => {
   });
 
   it('warns when a Deny statement applies to everyone', async () => {
-    mockGetBucketPolicy.mockResolvedValue({
-      policy: { Statement: [{ Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] }] },
-      etag: '"v1"',
-    });
+    mockGetBucketPolicy.mockResolvedValue({ policy: denyDeleteTo('*'), etag: '"v1"' });
     renderTab();
 
     expect(await screen.findByText('This policy denies everyone')).toBeInTheDocument();
   });
 
   it('does not warn for a Deny that names members', async () => {
-    mockGetBucketPolicy.mockResolvedValue({
-      policy: {
-        Statement: [{ Effect: 'Deny', Principal: [USER_2], Action: ['s3:DeleteObject'] }],
-      },
-      etag: '"v1"',
-    });
+    mockGetBucketPolicy.mockResolvedValue({ policy: denyDeleteTo([USER_2]), etag: '"v1"' });
     renderTab();
     await screen.findByText('Ben');
 

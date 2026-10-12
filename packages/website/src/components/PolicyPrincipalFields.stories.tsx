@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
-import type { PolicyStatement } from '@filone/shared';
 
 import {
   ADA_ID,
@@ -13,8 +12,9 @@ import {
   withRequestsAnswered,
 } from '../lib/story-members';
 import { PolicyPrincipalFields } from './PolicyPrincipalFields';
+import type { PrincipalSelection } from './PolicyPrincipalFields';
 
-function Controlled({ initial }: { initial: PolicyStatement['Principal'] }) {
+function Controlled({ initial }: { initial: PrincipalSelection }) {
   const [value, setValue] = useState(initial);
   return <PolicyPrincipalFields value={value} onChange={setValue} />;
 }

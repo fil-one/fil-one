@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { OrgRole, S3Region } from '@filone/shared';
+import { OrgRole, POLICY_VERSION, S3Region, buildStatement } from '@filone/shared';
 
 import { seedPermissions } from '../lib/test-permissions.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -101,7 +101,15 @@ const ACCESS_KEY = {
 
 const grantAllActionsToUser1 = {
   policy: {
-    Statement: [{ Sid: 'team', Effect: 'Allow', Principal: ['user-1'], Action: ['s3:*'] }],
+    Version: POLICY_VERSION,
+    Statement: [
+      buildStatement({
+        bucketName: 'photos',
+        principal: ['user-1'],
+        actions: ['s3:*'],
+        sid: 'team',
+      }),
+    ],
   },
 };
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { PlusIcon, ShieldCheckIcon } from '@phosphor-icons/react/dist/ssr';
+import { POLICY_VERSION } from '@filone/shared';
 import type { PolicyStatement, S3Region } from '@filone/shared';
 
 import { isPolicyConflict } from '../lib/bucket-policy-api.js';
@@ -121,6 +122,7 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
       <PolicyStatementModal
         open={editTarget !== null}
         onClose={() => setEditTarget(null)}
+        bucketName={bucketName}
         initial={editTarget?.kind === 'existing' ? draft.statements[editTarget.index] : undefined}
         onSubmit={submitStatement}
       />
@@ -169,7 +171,7 @@ function useBucketPolicyEditor(bucketName: string, region: S3Region) {
       // A draft with no statements removes the policy: the storage system
       // stores no empty document.
       if (draft.statements.length === 0) return deleteStoredPolicy();
-      const nextPolicy = { Statement: draft.statements };
+      const nextPolicy = { Version: POLICY_VERSION, Statement: draft.statements };
       const saveResult = await policy.save.mutateAsync({ policy: nextPolicy, etag: draft.etag });
       draft.acceptSaved({ policy: nextPolicy, etag: saveResult.etag });
       toast.success('Policy saved');

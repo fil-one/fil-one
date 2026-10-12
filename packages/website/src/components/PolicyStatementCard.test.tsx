@@ -1,18 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { PolicyStatement } from '@filone/shared';
+import { buildStatement, toPolicyPrincipal } from '@filone/shared';
 
 import { PolicyStatementCard } from './PolicyStatementCard.js';
 
 const memberNamesById: Record<string, string> = { a: 'Ada', b: 'Ben', c: 'Cy', d: 'Di' };
 const getMemberName = (id: string) => memberNamesById[id];
 
-const allowTeam: PolicyStatement = {
-  Sid: 'team',
-  Effect: 'Allow',
-  Principal: ['a', 'b'],
-  Action: ['s3:GetObject', 's3:ListBucket', 's3:PutObject'],
-};
+const allowTeam: PolicyStatement = buildStatement({
+  bucketName: 'photos',
+  principal: ['a', 'b'],
+  actions: ['s3:GetObject', 's3:ListBucket', 's3:PutObject'],
+  sid: 'team',
+});
 
 function renderCard(
   statement: PolicyStatement,
@@ -98,7 +99,7 @@ describe('PolicyStatementCard', () => {
   });
 
   it('shows the first three members and folds the rest into a "+N more" badge', () => {
-    renderCard({ ...allowTeam, Principal: ['a', 'b', 'c', 'd', 'e'] });
+    renderCard({ ...allowTeam, Principal: toPolicyPrincipal(['a', 'b', 'c', 'd', 'e']) });
 
     expect(screen.getByText('Ada')).toBeInTheDocument();
     expect(screen.getByText('Ben')).toBeInTheDocument();
@@ -108,13 +109,13 @@ describe('PolicyStatementCard', () => {
   });
 
   it('shows "Unknown member" for a user id with no known name', () => {
-    renderCard({ ...allowTeam, Principal: ['gone'] });
+    renderCard({ ...allowTeam, Principal: toPolicyPrincipal(['gone']) });
 
     expect(screen.getByText('Unknown member')).toBeInTheDocument();
   });
 
   it('sets each unknown member apart with a dashed badge', () => {
-    renderCard({ ...allowTeam, Principal: ['a', 'gone', 'also-gone'] });
+    renderCard({ ...allowTeam, Principal: toPolicyPrincipal(['a', 'gone', 'also-gone']) });
 
     expect(screen.getAllByText('Unknown member')).toHaveLength(2);
     expect(screen.getAllByTestId('policy-unknown-member')).toHaveLength(2);

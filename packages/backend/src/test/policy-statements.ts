@@ -1,6 +1,6 @@
 // Builders for the policy documents tests seed and send: the AWS shape with
 // the ARN and Resource boilerplate filled in from bare member ids and actions.
-import { POLICY_VERSION, getStatementResources, toPolicyPrincipal } from '@filone/shared';
+import { POLICY_VERSION, buildStatement } from '@filone/shared';
 import type { BucketPolicy, PolicyEffect, PolicyStatement } from '@filone/shared';
 
 /**
@@ -13,12 +13,7 @@ export function statement(
   principal: '*' | readonly string[],
   actions: PolicyStatement['Action'],
 ): PolicyStatement {
-  return {
-    Effect: effect,
-    Principal: principal === '*' ? '*' : toPolicyPrincipal(principal),
-    Action: actions,
-    Resource: getStatementResources(bucketName, actions),
-  };
+  return buildStatement({ bucketName, effect, principal, actions });
 }
 
 /** A document over `statements`. */

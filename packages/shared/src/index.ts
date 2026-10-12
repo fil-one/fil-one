@@ -235,6 +235,7 @@ export {
   PolicyStatementSchema,
   PutBucketPolicyRequestSchema,
   POLICY_VERSION,
+  buildStatement,
   fromPrincipalArn,
   getCreatorBucketPolicy,
   getEffectiveActions,

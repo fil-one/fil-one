@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { PolicyStatement } from '@filone/shared';
-import { POLICY_SID_MAX_LENGTH, POLICY_WILDCARD_PRINCIPAL } from '@filone/shared';
+import type { PolicyPrincipal, PolicyStatement } from '@filone/shared';
+import {
+  POLICY_SID_MAX_LENGTH,
+  POLICY_WILDCARD_PRINCIPAL,
+  getPrincipalIds,
+  getStatementResources,
+  toPolicyPrincipal,
+} from '@filone/shared';
 
 import { Alert } from './Alert.js';
 import { Button } from './Button.js';
@@ -9,17 +15,25 @@ import { Input } from './Input.js';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal/index.js';
 import { PolicyActionFields } from './PolicyActionFields.js';
 import { PolicyPrincipalFields } from './PolicyPrincipalFields.js';
+import type { PrincipalSelection } from './PolicyPrincipalFields.js';
 import { RadioOption } from './RadioOption.js';
 
 export type PolicyStatementModalProps = {
   open: boolean;
   onClose: () => void;
+  /** The bucket the statement applies to; its Resource is derived from the actions on submit. */
+  bucketName: string;
   /** The statement being edited; absent when adding one. */
   initial?: PolicyStatement;
   onSubmit: (statement: PolicyStatement) => void;
 };
 
-const EMPTY_STATEMENT: PolicyStatement = { Effect: 'Allow', Principal: [], Action: [] };
+const EMPTY_STATEMENT: PolicyStatement = {
+  Effect: 'Allow',
+  Principal: { AWS: [] },
+  Action: [],
+  Resource: [],
+};
 
 /**
  * Sets the statement's Sid, or removes it when the name is empty or only
@@ -29,6 +43,11 @@ const EMPTY_STATEMENT: PolicyStatement = { Effect: 'Allow', Principal: [], Actio
 function replaceSid(statement: PolicyStatement, name: string): PolicyStatement {
   const { Sid: _dropped, ...rest } = statement;
   return name.trim() ? { ...rest, Sid: name } : rest;
+}
+
+/** The principal as the fields show it: everyone, or the member ids the document names. */
+function getPrincipalSelection(principal: PolicyPrincipal): PrincipalSelection {
+  return principal === POLICY_WILDCARD_PRINCIPAL ? principal : getPrincipalIds(principal);
 }
 
 /** Whether a deny names everyone, which locks the org out of the bucket until an Owner edits it. */
@@ -58,9 +77,9 @@ function useOpenedStatement(open: boolean, initial: PolicyStatement | undefined)
     statement,
     setStatement,
     touched,
-    setPrincipal: (principal: PolicyStatement['Principal']) => {
+    setPrincipal: (selection: PrincipalSelection) => {
       setTouched((t) => ({ ...t, principal: true }));
-      setStatement((s) => ({ ...s, Principal: principal }));
+      setStatement((s) => ({ ...s, Principal: toPolicyPrincipal(selection) }));
     },
     setAction: (action: PolicyStatement['Action']) => {
       setTouched((t) => ({ ...t, action: true }));
@@ -76,6 +95,7 @@ function useOpenedStatement(open: boolean, initial: PolicyStatement | undefined)
 export function PolicyStatementModal({
   open,
   onClose,
+  bucketName,
   initial,
   onSubmit,
 }: PolicyStatementModalProps) {
@@ -85,12 +105,15 @@ export function PolicyStatementModal({
   );
 
   const hasNoPrincipal =
-    statement.Principal !== POLICY_WILDCARD_PRINCIPAL && statement.Principal.length === 0;
+    statement.Principal !== POLICY_WILDCARD_PRINCIPAL && statement.Principal.AWS.length === 0;
   const hasNoAction = statement.Action.length === 0;
   const canSubmit = !hasNoPrincipal && !hasNoAction;
 
   function submit() {
-    onSubmit(replaceSid(statement, statement.Sid?.trim() ?? ''));
+    onSubmit({
+      ...replaceSid(statement, statement.Sid?.trim() ?? ''),
+      Resource: getStatementResources(bucketName, statement.Action),
+    });
     onClose();
   }
 
@@ -142,7 +165,10 @@ export function PolicyStatementModal({
                 : undefined
             }
           >
-            <PolicyPrincipalFields value={statement.Principal} onChange={setPrincipal} />
+            <PolicyPrincipalFields
+              value={getPrincipalSelection(statement.Principal)}
+              onChange={setPrincipal}
+            />
           </FormField>
 
           {isDenyForEveryone(statement) && (
