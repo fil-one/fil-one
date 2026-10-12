@@ -3,7 +3,7 @@ import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import {
   IAM_REGION,
-  SCOPED_KEYS_REGION,
+  SERVICE_KEYS_REGION,
   ddbMock,
   getAuditEvents,
 } from '../test/bucket-policy-fixture.ts';
@@ -18,10 +18,9 @@ const mockEnsureTenantReady = vi.fn();
 const mockCreateBucket = vi.fn();
 const mockGetOrchestratorForRegion = vi.fn();
 
-const scopedKeysOrchestrator = {
+const legacyOrchestrator = {
   id: 'aurora',
-  region: SCOPED_KEYS_REGION,
-  accessModel: 'scoped-keys',
+  region: SERVICE_KEYS_REGION,
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   createBucket: (...args: unknown[]) => mockCreateBucket(...args),
 };
@@ -29,16 +28,16 @@ const scopedKeysOrchestrator = {
 // One region serves the `iam` model in these tests, so the roster policy the
 // create carries can be asserted; no production region serves iam yet.
 const iamOrchestrator = {
-  ...scopedKeysOrchestrator,
+  ...legacyOrchestrator,
   id: 'forgeDev',
   region: IAM_REGION,
-  accessModel: 'iam',
+  ...delegateIamMethods(new FakeIamOrchestrator()),
 };
 
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
-    return region === IAM_REGION ? iamOrchestrator : scopedKeysOrchestrator;
+    return region === IAM_REGION ? iamOrchestrator : legacyOrchestrator;
   },
 }));
 
@@ -73,6 +72,7 @@ import {
   S3_REGION,
   S3Region,
 } from '@filone/shared';
+import { delegateIamMethods, FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -429,7 +429,7 @@ describe('create-bucket baseHandler', () => {
     });
   });
 
-  it('passes no policy to createBucket on a scoped-keys region', async () => {
+  it('passes no policy to createBucket on a service-keys region', async () => {
     mockCreateBucket.mockResolvedValue(undefined);
 
     await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
@@ -437,7 +437,7 @@ describe('create-bucket baseHandler', () => {
     expect(mockCreateBucket.mock.calls[0]![1]).not.toHaveProperty('policy');
   });
 
-  it('does not read the org roster on a scoped-keys region', async () => {
+  it('does not read the org roster on a service-keys region', async () => {
     mockCreateBucket.mockResolvedValue(undefined);
 
     await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
@@ -445,7 +445,7 @@ describe('create-bucket baseHandler', () => {
     expect(mockListMembers).not.toHaveBeenCalled();
   });
 
-  it('writes no audit event on a scoped-keys region', async () => {
+  it('writes no audit event on a service-keys region', async () => {
     mockCreateBucket.mockResolvedValue(undefined);
 
     await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
