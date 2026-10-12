@@ -1,5 +1,5 @@
 import { describe, it } from 'vitest';
-import type { PolicyAction, PrincipalAccess } from '@filone/orchestrator-client';
+import type { AccessKey, PolicyAction, PrincipalAccess } from '@filone/orchestrator-client';
 
 // Type-level claims about the generated Management API client. The runtime
 // body is empty; `tsc --noEmit` is the assertion.
@@ -20,5 +20,15 @@ describe('generated contract types', () => {
     // @ts-expect-error — the effective set is expanded before it is returned.
     const _a: PrincipalAccess['buckets'][number]['actions'][number] = 's3:*';
     void _a;
+  });
+
+  it('rejects a principal key without a principal id or with permissions', () => {
+    const base = { accessKeyId: 'AK', name: 'k', createdAt: '2026-01-01T00:00:00Z' };
+    // @ts-expect-error — a principal key names its principal.
+    const _a: AccessKey = { ...base, type: 'principal' };
+    // @ts-expect-error — and carries no permissions of its own.
+    const _b: AccessKey = { ...base, type: 'principal', principalId: 'p', permissions: [] };
+    void _a;
+    void _b;
   });
 });

@@ -263,28 +263,41 @@ export type CreatePrincipalAccessKeyRequest = {
  */
 export type AccessKeyExpiresAt = string | null;
 
-export type AccessKey = {
+/**
+ * A service key with its own permissions, or a key bound to a principal that carries none.
+ */
+export type AccessKey =
+  | ({
+      type: 'service';
+    } & ServiceAccessKey)
+  | ({
+      type: 'principal';
+    } & PrincipalAccessKey);
+
+export type ServiceAccessKey = {
   /**
    * AWS-style access key ID, used by S3 clients.
    */
   accessKeyId: string;
   name: string;
-  /**
-   * A `service` key carries `permissions` and `buckets`; a `principal` key carries `principal`.
-   */
-  type: 'service' | 'principal';
-  /**
-   * Set on a principal-bound key. Such a key carries no `permissions` or `buckets`.
-   */
-  principal?: PrincipalId;
-  /**
-   * Present on a service key, absent on a principal-bound key.
-   */
-  permissions?: Array<AccessKeyPermission>;
+  type: 'service';
+  permissions: Array<AccessKeyPermission>;
   /**
    * Empty or omitted when the key has tenant-wide access.
    */
   buckets?: Array<BucketName>;
+  expiresAt?: string | null;
+  createdAt: string;
+};
+
+export type PrincipalAccessKey = {
+  /**
+   * AWS-style access key ID, used by S3 clients.
+   */
+  accessKeyId: string;
+  name: string;
+  type: 'principal';
+  principalId: PrincipalId;
   expiresAt?: string | null;
   createdAt: string;
 };

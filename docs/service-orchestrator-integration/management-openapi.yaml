@@ -11,7 +11,7 @@ info:
 
     ## Access models
 
-    Every orchestrator serves the *scoped-keys* model: an access key
+    Every orchestrator serves the *service-keys* model: an access key
     carries its own permission set and optional bucket list, fixed at
     creation. An orchestrator may additionally serve the *iam* model,
     in which each FilOne member is a **principal**, each bucket holds at
@@ -24,7 +24,7 @@ info:
     the matching permission, as fil-one/RFC#30 specifies; this contract
     carries the principals and the two reads computed from the policies.
     The principal endpoints below are the `iam` capability set; an
-    orchestrator that serves only scoped keys may answer them with 404.
+    orchestrator that serves only service keys may answer them with 404.
 
     The Service Orchestrator must also operate an S3 Gateway for
     bucket and object operations; that surface is outside this
@@ -1005,8 +1005,19 @@ components:
         after this time.
 
     AccessKey:
+      description: A service key with its own permissions, or a key bound to a principal that carries none.
+      oneOf:
+        - $ref: '#/components/schemas/ServiceAccessKey'
+        - $ref: '#/components/schemas/PrincipalAccessKey'
+      discriminator:
+        propertyName: type
+        mapping:
+          service: '#/components/schemas/ServiceAccessKey'
+          principal: '#/components/schemas/PrincipalAccessKey'
+
+    ServiceAccessKey:
       type: object
-      required: [accessKeyId, name, type, createdAt]
+      required: [accessKeyId, name, type, permissions, createdAt]
       properties:
         accessKeyId:
           type: string
@@ -1015,15 +1026,9 @@ components:
           type: string
         type:
           type: string
-          enum: [service, principal]
-          description: A `service` key carries `permissions` and `buckets`; a `principal` key carries `principal`.
-        principal:
-          description: Set on a principal-bound key. Such a key carries no `permissions` or `buckets`.
-          allOf:
-            - $ref: '#/components/schemas/PrincipalId'
+          enum: [service]
         permissions:
           type: array
-          description: Present on a service key, absent on a principal-bound key.
           items:
             $ref: '#/components/schemas/AccessKeyPermission'
         buckets:
@@ -1031,6 +1036,27 @@ components:
           description: Empty or omitted when the key has tenant-wide access.
           items:
             $ref: '#/components/schemas/BucketName'
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    PrincipalAccessKey:
+      type: object
+      required: [accessKeyId, name, type, principalId, createdAt]
+      properties:
+        accessKeyId:
+          type: string
+          description: AWS-style access key ID, used by S3 clients.
+        name:
+          type: string
+        type:
+          type: string
+          enum: [principal]
+        principalId:
+          $ref: '#/components/schemas/PrincipalId'
         expiresAt:
           type: [string, 'null']
           format: date-time

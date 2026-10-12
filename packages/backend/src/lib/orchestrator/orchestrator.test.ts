@@ -623,7 +623,7 @@ describe('issueAccessKey', () => {
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
     // Parity with FTH_BASE_PERMISSIONS (fth-orchestrator.ts): the console's
-    // read/write/list promise multipart support, so scoped keys get it too.
+    // read/write/list promise multipart support, so service keys get it too.
     expect(permissions).toStrictEqual([
       's3:ListAllMyBuckets',
       's3:GetObject',
