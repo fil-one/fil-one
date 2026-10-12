@@ -249,7 +249,7 @@ describe('useAccessKeyForm — on a region serving the iam access model', () => 
     expect(result.current.canSubmit).toBe(true);
   });
 
-  it('builds the scoped-key request once Service key is chosen', () => {
+  it('builds the service-key request once Service key is chosen', () => {
     const { result } = renderServiceKeyForm();
 
     expect(result.current.request).toStrictEqual({
