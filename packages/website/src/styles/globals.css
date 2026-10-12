@@ -57,6 +57,13 @@
   --color-brand-error: var(--color-red-500);
   --color-brand-error-dark: var(--color-red-300);
 
+  /* Height of every control a user clicks or types into (Button, SplitButton,
+     Input, Select), so a button beside an input lines up exactly. Padding sets
+     only the horizontal inset; see DESIGN.md §7. */
+  --control-height-sm: 32px;
+  --control-height-md: 36px;
+  --control-height-lg: 44px;
+
   --spacing-readable: 60ch;
 
   --tracking-tight: -1%;

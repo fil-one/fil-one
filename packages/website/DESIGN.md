@@ -174,7 +174,7 @@ height from a shared token, and horizontal padding is set independently of it:
 
 ```css
 @theme {
-  --control-height-sm: 28px;
+  --control-height-sm: 32px;
   --control-height-md: 36px;
   --control-height-lg: 44px;
 }
@@ -182,18 +182,22 @@ height from a shared token, and horizontal padding is set independently of it:
 
 **Why:** Height computed from `py-*` plus line height plus border drifts the moment two
 components pick different padding, and the drift is invisible in isolation and glaring in a
-row. That is the current state: `Button` (md) resolves to 38px from `py-2`, while `Input`
-and `Select` resolve to 42px from `py-2.5`, so every search-plus-button and
-field-plus-submit row in the console is misaligned by 4px. Horizontal padding disagrees too
-(`px-4` against `px-3`). Aligned controls are one of the clearest signals of a system that
-somebody owns.
+row. Before the tokens, `Button` (md) resolved to 38px from `py-2` while `Input` and `Select`
+resolved to 42px from `py-2.5`, so every search-plus-button row was 4px out. Aligned
+controls are one of the clearest signals of a system that somebody owns.
+
+Horizontal padding matches across controls of the same size so their contents share an
+inset: `px-2.5` at `sm`, `px-3` at `md`, `px-4` at `lg`. A call site that needs a taller
+control than `lg` (the auth pages' full-width CTA, which matches Auth0's 48px button) sets
+`h-*`, never `py-*`.
 
 The same reasoning applies to measurements that must match across independently-written
 components: page gutter, content max width, sidebar width. Those belong in `@theme` too, not
 repeated at call sites.
 
-**Check:** A story placing a button, an input, and a select in one `flex` row. Their tops
-and bottoms line up exactly.
+**Check:** `Components/Button/Aligned With Form Controls` places a button, a split button,
+an input, and a select in one `flex` row at each size. Their tops and bottoms line up
+exactly.
 
 **Dropdown and overflow menus** follow `BucketActionMenu.tsx`'s sizing, not a size picked
 per call site: `p-1.5` trigger padding with an 18px icon, `min-w-36` panel, `text-xs` items
@@ -317,6 +321,10 @@ Every interactive element defines: default, hover, focus-visible, active, disabl
 where it loads or fetches, loading, empty, and error. If a state is genuinely unreachable,
 say so in a comment on the component.
 
+Filled buttons darken on hover and darken again on press (`brand-600` to `brand-700` to
+`brand-800`). Lightening fails: `brand-500`, `red-500`, and `amber-600` all put white text
+below 4.5:1.
+
 Empty and error states are content, not placeholders. An empty state says what belongs here
 and how to add it. An error says what failed and what to do next. Use `EmptyStateCard` and
 `StateCard`; do not hand-roll either.
@@ -360,27 +368,23 @@ here.
 1. **`focus` to `focus-visible`** (rule 10): 11 occurrences in CSS (`button.css` 8, plus
    `tabs.css`, `modal.css`, `toast.css`), plus 5 components (`Switch`, `Checkbox`,
    `CodeBlock`, `AccessKeyExpirationFields`, `billing/PaymentForm`).
-2. **Control height mismatch** (rule 7): `Button` md resolves to 38px, `Input` and
-   `Select` to 42px. Introduce the height tokens and migrate `Button`, `SplitButton`,
-   `Input`, and `Select` in one change, since a partial migration looks worse than the
-   current state.
-3. **Off-scale type to `text-meta` / `text-ui`** (rule 4): 25 files. `text-[13px]` 43,
+2. **Off-scale type to `text-meta` / `text-ui`** (rule 4): 25 files. `text-[13px]` 43,
    `text-[11px]` 40, `text-[10px]` 18, `text-[12px]` 7, plus one-off `text-[14px]` and
    `text-[18px]`. Heaviest in `DashboardPage` (29) and `BillingPage` (26). Decide where
    10px goes: it most likely becomes `text-meta`.
-4. **Raw hex to tokens** (rules 2 and 3): 7 distinct values across `MfaSettings`,
+3. **Raw hex to tokens** (rules 2 and 3): 7 distinct values across `MfaSettings`,
    `billing/PaymentForm`, and `SettingRow.stories`. Do `#0080ff` and `#0066ff` first, since
    a hardcoded brand blue also loses the documented AA contrast behaviour. Add the missing
    semantic variables before migrating the greys.
-5. **Shadow collapse** (rule 9): 14 `shadow-sm`, 3 `shadow-2xl`, 2
+4. **Shadow collapse** (rule 9): 14 `shadow-sm`, 3 `shadow-2xl`, 2
    `shadow-[0px_1px_2px_...]`, 1 ring-as-shadow to convert to `ring-*`.
-6. **Radius collapse** (rule 8): 29 bare `rounded`, 4 `rounded-[6px]`, 2 `rounded-sm`, 2
+5. **Radius collapse** (rule 8): 29 bare `rounded`, 4 `rounded-[6px]`, 2 `rounded-sm`, 2
    `rounded-2xl`, 2 `rounded-3xl`.
-7. **Motion** (rule 11): 1 `duration-300`, 4 `transition-transform` and 2
+6. **Motion** (rule 11): 1 `duration-300`, 4 `transition-transform` and 2
    `transition-opacity` to confirm as intentional.
-8. **Weights** (rule 5): 8 `font-bold` uses to remove, and `font-semibold` (47 uses) to
+7. **Weights** (rule 5): 8 `font-bold` uses to remove, and `font-semibold` (47 uses) to
    audit down to page titles.
-9. **`font-heading` is undefined.** `DesignTokens.stories.tsx` uses it in two places and no
+8. **`font-heading` is undefined.** `DesignTokens.stories.tsx` uses it in two places and no
    CSS defines it, so the design tokens page renders its own headings in the fallback font.
    Either define the token or use `font-sans`.
 

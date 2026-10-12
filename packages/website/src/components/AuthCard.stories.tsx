@@ -23,7 +23,7 @@ export const Default: Story = {
         <p className="mt-2 text-sm text-(--color-paragraph-text)">
           Supporting copy sits directly under the heading, grouped as one unit.
         </p>
-        <a href="#" className="button button--primary button--lg mt-6 w-full justify-center py-3.5">
+        <a href="#" className="button button--primary button--lg mt-6 w-full justify-center h-12">
           Primary action
         </a>
       </>
