@@ -3,11 +3,12 @@ import { useNavigate } from '@tanstack/react-router';
 import { PlusIcon, DatabaseIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { listBucketsUnavailableMessage } from '@filone/shared';
+import type { S3Region } from '@filone/shared';
 
 import { PageLayout } from '../components/PageLayout.js';
 import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
-import { ConfirmDialog } from '../components/ConfirmDialog';
+import { DeleteBucketDialog } from '../components/DeleteBucketDialog';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 import { BucketsTable } from '../components/BucketsTable';
 import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
@@ -49,7 +50,7 @@ export function BucketsPage() {
   // "No buckets yet" would be a lie while a region is down. The banner explains the gap.
   const showEmptyState = baseBuckets.length === 0 && unavailableRegions.length === 0;
 
-  const { pendingBucketName, requestDelete, cancelDelete, confirmDelete } = useDeleteBucket();
+  const { pendingBucket, contents, requestDelete, cancelDelete, confirmDelete } = useDeleteBucket();
 
   // Shared across every state so navigating to Buckets never blanks the header
   // or takes the Create action away while the list loads.
@@ -143,13 +144,21 @@ export function BucketsPage() {
         />
       )}
 
-      <ConfirmDialog
-        open={pendingBucketName !== null}
+      <DeleteBucketDialog
+        bucketName={pendingBucket?.bucketName ?? null}
+        contents={contents}
         onClose={cancelDelete}
         onConfirm={confirmDelete}
-        title="Delete bucket"
-        description="This bucket will be permanently deleted. The bucket must be empty — delete its objects and object versions first."
-        confirmLabel="Delete bucket"
+        onOpenBucket={() => {
+          if (!pendingBucket) return;
+          const { bucketName, region } = pendingBucket;
+          cancelDelete();
+          void navigate({
+            to: '/buckets/$bucketName',
+            params: { bucketName },
+            search: { region: region as S3Region },
+          });
+        }}
       />
     </PageLayout>
   );

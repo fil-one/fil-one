@@ -122,6 +122,10 @@ export const queryKeys = {
     ['access-keys', bucketName, region] as const,
   bucketAnalytics: (bucketName: string, region: S3Region) =>
     ['bucket-analytics', bucketName, region] as const,
+  // Live, unlike the analytics count: read straight from S3 each time the delete
+  // dialog opens, because a stale "empty" or "not empty" sends the user the wrong way.
+  bucketHoldsObjects: (bucketName: string, region: S3Region) =>
+    ['bucket-holds-objects', bucketName, region] as const,
   // The org's roster and its outstanding invitations. Two keys rather than one:
   // every role may read the members list, while the invitations list is
   // `members.manage`, so a single key would tie a query most callers can run to
