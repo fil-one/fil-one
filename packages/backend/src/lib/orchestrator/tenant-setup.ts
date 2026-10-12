@@ -56,7 +56,7 @@ const CONSOLE_KEY_PERMISSIONS = [
 ] as const;
 
 // Bucket policies are read and written over S3 with this key (fil-one/RFC#30).
-// Only an iam region's storage system knows these actions; a scoped-keys
+// Only an iam region's storage system knows these actions; a service-keys
 // region refuses the whole key request over them.
 const CONSOLE_KEY_POLICY_PERMISSIONS = [
   's3:GetBucketPolicy',
@@ -74,7 +74,7 @@ export interface TenantSetupDeps {
   stage: string;
   /** Region the tenant is provisioned in, sent on `PUT /tenants/{tenantId}`. */
   region: string;
-  /** The region's access model; `iam` adds the bucket-policy permissions to the console key. Defaults to `scoped-keys`. */
+  /** The region's access model; `iam` adds the bucket-policy permissions to the console key. Defaults to `service-keys`. */
   accessModel?: AccessModel;
 }
 

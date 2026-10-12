@@ -48,7 +48,7 @@ import {
 } from '../lib/response-builder.ts';
 import { vendorNameForRotation } from '../lib/rotation-key-name.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import type { IssuedAccessKey, RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -330,7 +330,7 @@ interface Rotation {
   keyId: string;
   /** The row, its permission set having been found present. */
   stored: StoredKey & { permissions: AccessKeyPermission[] };
-  orchestrator: ServiceOrchestrator;
+  orchestrator: RegionOrchestrator;
   tenantId: string;
   /** Who asked. Everything the mint needs about them is derived from this. */
   rotator: { orgId: string; userId: string; email?: string };

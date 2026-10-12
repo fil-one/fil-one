@@ -8,10 +8,11 @@ import type {
 } from '@filone/shared';
 import type { S3ClientContext } from './s3-client.ts';
 import type { OrgProfileItem } from './org-profile.ts';
-import type { IamMethods } from './iam-orchestrator.ts';
+import type { BucketPolicyOrchestrator, MemberOrchestrator } from './iam-orchestrator.ts';
 
 export type {
-  IamMethods,
+  BucketPolicyOrchestrator,
+  MemberOrchestrator,
   IfMatchPrecondition,
   MemberBucketPolicy,
   PolicyPrecondition,
@@ -176,56 +177,8 @@ export interface TenantInfo {
   status?: TenantStatus;
 }
 
-/**
- * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
- * Each implementation handles tenant provisioning, bucket lifecycle,
- * access-key issuance, and presigning for a service orchestrator in a single region.
- *
- * ## Access models
- *
- * {@link ServiceOrchestrator} is a union on `accessModel` over this core. A
- * `scoped-keys` orchestrator is the core alone: every key carries its own
- * permission set and bucket list. An `iam` orchestrator adds {@link IamMethods}
- * under `iam`: members are principals, buckets carry policies, and a key bound
- * to a principal is authorized from those policies on every request. A caller
- * that needs the arm narrows on `accessModel`; every other caller sees the
- * core and compiles unchanged.
- *
- * ## orgId vs tenantId
- *
- * - `orgId` is our internal org identifier — a UUID generated on a user's
- *   first authenticated request and persisted in `UserInfoTable`.
- *   Orchestrator-agnostic, one per org, attached to every request via
- *   `event.requestContext.userInfo.orgId`.
- * - `tenantId` is the orchestrator-specific identifier (e.g. `auroraTenantId`).
- *   It maps 1:1 to `(orgId, orchestratorId)` and is stored on the
- *   `ORG#{orgId}/PROFILE` DDB row.
- *
- * `ensureTenantReady` takes `orgId` because it owns the setup state machine
- * (status, failure counts, transitions) which lives on the org row.
- * `isTenantReady` takes the pre-fetched `ORG#{orgId}/PROFILE` item (see
- * `getOrgProfile`) so callers consulting several orchestrators read the row
- * once. Every other method takes `tenantId` directly — those are stateless
- * calls, and callers are expected to have resolved org → tenant via
- * ensure/isReady first.
- */
-export interface OrchestratorCore {
-  /**
-   * The orchestrator's unique identifier (e.g. `aurora`, `fth`, etc.). It
-   * should have the format `^[a-z][a-zA-Z0-9_]*$`.
-   */
-  readonly id: string;
-  readonly region: S3Region;
-
-  /**
-   * How this backend decides what a credential may do, and therefore which
-   * rules the console applies to it. See {@link getRegionAccessModel}, which
-   * answers the same question for callers holding a region rather than an
-   * orchestrator, and which the registry hands each orchestrator so the two
-   * cannot disagree.
-   */
-  readonly accessModel: AccessModel;
-
+/** Tenant provisioning and lifecycle. */
+export interface TenantOrchestrator {
   /**
    * Resolves the org's tenant on this orchestrator, provisioning it if needed
    * and advancing the setup state machine on the `ORG#{orgId}/PROFILE` row.
@@ -385,15 +338,57 @@ export interface UsageOrchestrator {
   ): Promise<StorageUsageSample[]>;
 }
 
-/** The model before fil-one/RFC#30: a key is authorized from what it was created with. */
-export interface ScopedKeysOrchestrator extends OrchestratorCore {
-  readonly accessModel: 'scoped-keys';
+/**
+ * The features every orchestrator serves: tenants, buckets, access keys and
+ * usage. Aurora and FTH implement only this. Delete it once every deployment
+ * implements {@link ServiceOrchestrator}.
+ */
+export interface LegacyServiceOrchestrator
+  extends TenantOrchestrator, BucketOrchestrator, AccessKeyOrchestrator, UsageOrchestrator {
+  /**
+   * The orchestrator's unique identifier (e.g. `aurora`, `fth`, etc.). It
+   * should have the format `^[a-z][a-zA-Z0-9_]*$`.
+   */
+  readonly id: string;
+  readonly region: S3Region;
 }
 
-/** The fil-one/RFC#30 model: principals, bucket policies, and keys bound to a principal. */
-export interface IamOrchestrator extends OrchestratorCore {
-  readonly accessModel: 'iam';
-  readonly iam: IamMethods;
-}
+/**
+ * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.) in a single
+ * region, composed of one interface per feature. Members are principals,
+ * buckets carry policies, and a key bound to a principal is authorized from
+ * those policies on every request.
+ *
+ * ## orgId vs tenantId
+ *
+ * - `orgId` is our internal org identifier — a UUID generated on a user's
+ *   first authenticated request and persisted in `UserInfoTable`.
+ *   Orchestrator-agnostic, one per org, attached to every request via
+ *   `event.requestContext.userInfo.orgId`.
+ * - `tenantId` is the orchestrator-specific identifier (e.g. `auroraTenantId`).
+ *   It maps 1:1 to `(orgId, orchestratorId)` and is stored on the
+ *   `ORG#{orgId}/PROFILE` DDB row.
+ *
+ * `ensureTenantReady` takes `orgId` because it owns the setup state machine
+ * (status, failure counts, transitions) which lives on the org row.
+ * `isTenantReady` takes the pre-fetched `ORG#{orgId}/PROFILE` item (see
+ * `getOrgProfile`) so callers consulting several orchestrators read the row
+ * once. Every other method takes `tenantId` directly — those are stateless
+ * calls, and callers are expected to have resolved org → tenant via
+ * ensure/isReady first.
+ */
+export interface ServiceOrchestrator
+  extends LegacyServiceOrchestrator, BucketPolicyOrchestrator, MemberOrchestrator {}
 
-export type ServiceOrchestrator = ScopedKeysOrchestrator | IamOrchestrator;
+/** Any region's orchestrator; {@link supportsBucketPolicies} tells the two apart. */
+export type RegionOrchestrator = LegacyServiceOrchestrator | ServiceOrchestrator;
+
+/**
+ * Whether the orchestrator serves bucket policies and members (fil-one/RFC#30).
+ * A caller holding only a region asks {@link getRegionAccessModel} instead.
+ */
+export function supportsBucketPolicies(
+  orchestrator: LegacyServiceOrchestrator,
+): orchestrator is ServiceOrchestrator {
+  return 'putBucketPolicy' in orchestrator;
+}

@@ -66,10 +66,15 @@ import {
   BucketNotFoundError,
   PrincipalNotFoundError,
 } from '../errors.ts';
-import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
+import {
+  supportsBucketPolicies,
+  type IssueAccessKeyOpts,
+  type OrchestratorRequestOptions,
+} from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
-import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
+import { createFilOneOrchestrator } from './filone-orchestrator.ts';
+import type { FilOneOrchestratorConfig } from './orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).
@@ -573,13 +578,13 @@ describe('getBucket', () => {
 });
 
 describe('issueAccessKey bound to a principal', () => {
-  // Only the iam arm mints a principal-bound key.
+  // Only an orchestrator with members mints a principal-bound key.
   const orchestrator = buildOrchestrator({ accessModel: 'iam' });
   const principalKeyCreated = {
     accessKeyId: 'did:key:z6Mk',
     name: 'laptop',
     type: 'principal',
-    principal: 'alice',
+    principalId: 'alice',
     secretAccessKey: 'sk-secret',
     createdAt: '2026-09-16T12:00:00Z',
     expiresAt: null,
@@ -698,12 +703,12 @@ describe('issueAccessKey with a mixed shape', () => {
   });
 });
 
-describe('issueAccessKey on the scoped-keys arm', () => {
-  it('throws without calling the API when a scoped-keys orchestrator gets a principal-bound key', async () => {
-    expect(orchestrator.accessModel).toBe('scoped-keys');
+describe('issueAccessKey on a legacy orchestrator', () => {
+  it('throws without calling the API when a legacy orchestrator gets a principal-bound key', async () => {
+    expect(supportsBucketPolicies(orchestrator)).toBe(false);
     await expect(
       orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
-    ).rejects.toThrow(/iam access model/);
+    ).rejects.toThrow(/needs bucket policies/);
     expect(mockCreateAccessKey).not.toHaveBeenCalled();
   });
 });

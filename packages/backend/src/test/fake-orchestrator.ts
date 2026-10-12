@@ -6,15 +6,11 @@ import type {
   TenantInfo,
 } from '../lib/service-orchestrator.ts';
 import { S3Region, type TenantStatus } from '@filone/shared';
-import type { AccessModel } from '@filone/shared';
-import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
+import { delegateIamMethods, FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 
 export interface FakeOrchestrator {
   id: string;
   region: string;
-  accessModel: AccessModel;
-  /** Present when built with `iam`; see {@link FakeIamOrchestrator}. */
-  iam?: FakeIamOrchestrator;
   isTenantReady: ReturnType<typeof vi.fn>;
   getTenantStatus: ReturnType<typeof vi.fn>;
   updateTenantStatus: ReturnType<typeof vi.fn>;
@@ -32,11 +28,9 @@ export interface FakeOrchestratorOpts {
   status?: TenantStatus;
   /** Region reported by the orchestrator. Defaults to `eu-west-1`. */
   region?: S3Region;
-  /** Access model reported by the orchestrator. Defaults to `scoped-keys`, or `iam` when `iam` is set. */
-  accessModel?: AccessModel;
   /**
-   * Attach the `iam` arm: `true` for a fresh {@link FakeIamOrchestrator}, or
-   * one the test seeded. Sets `accessModel` to `iam`.
+   * Add the bucket-policy and member methods: `true` for a fresh
+   * {@link FakeIamOrchestrator}, or one the test seeded.
    */
   iam?: true | FakeIamOrchestrator;
   /** Storage series returned by `getTenantUsageMetrics`. Defaults to empty. */
@@ -70,8 +64,7 @@ export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): F
   return {
     id,
     region,
-    accessModel: iam ? 'iam' : (opts.accessModel ?? 'scoped-keys'),
-    ...(iam ? { iam } : {}),
+    ...(iam ? delegateIamMethods(iam) : {}),
     isTenantReady: vi.fn((orgProfile?: { pk?: { S?: string } }) => {
       const orgId = orgProfile?.pk?.S?.replace('ORG#', '');
       return ready && orgId ? tenantFor(id, orgId) : null;

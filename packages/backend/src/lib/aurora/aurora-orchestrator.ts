@@ -50,7 +50,7 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   OrchestratorRequestOptions,
-  ScopedKeysOrchestrator,
+  LegacyServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
   TenantInfo,
@@ -254,7 +254,7 @@ export const auroraOrchestrator = {
   ): Promise<IssuedAccessKey> {
     if ('principalId' in keyOpts) {
       throw new Error(
-        'Aurora serves scoped keys; a principal-bound key needs the iam access model',
+        'Aurora serves service keys only; a principal-bound key needs bucket policies',
       );
     }
     const key = await createAuroraAccessKey({
@@ -376,7 +376,7 @@ export const auroraOrchestrator = {
         objectCount: s.objectCount ?? 0,
       }));
   },
-} satisfies ScopedKeysOrchestrator;
+} satisfies LegacyServiceOrchestrator;
 
 // Aurora's metrics API only accepts windows in m/h units, so the
 // orchestrator-agnostic '1d' value is translated before it hits the wire.

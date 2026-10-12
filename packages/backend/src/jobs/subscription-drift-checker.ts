@@ -2,7 +2,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { reportMetric } from '../lib/metrics.ts';
 import { getOrgProfile, isOrgDeletedOrDeleting, type OrgProfileItem } from '../lib/org-profile.ts';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
-import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import { scanSubscriptions } from '../lib/subscription-store.ts';
 
 interface ActiveCandidate {
@@ -98,7 +98,7 @@ async function scanActiveSubscriptions(): Promise<ActiveCandidate[]> {
 // orchestrator counts as missingTenant there.
 async function evaluateCandidate(
   candidate: ActiveCandidate,
-  orchestrator: ServiceOrchestrator,
+  orchestrator: RegionOrchestrator,
   orgProfile: OrgProfileItem | undefined,
   stats: OrchestratorStats,
 ): Promise<void> {

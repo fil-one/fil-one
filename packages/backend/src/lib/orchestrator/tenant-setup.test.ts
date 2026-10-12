@@ -284,11 +284,11 @@ describe('ensureTenantReady', () => {
   });
 
   // Only an iam region's storage system knows the policy actions; a
-  // scoped-keys region refuses the whole key request over them.
-  it('omits the bucket-policy permissions from the console key on a scoped-keys region', async () => {
+  // service-keys region refuses the whole key request over them.
+  it('omits the bucket-policy permissions from the console key on a service-keys region', async () => {
     stubHappyPath();
 
-    await ensureTenantReady({ ...deps, accessModel: 'scoped-keys' }, orgId);
+    await ensureTenantReady({ ...deps, accessModel: 'service-keys' }, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
     expect(permissions).toStrictEqual(consoleKeyPermissions);

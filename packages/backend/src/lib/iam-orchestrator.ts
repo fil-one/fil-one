@@ -1,4 +1,4 @@
-// The `iam` half of the orchestrator interface: what Hilt, Forge's storage
+// The bucket-policy and member parts of the orchestrator interface: what Hilt, Forge's storage
 // gateway, offers once it serves principals and bucket policies
 // (fil-one/RFC#30). The principal methods are management-API calls under the
 // partner key; the policy methods are the S3 bucket policy operations signed
@@ -35,20 +35,8 @@ export type PolicyPrecondition =
 /** The precondition a delete carries; a delete never creates. */
 export type IfMatchPrecondition = { ifMatch: string };
 
-export interface IamMethods {
-  /**
-   * Asserts the member exists as a principal, so a key can bind to it and a
-   * statement can name it. Idempotent; carries no permissions. Revives a
-   * removed principal with nothing attached.
-   */
-  syncMember(tenantId: string, userId: string): Promise<void>;
-
-  /**
-   * Removes the principal, every key bound to it, and every statement naming
-   * it. Idempotent: a principal that is already gone is success.
-   */
-  removeMember(tenantId: string, userId: string): Promise<void>;
-
+/** Bucket policies, read and written over S3 with the tenant's console key. */
+export interface BucketPolicyOrchestrator {
   /** The bucket's policy, or null when the bucket exists and has none. Throws {@link BucketNotFoundError} otherwise. */
   getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null>;
 
@@ -75,6 +63,22 @@ export interface IamMethods {
     bucketName: string,
     precondition?: IfMatchPrecondition,
   ): Promise<void>;
+}
+
+/** Members as principals at the storage system. */
+export interface MemberOrchestrator {
+  /**
+   * Asserts the member exists as a principal, so a key can bind to it and a
+   * statement can name it. Idempotent; carries no permissions. Revives a
+   * removed principal with nothing attached.
+   */
+  syncMember(tenantId: string, userId: string): Promise<void>;
+
+  /**
+   * Removes the principal, every key bound to it, and every statement naming
+   * it. Idempotent: a principal that is already gone is success.
+   */
+  removeMember(tenantId: string, userId: string): Promise<void>;
 
   /** Every policy with a statement naming the member or everyone. */
   listBucketPoliciesForMember(tenantId: string, userId: string): Promise<MemberBucketPolicy[]>;
@@ -82,7 +86,7 @@ export interface IamMethods {
   /**
    * The member's effective actions per bucket, computed by the storage system
    * from its own tables, so the answer is consistent with its last write.
-   * Buckets the member cannot reach are absent.
+   * Buckets the member cannot access are absent.
    */
   resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]>;
 }
