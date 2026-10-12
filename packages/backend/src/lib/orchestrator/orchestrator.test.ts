@@ -593,6 +593,20 @@ describe('deleteBucket', () => {
   });
 });
 
+const MEMBER_ID = 'user-1';
+
+// Two buckets exist in the tenant; the gateway returns both whatever key
+// signs, because every principal holds `s3:ListAllMyBuckets`.
+function stubTenantListing() {
+  stubS3Credentials();
+  s3Mock.on(ListBucketsCommand).resolves({
+    Buckets: [
+      { Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') },
+      { Name: 'backups', CreationDate: new Date('2026-01-02T00:00:00Z') },
+    ],
+  });
+}
+
 describe('listBuckets', () => {
   it('maps S3 gateway buckets to summaries without a per-bucket versioning read', async () => {
     stubS3Credentials();
@@ -616,88 +630,89 @@ describe('listBuckets', () => {
       },
     ]);
   });
+
+  it('returns every tenant bucket on a scoped-keys region even when a member is named', async () => {
+    stubTenantListing();
+
+    const result = await orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
+
+    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos', 'backups']);
+    expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
+  });
 });
 
 describe('listBuckets on an iam region', () => {
   const iamOrchestrator = buildOrchestrator({ accessModel: 'iam' });
-  const member = 'user-1';
 
-  // Two buckets exist in the tenant; the gateway returns both whatever key
-  // signs, because every principal holds `s3:ListAllMyBuckets`.
-  function stubTenantListing() {
-    stubS3Credentials();
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [
-        { Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') },
-        { Name: 'backups', CreationDate: new Date('2026-01-02T00:00:00Z') },
-      ],
-    });
-  }
-
-  const reaches = (...names: string[]) => ({
-    data: { buckets: names.map((name) => ({ name, actions: ['s3:ListBucket'] })) },
+  const buildAccessResponse = (...bucketNames: string[]) => ({
+    data: { buckets: bucketNames.map((name) => ({ name, actions: ['s3:ListBucket'] })) },
     error: undefined,
     response: { status: 200 },
   });
 
-  it('keeps only the buckets the member reaches', async () => {
+  it('returns only the buckets the access lookup lists for the member', async () => {
     stubTenantListing();
-    mockGetPrincipalAccess.mockReturnValue(reaches('photos'));
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
 
-    const result = await iamOrchestrator.listBuckets(tenantId, { actAs: member });
+    const result = await iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
 
     expect(result.map((b) => b.bucketName)).toStrictEqual(['photos']);
+  });
+
+  it('looks up access for the named member in the tenant', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
+
+    await iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
+
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
-      expect.objectContaining({ path: { tenantId, principalId: member } }),
+      expect.objectContaining({ path: { tenantId, principalId: MEMBER_ID } }),
     );
   });
 
-  it('returns the tenant listing untouched when no member is named', async () => {
+  it('returns every tenant bucket without an access lookup when no member is named', async () => {
     stubTenantListing();
 
+    // Tenant-wide callers omit the member and must keep seeing every bucket.
     const result = await iamOrchestrator.listBuckets(tenantId);
 
-    // The fence for the roster fan-out, the usage handler and the activity
-    // feed: they omit `actAs` and must keep seeing every bucket.
     expect(result.map((b) => b.bucketName)).toStrictEqual(['photos', 'backups']);
     expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
   });
 
-  it('rejects rather than answering unfiltered when the access lookup fails', async () => {
+  it('rejects when the access lookup fails', async () => {
     stubTenantListing();
     mockGetPrincipalAccess.mockReturnValue(fail(503));
 
     // The caller's fan-out turns this into an unavailable region. Returning the
     // tenant listing here would hand the member every bucket name it holds.
-    await expect(iamOrchestrator.listBuckets(tenantId, { actAs: member })).rejects.toThrow();
+    await expect(
+      iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID }),
+    ).rejects.toThrow(
+      new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),
+    );
   });
 
-  it('answers with an empty list for a member who reaches nothing', async () => {
+  it('returns no buckets when the member can access none', async () => {
     stubTenantListing();
-    mockGetPrincipalAccess.mockReturnValue(reaches());
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse());
 
-    await expect(iamOrchestrator.listBuckets(tenantId, { actAs: member })).resolves.toStrictEqual(
-      [],
-    );
+    await expect(
+      iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID }),
+    ).resolves.toStrictEqual([]);
   });
 
   it('forwards the signal to the access lookup as well as S3', async () => {
     stubTenantListing();
-    mockGetPrincipalAccess.mockReturnValue(reaches('photos'));
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
     const signal = new AbortController().signal;
 
-    await iamOrchestrator.listBuckets(tenantId, { actAs: member, signal });
+    await iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID, signal });
 
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
-  });
-
-  it('ignores the named member on a scoped-keys region', async () => {
-    stubTenantListing();
-
-    const result = await orchestrator.listBuckets(tenantId, { actAs: member });
-
-    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos', 'backups']);
-    expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
+    // aws-sdk-client-mock types `args` as `[command]`, but the call carries the send options too.
+    const [listCall] = s3Mock.commandCalls(ListBucketsCommand) as Array<{ args: unknown[] }>;
+    expect(listCall.args[1]).toStrictEqual({ abortSignal: signal });
   });
 });
 

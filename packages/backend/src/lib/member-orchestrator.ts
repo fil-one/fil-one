@@ -39,6 +39,6 @@ export interface MemberOrchestrator {
   resolveMemberAccess(
     tenantId: string,
     userId: string,
-    opts?: OrchestratorRequestOptions,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<MemberBucketAccess[]>;
 }

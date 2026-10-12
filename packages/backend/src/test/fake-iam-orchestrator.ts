@@ -147,7 +147,7 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
   async resolveMemberAccess(
     tenantId: string,
     userId: string,
-    _opts?: OrchestratorRequestOptions,
+    _requestOptions?: OrchestratorRequestOptions,
   ): Promise<MemberBucketAccess[]> {
     this.recordCall('resolveMemberAccess', tenantId, userId);
     this.throwInjectedFailure('resolveMemberAccess');
