@@ -44,7 +44,7 @@ export interface CreateBucketArgs {
   lock?: boolean;
   /**
    * The policy the bucket starts with, on a region serving the `iam` access
-   * model. Never set on a `scoped-keys` region.
+   * model. Never set on a `service-keys` region.
    */
   policy?: BucketPolicy;
   retention?: {

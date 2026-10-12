@@ -154,7 +154,7 @@ describe('commitAfterRevokingKeys', () => {
 
   it('answers the fence itself, so the caller cannot mistake it for its own item', async () => {
     // A key was minted after the listing. The keys already revoked went before
-    // it did, so they ride the arm the caller has to answer.
+    // it did, so they ride the result the caller has to answer.
     ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(ITEMS.length, ITEMS.length + 2));
 
     expect(await commit()).toStrictEqual({ keyMinted: REVOKED });

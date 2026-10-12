@@ -11,7 +11,7 @@ import {
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import { supportsBucketPolicies, type RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import {
   BucketAlreadyExistsError,
   BucketConfigurationError,
@@ -134,16 +134,16 @@ export async function baseHandler(
 
 /**
  * Loads the policy a new bucket starts with:
- * 1. On a `scoped-keys` orchestrator, returns `undefined`.
+ * 1. On a `service-keys` orchestrator, returns `undefined`.
  * 2. Otherwise reads the org's members and splits them into Owners and Admins.
  * 3. Builds the policy with `getDefaultBucketPolicy`.
  */
 async function loadDefaultBucketPolicy(
-  orchestrator: ServiceOrchestrator,
+  orchestrator: RegionOrchestrator,
   orgId: string,
   creatorId: string,
 ): Promise<BucketPolicy | undefined> {
-  if (orchestrator.accessModel !== 'iam') return undefined;
+  if (!supportsBucketPolicies(orchestrator)) return undefined;
   const members = await listMembers(orgId);
   return getDefaultBucketPolicy({
     owners: members.filter((m) => m.role === OrgRole.Owner).map((m) => m.userId),

@@ -32,7 +32,7 @@ import {
   unsupportedRegionResponse,
 } from './response-builder.ts';
 import { getOrchestratorForRegion } from './service-orchestrator-registry.ts';
-import type { ServiceOrchestrator } from './service-orchestrator.ts';
+import { supportsBucketPolicies, type ServiceOrchestrator } from './service-orchestrator.ts';
 import type { AuthenticatedEvent } from './user-context.ts';
 
 /** The bucket and region a policy route is about. */
@@ -163,9 +163,9 @@ export function policyConflictResponse(status: 409 | 412): APIGatewayProxyStruct
 }
 
 /**
- * The console's answer to each refusal the orchestrator's `iam` arm can raise,
- * or undefined for an error that is not one of them, which the caller rethrows
- * into the generic 500.
+ * The console's answer to each refusal the orchestrator's bucket-policy
+ * methods can raise, or undefined for an error that is not one of them, which
+ * the caller rethrows into the generic 500.
  *
  * A failed publish is a 503 rather than a 500: the storage system committed
  * nothing and the same request may be sent again, which is what a 503 tells a

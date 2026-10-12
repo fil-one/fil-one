@@ -78,7 +78,11 @@ import {
   PrincipalNotFoundError,
 } from '../errors.ts';
 import { grantGetObjectToUser } from '../../test/bucket-policy-fixture.ts';
-import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
+import {
+  supportsBucketPolicies,
+  type IssueAccessKeyOpts,
+  type OrchestratorRequestOptions,
+} from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
 import { FilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
