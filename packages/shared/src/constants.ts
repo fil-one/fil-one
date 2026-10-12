@@ -125,22 +125,54 @@ export function supportsBucketManagement(region: S3Region): boolean {
  *
  * `iam`: each member is a principal at the storage system, an access key
  * belongs to a member, and the key's authority is the member's as evaluated at
- * request time. No region declares it yet.
+ * request time.
  */
 export type AccessModel = 'service-keys' | 'iam';
 
+const ACCESS_MODELS: readonly AccessModel[] = ['service-keys', 'iam'];
+
+/** A Forge network, by the orchestrator id it is registered under. */
+export type ForgeNetwork = 'forge' | 'forgeDev';
+
 /**
- * The access model a region's backend serves. Every region is `service-keys`
- * today: Aurora and FTH cannot model a principal, and the Forge integration
- * issues flat-permission keys through the Management API, which is the same
- * shape. A Forge region moves to `iam` when its Hilt network implements the
- * principal-and-policy contract.
- *
- * Mirrored here rather than read off the orchestrator so the console can decide
- * without one in hand.
+ * The access model each Forge network serves. It comes from deploy config, so
+ * a network moves to `iam` when its Hilt does, without a code change.
  */
-export function getRegionAccessModel(_region: S3Region): AccessModel {
-  return 'service-keys';
+export type NetworkAccessModels = Record<ForgeNetwork, AccessModel>;
+
+const FORGE_NETWORK_BY_REGION: Partial<Record<S3Region, ForgeNetwork>> = {
+  [S3Region.EuCentral3]: 'forge',
+  [S3Region.UsEast9]: 'forgeDev',
+};
+
+/** The Forge network serving a region, or undefined for the Aurora and FTH regions. */
+export function getRegionNetwork(region: S3Region): ForgeNetwork | undefined {
+  return FORGE_NETWORK_BY_REGION[region];
+}
+
+/**
+ * The access model a network serves. A region on no Forge network serves
+ * service keys: Aurora and FTH cannot model a principal.
+ */
+export function getNetworkAccessModel(
+  network: ForgeNetwork | undefined,
+  networkAccessModels: NetworkAccessModels,
+): AccessModel {
+  return network ? networkAccessModels[network] : 'service-keys';
+}
+
+/**
+ * Reads an access model from deploy config. Unset means `service-keys`; any
+ * other value outside {@link AccessModel} is a misconfiguration and throws, so
+ * a typo cannot quietly turn a network's IAM off.
+ */
+export function parseAccessModel(value: string | undefined): AccessModel {
+  if (!value) return 'service-keys';
+  const model = ACCESS_MODELS.find((candidate) => candidate === value);
+  if (!model) {
+    throw new Error(`Unknown access model "${value}"; expected ${ACCESS_MODELS.join(' or ')}`);
+  }
+  return model;
 }
 
 /**

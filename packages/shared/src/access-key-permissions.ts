@@ -4,7 +4,8 @@ import type {
   GranularPermission,
   ObjectPermission,
 } from './api/access-keys.ts';
-import { getRegionAccessModel } from './constants.ts';
+import { getNetworkAccessModel, getRegionNetwork } from './constants.ts';
+import type { NetworkAccessModels } from './constants.ts';
 import type { S3Region } from './constants.ts';
 import { permissionsForRole, roleHasPermission } from './permissions.ts';
 import type { Permission } from './permissions.ts';
@@ -191,13 +192,17 @@ export type KeyRetentionResult =
  * The caller decides whose keys to ask about. A row with no `createdBy` belongs
  * to nobody the console can name and is outside this rule entirely.
  */
-export function canRetainAccessKey(role: string, key: ServiceKeyGrant): KeyRetentionResult {
+export function canRetainAccessKey(
+  role: string,
+  key: ServiceKeyGrant,
+  networkAccessModels: NetworkAccessModels,
+): KeyRetentionResult {
   if (!roleHasPermission(role, 'keys.create')) {
     return { retained: false, reason: 'role_cannot_mint' };
   }
   if (
     key.region &&
-    getRegionAccessModel(key.region) === 'iam' &&
+    getNetworkAccessModel(getRegionNetwork(key.region), networkAccessModels) === 'iam' &&
     !roleHasPermission(role, 'keys.create_service')
   ) {
     return { retained: false, reason: 'role_cannot_mint' };

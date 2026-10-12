@@ -14,7 +14,9 @@ export {
   getAvailableRegions,
   isSupportedRegion,
   supportsBucketManagement,
-  getRegionAccessModel,
+  getNetworkAccessModel,
+  getRegionNetwork,
+  parseAccessModel,
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
@@ -36,7 +38,14 @@ export {
   getUsageLimits,
   senderAddress,
 } from './constants.ts';
-export type { AccessModel, UsageLimits, StageLike, S3RegionLike } from './constants.ts';
+export type {
+  AccessModel,
+  ForgeNetwork,
+  NetworkAccessModels,
+  UsageLimits,
+  StageLike,
+  S3RegionLike,
+} from './constants.ts';
 export { formatBytes, formatBytesShort, bytesAxisFormatter } from './formatBytes.ts';
 export { UUID_PATTERN, isUuid } from './uuid.ts';
 export type {

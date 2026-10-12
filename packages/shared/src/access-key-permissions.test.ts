@@ -1,17 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { OrgRole } from './api/org.ts';
 import { S3Region } from './constants.ts';
 
-// No region declares `iam` yet; the mock stands one up so the service-key rule
-// can be exercised before the first such region ships.
-vi.mock('./constants.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./constants.ts')>();
-  return {
-    ...actual,
-    getRegionAccessModel: (region: string) =>
-      region === actual.S3Region.UsEast9 ? 'iam' : 'service-keys',
-  };
-});
 import {
   ACCESS_KEY_PERMISSIONS,
   GRANULAR_PERMISSIONS,
@@ -24,6 +14,14 @@ import {
   canRetainAccessKey,
 } from './access-key-permissions.ts';
 import type { ServiceKeyGrant } from './access-key-permissions.ts';
+import type { NetworkAccessModels } from './constants.ts';
+
+const SERVICE_KEYS_EVERYWHERE: NetworkAccessModels = {
+  forge: 'service-keys',
+  forgeDev: 'service-keys',
+};
+/** The dev network (us-east-9) serves `iam`; the staging network does not. */
+const DEV_ON_IAM: NetworkAccessModels = { forge: 'service-keys', forgeDev: 'iam' };
 
 /** The two granulars a key may carry only with `privileged.grant`. */
 const ELEVATED = ['PutObjectRetention', 'PutObjectLegalHold'];
@@ -204,7 +202,10 @@ describe('canRetainAccessKey', () => {
 
   function retentionFor(role: string) {
     return Object.fromEntries(
-      Object.entries(KEYS).map(([name, key]) => [name, canRetainAccessKey(role, key)]),
+      Object.entries(KEYS).map(([name, key]) => [
+        name,
+        canRetainAccessKey(role, key, SERVICE_KEYS_EVERYWHERE),
+      ]),
     );
   }
 
@@ -269,7 +270,9 @@ describe('canRetainAccessKey', () => {
   );
 
   it('reads an empty permission list as a recorded set, and keeps it', () => {
-    expect(canRetainAccessKey(OrgRole.Member, { permissions: [] })).toStrictEqual(KEPT);
+    expect(
+      canRetainAccessKey(OrgRole.Member, { permissions: [] }, SERVICE_KEYS_EVERYWHERE),
+    ).toStrictEqual(KEPT);
   });
 
   // Bucket policies never see a service key, so on an `iam` region only a role
@@ -280,16 +283,22 @@ describe('canRetainAccessKey', () => {
   };
 
   it('takes a service key on an iam region from a Member, who lacks keys.create_service', () => {
-    expect(canRetainAccessKey(OrgRole.Member, iamServiceKey)).toStrictEqual(CANNOT_MINT);
+    expect(canRetainAccessKey(OrgRole.Member, iamServiceKey, DEV_ON_IAM)).toStrictEqual(
+      CANNOT_MINT,
+    );
   });
 
   it('keeps a service key on an iam region for an Admin', () => {
-    expect(canRetainAccessKey(OrgRole.Admin, iamServiceKey)).toStrictEqual(KEPT);
+    expect(canRetainAccessKey(OrgRole.Admin, iamServiceKey, DEV_ON_IAM)).toStrictEqual(KEPT);
   });
 
-  it('keeps a key on a service-keys region for a Member', () => {
-    expect(
-      canRetainAccessKey(OrgRole.Member, { ...iamServiceKey, region: S3Region.EuWest1 }),
-    ).toStrictEqual(KEPT);
-  });
+  // The staging network serves service keys while the dev network serves iam.
+  it.each([S3Region.EuCentral3, S3Region.EuWest1])(
+    'keeps a key on %s, a region whose network serves service keys, for a Member',
+    (region) => {
+      expect(
+        canRetainAccessKey(OrgRole.Member, { ...iamServiceKey, region }, DEV_ON_IAM),
+      ).toStrictEqual(KEPT);
+    },
+  );
 });

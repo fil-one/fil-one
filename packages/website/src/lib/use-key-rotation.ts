@@ -8,6 +8,7 @@ import { apiRequest } from './api.js';
 import { queryClient, queryKeys } from './query-client.js';
 import { useKeyActionScope } from './use-key-scope.js';
 import { useHasPermission, usePermissions } from './use-permissions.js';
+import { getNetworkAccessModels } from './access-model.js';
 
 /** The credential a rotation hands back, shown once and then gone. */
 interface NewCredentials {
@@ -101,6 +102,7 @@ export function useKeyRotation(): {
       mayCreate &&
       mayRevoke(key) &&
       role !== undefined &&
-      (key.type === 'principal' || canRetainAccessKey(role, key).retained),
+      (key.type === 'principal' ||
+        canRetainAccessKey(role, key, getNetworkAccessModels()).retained),
   };
 }

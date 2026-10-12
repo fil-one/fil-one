@@ -53,8 +53,13 @@ its creator's authority. It left bucket scope to this milestone.
 
 ## Proposed access model
 
-Each region declares the model its backend serves, `getRegionAccessModel(region)`
-returning `'service-keys' | 'iam'`.
+Each Forge network declares the model its backend serves, `'service-keys' |
+'iam'`, in deploy config: the console's env file for the stage carries
+`VITE_FORGE_ACCESS_MODEL` and `VITE_FORGE_DEV_ACCESS_MODEL`, and `sst.config.ts`
+hands the backend the same values. A network moves to `iam` when its Hilt does,
+with no code change. A region takes the model of the network serving it
+(`getRegionNetwork`, `getNetworkAccessModel`); Aurora and FTH serve
+`service-keys`.
 
 A **principal** is a member as the storage system knows them, `(tenantId,
 userId)` and nothing more. It carries no permissions of its own: the storage
@@ -259,7 +264,7 @@ which every orchestrator serves, plus `BucketPolicyOrchestrator` and
 `LegacyServiceOrchestrator` extends only the first four; Aurora, FTH and a Forge
 region not yet on IAM implement it, and it goes once every deployment implements
 `ServiceOrchestrator`. A caller narrows with `supportsBucketPolicies`, and a
-caller holding only a region asks `getRegionAccessModel`.
+caller holding only a region asks the model of the region's network.
 
 The policy and member methods are shaped after AWS IAM, minus its request bodies:
 
