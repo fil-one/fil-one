@@ -1,7 +1,7 @@
 // What the console does on behalf of one member on a region serving the `iam`
 // access model: which buckets the member can access.
 
-import type { IamMethods } from '../iam-orchestrator.ts';
+import type { MemberOrchestrator } from '../iam-orchestrator.ts';
 import type { BucketSummary, ListBucketsOptions } from '../service-orchestrator.ts';
 
 /**
@@ -21,14 +21,14 @@ import type { BucketSummary, ListBucketsOptions } from '../service-orchestrator.
  * Owner or an Admin is unscoped and never gets to this filter.
  */
 export async function filterBucketsByMemberAccess(
-  iam: IamMethods,
+  members: MemberOrchestrator,
   buckets: Promise<BucketSummary[]>,
   tenantId: string,
   requestOptions: ListBucketsOptions & { scopeToMemberId: string },
 ): Promise<BucketSummary[]> {
   const [listedBuckets, access] = await Promise.all([
     buckets,
-    iam.resolveMemberAccess(tenantId, requestOptions.scopeToMemberId, {
+    members.resolveMemberAccess(tenantId, requestOptions.scopeToMemberId, {
       signal: requestOptions.signal,
     }),
   ]);
