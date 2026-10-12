@@ -27,17 +27,26 @@ describe('CreateBulkDeleteJobSchema', () => {
   });
 
   it('requires an idempotency key', () => {
-    expect(CreateBulkDeleteJobSchema.safeParse({}).success).toBe(false);
+    expect(CreateBulkDeleteJobSchema.safeParse({})).toMatchZodValidationError({
+      code: 'invalid_type',
+      path: ['idempotencyKey'],
+    });
   });
 
   it('rejects a non-UUID idempotency key', () => {
-    expect(CreateBulkDeleteJobSchema.safeParse({ idempotencyKey: 'nope' }).success).toBe(false);
+    expect(
+      CreateBulkDeleteJobSchema.safeParse({ idempotencyKey: 'nope' }),
+    ).toMatchZodValidationError({
+      code: 'invalid_format',
+      format: 'uuid',
+      path: ['idempotencyKey'],
+    });
   });
 
   it('rejects an unknown scope', () => {
     expect(
-      CreateBulkDeleteJobSchema.safeParse({ idempotencyKey, scope: 'everything' }).success,
-    ).toBe(false);
+      CreateBulkDeleteJobSchema.safeParse({ idempotencyKey, scope: 'everything' }),
+    ).toMatchZodValidationError({ code: 'invalid_value', path: ['scope'] });
   });
 });
 

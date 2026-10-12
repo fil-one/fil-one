@@ -22,9 +22,18 @@ describe('CreateRagApiKeySchema', () => {
 
   it('trims and validates the key name like access keys', () => {
     expect(CreateRagApiKeySchema.parse({ keyName: '  ok name  ' }).keyName).toBe('ok name');
-    expect(CreateRagApiKeySchema.safeParse({ keyName: '' }).success).toBe(false);
-    expect(CreateRagApiKeySchema.safeParse({ keyName: 'bad/name' }).success).toBe(false);
-    expect(CreateRagApiKeySchema.safeParse({ keyName: 'x'.repeat(65) }).success).toBe(false);
+    expect(CreateRagApiKeySchema.safeParse({ keyName: '' })).toMatchZodValidationError(
+      { code: 'too_small', path: ['keyName'] },
+      { code: 'invalid_format', path: ['keyName'] },
+    );
+    expect(CreateRagApiKeySchema.safeParse({ keyName: 'bad/name' })).toMatchZodValidationError({
+      code: 'invalid_format',
+      path: ['keyName'],
+    });
+    expect(CreateRagApiKeySchema.safeParse({ keyName: 'x'.repeat(65) })).toMatchZodValidationError({
+      code: 'too_big',
+      path: ['keyName'],
+    });
   });
 
   it('rejects specific scope without buckets', () => {
@@ -34,7 +43,10 @@ describe('CreateRagApiKeySchema', () => {
         bucketScope: 'specific',
         buckets,
       });
-      expect(result.success).toBe(false);
+      expect(result, `buckets: ${JSON.stringify(buckets)}`).toMatchZodValidationError({
+        path: ['buckets'],
+        message: 'At least one bucket is required when scope is "specific"',
+      });
     }
   });
 
@@ -44,7 +56,10 @@ describe('CreateRagApiKeySchema', () => {
       bucketScope: 'all',
       buckets: [BUCKET],
     });
-    expect(result.success).toBe(false);
+    expect(result).toMatchZodValidationError({
+      path: ['buckets'],
+      message: 'Buckets must not be provided when scope is "all"',
+    });
   });
 
   it('rejects duplicate (region, name) pairs but allows the same name across regions', () => {
@@ -53,14 +68,17 @@ describe('CreateRagApiKeySchema', () => {
       bucketScope: 'specific',
       buckets: [BUCKET, { ...BUCKET }],
     });
-    expect(dup.success).toBe(false);
+    expect(dup).toMatchZodValidationError({
+      path: ['buckets'],
+      message: 'Duplicate bucket in scope',
+    });
 
     const crossRegion = CreateRagApiKeySchema.safeParse({
       keyName: 'k',
       bucketScope: 'specific',
       buckets: [BUCKET, { region: S3Region.UsEast1, name: BUCKET.name }],
     });
-    expect(crossRegion.success).toBe(true);
+    expect(crossRegion).toMatchObject({ success: true });
   });
 
   it('rejects more than RAG_KEY_MAX_BUCKETS buckets', () => {
@@ -73,7 +91,11 @@ describe('CreateRagApiKeySchema', () => {
       bucketScope: 'specific',
       buckets,
     });
-    expect(result.success).toBe(false);
+    expect(result).toMatchZodValidationError({
+      code: 'too_big',
+      maximum: RAG_KEY_MAX_BUCKETS,
+      path: ['buckets'],
+    });
   });
 
   it('rejects invalid regions in bucket refs', () => {
@@ -82,6 +104,9 @@ describe('CreateRagApiKeySchema', () => {
       bucketScope: 'specific',
       buckets: [{ region: 'mars-central-1', name: 'my-bucket' }],
     });
-    expect(result.success).toBe(false);
+    expect(result).toMatchZodValidationError({
+      code: 'invalid_value',
+      path: ['buckets', 0, 'region'],
+    });
   });
 });

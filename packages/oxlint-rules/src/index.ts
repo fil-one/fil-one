@@ -1,10 +1,12 @@
 import { definePlugin } from '@oxlint/plugins';
+import { noBareSuccessAssertions } from './rules/no-bare-success-assertions.ts';
 import { noJsDynamicImport } from './rules/no-js-dynamic-import.ts';
 import { noTextLocators } from './rules/no-text-locators.ts';
 
 export default definePlugin({
   meta: { name: '@filone/oxlint-rules' },
   rules: {
+    'no-bare-success-assertions': noBareSuccessAssertions,
     'no-js-dynamic-import': noJsDynamicImport,
     'no-text-locators': noTextLocators,
   },

@@ -1,81 +1,55 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import {
-  DynamoDBClient,
-  DeleteItemCommand,
-  GetItemCommand,
-  PutItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
+import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
-import { type MetricEvent, reportMetric } from '../lib/metrics.ts';
-import { SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
 vi.mock('sst', () => ({
-  Resource: {
-    BillingTable: { name: 'BillingTable' },
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
+  Resource: { BillingTable: { name: 'BillingTable' } },
 }));
 
-// The orchestrator registry instantiates real clients at import time; mock it
-// so the otherwise-real region-helpers module can be loaded below.
-vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  getAvailableOrchestrators: () => [],
-}));
-
-const mockSyncTenantStatusInProvisionedRegions = vi.fn();
-vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../lib/region-helpers.ts')>()),
-  syncTenantStatusInProvisionedRegions: (...args: unknown[]) =>
-    mockSyncTenantStatusInProvisionedRegions(...args),
-}));
+// The webhook acknowledges Stripe before any processing, so it must not even
+// load the orchestrator clients: importing them costs cold-start time, and
+// this mock fails the whole file if anything on the webhook's import path does.
+// The module mocks below spread the real modules so their imports load too.
+vi.mock('../lib/service-orchestrator-registry.ts', () => {
+  throw new Error('the Stripe webhook must not load the orchestrator registry');
+});
 
 const mockConstructEvent = vi.fn();
 const mockCustomersRetrieve = vi.fn();
-const mockPaymentMethodsRetrieve = vi.fn();
 
-vi.mock('../lib/stripe-client.ts', () => ({
+vi.mock('../lib/stripe-client.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/stripe-client.ts')>()),
   getStripeClient: () => ({
     webhooks: { constructEvent: mockConstructEvent },
     customers: { retrieve: mockCustomersRetrieve },
-    paymentMethods: { retrieve: mockPaymentMethodsRetrieve },
   }),
   getWebhookSecret: vi.fn().mockResolvedValue('whsec_test_fake'),
 }));
 
-const mockStartDeletion = vi.fn(async (_params: unknown) => undefined);
-vi.mock('../lib/deletion-from-stripe.ts', () => ({
-  startDeletionFromStripe: (params: unknown) => mockStartDeletion(params),
+const mockEnqueueStripeEvent = vi.fn();
+vi.mock('../lib/stripe-event-queue.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/stripe-event-queue.ts')>()),
+  enqueueStripeEvent: (...args: unknown[]) => mockEnqueueStripeEvent(...args),
 }));
-
-vi.mock('../lib/metrics.ts', () => ({
-  reportMetric: vi.fn(),
-}));
-
-const reportMetricMock = vi.mocked(reportMetric);
 
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-webhook.ts';
-import { WEBHOOK_STATUS_SYNC_RETRY } from '../lib/region-helpers.ts';
-import { BILLING_IDENTITY_PROJECTION } from '../lib/subscription-store.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const TABLE_NAME = 'BillingTable';
-const MOCK_USER_ID = 'test-user-uuid';
-const MOCK_CUSTOMER_ID = 'cus_test_123';
-const MOCK_SUBSCRIPTION_ID = 'sub_test_456';
-const MOCK_EVENT_ID = 'evt_test_789';
-const MOCK_ORG_ID = 'test-org-uuid';
+const STRIPE_EVENT = {
+  id: 'evt_test_789',
+  type: 'invoice.payment_failed',
+  data: { object: { object: 'invoice', customer: 'cus_test_123' } },
+};
 
 function buildWebhookEvent(body: string, opts?: { isBase64Encoded?: boolean }) {
   const evt = buildEvent();
@@ -85,194 +59,31 @@ function buildWebhookEvent(body: string, opts?: { isBase64Encoded?: boolean }) {
   return evt;
 }
 
-function mockSubscription(overrides?: Record<string, unknown>) {
-  return {
-    id: MOCK_SUBSCRIPTION_ID,
-    customer: MOCK_CUSTOMER_ID,
-    status: 'active',
-    metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
-    items: {
-      data: [
-        {
-          current_period_start: 1600000000,
-          current_period_end: 1700000000,
-        },
-      ],
-    },
-    ...overrides,
-  };
-}
-
-function mockInvoice(overrides?: Record<string, unknown>) {
-  return {
-    id: 'in_test_001',
-    customer: MOCK_CUSTOMER_ID,
-    ...overrides,
-  };
-}
-
-/**
- * An invoice carrying the subscription metadata Stripe snapshots onto it at
- * finalization, which is where an invoice event learns its org.
- */
-function mockInvoiceForOrgSubscription(overrides?: Record<string, unknown>) {
-  return mockInvoice({
-    parent: {
-      subscription_details: {
-        subscription: MOCK_SUBSCRIPTION_ID,
-        metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
-      },
-    },
-    ...overrides,
-  });
-}
-
-function setupStripeEvent(type: string, object: unknown) {
-  mockConstructEvent.mockReturnValue({
-    id: MOCK_EVENT_ID,
-    type,
-    data: { object },
-  });
-}
-
-function setupCustomerRetrieve(userId?: string, orgId?: string) {
-  mockCustomersRetrieve.mockResolvedValue({
-    id: MOCK_CUSTOMER_ID,
-    deleted: false,
-    metadata: { userId: userId ?? MOCK_USER_ID, orgId: orgId ?? MOCK_ORG_ID },
-  });
-}
-
-/** A customer whose metadata names no org, so no billing row can be addressed for it. */
-function setupCustomerRetrieveWithoutOrg() {
-  mockCustomersRetrieve.mockResolvedValue({
-    id: MOCK_CUSTOMER_ID,
-    deleted: false,
-    metadata: { userId: MOCK_USER_ID },
-  });
-}
-
-/**
- * What the stored billing row names, for the guards that compare it against the
- * event in hand. Keyed on the projection so it does not answer the org-resolution
- * read, which projects `orgId`.
- */
-function setupStoredIdentity(identity: { subscriptionId?: string; stripeCustomerId?: string }) {
-  ddbMock
-    .on(GetItemCommand, { ProjectionExpression: BILLING_IDENTITY_PROJECTION })
-    .resolves({ Item: marshall(identity) });
-}
-
-function setupDeletedCustomerRetrieve() {
-  mockCustomersRetrieve.mockResolvedValue({
-    id: MOCK_CUSTOMER_ID,
-    deleted: true,
-  });
-}
-
-const MOCK_PM_ID = 'pm_test_abc';
-const MOCK_PM_LAST4 = '3184';
-const MOCK_PM_BRAND = 'visa';
-const MOCK_PM_EXP_MONTH = 12;
-const MOCK_PM_EXP_YEAR = 2030;
-
-function mockPaymentMethod(overrides?: Record<string, unknown>) {
-  return {
-    id: MOCK_PM_ID,
-    card: {
-      last4: MOCK_PM_LAST4,
-      brand: MOCK_PM_BRAND,
-      exp_month: MOCK_PM_EXP_MONTH,
-      exp_year: MOCK_PM_EXP_YEAR,
-    },
-    ...overrides,
-  };
-}
-
-function mockCustomerObject(overrides?: Record<string, unknown>) {
-  return {
-    id: MOCK_CUSTOMER_ID,
-    metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
-    invoice_settings: {
-      default_payment_method: mockPaymentMethod(),
-    },
-    ...overrides,
-  };
-}
-
-function setupPaymentMethodsRetrieve() {
-  mockPaymentMethodsRetrieve.mockResolvedValue(mockPaymentMethod());
-}
-
-const MOCK_AURORA_TENANT_ID = 'aurora-tenant-123';
-
-// The key every subscription write lands on. The org id in it comes from Stripe
-// metadata, which is the only place the webhook can learn it.
-const ORG_KEY = { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } };
-
-// The pre-re-key row, which is where a customer created before
-// `metadata.orgId` existed still names its org.
-const LEGACY_KEY = { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } };
-
-function updateInputs() {
-  return ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input);
-}
-
-function updatedKeys() {
-  return updateInputs().map((input) => input.Key);
-}
-
-// Per-region failure as reported by syncTenantStatusInProvisionedRegions,
-// which never throws.
-function regionSyncFailure(cause: Error) {
-  return [
-    {
-      orchestratorId: 'aurora',
-      tenantId: MOCK_AURORA_TENANT_ID,
-      outcome: 'error' as const,
-      cause,
-    },
-  ];
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('stripe-webhook handler', () => {
-  function dunningEmissions(): MetricEvent[] {
-    return reportMetricMock.mock.calls
-      .map(([event]) => event)
-      .filter((e) => (e as { DunningEscalation?: unknown }).DunningEscalation === 1);
-  }
-
   beforeEach(() => {
     ddbMock.reset();
-    ddbMock.on(PutItemCommand).resolves({});
-    ddbMock.on(UpdateItemCommand).resolves({});
-    ddbMock.on(DeleteItemCommand).resolves({});
     ddbMock.on(GetItemCommand).resolves({ Item: undefined });
+    ddbMock.on(PutItemCommand).resolves({});
     mockConstructEvent.mockReset();
+    mockConstructEvent.mockReturnValue(STRIPE_EVENT);
     mockCustomersRetrieve.mockReset();
-    mockPaymentMethodsRetrieve.mockReset();
-    mockSyncTenantStatusInProvisionedRegions.mockReset();
-    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
-    mockStartDeletion.mockReset();
-    reportMetricMock.mockReset();
+    mockEnqueueStripeEvent.mockReset();
+    mockEnqueueStripeEvent.mockResolvedValue(undefined);
   });
 
-  // -----------------------------------------------------------------------
-  // 1. Signature verification
-  // -----------------------------------------------------------------------
   describe('signature verification', () => {
     it('returns 400 when stripe-signature header missing', async () => {
-      const evt = buildEvent();
-      // No stripe-signature header
-      const result = await handler(evt);
+      const result = await handler(buildEvent());
+
       expect(result).toEqual({
         statusCode: 400,
         body: JSON.stringify({ message: 'Missing stripe-signature header' }),
       });
+      expect(mockEnqueueStripeEvent).not.toHaveBeenCalled();
     });
 
     it('returns 400 when constructEvent throws (invalid signature)', async () => {
@@ -280,60 +91,99 @@ describe('stripe-webhook handler', () => {
         throw new Error('Invalid signature');
       });
 
-      const evt = buildWebhookEvent('{}');
-      const result = await handler(evt);
+      const result = await handler(buildWebhookEvent('{}'));
+
       expect(result).toEqual({
         statusCode: 400,
         body: JSON.stringify({ message: 'Invalid signature' }),
       });
+      expect(mockEnqueueStripeEvent).not.toHaveBeenCalled();
     });
 
     it('decodes base64 body before verification', async () => {
       const rawBody = JSON.stringify({ test: true });
-      setupStripeEvent('unknown.event', {});
 
-      const evt = buildWebhookEvent(rawBody, { isBase64Encoded: true });
-      await handler(evt);
+      await handler(buildWebhookEvent(rawBody, { isBase64Encoded: true }));
 
       expect(mockConstructEvent).toHaveBeenCalledWith(rawBody, 'sig_test', 'whsec_test_fake');
     });
   });
 
-  // -----------------------------------------------------------------------
-  // 2. Idempotency
-  // -----------------------------------------------------------------------
-  describe('idempotency', () => {
-    it('returns 200 without processing when event already handled', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-      const condError = new Error('Conditional check failed');
-      (condError as { name: string }).name = 'ConditionalCheckFailedException';
-      ddbMock.on(PutItemCommand).rejects(condError);
-
+  describe('hand-off to the worker', () => {
+    it('enqueues the verified event and acknowledges Stripe', async () => {
       const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
 
-      // Should NOT have called UpdateItemCommand
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(mockEnqueueStripeEvent).toHaveBeenCalledExactlyOnceWith(STRIPE_EVENT);
     });
 
-    it('records idempotency PutItem before processing (with TTL ~30 days)', async () => {
-      setupStripeEvent('unknown.event', {});
+    it('returns 500 when the event cannot be enqueued, so Stripe retries', async () => {
+      mockEnqueueStripeEvent.mockRejectedValue(new Error('SQS unavailable'));
 
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({
+        statusCode: 500,
+        body: JSON.stringify({ message: 'Enqueue error' }),
+      });
+    });
+
+    it('makes no Stripe API call while Stripe waits', async () => {
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockCustomersRetrieve).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deduplication', () => {
+    const MARK_KEY = { pk: { S: `WEBHOOK#${STRIPE_EVENT.id}` }, sk: { S: 'EVENT' } };
+
+    it('acknowledges an event already received without enqueueing it again', async () => {
+      ddbMock
+        .on(GetItemCommand, { Key: MARK_KEY })
+        .resolves({ Item: { ...MARK_KEY, eventType: { S: STRIPE_EVENT.type } } });
+
+      const result = await handler(buildWebhookEvent('{}'));
+
+      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
+      expect(mockEnqueueStripeEvent).not.toHaveBeenCalled();
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+    });
+
+    it('reads the mark with a strongly consistent read', async () => {
+      await handler(buildWebhookEvent('{}'));
+
+      expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input).toStrictEqual({
+        TableName: 'BillingTable',
+        Key: MARK_KEY,
+        ConsistentRead: true,
+      });
+    });
+
+    it('writes the mark only after the event is enqueued', async () => {
+      // Marking first would lose the event if the enqueue then failed: Stripe's
+      // retry would find the mark and be acknowledged with nothing queued.
+      mockEnqueueStripeEvent.mockImplementation(async () => {
+        expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
+      });
+
+      await handler(buildWebhookEvent('{}'));
+
+      expect(mockEnqueueStripeEvent).toHaveBeenCalledOnce();
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
+    });
+
+    it('marks the event with its type and a 30-day TTL', async () => {
       const before = Math.floor(Date.now() / 1000);
       await handler(buildWebhookEvent('{}'));
       const after = Math.floor(Date.now() / 1000);
 
-      const putCalls = ddbMock.commandCalls(PutItemCommand);
-      expect(putCalls).toHaveLength(1);
-
-      const input = putCalls[0].args[0].input;
+      const input = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
       expect(input).toStrictEqual({
-        TableName: TABLE_NAME,
-        ConditionExpression: 'attribute_not_exists(pk)',
+        TableName: 'BillingTable',
         Item: {
-          pk: { S: `WEBHOOK#${MOCK_EVENT_ID}` },
-          sk: { S: 'EVENT' },
-          eventType: { S: 'unknown.event' },
+          ...MARK_KEY,
+          eventType: { S: STRIPE_EVENT.type },
           processedAt: { S: expect.any(String) },
           ttl: { N: expect.any(String) },
         },
@@ -345,1680 +195,41 @@ describe('stripe-webhook handler', () => {
       expect(ttl).toBeLessThanOrEqual(after + thirtyDays + 1);
     });
 
-    it('deletes idempotency record when processing fails', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-      ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB error'));
-
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-
-      const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
-      expect(deleteCalls).toHaveLength(1);
-      expect(deleteCalls[0].args[0].input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: {
-          pk: { S: `WEBHOOK#${MOCK_EVENT_ID}` },
-          sk: { S: 'EVENT' },
-        },
-      });
-    });
-
-    it('returns 500 even if delete of idempotency record fails', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-      ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB error'));
-      ddbMock.on(DeleteItemCommand).rejects(new Error('Delete failed'));
-
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 3. customer.subscription.created
-  // -----------------------------------------------------------------------
-  describe('customer.subscription.created', () => {
-    it('updates the billing record named by subscription.metadata', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: ORG_KEY,
-        UpdateExpression:
-          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now, orgId = if_not_exists(orgId, :orgId) REMOVE gracePeriodEndsAt, canceledAt',
-        ExpressionAttributeValues: {
-          ':subId': { S: MOCK_SUBSCRIPTION_ID },
-          ':status': { S: 'active' },
-          ':periodStart': { S: new Date(1600000000 * 1000).toISOString() },
-          ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
-          ':now': { S: expect.any(String) },
-          ':orgId': { S: MOCK_ORG_ID },
-        },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
-      });
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('falls back to customer metadata when subscription metadata empty', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription({ metadata: {} }));
-      // A distinct org on the customer: the key the write lands on is what says
-      // which metadata the handler read.
-      setupCustomerRetrieve('fallback-user', 'fallback-org');
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toEqual(
-        expect.objectContaining({
-          Key: {
-            pk: { S: 'ORG#fallback-org' },
-            sk: { S: 'SUBSCRIPTION' },
-          },
-        }),
-      );
-      expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('skips when customer is deleted (fallback path)', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription({ metadata: {} }));
-      setupDeletedCustomerRetrieve();
-
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('skips when neither metadata source has userId', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription({ metadata: {} }));
-      mockCustomersRetrieve.mockResolvedValue({
-        id: MOCK_CUSTOMER_ID,
-        deleted: false,
-        metadata: {},
-      });
-
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('handles string customer ID via getCustomerIdString', async () => {
-      setupStripeEvent(
-        'customer.subscription.created',
-        mockSubscription({ customer: 'cus_string_id' }),
-      );
-
-      await handler(buildWebhookEvent('{}'));
-      // No error thrown, processed correctly
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-    });
-
-    it('handles Customer object instead of string', async () => {
-      setupStripeEvent(
-        'customer.subscription.created',
-        mockSubscription({
-          customer: { id: 'cus_obj_id', deleted: false },
-        }),
-      );
-
-      await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-    });
-
-    it('handles DeletedCustomer object', async () => {
-      setupStripeEvent(
-        'customer.subscription.created',
-        mockSubscription({
-          metadata: {},
-          customer: { id: 'cus_del_id', deleted: true },
-        }),
-      );
-      setupDeletedCustomerRetrieve();
-
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('passes through non-active subscription status', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'past_due' }));
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toEqual(
-        expect.objectContaining({
-          ExpressionAttributeValues: expect.objectContaining({
-            ':status': { S: 'past_due' },
-          }),
-        }),
-      );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('skips DDB update when Stripe status is incomplete (unmappable)', async () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'incomplete' }));
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(consoleSpy).toHaveBeenCalledWith(
-        '[stripe-webhook] Unmappable Stripe status, skipping update',
-        expect.objectContaining({ stripeStatus: 'incomplete' }),
-      );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      consoleSpy.mockRestore();
-    });
-
-    it('maps incomplete_expired to canceled', async () => {
-      setupStripeEvent(
-        'customer.subscription.created',
-        mockSubscription({ status: 'incomplete_expired' }),
-      );
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toEqual(
-        expect.objectContaining({
-          ExpressionAttributeValues: expect.objectContaining({
-            ':status': { S: SubscriptionStatus.Canceled },
-          }),
-        }),
-      );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('maps unpaid to past_due', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription({ status: 'unpaid' }));
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toEqual(
-        expect.objectContaining({
-          ExpressionAttributeValues: expect.objectContaining({
-            ':status': { S: SubscriptionStatus.PastDue },
-          }),
-        }),
-      );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('falls back to customer lookup when userId is empty string', async () => {
-      setupStripeEvent(
-        'customer.subscription.created',
-        mockSubscription({ metadata: { userId: '' } }),
-      );
-      setupCustomerRetrieve('fallback-user', 'fallback-org');
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toEqual(
-        expect.objectContaining({
-          Key: {
-            pk: { S: 'ORG#fallback-org' },
-            sk: { S: 'SUBSCRIPTION' },
-          },
-        }),
-      );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 4. customer.subscription.updated
-  // -----------------------------------------------------------------------
-  describe('customer.subscription.updated', () => {
-    it('processes same as created (UpdateItemCommand with correct key/values)', async () => {
-      setupStripeEvent('customer.subscription.updated', mockSubscription());
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: ORG_KEY,
-        UpdateExpression:
-          'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodEnd = :periodEnd, currentPeriodStart = :periodStart, updatedAt = :now, orgId = if_not_exists(orgId, :orgId) REMOVE gracePeriodEndsAt, canceledAt',
-        ExpressionAttributeValues: {
-          ':subId': { S: MOCK_SUBSCRIPTION_ID },
-          ':status': { S: 'active' },
-          ':periodStart': { S: new Date(1600000000 * 1000).toISOString() },
-          ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
-          ':now': { S: expect.any(String) },
-          ':orgId': { S: MOCK_ORG_ID },
-        },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
-      });
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('sets currentPeriodEnd from subscription.items.data[0].current_period_end', async () => {
-      setupStripeEvent(
-        'customer.subscription.updated',
-        mockSubscription({
-          items: { data: [{ current_period_end: 1800000000 }] },
-        }),
-      );
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toEqual(
-        expect.objectContaining({
-          ExpressionAttributeValues: expect.objectContaining({
-            ':periodEnd': { S: new Date(1800000000 * 1000).toISOString() },
-          }),
-        }),
-      );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('handles empty items.data array (defaults to epoch 0)', async () => {
-      setupStripeEvent(
-        'customer.subscription.updated',
-        mockSubscription({
-          items: { data: [] },
-        }),
-      );
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toEqual(
-        expect.objectContaining({
-          ExpressionAttributeValues: expect.objectContaining({
-            ':periodEnd': { S: new Date(0).toISOString() },
-          }),
-        }),
-      );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 4b. customer.updated
-  // -----------------------------------------------------------------------
-  describe('customer.updated', () => {
-    let consoleSpy: MockInstance | undefined;
-
-    afterEach(() => {
-      consoleSpy?.mockRestore();
-      consoleSpy = undefined;
-    });
-
-    it('updates payment method in DynamoDB when default_payment_method is expanded object', async () => {
-      setupStripeEvent('customer.updated', mockCustomerObject());
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: ORG_KEY,
-        UpdateExpression:
-          'SET paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now',
-        ExpressionAttributeValues: {
-          ':pmId': { S: MOCK_PM_ID },
-          ':last4': { S: MOCK_PM_LAST4 },
-          ':brand': { S: MOCK_PM_BRAND },
-          ':expMonth': { N: String(MOCK_PM_EXP_MONTH) },
-          ':expYear': { N: String(MOCK_PM_EXP_YEAR) },
-          ':now': { S: expect.any(String) },
-        },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
-      });
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('swallows a missing billing row, with a metric so it is not silent', async () => {
-      // The event carries a card's last four and expiry. A 500 would buy three
-      // days of Stripe retries and alert noise to redeliver that; post-verify
-      // the state is near-impossible and the metric is how anyone learns of it.
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      setupStripeEvent('customer.updated', mockCustomerObject());
-      const noRow = new Error('The conditional request failed');
-      (noRow as { name: string }).name = 'ConditionalCheckFailedException';
-      ddbMock.on(UpdateItemCommand).rejects(noRow);
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0); // claim not released
-      expect(
-        reportMetricMock.mock.calls.some(
-          ([event]) => (event as { BillingRowMissing?: number }).BillingRowMissing === 1,
-        ),
-      ).toBe(true);
-      errorSpy.mockRestore();
-    });
-
-    it('fetches payment method via paymentMethods.retrieve when default_payment_method is a string ID', async () => {
-      setupStripeEvent(
-        'customer.updated',
-        mockCustomerObject({
-          invoice_settings: { default_payment_method: MOCK_PM_ID },
-        }),
-      );
-      setupPaymentMethodsRetrieve();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(mockPaymentMethodsRetrieve).toHaveBeenCalledWith(MOCK_PM_ID);
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-      expect(updateCalls[0].args[0].input).toEqual(
-        expect.objectContaining({
-          ExpressionAttributeValues: expect.objectContaining({
-            ':last4': { S: MOCK_PM_LAST4 },
-          }),
-        }),
-      );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('resolves the org from the billing row when the customer metadata carries none', async () => {
-      // Nothing stamped metadata.orgId onto customers created before it, and
-      // the re-key made no Stripe calls — so without this fallback every
-      // metadata write by the daily usage worker 500s and Stripe retries it
-      // until the endpoint is disabled.
-      setupStripeEvent(
-        'customer.updated',
-        mockCustomerObject({ metadata: { userId: MOCK_USER_ID } }),
-      );
-      ddbMock
-        .on(GetItemCommand, { Key: LEGACY_KEY })
-        .resolves({ Item: marshall({ orgId: MOCK_ORG_ID }) });
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(updatedKeys()).toEqual([ORG_KEY]);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('does not read the billing row when the metadata already names the org', async () => {
-      setupStripeEvent('customer.updated', mockCustomerObject());
+    it('does not mark an event it failed to enqueue', async () => {
+      mockEnqueueStripeEvent.mockRejectedValue(new Error('SQS unavailable'));
 
       await handler(buildWebhookEvent('{}'));
 
-      const legacyReads = ddbMock
-        .commandCalls(GetItemCommand)
-        .filter((call) => call.args[0].input.Key?.pk?.S === `CUSTOMER#${MOCK_USER_ID}`);
-      expect(legacyReads).toHaveLength(0);
+      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(0);
     });
 
-    it('returns 200 for a customer no source can resolve to an org', async () => {
-      // The rows carrying no orgId were dispositioned by name before the
-      // re-key, so no retry converges on an answer: retrying would spend three
-      // days of redeliveries and then disable the endpoint.
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      setupStripeEvent(
-        'customer.updated',
-        mockCustomerObject({ metadata: { userId: MOCK_USER_ID } }),
-      );
+    it('returns 500 when the mark cannot be read, so Stripe retries', async () => {
+      ddbMock.on(GetItemCommand).rejects(new Error('DynamoDB get failed'));
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0); // claim not released
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('resolves to no org'),
-        expect.objectContaining({ customerId: MOCK_CUSTOMER_ID, userId: MOCK_USER_ID }),
-      );
-      errorSpy.mockRestore();
-    });
-
-    it('throws when customer has no userId in metadata', async () => {
-      setupStripeEvent('customer.updated', mockCustomerObject({ metadata: {} }));
-
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-
-      const deleteCalls = ddbMock.commandCalls(DeleteItemCommand);
-      expect(deleteCalls).toHaveLength(1);
-    });
-
-    it('skips update when default_payment_method is null', async () => {
-      setupStripeEvent(
-        'customer.updated',
-        mockCustomerObject({
-          invoice_settings: { default_payment_method: null },
-        }),
-      );
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-
-      // This handler path should not perform any DynamoDB updates or deletes.
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
-    });
-
-    it('skips update for trial-creation customer.updated event (currency null → usd, no default_payment_method)', async () => {
-      const TRIAL_USER_ID = '2bfd6596-4ccb-47a8-b508-bf64fdb44d4e';
-      const TRIAL_ORG_ID = '7d352bd8-ed9e-4f2a-8ec3-6ba7ae356525';
-      const TRIAL_CUSTOMER_ID = 'cus_UN4LxyuGMbKzKz';
-      const TRIAL_EVENT_ID = 'evt_1TOKCkAQEKri8lBk4HwPEKWK';
-
-      consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
-
-      mockConstructEvent.mockReturnValue({
-        id: TRIAL_EVENT_ID,
-        type: 'customer.updated',
-        data: {
-          object: {
-            id: TRIAL_CUSTOMER_ID,
-            object: 'customer',
-            currency: 'usd',
-            invoice_settings: {
-              default_payment_method: null,
-              custom_fields: null,
-              footer: null,
-              rendering_options: null,
-            },
-            metadata: {
-              userId: TRIAL_USER_ID,
-              orgId: TRIAL_ORG_ID,
-            },
-          },
-          previous_attributes: { currency: null },
-        },
-      });
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-
-      // This handler path should not perform any DynamoDB updates or deletes.
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
-
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('customer.updated without default_payment_method'),
-        expect.objectContaining({ customerId: TRIAL_CUSTOMER_ID, userId: TRIAL_USER_ID }),
-      );
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 5. customer.subscription.deleted
-  // -----------------------------------------------------------------------
-  describe('a subscription the account has already replaced', () => {
-    function supersededEmissions(): MetricEvent[] {
-      return reportMetricMock.mock.calls
-        .map(([event]) => event)
-        .filter((e) => (e as { SupersededBillingEvent?: unknown }).SupersededBillingEvent === 1);
-    }
-
-    it('does not put a paying tenant into grace on a late cancellation', async () => {
-      // Stripe retries out of order: a cancellation for the trial subscription
-      // an upgrade replaced can arrive after the replacement is live.
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieve();
-      setupStoredIdentity({ subscriptionId: 'sub_the_live_one' });
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
-      expect(supersededEmissions()).toHaveLength(1);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('grants the grace period when the event names the subscription on the row', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieve();
-      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
-        S: SubscriptionStatus.GracePeriod,
-      });
-      expect(supersededEmissions()).toHaveLength(0);
-    });
-
-    it('does not mark a live subscription past due on a late payment failure', async () => {
-      setupStripeEvent(
-        'invoice.payment_failed',
-        mockInvoice({
-          parent: { subscription_details: { subscription: 'sub_the_old_one' } },
-        }),
-      );
-      setupCustomerRetrieve();
-      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(supersededEmissions()).toHaveLength(1);
-    });
-
-    it('does not reactivate the org on a successful invoice from a replaced subscription', async () => {
-      // The other direction of the same refusal: on the shared org row, a late
-      // success for historical subscription A would mark the org active and
-      // re-enable tenants the authoritative past-due subscription locked.
-      setupStripeEvent(
-        'invoice.payment_succeeded',
-        mockInvoice({
-          parent: { subscription_details: { subscription: 'sub_the_old_one' } },
-        }),
-      );
-      setupCustomerRetrieve();
-      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
-      expect(supersededEmissions()).toHaveLength(1);
-    });
-
-    it('marks past due when the failing invoice names the subscription on the row', async () => {
-      setupStripeEvent(
-        'invoice.payment_failed',
-        mockInvoice({
-          parent: { subscription_details: { subscription: MOCK_SUBSCRIPTION_ID } },
-        }),
-      );
-      setupCustomerRetrieve();
-      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
-        S: SubscriptionStatus.PastDue,
-      });
-      expect(supersededEmissions()).toHaveLength(0);
-    });
-
-    it('still applies an update arriving under a new subscription id', async () => {
-      // The upsert keeps last-writer-wins: an upgrade legitimately arrives
-      // under an id the row has never seen, and refusing it as superseded would
-      // leave the account on the plan it just left.
-      setupStripeEvent('customer.subscription.updated', mockSubscription());
-      setupCustomerRetrieve();
-      setupStoredIdentity({ subscriptionId: 'sub_the_previous_one' });
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(updateInputs()[0].ExpressionAttributeValues![':subId']).toEqual({
-        S: MOCK_SUBSCRIPTION_ID,
-      });
-      expect(supersededEmissions()).toHaveLength(0);
-    });
-  });
-
-  describe('customer.subscription.deleted', () => {
-    it('sets GracePeriod status with 30-day grace window', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieve();
-
-      const before = Date.now();
-      const result = await handler(buildWebhookEvent('{}'));
-      const after = Date.now();
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-
-      const input = updateCalls[0].args[0].input;
-      expect(input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: ORG_KEY,
-        UpdateExpression:
-          'SET subscriptionStatus = :status, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
-        ExpressionAttributeValues: {
-          ':status': { S: SubscriptionStatus.GracePeriod },
-          ':now': { S: expect.any(String) },
-          ':grace': { S: expect.any(String) },
-          ':orgId': { S: MOCK_ORG_ID },
-        },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
-      });
-
-      const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
-      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-      expect(graceDate).toBeGreaterThanOrEqual(before + thirtyDays - 5000);
-      expect(graceDate).toBeLessThanOrEqual(after + thirtyDays + 5000);
-      expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('sets GracePeriod status with 7-day grace window for trialing subscriptions', async () => {
-      const futureTrialEnd = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60;
-      setupStripeEvent(
-        'customer.subscription.deleted',
-        mockSubscription({ trial_end: futureTrialEnd }),
-      );
-      setupCustomerRetrieve();
-
-      const before = Date.now();
-      const result = await handler(buildWebhookEvent('{}'));
-      const after = Date.now();
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-
-      const input = updateCalls[0].args[0].input;
-      const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
-      const sevenDays = 7 * 24 * 60 * 60 * 1000;
-      expect(graceDate).toBeGreaterThanOrEqual(before + sevenDays - 5000);
-      expect(graceDate).toBeLessThanOrEqual(after + sevenDays + 5000);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('falls back to the subscription’s own org when the customer names none', async () => {
-      // The subscription's metadata is the more specific answer, and resolving
-      // only from the customer defined a cohort of accounts whose cancellation
-      // quietly wrote nothing.
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieveWithoutOrg();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(updatedKeys()).toEqual([ORG_KEY]);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('fails the webhook when neither object names an org', async () => {
-      // The org id is both the row's address and the tenant's name, so nothing
-      // can be written or locked. A 500 releases the idempotency claim and lets
-      // Stripe retry until the metadata is repaired.
-      setupStripeEvent(
-        'customer.subscription.deleted',
-        mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
-      );
-      setupCustomerRetrieveWithoutOrg();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-    });
-
-    describe('when the customer is already deleted', () => {
-      // The fallback for a customer.deleted event that was never delivered.
-      it('starts the deletion instead of granting a grace period', async () => {
-        setupStripeEvent('customer.subscription.deleted', mockSubscription());
-        setupDeletedCustomerRetrieve();
-
-        const result = await handler(buildWebhookEvent('{}'));
-
-        expect(mockStartDeletion).toHaveBeenCalledWith(
-          expect.objectContaining({ userId: MOCK_USER_ID, caller: 'subscription.deleted' }),
-        );
-        expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-        expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      });
-
-      it('emits a DunningEscalation metric with reason customer_deleted', async () => {
-        setupStripeEvent('customer.subscription.deleted', mockSubscription());
-        setupDeletedCustomerRetrieve();
-
-        await handler(buildWebhookEvent('{}'));
-
-        const emissions = dunningEmissions();
-        expect(
-          emissions.some(
-            (e) =>
-              (e as { stage?: string }).stage === 'canceled' &&
-              (e as { reason?: string }).reason === 'customer_deleted',
-          ),
-        ).toBe(true);
-      });
-
-      // Nothing can be resolved without it, but Stripe must not be asked to retry
-      // an event that will never succeed.
-      it('acknowledges when the subscription has no metadata.userId', async () => {
-        setupStripeEvent('customer.subscription.deleted', mockSubscription({ metadata: {} }));
-        setupDeletedCustomerRetrieve();
-        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-        try {
-          const result = await handler(buildWebhookEvent('{}'));
-
-          expect(mockStartDeletion).not.toHaveBeenCalled();
-          expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-          expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-        } finally {
-          error.mockRestore();
-        }
-      });
-    });
-
-    it('skips when customer has no userId', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      mockCustomersRetrieve.mockResolvedValue({
-        id: MOCK_CUSTOMER_ID,
-        deleted: false,
-        metadata: {},
-      });
-
-      await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('calls updateTenantStatus WRITE_LOCKED on subscription deletion', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieve();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-        MOCK_ORG_ID,
-        'write-locked',
-        WEBHOOK_STATUS_SYNC_RETRY,
-      );
-
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('does not fail webhook when Aurora WRITE_LOCK fails', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieve();
-      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
-        regionSyncFailure(new Error('Aurora API error')),
-      );
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      // The grace period is already recorded when the lock is attempted
-      expect(updatedKeys()).toEqual([ORG_KEY]);
-      // Webhook should still return 200
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 5b. customer.deleted
-  // -----------------------------------------------------------------------
-  describe('customer.deleted', () => {
-    // Deleting the customer in Stripe is the standing response to trial abuse, so
-    // terminating the account is its intended meaning.
-    it('starts the full account deletion', async () => {
-      setupStripeEvent(
-        'customer.deleted',
-        mockCustomerObject({ metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID } }),
-      );
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(mockStartDeletion).toHaveBeenCalledWith({
-        userId: MOCK_USER_ID,
-        customerId: MOCK_CUSTOMER_ID,
-        orgId: MOCK_ORG_ID,
-        caller: 'customer.deleted',
-      });
-      // The teardown owns every write from here; the handler makes none.
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('reads userId from the event payload and never calls Stripe customers.retrieve', async () => {
-      setupStripeEvent('customer.deleted', mockCustomerObject());
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(mockCustomersRetrieve).not.toHaveBeenCalled();
-    });
-
-    // The old contract answered 500 so Stripe's retries would re-drive a failed
-    // region sync. The record and the sweeper own retries now, so the webhook
-    // always acknowledges — days of Stripe retries would disable the endpoint.
-    it('acknowledges when customer.deleted has no userId in metadata', async () => {
-      setupStripeEvent('customer.deleted', mockCustomerObject({ metadata: {} }));
-      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-      try {
-        const result = await handler(buildWebhookEvent('{}'));
-
-        expect(mockStartDeletion).not.toHaveBeenCalled();
-        expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      } finally {
-        error.mockRestore();
-      }
-    });
-
-    it('emits a DunningEscalation metric with reason customer_deleted', async () => {
-      setupStripeEvent('customer.deleted', mockCustomerObject());
-
-      await handler(buildWebhookEvent('{}'));
-
-      const emissions = dunningEmissions();
-      expect(
-        emissions.some(
-          (e) =>
-            (e as { stage?: string }).stage === 'canceled' &&
-            (e as { reason?: string }).reason === 'customer_deleted',
-        ),
-      ).toBe(true);
-    });
-
-    // metadata.orgId is written at customer creation; the entry point falls back to
-    // the billing row for customers that predate it.
-    it('passes no orgId through when the customer metadata carries none', async () => {
-      setupStripeEvent(
-        'customer.deleted',
-        mockCustomerObject({ metadata: { userId: MOCK_USER_ID } }),
-      );
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(mockStartDeletion).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: MOCK_USER_ID, orgId: undefined }),
-      );
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 6. customer.subscription.trial_will_end
-  // -----------------------------------------------------------------------
-  describe('customer.subscription.trial_will_end', () => {
-    it('logs only, no UpdateItemCommand, idempotency claimed upfront', async () => {
-      setupStripeEvent('customer.subscription.trial_will_end', mockSubscription());
-
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 7. invoice.payment_succeeded
-  // -----------------------------------------------------------------------
-  describe('invoice.payment_succeeded', () => {
-    it('sets Active status, REMOVEs gracePeriodEndsAt, lastPaymentFailedAt, and canceledAt', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-
-      expect(updateCalls[0].args[0].input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: ORG_KEY,
-        UpdateExpression:
-          'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now, orgId = if_not_exists(orgId, :orgId) REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt',
-        ExpressionAttributeValues: {
-          ':active': { S: SubscriptionStatus.Active },
-          ':now': { S: expect.any(String) },
-          ':orgId': { S: MOCK_ORG_ID },
-        },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
-        ReturnValues: 'ALL_OLD',
-      });
-      expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('skips when invoice.customer is null', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ customer: null }));
-
-      await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('skips when customer is deleted', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupDeletedCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('skips when customer has no userId', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      mockCustomersRetrieve.mockResolvedValue({
-        id: MOCK_CUSTOMER_ID,
-        deleted: false,
-        metadata: {},
-      });
-
-      await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('handles invoice with Customer object instead of string', async () => {
-      setupStripeEvent(
-        'invoice.payment_succeeded',
-        mockInvoice({
-          customer: { id: MOCK_CUSTOMER_ID, deleted: false },
-        }),
-      );
-      setupCustomerRetrieve();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('calls updateTenantStatus ACTIVE on payment success', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-        MOCK_ORG_ID,
-        'active',
-        WEBHOOK_STATUS_SYNC_RETRY,
-      );
-
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('does not fail webhook when Aurora re-activation fails', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
-        regionSyncFailure(new Error('Aurora API error')),
-      );
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(updatedKeys()).toEqual([ORG_KEY]);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 8. invoice.payment_failed
-  // -----------------------------------------------------------------------
-  describe('invoice.payment_failed', () => {
-    it('fails the webhook when the Stripe objects name no org', async () => {
-      // There is no key to write the row under, and no billing-row fallback any
-      // more. A 500 releases the idempotency claim, so Stripe's retries converge
-      // once somebody repairs the metadata; reporting success would consume the
-      // event and take the status change with it.
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupCustomerRetrieveWithoutOrg();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1); // idempotency release
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-    });
-
-    it('sets PastDue status with lastPaymentFailedAt (no grace period)', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupCustomerRetrieve();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-
-      const input = updateCalls[0].args[0].input;
-      expect(input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: ORG_KEY,
-        UpdateExpression:
-          'SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
-        ExpressionAttributeValues: {
-          ':status': { S: SubscriptionStatus.PastDue },
-          ':failedAt': { S: expect.any(String) },
-          ':now': { S: expect.any(String) },
-          ':orgId': { S: MOCK_ORG_ID },
-        },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
-      });
-
-      // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window
-      expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt');
-      expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('skips when invoice.customer is null', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice({ customer: null }));
-
-      await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('skips when customer is deleted', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupDeletedCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('skips when customer has no userId', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      mockCustomersRetrieve.mockResolvedValue({
-        id: MOCK_CUSTOMER_ID,
-        deleted: false,
-        metadata: {},
-      });
-
-      await handler(buildWebhookEvent('{}'));
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('handles invoice with Customer object instead of string', async () => {
-      setupStripeEvent(
-        'invoice.payment_failed',
-        mockInvoice({
-          customer: { id: MOCK_CUSTOMER_ID, deleted: false },
-        }),
-      );
-      setupCustomerRetrieve();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 9. Error handling & edge cases
-  // -----------------------------------------------------------------------
-  describe('error handling & edge cases', () => {
-    it('returns 500 when UpdateItemCommand fails during processing', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-      ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB update failed'));
-
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-    });
-
-    it('returns 500 when stripe.customers.retrieve fails', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      mockCustomersRetrieve.mockRejectedValue(new Error('Stripe API error'));
-
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-    });
-
-    it('unhandled event type returns 200 and records idempotency', async () => {
-      setupStripeEvent('some.unknown.event', {});
-
-      const result = await handler(buildWebhookEvent('{}'));
-      expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-      expect(ddbMock.commandCalls(PutItemCommand)).toHaveLength(1);
-    });
-
-    it('returns 500 when idempotency PutItem fails (non-condition error)', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-      ddbMock.on(PutItemCommand).rejects(new Error('DynamoDB put failed'));
-
-      const result = await handler(buildWebhookEvent('{}'));
       expect(result).toEqual({
         statusCode: 500,
         body: JSON.stringify({ message: 'Idempotency check error' }),
       });
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 10. DunningEscalation metric (EMF via reportMetric)
-  // -----------------------------------------------------------------------
-  describe('DunningEscalation metric', () => {
-    it('emits stage=entered on first payment_failed (attempt_count=1)', async () => {
-      setupStripeEvent(
-        'invoice.payment_failed',
-        mockInvoice({
-          attempt_count: 1,
-          last_finalization_error: { code: 'card_declined' },
-        }),
-      );
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      const emissions = dunningEmissions();
-      expect(emissions).toHaveLength(1);
-      expect(emissions[0]).toMatchObject({
-        stage: 'entered',
-        reason: 'card_declined',
-        attemptBucket: '1',
-        DunningEscalation: 1,
-      });
-      expect(emissions[0]._aws).toMatchObject({
-        CloudWatchMetrics: [
-          {
-            Namespace: 'FilOne',
-            Dimensions: [['stage', 'reason', 'attemptBucket']],
-            Metrics: [{ Name: 'DunningEscalation', Unit: 'Count' }],
-          },
-        ],
-      });
+      expect(mockEnqueueStripeEvent).not.toHaveBeenCalled();
     });
 
-    it('emits stage=retry on subsequent payment_failed (attempt_count>=2)', async () => {
-      setupStripeEvent(
-        'invoice.payment_failed',
-        mockInvoice({
-          attempt_count: 2,
-          last_finalization_error: { code: 'insufficient_funds' },
-        }),
-      );
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(dunningEmissions()[0]).toMatchObject({
-        stage: 'retry',
-        reason: 'insufficient_funds',
-        attemptBucket: '2',
-      });
-    });
-
-    it('buckets attempt_count>=4 into "4+"', async () => {
-      setupStripeEvent(
-        'invoice.payment_failed',
-        mockInvoice({
-          attempt_count: 5,
-          last_finalization_error: { code: 'card_declined' },
-        }),
-      );
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(dunningEmissions()[0]).toMatchObject({
-        stage: 'retry',
-        attemptBucket: '4+',
-      });
-    });
-
-    it('reports reason="unknown" when last_finalization_error missing', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice({ attempt_count: 1 }));
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(dunningEmissions()[0]).toMatchObject({
-        stage: 'entered',
-        reason: 'unknown',
-      });
-    });
-
-    it('emits stage=canceled with cancellation_details.reason=payment_failed', async () => {
-      setupStripeEvent(
-        'customer.subscription.deleted',
-        mockSubscription({
-          cancellation_details: { reason: 'payment_failed' },
-          latest_invoice: { id: 'in_latest', attempt_count: 3 },
-        }),
-      );
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(dunningEmissions()[0]).toMatchObject({
-        stage: 'canceled',
-        reason: 'payment_failed',
-        attemptBucket: '3',
-      });
-    });
-
-    it('labels canceled by cancellation_requested when voluntary', async () => {
-      setupStripeEvent(
-        'customer.subscription.deleted',
-        mockSubscription({
-          cancellation_details: { reason: 'cancellation_requested' },
-        }),
-      );
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(dunningEmissions()[0]).toMatchObject({
-        stage: 'canceled',
-        reason: 'cancellation_requested',
-        attemptBucket: 'unknown',
-      });
-      // Grace-period behavior must still run regardless of reason
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-    });
-
-    it('labels canceled as reason="unknown" when cancellation_details absent', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(dunningEmissions()[0]).toMatchObject({
-        stage: 'canceled',
-        reason: 'unknown',
-      });
-    });
-
-    it('emits stage=recovered when prior status was past_due', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 2 }));
-      setupCustomerRetrieve();
-      ddbMock.on(UpdateItemCommand).resolves({
-        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.PastDue }),
-      });
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(dunningEmissions()[0]).toMatchObject({
-        stage: 'recovered',
-        reason: 'past_due',
-        attemptBucket: '2',
-      });
-    });
-
-    it('emits stage=recovered with reason=grace_period when prior status was grace_period', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 4 }));
-      setupCustomerRetrieve();
-      ddbMock.on(UpdateItemCommand, { TableName: TABLE_NAME }).resolves({
-        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.GracePeriod }),
-      });
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(dunningEmissions()[0]).toMatchObject({
-        stage: 'recovered',
-        reason: 'grace_period',
-        attemptBucket: '4+',
-      });
-      // Aurora re-activation must still run
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
-        MOCK_ORG_ID,
-        'active',
-        WEBHOOK_STATUS_SYNC_RETRY,
-      );
-    });
-
-    it('does NOT emit recovered on normal renewal (prior status was active)', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 1 }));
-      setupCustomerRetrieve();
-      ddbMock.on(UpdateItemCommand).resolves({
-        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.Active }),
-      });
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(dunningEmissions()).toHaveLength(0);
-    });
-
-    it('does NOT emit on unrelated events (customer.subscription.created)', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(dunningEmissions()).toHaveLength(0);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 11. InvoicePaid metric (EMF via reportMetric)
-  // -----------------------------------------------------------------------
-  describe('InvoicePaid metric', () => {
-    function invoicePaidEmissions(): MetricEvent[] {
-      return reportMetricMock.mock.calls
-        .map(([event]) => event)
-        .filter((e) => (e as { InvoicePaid?: unknown }).InvoicePaid === 1);
-    }
-
-    it('emits one InvoicePaid event on invoice.payment_succeeded', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      const emissions = invoicePaidEmissions();
-      expect(emissions).toHaveLength(1);
-      expect(emissions[0]).toMatchObject({ InvoicePaid: 1 });
-      expect(emissions[0]._aws).toMatchObject({
-        CloudWatchMetrics: [
-          {
-            Namespace: 'FilOne',
-            Dimensions: [[]],
-            Metrics: [{ Name: 'InvoicePaid', Unit: 'Count' }],
-          },
-        ],
-      });
-    });
-
-    it('does not emit even when invoice.customer is null', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ customer: null }));
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(invoicePaidEmissions()).toHaveLength(0);
-    });
-
-    it('does NOT emit on invoice.payment_failed', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice({ attempt_count: 1 }));
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(invoicePaidEmissions()).toHaveLength(0);
-    });
-
-    it('does NOT emit on unrelated events (customer.subscription.created)', async () => {
-      setupStripeEvent('customer.subscription.created', mockSubscription());
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(invoicePaidEmissions()).toHaveLength(0);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 12. InvoiceFinalized metric (EMF via reportMetric)
-  // -----------------------------------------------------------------------
-  describe('InvoiceFinalized metric', () => {
-    function invoiceFinalizedEmissions(): MetricEvent[] {
-      return reportMetricMock.mock.calls
-        .map(([event]) => event)
-        .filter((e) => (e as { InvoiceFinalized?: unknown }).InvoiceFinalized === 1);
-    }
-
-    it('emits one InvoiceFinalized event on invoice.finalized', async () => {
-      setupStripeEvent('invoice.finalized', mockInvoice());
-
-      await handler(buildWebhookEvent('{}'));
-
-      const emissions = invoiceFinalizedEmissions();
-      expect(emissions).toHaveLength(1);
-      expect(emissions[0]).toMatchObject({ InvoiceFinalized: 1 });
-      expect(emissions[0]._aws).toMatchObject({
-        CloudWatchMetrics: [
-          {
-            Namespace: 'FilOne',
-            Dimensions: [[]],
-            Metrics: [{ Name: 'InvoiceFinalized', Unit: 'Count' }],
-          },
-        ],
-      });
-    });
-
-    it('does NOT emit on invoice.finalization_failed', async () => {
-      setupStripeEvent('invoice.finalization_failed', mockInvoice());
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(invoiceFinalizedEmissions()).toHaveLength(0);
-    });
-
-    it('does NOT emit on invoice.payment_succeeded', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(invoiceFinalizedEmissions()).toHaveLength(0);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 13. InvoiceFinalizationFailed metric (EMF via reportMetric)
-  // -----------------------------------------------------------------------
-  describe('InvoiceFinalizationFailed metric', () => {
-    function invoiceFinalizationFailedEmissions(): MetricEvent[] {
-      return reportMetricMock.mock.calls
-        .map(([event]) => event)
-        .filter(
-          (e) => (e as { InvoiceFinalizationFailed?: unknown }).InvoiceFinalizationFailed === 1,
-        );
-    }
-
-    it('emits with reason from last_finalization_error.code', async () => {
-      setupStripeEvent(
-        'invoice.finalization_failed',
-        mockInvoice({ last_finalization_error: { code: 'tax_calculation_failed' } }),
-      );
-
-      await handler(buildWebhookEvent('{}'));
-
-      const emissions = invoiceFinalizationFailedEmissions();
-      expect(emissions).toHaveLength(1);
-      expect(emissions[0]).toMatchObject({
-        reason: 'tax_calculation_failed',
-        InvoiceFinalizationFailed: 1,
-      });
-      expect(emissions[0]._aws).toMatchObject({
-        CloudWatchMetrics: [
-          {
-            Namespace: 'FilOne',
-            Dimensions: [['reason']],
-            Metrics: [{ Name: 'InvoiceFinalizationFailed', Unit: 'Count' }],
-          },
-        ],
-      });
-    });
-
-    it('emits with reason="unknown" when last_finalization_error missing', async () => {
-      setupStripeEvent('invoice.finalization_failed', mockInvoice());
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(invoiceFinalizationFailedEmissions()[0]).toMatchObject({
-        reason: 'unknown',
-      });
-    });
-
-    it('does NOT emit on invoice.finalized', async () => {
-      setupStripeEvent('invoice.finalized', mockInvoice());
-
-      await handler(buildWebhookEvent('{}'));
-
-      expect(invoiceFinalizationFailedEmissions()).toHaveLength(0);
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // 11. orgId backfill — the org id keys the row, and every lifecycle job
-  // reads the attribute off it, so each writer stamps it from Stripe metadata.
-  // if_not_exists is the do-not-overwrite guarantee: a stored orgId wins over
-  // whatever the metadata carries. Metadata that names no org names no row
-  // either, and that write is refused outright.
-  // -----------------------------------------------------------------------
-  describe('orgId backfill', () => {
-    let errorSpy: MockInstance;
-
-    beforeEach(() => {
-      errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    });
-
-    afterEach(() => {
-      errorSpy.mockRestore();
-    });
-
-    function expectOrgIdBackfilled() {
-      expect(updatedKeys()).toEqual([ORG_KEY]);
-      const input = updateInputs()[0];
-      expect(input.UpdateExpression).toContain('orgId = if_not_exists(orgId, :orgId)');
-      expect(input.ExpressionAttributeValues![':orgId']).toEqual({ S: MOCK_ORG_ID });
-    }
-
-    // A key built from a guessed org would put this subscription on another
-    // org's partition, so nothing is written — and the webhook fails rather than
-    // reporting success. A 500 releases the idempotency claim, so Stripe keeps
-    // retrying and the event converges on its own once somebody repairs the
-    // metadata. Swallowing it consumes the event and the status change with it.
-    function expectRefusedAndRetryable(result: unknown) {
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1);
-      expect(result).toEqual({
-        statusCode: 500,
-        body: JSON.stringify({ message: 'Processing error' }),
-      });
-    }
-
-    it('subscription update persists orgId from subscription metadata when present', async () => {
-      setupStripeEvent(
-        'customer.subscription.updated',
-        mockSubscription({ metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID } }),
-      );
-
-      await handler(buildWebhookEvent('{}'));
-
-      expectOrgIdBackfilled();
-    });
-
-    it('subscription update persists orgId from customer metadata on the fallback path', async () => {
-      setupStripeEvent('customer.subscription.updated', mockSubscription({ metadata: {} }));
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expectOrgIdBackfilled();
-    });
-
-    // A subscription created before the metadata stamped an orgId still names
-    // its user, and that alone used to take the no-fetch path and reach the
-    // store with no org — a permanent 500 for every status change on every
-    // legacy subscription. The customer is where the org actually is.
-    it('subscription update falls back to customer metadata when the subscription names only the user', async () => {
-      setupStripeEvent(
-        'customer.subscription.updated',
-        mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
-      );
-      setupCustomerRetrieve();
+    it('acknowledges a queued event, with an error log, when the mark cannot be written', async () => {
+      // The event is queued. Without the mark, a later duplicate from Stripe
+      // would be handled again, which the handlers tolerate.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      ddbMock.on(PutItemCommand).rejects(new Error('DynamoDB put failed'));
 
       const result = await handler(buildWebhookEvent('{}'));
 
-      expectOrgIdBackfilled();
-      expect(mockCustomersRetrieve).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ statusCode: 200, body: JSON.stringify({ received: true }) });
-    });
-
-    it('subscription update writes nothing when neither the subscription nor the customer names an org', async () => {
-      setupStripeEvent(
-        'customer.subscription.updated',
-        mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[stripe-webhook] Failed to mark event received:',
+        STRIPE_EVENT.id,
+        expect.objectContaining({ message: 'DynamoDB put failed' }),
       );
-      setupCustomerRetrieveWithoutOrg();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expectRefusedAndRetryable(result);
-    });
-
-    it('subscription deleted persists orgId from customer metadata', async () => {
-      setupStripeEvent('customer.subscription.deleted', mockSubscription());
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expectOrgIdBackfilled();
-    });
-
-    it('subscription deleted writes nothing when metadata carries no orgId', async () => {
-      setupStripeEvent(
-        'customer.subscription.deleted',
-        mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
-      );
-      setupCustomerRetrieveWithoutOrg();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expectRefusedAndRetryable(result);
-    });
-
-    it('payment succeeded persists orgId from customer metadata', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expectOrgIdBackfilled();
-    });
-
-    // Stripe snapshots the subscription's metadata onto the invoice, so an
-    // invoice for a customer created before the metadata carried an orgId still
-    // names the org it is paying for.
-    it('payment succeeded persists orgId from the invoice subscription metadata', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoiceForOrgSubscription());
-      setupCustomerRetrieveWithoutOrg();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expectOrgIdBackfilled();
-    });
-
-    it('payment succeeded writes nothing when metadata carries no orgId', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieveWithoutOrg();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expectRefusedAndRetryable(result);
-    });
-
-    it('payment failed persists orgId from customer metadata', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupCustomerRetrieve();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expectOrgIdBackfilled();
-    });
-
-    it('payment failed persists orgId from the invoice subscription metadata', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoiceForOrgSubscription());
-      setupCustomerRetrieveWithoutOrg();
-
-      await handler(buildWebhookEvent('{}'));
-
-      expectOrgIdBackfilled();
-    });
-
-    it('payment failed writes nothing when metadata carries no orgId', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupCustomerRetrieveWithoutOrg();
-
-      const result = await handler(buildWebhookEvent('{}'));
-
-      expectRefusedAndRetryable(result);
+      errorSpy.mockRestore();
     });
   });
 });

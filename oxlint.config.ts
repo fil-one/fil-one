@@ -85,6 +85,7 @@ export default defineConfig({
         'max-lines': 'off',
         'max-lines-per-function': 'off',
         'complexity/complexity': 'off',
+        '@filone/oxlint-rules/no-bare-success-assertions': 'error',
       },
     },
     {

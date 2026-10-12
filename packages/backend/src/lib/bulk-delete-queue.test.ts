@@ -4,11 +4,18 @@ vi.mock('sst', () => ({
   Resource: { BulkDeleteQueue: { url: 'https://sqs.example.com/bulk-delete.fifo' } },
 }));
 
-const { sendMock } = vi.hoisted(() => ({ sendMock: vi.fn() }));
+const { sendMock, clientConfigs } = vi.hoisted(() => ({
+  sendMock: vi.fn(),
+  clientConfigs: [] as unknown[],
+}));
 
 vi.mock('@aws-sdk/client-sqs', () => ({
   SQSClient: class {
     send = sendMock;
+
+    constructor(config: unknown) {
+      clientConfigs.push(config);
+    }
   },
   SendMessageCommand: class {
     input: Record<string, string>;
@@ -33,6 +40,12 @@ beforeEach(() => {
 });
 
 describe('enqueueBulkDeleteJob', () => {
+  it('sends to the regional SQS endpoint rather than the queue URL host', () => {
+    // In AWS the two are the same host. A local emulator hands out queue URLs
+    // on a host the Lambda cannot reach, and the SDK would otherwise use it.
+    expect(clientConfigs).toEqual([{ useQueueUrlAsEndpoint: false }]);
+  });
+
   it('groups a job on its own id so deliveries cannot overlap', async () => {
     await enqueueBulkDeleteJob(payload, 0);
 

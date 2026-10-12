@@ -108,13 +108,17 @@ describe('CreateAccessKeySchema reserved key names', () => {
   for (const [desc, keyName] of Object.entries(reservedNames)) {
     it(`rejects a key name when ${desc}`, () => {
       const result = CreateAccessKeySchema.safeParse({ ...base, keyName });
-      expect(result.success).toBe(false);
+      expect(result).toMatchZodValidationError({
+        code: 'custom',
+        path: ['keyName'],
+        message: expect.stringContaining('must not start with "filone-console"'),
+      });
     });
   }
 
   it('accepts a name that merely contains the prefix', () => {
     const result = CreateAccessKeySchema.safeParse({ ...base, keyName: 'my filone-console key' });
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({ success: true });
   });
 });
 
@@ -130,7 +134,7 @@ describe('CreateAccessKeySchema bucket permissions', () => {
       permissions: ['read', 'CreateBucket'],
       region: S3Region.UsEast1,
     });
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({ success: true });
   });
 
   it('rejects CreateBucket in the Aurora region', () => {
@@ -139,7 +143,11 @@ describe('CreateAccessKeySchema bucket permissions', () => {
       permissions: ['read', 'CreateBucket'],
       region: S3Region.EuWest1,
     });
-    expect(result.success).toBe(false);
+    expect(result).toMatchZodValidationError({
+      code: 'custom',
+      path: ['permissions'],
+      message: 'Bucket management permissions are not supported in the selected region',
+    });
   });
 
   it('accepts a bucket-info permission in the Aurora region', () => {
@@ -148,7 +156,7 @@ describe('CreateAccessKeySchema bucket permissions', () => {
       permissions: ['GetBucketVersioning'],
       region: S3Region.EuWest1,
     });
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({ success: true });
   });
 
   it('allows a bucket-only key (no object permissions) in a non-Aurora region', () => {
@@ -157,7 +165,7 @@ describe('CreateAccessKeySchema bucket permissions', () => {
       permissions: ['CreateBucket'],
       region: S3Region.UsEast1,
     });
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({ success: true });
   });
 
   it('rejects a key with no permissions', () => {
@@ -166,7 +174,11 @@ describe('CreateAccessKeySchema bucket permissions', () => {
       permissions: [],
       region: S3Region.UsEast1,
     });
-    expect(result.success).toBe(false);
+    expect(result).toMatchZodValidationError({
+      code: 'custom',
+      path: ['permissions'],
+      message: 'At least one permission is required',
+    });
   });
 
   it('still requires a data-protection granular to belong to a selected basic', () => {
@@ -176,6 +188,10 @@ describe('CreateAccessKeySchema bucket permissions', () => {
       granularPermissions: ['GetObjectVersion'], // belongs to `read`, not `list`
       region: S3Region.UsEast1,
     });
-    expect(result.success).toBe(false);
+    expect(result).toMatchZodValidationError({
+      code: 'custom',
+      path: ['granularPermissions'],
+      message: 'Granular permissions must belong to the selected basic permissions',
+    });
   });
 });

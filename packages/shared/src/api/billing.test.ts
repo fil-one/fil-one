@@ -46,40 +46,43 @@ describe('mapStripeStatus', () => {
 describe('ActivateSubscriptionRequestSchema', () => {
   it('accepts an empty object (no promotion code)', () => {
     const parsed = ActivateSubscriptionRequestSchema.safeParse({});
-    expect(parsed.success).toBe(true);
-    if (parsed.success) {
-      expect(parsed.data.promotionCode).toBeUndefined();
-    }
+    expect(parsed).toStrictEqual({ success: true, data: { useSavedPaymentMethod: false } });
   });
 
   it('accepts a valid promotion code', () => {
     const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'WELCOME20' });
-    expect(parsed.success).toBe(true);
-    if (parsed.success) {
-      expect(parsed.data.promotionCode).toBe('WELCOME20');
-    }
+    expect(parsed).toMatchObject({ success: true, data: { promotionCode: 'WELCOME20' } });
   });
 
   it('trims surrounding whitespace from the promotion code', () => {
     const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: '  WELCOME20  ' });
-    expect(parsed.success).toBe(true);
-    if (parsed.success) {
-      expect(parsed.data.promotionCode).toBe('WELCOME20');
-    }
+    expect(parsed).toMatchObject({ success: true, data: { promotionCode: 'WELCOME20' } });
   });
 
   it('rejects promotion codes shorter than 3 characters', () => {
     const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'ab' });
-    expect(parsed.success).toBe(false);
+    expect(parsed).toMatchZodValidationError({
+      code: 'invalid_format',
+      path: ['promotionCode'],
+      message: 'Promo code must be 3–40 letters, digits, or hyphens.',
+    });
   });
 
   it('rejects promotion codes longer than 40 characters', () => {
     const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'A'.repeat(41) });
-    expect(parsed.success).toBe(false);
+    expect(parsed).toMatchZodValidationError({
+      code: 'invalid_format',
+      path: ['promotionCode'],
+      message: 'Promo code must be 3–40 letters, digits, or hyphens.',
+    });
   });
 
   it('rejects promotion codes containing spaces or punctuation', () => {
     const parsed = ActivateSubscriptionRequestSchema.safeParse({ promotionCode: 'bad code!' });
-    expect(parsed.success).toBe(false);
+    expect(parsed).toMatchZodValidationError({
+      code: 'invalid_format',
+      path: ['promotionCode'],
+      message: 'Promo code must be 3–40 letters, digits, or hyphens.',
+    });
   });
 });

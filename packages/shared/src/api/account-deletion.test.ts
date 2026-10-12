@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { ExpectedZodIssue } from '../testing/zod-matchers.ts';
 import {
   DeleteAccountSchema,
   DeletionCodeSchema,
@@ -21,12 +22,24 @@ describe('DeletionCodeSchema', () => {
     ['empty', ''],
     ['internal space', '123 56'],
   ])('rejects %s', (_label, code) => {
-    expect(DeletionCodeSchema.safeParse(code).success).toBe(false);
+    expect(DeletionCodeSchema.safeParse(code)).toMatchZodValidationError({
+      code: 'invalid_format',
+      format: 'regex',
+      message: 'Verification code must be 6 digits',
+    });
   });
 
   it('is exactly DELETION_CODE_LENGTH digits', () => {
-    expect(DeletionCodeSchema.safeParse('1'.repeat(DELETION_CODE_LENGTH)).success).toBe(true);
-    expect(DeletionCodeSchema.safeParse('1'.repeat(DELETION_CODE_LENGTH + 1)).success).toBe(false);
+    expect(DeletionCodeSchema.safeParse('1'.repeat(DELETION_CODE_LENGTH))).toMatchObject({
+      success: true,
+    });
+    expect(
+      DeletionCodeSchema.safeParse('1'.repeat(DELETION_CODE_LENGTH + 1)),
+    ).toMatchZodValidationError({
+      code: 'invalid_format',
+      format: 'regex',
+      message: 'Verification code must be 6 digits',
+    });
   });
 });
 
@@ -39,17 +52,27 @@ describe('DeleteAccountSchema', () => {
   });
 
   it('accepts an org name the current OrgNameSchema rules would reject', () => {
-    expect(DeleteAccountSchema.safeParse({ code: '123456', orgName: "Acme & Co's" }).success).toBe(
-      true,
+    expect(DeleteAccountSchema.safeParse({ code: '123456', orgName: "Acme & Co's" })).toMatchObject(
+      {
+        success: true,
+      },
     );
   });
 
-  it.each([
-    ['a missing code', { orgName: 'Acme' }],
-    ['a missing org name', { code: '123456' }],
-    ['a blank org name', { code: '123456', orgName: '   ' }],
-    ['a malformed code', { code: 'abcdef', orgName: 'Acme' }],
-  ])('rejects %s', (_label, body) => {
-    expect(DeleteAccountSchema.safeParse(body).success).toBe(false);
+  it.each<[string, unknown, ExpectedZodIssue]>([
+    ['a missing code', { orgName: 'Acme' }, { code: 'invalid_type', path: ['code'] }],
+    ['a missing org name', { code: '123456' }, { code: 'invalid_type', path: ['orgName'] }],
+    [
+      'a blank org name',
+      { code: '123456', orgName: '   ' },
+      { code: 'too_small', path: ['orgName'], message: 'Organization name is required' },
+    ],
+    [
+      'a malformed code',
+      { code: 'abcdef', orgName: 'Acme' },
+      { code: 'invalid_format', path: ['code'], message: 'Verification code must be 6 digits' },
+    ],
+  ])('rejects %s', (_label, body, issue) => {
+    expect(DeleteAccountSchema.safeParse(body)).toMatchZodValidationError(issue);
   });
 });

@@ -347,6 +347,18 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "StripeEventDlq": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "StripeEventQueue": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "StripeEventWorker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "StripePriceId": {
       "type": "sst.sst.Secret"
       "value": string
