@@ -35,7 +35,6 @@ const mockDeleteTenant = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetPrincipalAccess = vi.fn((_o: Record<string, unknown>) => ({}));
-const mockPutPrincipal = vi.fn((_o: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/orchestrator-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
@@ -51,7 +50,6 @@ vi.mock('@filone/orchestrator-client', () => ({
     mockGetBucketMetrics(o),
   getTenantsByTenantIdPrincipalsByPrincipalIdAccess: (o: Record<string, unknown>) =>
     mockGetPrincipalAccess(o),
-  putTenantsByTenantIdPrincipalsByPrincipalId: (o: Record<string, unknown>) => mockPutPrincipal(o),
 }));
 
 vi.mock('./metrics.ts', () => ({
@@ -702,18 +700,18 @@ describe('listBuckets for a member', () => {
     expect(listCall.args[1]).toStrictEqual({ abortSignal: signal });
   });
 
-  it('starts the access lookup before the S3 listing answers', async () => {
+  it('calls the access lookup before S3 answers the bucket listing', async () => {
     stubS3Credentials();
-    let lookupsWhenListed = -1;
+    let accessLookupCallsWhenS3Listed: number | undefined;
     s3Mock.on(ListBucketsCommand).callsFake(() => {
-      lookupsWhenListed = mockGetPrincipalAccess.mock.calls.length;
+      accessLookupCallsWhenS3Listed = mockGetPrincipalAccess.mock.calls.length;
       return { Buckets: [{ Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') }] };
     });
     mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
 
     await iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
 
-    expect(lookupsWhenListed).toBe(1);
+    expect(accessLookupCallsWhenS3Listed).toBe(1);
   });
 });
 
