@@ -18,6 +18,7 @@ import {
   BUCKET_NAME,
   IAM_REGION,
   ORG_ID,
+  SERVICE_KEYS_REGION,
   TENANT_ID,
   USER_ID,
   getAuditEvents,
@@ -26,11 +27,11 @@ import {
   resetFixture,
 } from '../test/bucket-policy-fixture.ts';
 
-function buildDeleteEvent(headers: Record<string, string>) {
+function buildDeleteEvent(headers: Record<string, string>, region: string = IAM_REGION) {
   const event = buildEvent({
     method: 'DELETE',
     userInfo: { userId: USER_ID, orgId: ORG_ID },
-    queryStringParameters: { region: IAM_REGION },
+    queryStringParameters: { region },
   });
   event.headers = headers;
   event.pathParameters = { name: BUCKET_NAME };
@@ -114,5 +115,17 @@ describe('delete-bucket-policy baseHandler', () => {
 
     expect(result.statusCode).toBe(404);
     expect(parseResponseBody(result).code).toBe(ApiErrorCode.POLICY_NOT_FOUND);
+  });
+
+  it('answers 501 in a region whose network does not serve the iam access model', async () => {
+    const result = await baseHandler(
+      buildDeleteEvent({ 'if-match': '"any"' }, SERVICE_KEYS_REGION),
+    );
+
+    expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
+      statusCode: 501,
+      body: { message: 'Bucket policies are not available in this region' },
+    });
+    expect(iam.calls).toHaveLength(0);
   });
 });
