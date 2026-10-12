@@ -21,7 +21,7 @@ import { listMembers } from './org-membership.ts';
 import type { OrgProfileItem } from './org-profile.ts';
 import { removeRegisteredPrincipal } from './org-profile.ts';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.ts';
-import type { IamOrchestrator } from './service-orchestrator.ts';
+import { supportsBucketPolicies, type ServiceOrchestrator } from './service-orchestrator.ts';
 
 /**
  * The roster as the storage system should see it after a role change. Read
@@ -51,9 +51,9 @@ export function isRosterRole(role: OrgRole): boolean {
 /** The ready `iam` orchestrators for this org, with the tenant each resolved. */
 function getReadyIamOrchestrators(
   orgProfile: OrgProfileItem | undefined,
-): Array<{ orchestrator: IamOrchestrator; tenantId: string }> {
+): Array<{ orchestrator: ServiceOrchestrator; tenantId: string }> {
   return getAvailableOrchestrators().flatMap((orchestrator) => {
-    if (orchestrator.accessModel !== 'iam') return [];
+    if (!supportsBucketPolicies(orchestrator)) return [];
     const tenantId = orchestrator.isTenantReady(orgProfile);
     return tenantId ? [{ orchestrator, tenantId }] : [];
   });
@@ -92,7 +92,7 @@ async function syncRosterStatementsInRegion({
   actor,
 }: {
   orgId: string;
-  orchestrator: IamOrchestrator;
+  orchestrator: ServiceOrchestrator;
   tenantId: string;
   roster: Roster;
   actor: AuditActor;
@@ -107,7 +107,7 @@ async function syncRosterStatementsInRegion({
   try {
     // Every member a statement will name has to exist as a principal first.
     for (const userId of [...roster.owners, ...roster.admins]) {
-      await orchestrator.iam.syncMember(tenantId, userId);
+      await orchestrator.syncMember(tenantId, userId);
     }
     buckets = (await orchestrator.listBuckets(tenantId)).map((bucket) => bucket.bucketName);
   } catch (err) {
@@ -159,27 +159,27 @@ async function replaceRosterStatementsOnBucket({
   actor,
 }: {
   orgId: string;
-  orchestrator: IamOrchestrator;
+  orchestrator: ServiceOrchestrator;
   tenantId: string;
   bucketName: string;
   roster: Roster;
   actor: AuditActor;
 }): Promise<void> {
-  const { iam, region } = orchestrator;
+  const { region } = orchestrator;
   await pRetry(
     async () => {
-      const current = await iam.getBucketPolicy(tenantId, bucketName);
+      const current = await orchestrator.getBucketPolicy(tenantId, bucketName);
       const next = replaceRosterStatements(current?.policy ?? null, roster);
       if (JSON.stringify(current?.policy ?? null) === JSON.stringify(next)) return;
       await writeBucketPolicyWithAudit({ orgId, region, bucketName, actor, current, next }, () =>
         next
-          ? iam.putBucketPolicy(
+          ? orchestrator.putBucketPolicy(
               tenantId,
               bucketName,
               next,
               current ? { ifMatch: current.etag } : { ifNoneMatch: '*' },
             )
-          : iam.deleteBucketPolicy(tenantId, bucketName, { ifMatch: current!.etag }),
+          : orchestrator.deleteBucketPolicy(tenantId, bucketName, { ifMatch: current!.etag }),
       );
     },
     // A stale ETag is another writer landing first; the read-modify-write runs
@@ -266,7 +266,7 @@ export async function removeMemberPrincipalFromIamRegions({
     regions.map(async ({ orchestrator, tenantId }) => {
       const { region } = orchestrator;
       try {
-        await orchestrator.iam.removeMember(tenantId, userId);
+        await orchestrator.removeMember(tenantId, userId);
         await removeRegisteredPrincipal(orgId, orchestrator.id, userId);
         return { region, ok: true };
       } catch (error) {

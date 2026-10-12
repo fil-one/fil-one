@@ -5,11 +5,11 @@
 // `create-bucket`), so a member who is not a principal cannot create a bucket. This runs from
 // `ensureTenantReady`, the call every policy-writing path already makes.
 //
-// Kept out of iam-policy-fanout.ts on purpose: that module reaches the
+// Kept out of iam-policy-fanout.ts on purpose: that module imports the
 // orchestrator registry, and importing it from the orchestrator would close an
 // import cycle.
 
-import type { IamMethods } from '../iam-orchestrator.ts';
+import type { MemberOrchestrator } from '../iam-orchestrator.ts';
 import { listMembers } from '../org-membership.ts';
 import { addRegisteredPrincipals, getOrgProfile, getRegisteredPrincipals } from '../org-profile.ts';
 
@@ -21,7 +21,7 @@ import { addRegisteredPrincipals, getOrgProfile, getRegisteredPrincipals } from 
  * invited member is registered on the next call and never again.
  */
 export async function registerMemberPrincipals(
-  iam: IamMethods,
+  members: MemberOrchestrator,
   orchestratorId: string,
   orgId: string,
   tenantId: string,
@@ -31,7 +31,7 @@ export async function registerMemberPrincipals(
   if (missing.length === 0) return;
 
   for (const { userId } of missing) {
-    await iam.syncMember(tenantId, userId);
+    await members.syncMember(tenantId, userId);
   }
   await addRegisteredPrincipals(
     orgId,

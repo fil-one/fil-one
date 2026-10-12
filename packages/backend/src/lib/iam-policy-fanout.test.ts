@@ -155,7 +155,7 @@ describe('syncRosterStatements', () => {
     ]);
   });
 
-  it('skips scoped-keys regions', async () => {
+  it('skips service-keys regions', async () => {
     const reports = await syncRoster();
 
     expect(reports.map((report) => report.region)).toStrictEqual([S3Region.UsEast9]);
