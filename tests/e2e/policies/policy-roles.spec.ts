@@ -1,24 +1,25 @@
 import { test, expect, type Page } from '@playwright/test';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
+  allow,
+  bindToBucket,
+  buildCreatorPolicy,
+  grantAllToOwner,
+  createS3ClientWithNewKey,
+  deleteObject,
+  emptyAndDeleteBucket,
+  generateBucketName,
+  getCredentials,
+  getS3Outcome,
+  listObjects,
+  putObject,
+  toCanonicalPolicy,
   ConsoleApi,
   PAYLOAD,
   REGION,
   SEEDED_KEY,
   STORAGE_STATE,
-  allow,
-  getCredentials,
-  deleteObject,
-  listObjects,
-  getS3Outcome,
-  putObject,
-  emptyAndDeleteBucket,
-  buildCreatorPolicy,
-  grantAllToOwner,
-  createS3ClientWithNewKey,
-  generateBucketName,
   type PolicyUser,
-  toCanonicalPolicy,
 } from './policy.util.ts';
 
 // The same bucket as each role sees it: the Owner and the Admin are unscoped
@@ -120,7 +121,7 @@ test('R3. a bucket the admin creates names only the admin', async () => {
   await apiByRole.admin.createBucket(bucket);
   buckets.push(bucket);
   expect(toCanonicalPolicy((await apiByRole.owner.readPolicy(bucket)).policy)).toEqual(
-    toCanonicalPolicy(buildCreatorPolicy(userIdByRole.admin)),
+    toCanonicalPolicy(buildCreatorPolicy(bucket, userIdByRole.admin)),
   );
 });
 
@@ -228,14 +229,14 @@ test("R8. the first policy is the server's own, whatever a creator sends", async
   // The create request carries no policy; the server names the creator and
   // sends that on the create itself, so a creator who asks for more gets the
   // default and nothing else.
-  const requestedPolicy = { Statement: [allow('*', ['s3:*'], 'mine')] };
   const results = [];
+  const expected = [];
   for (const role of ['admin', 'member'] as const) {
     const bucket = generateBucketName(`r8-${role}`);
     const created = await apiByRole[role].send('POST', '/buckets', {
       bucketName: bucket,
       region: REGION,
-      policy: requestedPolicy,
+      policy: bindToBucket(bucket, [allow('*', ['s3:*'], 'mine')]),
     });
     if (created.status() === 201) buckets.push(bucket);
     results.push([
@@ -243,9 +244,7 @@ test("R8. the first policy is the server's own, whatever a creator sends", async
       created.status(),
       toCanonicalPolicy((await apiByRole.owner.readPolicy(bucket)).policy),
     ]);
+    expected.push([role, 201, toCanonicalPolicy(buildCreatorPolicy(bucket, userIdByRole[role]))]);
   }
-  expect(results).toEqual([
-    ['admin', 201, toCanonicalPolicy(buildCreatorPolicy(userIdByRole.admin))],
-    ['member', 201, toCanonicalPolicy(buildCreatorPolicy(userIdByRole.member))],
-  ]);
+  expect(results).toEqual(expected);
 });

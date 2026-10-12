@@ -15,24 +15,25 @@ import {
   type S3Client,
 } from '@aws-sdk/client-s3';
 import { test, expect } from '@playwright/test';
-import type { PolicyStatement } from '@filone/shared';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
+  allow,
+  bindToBucket,
+  grantAllToOwner,
+  createS3ClientWithNewKey,
+  deleteObject,
+  deny,
+  emptyAndDeleteBucket,
+  generateBucketName,
+  getCredentials,
+  getS3Outcome,
+  listObjects,
+  putObject,
+  toCanonicalPolicy,
   ConsoleApi,
   PAYLOAD,
   SEEDED_KEY,
-  allow,
-  getCredentials,
-  deleteObject,
-  deny,
-  listObjects,
-  getS3Outcome,
-  grantAllToOwner,
-  putObject,
-  emptyAndDeleteBucket,
-  createS3ClientWithNewKey,
-  generateBucketName,
-  toCanonicalPolicy,
+  type UnboundStatement,
 } from './policy.util.ts';
 
 // Which S3 operations each action admits, read at the gateway. Several actions
@@ -56,7 +57,7 @@ const createdKeys: { api: ConsoleApi; id: string }[] = [];
 
 /** A bucket holding SEEDED_KEY whose policy is the owners plus `statements`. */
 async function createBucketWithStatements(
-  statements: PolicyStatement[],
+  statements: UnboundStatement[],
   { versioning = false, lock = false } = {},
 ): Promise<string> {
   const bucket = generateBucketName('enf');
@@ -298,9 +299,10 @@ test.describe('C. policy writes', () => {
     const { etag } = await owner.readPolicy(bucket);
     const write = (sid: string) =>
       owner.putPolicy(bucket, {
-        policy: {
-          Statement: [grantAllToOwner(ownerId), allow([memberId], ['s3:ListBucket'], sid)],
-        },
+        policy: bindToBucket(bucket, [
+          grantAllToOwner(ownerId),
+          allow([memberId], ['s3:ListBucket'], sid),
+        ]),
         etag,
       });
     const statuses = (await Promise.all([write('first'), write('second')])).map((r) => r.status());
@@ -319,7 +321,7 @@ test.describe('C. policy writes', () => {
   for (const [title, statement] of [
     [
       'C3a. a statement with a field the schema does not know is refused',
-      { ...allow([memberId], ['s3:GetObject']), resource: 'arn:aws:s3:::x' },
+      { ...allow([memberId], ['s3:GetObject']), resource: 'arn:aws:s3:::x' } as UnboundStatement,
     ],
     [
       'C3b. a Sid longer than 128 characters is refused',
@@ -334,7 +336,7 @@ test.describe('C. policy writes', () => {
     test(title, async () => {
       const { etag } = await owner.readPolicy(bucket);
       const res = await owner.putPolicy(bucket, {
-        policy: { Statement: [grantAllToOwner(ownerId), statement] },
+        policy: bindToBucket(bucket, [grantAllToOwner(ownerId), statement]),
         etag,
       });
       const body = await res.text();
@@ -352,12 +354,12 @@ test.describe('C. policy writes', () => {
       allow([memberId, ownerId, memberId], ['s3:ListBucket'], 'repeat'),
     ]);
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-      toCanonicalPolicy({
-        Statement: [
+      toCanonicalPolicy(
+        bindToBucket(bucket, [
           grantAllToOwner(ownerId),
           allow([memberId, ownerId], ['s3:ListBucket'], 'repeat'),
-        ],
-      }),
+        ]),
+      ),
     );
   });
 });

@@ -185,7 +185,7 @@ test.describe('as the owner', () => {
     await page.getByTestId('bucket-policy-tab').click();
     await expect(page.getByTestId('policy-statement')).toHaveCount(1);
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-      toCanonicalPolicy(buildCreatorPolicy(ownerId)),
+      toCanonicalPolicy(buildCreatorPolicy(bucket, ownerId)),
     );
   });
 });
