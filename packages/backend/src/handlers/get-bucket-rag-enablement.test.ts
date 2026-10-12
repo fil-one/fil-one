@@ -38,8 +38,12 @@ process.env.FILONE_STAGE = 'test';
 import { baseHandler } from './get-bucket-rag-enablement.ts';
 import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
-import { reachesBucket } from '../lib/orchestrator/member-access.ts';
-import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
+import {
+  fakeOrchestrator,
+  stubMemberScopedGetBucket,
+  tenantFor,
+  type FakeOrchestrator,
+} from '../test/fake-orchestrator.ts';
 import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
@@ -252,13 +256,7 @@ describe('get-bucket-rag-enablement member scope on an iam region', () => {
       Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
     });
     orch = fakeOrchestrator('forge', { bucket: BUCKET, iam });
-    // The real iam arm's getBucket: null when the named member cannot reach it.
-    orch.getBucket.mockImplementation(
-      async (tenantId: string, bucketName: string, opts?: { actAs?: string }) =>
-        opts?.actAs && !(await reachesBucket(iam, tenantId, opts.actAs, bucketName))
-          ? null
-          : BUCKET,
-    );
+    stubMemberScopedGetBucket(orch, iam, BUCKET);
     mockGetOrchestratorForRegion.mockReturnValue(orch);
   });
 
@@ -268,18 +266,19 @@ describe('get-bucket-rag-enablement member scope on an iam region', () => {
     return e;
   }
 
-  it("answers not found for a bucket outside a Member's policies", async () => {
+  it('returns 404 for a Member whose policies do not grant the bucket', async () => {
     const result = await baseHandler(eventAs(OrgRole.Member));
 
-    expect(result.statusCode).toBe(404);
+    expect(result).toMatchObject({ statusCode: 404 });
+    expect(JSON.parse(result.body!)).toStrictEqual({ message: 'Bucket not found' });
   });
 
-  it('answers an Owner or Admin on a bucket their policies leave out', async () => {
-    const statuses: Array<number | undefined> = [];
-    for (const role of [OrgRole.Owner, OrgRole.Admin]) {
-      statuses.push((await baseHandler(eventAs(role))).statusCode);
-    }
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'returns 200 for an %s on a bucket no policy grants them',
+    async (role) => {
+      const result = await baseHandler(eventAs(role));
 
-    expect(statuses).toStrictEqual([200, 200]);
-  });
+      expect(result.statusCode).toBe(200);
+    },
+  );
 });

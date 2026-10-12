@@ -28,7 +28,7 @@ import { ragAccessMiddleware } from '../middleware/rag-access.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 /**
- * Refuse a bucket the caller cannot reach, or cannot index.
+ * Refuse a bucket the caller cannot access, or cannot index.
  *
  * A bucket the caller's tenant does not own is 404, as is one outside a scoped
  * member's policies. Turning indexing on also needs the member's policies to
@@ -36,12 +36,12 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
  * tenant's key, and the query path answers from that content. A region serving
  * scoped keys has no policies to consult.
  */
-async function checkBucketReach(
+async function checkRagBucketAccess(
   orchestrator: ServiceOrchestrator,
   tenantId: string,
   bucketName: string,
   memberId: string | undefined,
-  indexing: boolean,
+  enableIndexing: boolean,
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
   if (!(await orchestrator.getBucket(tenantId, bucketName, memberId))) {
     return new ResponseBuilder()
@@ -49,7 +49,7 @@ async function checkBucketReach(
       .body<ErrorResponse>({ message: 'Bucket not found' })
       .build();
   }
-  if (!indexing || !memberId || orchestrator.accessModel !== 'iam') return undefined;
+  if (!enableIndexing || !memberId || orchestrator.accessModel !== 'iam') return undefined;
   const access = await orchestrator.iam.resolveMemberAccess(tenantId, memberId);
   const actions = access.find((entry) => entry.bucketName === bucketName)?.actions ?? [];
   if (actions.includes('s3:ListBucket') && actions.includes('s3:GetObject')) return undefined;
@@ -124,7 +124,7 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  const refused = await checkBucketReach(
+  const refused = await checkRagBucketAccess(
     orchestrator,
     tenantId,
     bucketName,

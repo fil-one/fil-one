@@ -361,12 +361,11 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   }
 
   /**
-   * One bucket's details, or null when the caller cannot reach it.
+   * One bucket's details, or null when the tenant has no such bucket.
    *
-   * Existence comes from the bucket-addressed reads themselves rather than from
-   * a tenant-wide listing. The listing answered for the tenant, so it said yes
-   * for a bucket the caller could not open, and it cost a call per bucket in
-   * the tenant to answer a question about one.
+   * Existence comes from the bucket-addressed reads rather than a tenant-wide
+   * listing, which names every bucket in the tenant whether or not the caller
+   * can open it, and costs a call per bucket in the tenant.
    */
   async getBucket(
     tenantId: string,
@@ -386,8 +385,9 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
       ]);
     } catch (err) {
       if (isNoSuchBucketError(err)) return null;
-      // The gateway answers another tenant's bucket AccessDenied, and so a key
-      // missing these reads; only a bucket the tenant does not list is absent.
+      // The gateway answers AccessDenied both for another tenant's bucket and
+      // for the tenant's own bucket when the key lacks these reads. The tenant
+      // listing tells them apart: a bucket it does not include is absent.
       if (isAccessDeniedError(err)) {
         const { buckets } = await s3ListBuckets(s3, requestOptions);
         if (!buckets.some((b) => b.name === bucketName)) return null;

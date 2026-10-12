@@ -49,8 +49,12 @@ process.env.FILONE_STAGE = 'test';
 import { baseHandler } from './set-bucket-rag-enablement.ts';
 import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
-import { reachesBucket } from '../lib/orchestrator/member-access.ts';
-import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
+import {
+  fakeOrchestrator,
+  stubMemberScopedGetBucket,
+  tenantFor,
+  type FakeOrchestrator,
+} from '../test/fake-orchestrator.ts';
 import { ApiErrorCode, OrgRole, S3Region, type PolicyAction } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
@@ -295,49 +299,56 @@ describe('set-bucket-rag-enablement member scope on an iam region', () => {
   });
 
   /** An iam orchestrator whose policy on my-bucket grants user-1 `actions`. */
-  function grantingOnBucket(actions: PolicyAction[]): FakeOrchestrator {
+  function buildIamOrchestratorGrantingOnMyBucket(actions: PolicyAction[]): FakeOrchestrator {
     const iam = new FakeIamOrchestrator();
     iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
     iam.seedPolicy(tenantFor('forge', 'org-1'), 'my-bucket', {
       Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: actions }],
     });
-    const o = fakeOrchestrator('forge', { bucket: BUCKET, iam });
-    // The real iam arm's getBucket: null when the named member cannot reach it.
-    o.getBucket.mockImplementation(
-      async (tenantId: string, bucketName: string, memberId?: string) =>
-        memberId && !(await reachesBucket(iam, tenantId, memberId, bucketName)) ? null : BUCKET,
-    );
-    return o;
+    const orchestrator = fakeOrchestrator('forge', { bucket: BUCKET, iam });
+    stubMemberScopedGetBucket(orchestrator, iam, BUCKET);
+    return orchestrator;
   }
 
-  it('refuses a Member whose policy on the bucket grants no object read', async () => {
-    orch = grantingOnBucket(['s3:PutObject']);
+  // The indexer lists and reads every object with the tenant key.
+  it.each([
+    ['s3:ListBucket but not s3:GetObject', ['s3:ListBucket']],
+    ['s3:GetObject but not s3:ListBucket', ['s3:GetObject']],
+  ] as const)('refuses a Member whose policy grants %s', async (_grant, actions) => {
+    orch = buildIamOrchestratorGrantingOnMyBucket([...actions]);
     mockGetOrchestratorForRegion.mockReturnValue(orch);
 
     const result = await baseHandler(event({ enabled: true }, OrgRole.Member));
 
-    // The indexer lists and reads every object with the tenant key.
     expect(result.statusCode).toBe(403);
     expect(mockSetEnablement).not.toHaveBeenCalled();
   });
 
   it('lets a Member whose policy grants listing and reading turn indexing on', async () => {
-    orch = grantingOnBucket(['s3:ListBucket', 's3:GetObject']);
+    orch = buildIamOrchestratorGrantingOnMyBucket(['s3:ListBucket', 's3:GetObject']);
     mockGetOrchestratorForRegion.mockReturnValue(orch);
 
     const result = await baseHandler(event({ enabled: true }, OrgRole.Member));
 
     expect(result.statusCode).toBe(200);
+    expect(mockSetEnablement).toHaveBeenCalledWith({
+      bucketName: 'my-bucket',
+      orgId: 'org-1',
+      enabled: true,
+      existing: undefined,
+      region: S3Region.EuWest1,
+    });
   });
 
-  it('lets an Owner or Admin turn indexing on where no policy names them', async () => {
-    const statuses: Array<number | undefined> = [];
-    for (const role of [OrgRole.Owner, OrgRole.Admin]) {
-      orch = grantingOnBucket(['s3:PutObject']);
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'lets an %s turn indexing on where no policy names them',
+    async (role) => {
+      orch = buildIamOrchestratorGrantingOnMyBucket(['s3:PutObject']);
       mockGetOrchestratorForRegion.mockReturnValue(orch);
-      statuses.push((await baseHandler(event({ enabled: true }, role))).statusCode);
-    }
 
-    expect(statuses).toStrictEqual([200, 200]);
-  });
+      const result = await baseHandler(event({ enabled: true }, role));
+
+      expect(result.statusCode).toBe(200);
+    },
+  );
 });

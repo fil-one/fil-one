@@ -21,7 +21,7 @@ import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
 import type {
-  BucketDetail,
+  BucketProperties,
   ListObjectVersionsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
@@ -76,7 +76,7 @@ function displayObjectCount(
 async function fetchObjectListing(
   region: S3Region,
   bucketName: string,
-  bucket: BucketDetail | null,
+  bucket: BucketProperties | null,
 ): Promise<ListObjectVersionsResponse> {
   if (bucket?.versioning) {
     const { items } = await batchPresign(region, [
@@ -132,7 +132,7 @@ function BucketOverview({
   region,
   bytesUsed,
 }: {
-  bucket: BucketDetail | null;
+  bucket: BucketProperties | null;
   region: S3Region;
   bytesUsed: number | undefined;
 }) {

@@ -6,7 +6,9 @@ import type {
   TenantInfo,
 } from '../lib/service-orchestrator.ts';
 import { S3Region, type TenantStatus } from '@filone/shared';
-import { delegateIamMethods, FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
+import type { AccessModel } from '@filone/shared';
+import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
+import { canMemberAccessBucket } from '../lib/orchestrator/member-access.ts';
 
 export interface FakeOrchestrator {
   id: string;
@@ -107,4 +109,21 @@ export function fakeOrgProfile(orgId: string) {
 /** The tenant id a {@link fakeOrchestrator} resolves for the given org. */
 export function tenantFor(orchestratorId: string, orgId: string): string {
   return `${orchestratorId}:${orgId}`;
+}
+
+/**
+ * Gives `getBucket` the iam orchestrator's rule: null when the named member
+ * cannot access the bucket by the policies seeded on `iam`, otherwise `bucket`.
+ */
+export function stubMemberScopedGetBucket(
+  orchestrator: FakeOrchestrator,
+  iam: FakeIamOrchestrator,
+  bucket: BucketDetails,
+): void {
+  orchestrator.getBucket.mockImplementation(
+    async (tenantId: string, bucketName: string, memberId?: string) =>
+      memberId && !(await canMemberAccessBucket(iam, tenantId, memberId, bucketName))
+        ? null
+        : bucket,
+  );
 }

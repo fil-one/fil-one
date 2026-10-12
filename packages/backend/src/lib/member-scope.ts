@@ -8,9 +8,7 @@ import { OrgRole } from '@filone/shared';
  * own keys still answer to the policy at the storage system.
  *
  * This asks who is unscoped, which `isRosterRole` only happens to answer today.
- * The two part company once a membership row can say `bucketScope: 'all'`,
- * since a roster statement never names such a member.
  */
-export function getScopedMemberId(role: string | undefined, userId: string): string | undefined {
+export function getScopedMemberId(role: OrgRole | undefined, userId: string): string | undefined {
   return role === OrgRole.Owner || role === OrgRole.Admin ? undefined : userId;
 }

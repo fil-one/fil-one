@@ -729,8 +729,7 @@ describe('listBuckets for a member', () => {
 
 describe('getBucket on an iam region', () => {
   const iamOrchestrator = buildOrchestrator({ accessModel: 'iam' });
-  const member = 'user-1';
-  const reaches = (...names: string[]) => ({
+  const respondWithAccessibleBuckets = (...names: string[]) => ({
     data: { buckets: names.map((name) => ({ name, actions: ['s3:ListBucket'] })) },
     error: undefined,
     response: { status: 200 },
@@ -742,24 +741,31 @@ describe('getBucket on an iam region', () => {
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
   });
 
-  it('reads the bucket when the member reaches it', async () => {
-    mockGetPrincipalAccess.mockReturnValue(reaches('bucket-a'));
+  it("returns details when the Member's access includes the bucket", async () => {
+    mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
 
     await expect(iamOrchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).resolves.toMatchObject(
       { bucketName: 'bucket-a' },
     );
+  });
+
+  it('looks up access for the named member', async () => {
+    mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
+
+    await iamOrchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID);
+
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
-      expect.objectContaining({ path: { tenantId, principalId: member } }),
+      expect.objectContaining({ path: { tenantId, principalId: MEMBER_ID } }),
     );
   });
 
-  it('answers null without touching S3 for a bucket the member cannot reach', async () => {
-    mockGetPrincipalAccess.mockReturnValue(reaches('other'));
+  it("returns null without S3 reads when the Member's access omits the bucket", async () => {
+    mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('other'));
 
     // The tenant's key would answer for the bucket, so the refusal comes from
     // the member's policies, and it reads exactly like a missing bucket.
     await expect(iamOrchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).resolves.toBeNull();
-    expect(s3Mock.commandCalls(GetBucketVersioningCommand)).toHaveLength(0);
+    expect(s3Mock.calls()).toHaveLength(0);
   });
 
   it('reads unscoped when no member is named', async () => {
@@ -772,29 +778,33 @@ describe('getBucket on an iam region', () => {
   it('rejects rather than reading when the access lookup fails', async () => {
     mockGetPrincipalAccess.mockReturnValue(fail(503));
 
-    await expect(iamOrchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).rejects.toThrow();
+    await expect(iamOrchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).rejects.toThrow(
+      new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),
+    );
+    expect(s3Mock.calls()).toHaveLength(0);
   });
 });
 
 describe('getBucket', () => {
   beforeEach(stubS3Credentials);
 
-  const noSuchBucket = () =>
+  const buildNoSuchBucketError = () =>
     new NoSuchBucket({ message: 'The specified bucket does not exist', $metadata: {} });
 
-  it('proves existence without listing the tenant', async () => {
+  it('does not call ListBuckets when both bucket reads succeed', async () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    await orchestrator.getBucket(tenantId, 'bucket-a');
+    const result = await orchestrator.getBucket(tenantId, 'bucket-a');
 
-    // The listing answered for the tenant, so it said yes for a bucket the
-    // caller could not open, and cost a call per bucket to answer about one.
+    // A tenant listing names every bucket in the tenant whether or not the
+    // caller can open it, so the bucket-addressed reads settle existence.
+    expect(result).toMatchObject({ bucketName: 'bucket-a', versioning: true });
     expect(s3Mock.commandCalls(ListBucketsCommand)).toHaveLength(0);
   });
 
   it('returns null when the versioning read says the bucket is not there', async () => {
-    s3Mock.on(GetBucketVersioningCommand).rejects(noSuchBucket());
+    s3Mock.on(GetBucketVersioningCommand).rejects(buildNoSuchBucketError());
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
     await expect(orchestrator.getBucket(tenantId, 'missing')).resolves.toBeNull();
@@ -802,12 +812,12 @@ describe('getBucket', () => {
 
   it('returns null when the object-lock read says the bucket is not there', async () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
-    s3Mock.on(GetObjectLockConfigurationCommand).rejects(noSuchBucket());
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(buildNoSuchBucketError());
 
     await expect(orchestrator.getBucket(tenantId, 'missing')).resolves.toBeNull();
   });
 
-  const accessDenied = () =>
+  const buildAccessDeniedError = () =>
     new S3ServiceException({
       name: 'AccessDenied',
       $fault: 'client',
@@ -816,16 +826,16 @@ describe('getBucket', () => {
     });
 
   it("returns null for another tenant's bucket, which the gateway answers AccessDenied", async () => {
-    s3Mock.on(GetBucketVersioningCommand).rejects(accessDenied());
-    s3Mock.on(GetObjectLockConfigurationCommand).rejects(accessDenied());
+    s3Mock.on(GetBucketVersioningCommand).rejects(buildAccessDeniedError());
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(buildAccessDeniedError());
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [{ Name: 'bucket-a' }] });
 
     await expect(orchestrator.getBucket(tenantId, 'someone-elses')).resolves.toBeNull();
   });
 
-  it("rethrows AccessDenied on the tenant's own bucket, which a key without the reads gets", async () => {
-    s3Mock.on(GetBucketVersioningCommand).rejects(accessDenied());
-    s3Mock.on(GetObjectLockConfigurationCommand).rejects(accessDenied());
+  it('rethrows AccessDenied for a bucket the tenant listing includes', async () => {
+    s3Mock.on(GetBucketVersioningCommand).rejects(buildAccessDeniedError());
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(buildAccessDeniedError());
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [{ Name: 'bucket-a' }] });
 
     await expect(orchestrator.getBucket(tenantId, 'bucket-a')).rejects.toThrow('Access Denied');
@@ -855,8 +865,7 @@ describe('getBucket', () => {
 
     const result = await orchestrator.getBucket(tenantId, 'bucket-a');
 
-    // No createdAt: S3 carries no creation date for a single bucket, and the
-    // listing that did carry one is gone.
+    // No createdAt: S3 carries no creation date for a single bucket.
     expect(result).toEqual({
       bucketName: 'bucket-a',
       region: S3Region.UsEast1,
@@ -1529,7 +1538,7 @@ describe('signal forwarding', () => {
   it('listBuckets forwards the signal to S3 ListBuckets', async () => {
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
 
-    await orchestrator.listBuckets(tenantId, undefined, { signal });
+    await orchestrator.listBuckets(tenantId, { signal });
 
     expect(sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand))).toEqual({
       abortSignal: signal,
@@ -1550,7 +1559,7 @@ describe('signal forwarding', () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    await orchestrator.getBucket(tenantId, 'b', undefined, { signal });
+    await orchestrator.getBucket(tenantId, 'b', { signal });
 
     const sent = [
       sendOptionsOf(s3Mock.commandCalls(GetBucketVersioningCommand)),

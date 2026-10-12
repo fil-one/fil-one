@@ -557,39 +557,59 @@ describe('presign baseHandler', () => {
       accessModel: 'iam',
       iam: { resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args) },
     };
-    const reaches = (bucketName: string, actions: string[]) => [{ bucketName, actions }];
-    const getObject = (bucket: string) => [{ op: 'getObject', bucket, key: 'k' }];
+    const grantActionsOnBucket = (bucketName: string, actions: string[]) => [
+      { bucketName, actions },
+    ];
+    const buildGetObjectOps = (bucket: string) => [{ op: 'getObject', bucket, key: 'k' }];
 
     beforeEach(() => {
       mockGetOrchestratorForRegion.mockReturnValue(iamOrchestrator);
     });
 
-    it('signs for a scoped member what their policies reach, with the tenant key', async () => {
-      mockResolveMemberAccess.mockResolvedValue(reaches('b', ['s3:GetObject']));
+    it('presigns getObject for a Member whose policy grants s3:GetObject', async () => {
+      mockResolveMemberAccess.mockResolvedValue(grantActionsOnBucket('b', ['s3:GetObject']));
 
-      const result = await baseHandler(buildPresignEvent(getObject('b'), { role: OrgRole.Member }));
+      const result = await baseHandler(
+        buildPresignEvent(buildGetObjectOps('b'), { role: OrgRole.Member }),
+      );
 
       expect(result.statusCode).toBe(200);
+      expect(mockGetPresignedGetObjectUrl).toHaveBeenCalledTimes(1);
+    });
+
+    it("looks up the Member's access by tenant and user id", async () => {
+      mockResolveMemberAccess.mockResolvedValue(grantActionsOnBucket('b', ['s3:GetObject']));
+
+      await baseHandler(buildPresignEvent(buildGetObjectOps('b'), { role: OrgRole.Member }));
+
       expect(mockResolveMemberAccess).toHaveBeenCalledWith('aurora-t-1', 'user-1');
+    });
+
+    it("signs with the tenant's S3 context", async () => {
+      mockResolveMemberAccess.mockResolvedValue(grantActionsOnBucket('b', ['s3:GetObject']));
+
+      await baseHandler(buildPresignEvent(buildGetObjectOps('b'), { role: OrgRole.Member }));
+
       expect(mockGetS3ClientContext).toHaveBeenCalledWith('aurora-t-1');
     });
 
-    it("answers not found for a bucket outside the member's policies", async () => {
-      mockResolveMemberAccess.mockResolvedValue(reaches('other', ['s3:GetObject']));
+    it('returns the same 404 as a missing bucket when no policy grants the Member the bucket', async () => {
+      mockResolveMemberAccess.mockResolvedValue(grantActionsOnBucket('other', ['s3:GetObject']));
 
-      const result = await baseHandler(buildPresignEvent(getObject('b'), { role: OrgRole.Member }));
+      const result = await baseHandler(
+        buildPresignEvent(buildGetObjectOps('b'), { role: OrgRole.Member }),
+      );
 
-      // Same status and body as a bucket that does not exist: a distinct code
-      // would confirm that it does.
-      expect(result).toMatchObject({
+      // A distinct status or body would confirm that the bucket exists.
+      expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
         statusCode: 404,
-        body: expect.stringContaining('Bucket not found'),
+        body: { message: 'Bucket not found' },
       });
       expect(mockGetPresignedGetObjectUrl).not.toHaveBeenCalled();
     });
 
     it("refuses an operation the bucket's policy does not grant", async () => {
-      mockResolveMemberAccess.mockResolvedValue(reaches('b', ['s3:GetObject']));
+      mockResolveMemberAccess.mockResolvedValue(grantActionsOnBucket('b', ['s3:GetObject']));
 
       const result = await baseHandler(
         buildPresignEvent(
@@ -598,60 +618,64 @@ describe('presign baseHandler', () => {
         ),
       );
 
-      expect(result.statusCode).toBe(403);
+      expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+        statusCode: 403,
+        body: { message: 'Your access to b does not permit putObject.' },
+      });
       expect(mockGetPresignedPutObjectUrl).not.toHaveBeenCalled();
     });
 
-    it('refuses a version read or delete the policy grants only on the current object', async () => {
-      mockResolveMemberAccess.mockResolvedValue(reaches('b', ['s3:GetObject', 's3:DeleteObject']));
-
-      const statuses: Array<number | undefined> = [];
-      for (const op of [
-        { op: 'getObject', bucket: 'b', key: 'k', versionId: 'v1' },
-        { op: 'headObject', bucket: 'b', key: 'k', versionId: 'v1' },
-        { op: 'deleteObject', bucket: 'b', key: 'k', versionId: 'v1' },
-      ]) {
-        const result = await baseHandler(buildPresignEvent([op], { role: OrgRole.Member }));
-        statuses.push(result.statusCode);
-      }
-
-      // The gateway classifies these as s3:GetObjectVersion and
-      // s3:DeleteObjectVersion; the tenant-signed URL skips that evaluation.
-      expect(statuses).toStrictEqual([403, 403, 403]);
-    });
-
-    it('signs a version read or delete the policy grants on versions', async () => {
-      mockResolveMemberAccess.mockResolvedValue(
-        reaches('b', ['s3:GetObjectVersion', 's3:DeleteObjectVersion']),
-      );
+    // The gateway classifies a versioned read or delete as s3:GetObjectVersion
+    // or s3:DeleteObjectVersion; the tenant-signed URL skips that evaluation.
+    it.each([
+      ['getObject', 's3:GetObject'],
+      ['headObject', 's3:GetObject'],
+      ['deleteObject', 's3:DeleteObject'],
+    ])('returns 403 for a versioned %s when the policy grants only %s', async (op, action) => {
+      mockResolveMemberAccess.mockResolvedValue(grantActionsOnBucket('b', [action]));
 
       const result = await baseHandler(
-        buildPresignEvent(
-          [
-            { op: 'getObject', bucket: 'b', key: 'k', versionId: 'v1' },
-            { op: 'headObject', bucket: 'b', key: 'k', versionId: 'v1' },
-            { op: 'deleteObject', bucket: 'b', key: 'k', versionId: 'v1' },
-          ],
-          { role: OrgRole.Member },
-        ),
+        buildPresignEvent([{ op, bucket: 'b', key: 'k', versionId: 'v1' }], {
+          role: OrgRole.Member,
+        }),
+      );
+
+      expect(result.statusCode).toBe(403);
+    });
+
+    it.each([
+      ['getObject', 's3:GetObjectVersion'],
+      ['headObject', 's3:GetObjectVersion'],
+      ['deleteObject', 's3:DeleteObjectVersion'],
+    ])('presigns a versioned %s the policy grants', async (op, action) => {
+      mockResolveMemberAccess.mockResolvedValue(grantActionsOnBucket('b', [action]));
+
+      const result = await baseHandler(
+        buildPresignEvent([{ op, bucket: 'b', key: 'k', versionId: 'v1' }], {
+          role: OrgRole.Member,
+        }),
       );
 
       expect(result.statusCode).toBe(200);
     });
 
-    it('reads member access for a scoped caller only', async () => {
-      // An Owner or Admin must reach a bucket whose policy leaves them out, or
-      // has none, to repair it, so the console never reads their access.
-      const reads: number[] = [];
-      for (const role of [OrgRole.Owner, OrgRole.Admin, OrgRole.Member, OrgRole.ReadOnly]) {
-        mockResolveMemberAccess.mockClear().mockResolvedValue(reaches('b', ['s3:ListBucket']));
-        await baseHandler(buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], { role }));
-        reads.push(mockResolveMemberAccess.mock.calls.length);
-      }
-      expect(reads).toStrictEqual([0, 0, 1, 1]);
+    // An Owner or Admin must open a bucket whose policy leaves them out, or has
+    // none, to repair it, so the console never looks up their access.
+    it.each([OrgRole.Owner, OrgRole.Admin])('skips the access lookup for an %s', async (role) => {
+      await baseHandler(buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], { role }));
+
+      expect(mockResolveMemberAccess).not.toHaveBeenCalled();
     });
 
-    it('never reads member access on a scoped-keys region', async () => {
+    it.each([OrgRole.Member, OrgRole.ReadOnly])('looks up access for a %s', async (role) => {
+      mockResolveMemberAccess.mockResolvedValue(grantActionsOnBucket('b', ['s3:ListBucket']));
+
+      await baseHandler(buildPresignEvent([{ op: 'listObjects', bucket: 'b' }], { role }));
+
+      expect(mockResolveMemberAccess).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips the access lookup on a scoped-keys region', async () => {
       mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
 
       const result = await baseHandler(

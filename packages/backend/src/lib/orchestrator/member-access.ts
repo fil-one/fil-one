@@ -29,8 +29,11 @@ export async function filterBucketsByMemberAccess(
   return listedBuckets.filter((bucket) => accessibleBucketNames.has(bucket.bucketName));
 }
 
-/** Whether one member reaches one bucket, by the same evaluation. */
-export async function reachesBucket(
+/**
+ * Whether one member can access one bucket, by the storage system's evaluation
+ * of their policies that {@link filterBucketsByMemberAccess} also uses.
+ */
+export async function canMemberAccessBucket(
   iam: IamMethods,
   tenantId: string,
   userId: string,

@@ -92,8 +92,12 @@ import {
   stubMembershipRead,
 } from '../test/lambda-test-utilities.ts';
 import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
-import { reachesBucket } from '../lib/orchestrator/member-access.ts';
-import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
+import {
+  fakeOrchestrator,
+  stubMemberScopedGetBucket,
+  tenantFor,
+  type FakeOrchestrator,
+} from '../test/fake-orchestrator.ts';
 import { OrgRole, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
@@ -636,9 +640,9 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
     expect(mockEmbed).not.toHaveBeenCalled();
   });
 
-  it("keeps the key's own scope on an iam region, not its creator's policies", async () => {
+  it("answers a RAG key request on an iam region even when the key creator's policies do not grant the bucket", async () => {
     stubKey();
-    orch = iamOrchestratorReachingOnly('other-bucket');
+    orch = buildIamOrchestratorGrantingOnly('other-bucket');
     mockGetOrchestratorForRegion.mockReturnValue(orch);
 
     const result = await handler(bearerEvent(`Bearer ${TOKEN}`), buildContext());
@@ -666,25 +670,16 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
   });
 });
 
-/**
- * An iam-region orchestrator whose policies grant user-1 only `bucketName`,
- * with the real iam arm's getBucket rule: null when the named member cannot
- * reach the bucket.
- */
-function iamOrchestratorReachingOnly(bucketName: string): FakeOrchestrator {
+/** An iam-region orchestrator whose policies grant user-1 only `bucketName`. */
+function buildIamOrchestratorGrantingOnly(bucketName: string): FakeOrchestrator {
   const iam = new FakeIamOrchestrator();
   iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
   iam.seedPolicy(tenantFor('forge', 'org-1'), bucketName, {
     Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
   });
-  const o = fakeOrchestrator('forge', { bucket: BUCKET, iam });
-  o.getBucket.mockImplementation(
-    async (tenantId: string, name: string, opts?: { scopeToMemberId?: string }) =>
-      opts?.scopeToMemberId && !(await reachesBucket(iam, tenantId, opts.scopeToMemberId, name))
-        ? null
-        : BUCKET,
-  );
-  return o;
+  const orchestrator = fakeOrchestrator('forge', { bucket: BUCKET, iam });
+  stubMemberScopedGetBucket(orchestrator, iam, BUCKET);
+  return orchestrator;
 }
 
 describe('query-bucket member scope on an iam region', () => {
@@ -694,7 +689,7 @@ describe('query-bucket member scope on an iam region', () => {
     mockComplete.mockResolvedValue('grounded answer');
     mockQuery.mockResolvedValue([vector('secret.pdf#0', 'secret.pdf')]);
     mockGetEnablement.mockResolvedValue(SYNCED_ENABLEMENT);
-    orch = iamOrchestratorReachingOnly('other-bucket');
+    orch = buildIamOrchestratorGrantingOnly('other-bucket');
     mockGetOrchestratorForRegion.mockReturnValue(orch);
   });
 
@@ -704,19 +699,22 @@ describe('query-bucket member scope on an iam region', () => {
     return event;
   }
 
-  it("answers not found for a bucket outside a cookie Member's policies", async () => {
+  it('returns 404 to a signed-in Member whose policies do not grant the bucket', async () => {
     const result = await baseHandler(cookieEvent(OrgRole.Member));
 
-    expect(result.statusCode).toBe(404);
-    expect(mockComplete).not.toHaveBeenCalled();
+    expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+      statusCode: 404,
+      body: { message: 'Bucket not found' },
+    });
+    expect(mockEmbed).not.toHaveBeenCalled();
   });
 
-  it('answers an Owner or Admin on a bucket their policies leave out', async () => {
-    const statuses: Array<number | undefined> = [];
-    for (const role of [OrgRole.Owner, OrgRole.Admin]) {
-      statuses.push((await baseHandler(cookieEvent(role))).statusCode);
-    }
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'answers an %s on a bucket their policies leave out',
+    async (role) => {
+      const result = await baseHandler(cookieEvent(role));
 
-    expect(statuses).toStrictEqual([200, 200]);
-  });
+      expect(result.statusCode).toBe(200);
+    },
+  );
 });

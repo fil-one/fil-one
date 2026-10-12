@@ -93,7 +93,7 @@ function checkPresignPermissions(
  * The policy action each presign operation needs on a region serving the `iam`
  * access model. A HEAD reads the object, so it takes `s3:GetObject`.
  */
-const OP_ACTIONS: Record<PresignOp['op'], PolicyAction> = {
+const PRESIGN_OP_ACTIONS: Record<PresignOp['op'], PolicyAction> = {
   getObject: 's3:GetObject',
   headObject: 's3:GetObject',
   listObjects: 's3:ListBucket',
@@ -107,12 +107,12 @@ const OP_ACTIONS: Record<PresignOp['op'], PolicyAction> = {
  * The action an operation needs. A read or delete naming a version takes the
  * version action, as the storage system classifies it.
  */
-function requiredAction(op: PresignOp): PolicyAction {
+function getRequiredAction(op: PresignOp): PolicyAction {
   if (op.op === 'getObject' || op.op === 'headObject') {
     return op.versionId ? 's3:GetObjectVersion' : 's3:GetObject';
   }
   if (op.op === 'deleteObject' && op.versionId) return 's3:DeleteObjectVersion';
-  return OP_ACTIONS[op.op];
+  return PRESIGN_OP_ACTIONS[op.op];
 }
 
 /**
@@ -125,7 +125,7 @@ function requiredAction(op: PresignOp): PolicyAction {
  * distinct code would confirm it exists. An unscoped caller, and every region
  * serving scoped keys, skips the read.
  */
-async function checkMemberReach(
+async function checkMemberBucketAccess(
   orchestrator: ServiceOrchestrator,
   tenantId: string,
   userId: string | undefined,
@@ -133,18 +133,18 @@ async function checkMemberReach(
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
   if (!userId || orchestrator.accessModel !== 'iam') return undefined;
   const access = await orchestrator.iam.resolveMemberAccess(tenantId, userId);
-  const granted = new Map<string, Set<PolicyAction>>(
+  const grantedBucketActions = new Map<string, Set<PolicyAction>>(
     access.map((entry) => [entry.bucketName, new Set(entry.actions)]),
   );
   for (const op of ops) {
-    const actions = granted.get(op.bucket);
+    const actions = grantedBucketActions.get(op.bucket);
     if (!actions) {
       return new ResponseBuilder()
         .status(404)
         .body<ErrorResponse>({ message: 'Bucket not found' })
         .build();
     }
-    if (!actions.has(requiredAction(op))) {
+    if (!actions.has(getRequiredAction(op))) {
       return new ResponseBuilder()
         .status(403)
         .body<ErrorResponse>({ message: `Your access to ${op.bucket} does not permit ${op.op}.` })
@@ -356,13 +356,13 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  const outOfReach = await checkMemberReach(
+  const accessRefused = await checkMemberBucketAccess(
     orchestrator,
     tenantId,
     getScopedMemberId(membership?.role, userId),
     ops,
   );
-  if (outOfReach) return outOfReach;
+  if (accessRefused) return accessRefused;
 
   const s3Ctx = await orchestrator.getS3ClientContext(tenantId);
   const ctx = s3Ctx.presignEndpointUrl

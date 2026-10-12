@@ -95,9 +95,11 @@ export async function baseHandler(
   // Enforce tenant/org scope: a bucket the caller's tenant does not own is 404.
   // A cookie caller also answers to their member scope; a RAG key carries its
   // own bucket scope, which the auth middleware already applied.
-  const bucket = await orchestrator.getBucket(tenantId, bucketName, {
-    scopeToMemberId: apiKeySession ? undefined : getScopedMemberId(membership?.role, userId),
-  });
+  const bucket = await orchestrator.getBucket(
+    tenantId,
+    bucketName,
+    apiKeySession ? undefined : getScopedMemberId(membership?.role, userId),
+  );
   if (!bucket) {
     return new ResponseBuilder()
       .status(404)
