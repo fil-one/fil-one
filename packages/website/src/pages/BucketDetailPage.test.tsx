@@ -55,8 +55,8 @@ vi.mock('../components/AddBucketKeyModal', () => ({
 
 // The policy tab exists only on a region serving the `iam` access model; the
 // suite about it flips this on, every other suite runs against `service-keys`.
-const mockIsIamRegion = vi.fn(() => false);
-vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => mockIsIamRegion() }));
+const mockSupportsIamMethods = vi.fn(() => false);
+vi.mock('../lib/access-model.js', () => ({ supportsIamMethods: () => mockSupportsIamMethods() }));
 
 vi.mock('../lib/use-presign.js', () => ({
   batchPresign: () => Promise.resolve({ items: [{ url: 'https://s3.test/list', method: 'GET' }] }),
@@ -133,7 +133,7 @@ function renderPage(role: OrgRole = OrgRole.Owner) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockIsIamRegion.mockReturnValue(false);
+  mockSupportsIamMethods.mockReturnValue(false);
   mockApiRequest.mockImplementation((path: string) => respond(path));
   mockSendApiRequest.mockImplementation(
     async (path: string) =>
@@ -145,7 +145,7 @@ describe('BucketDetailPage — the policy tab', () => {
   it.each([OrgRole.Owner, OrgRole.Admin])(
     'shows the Policy tab to %s on an iam region',
     async (role) => {
-      mockIsIamRegion.mockReturnValue(true);
+      mockSupportsIamMethods.mockReturnValue(true);
       renderPage(role);
 
       expect(await screen.findByTestId('bucket-policy-tab')).toBeInTheDocument();
@@ -153,7 +153,7 @@ describe('BucketDetailPage — the policy tab', () => {
   );
 
   it("renders the bucket's policy in the Policy tab", async () => {
-    mockIsIamRegion.mockReturnValue(true);
+    mockSupportsIamMethods.mockReturnValue(true);
     renderPage(OrgRole.Owner);
 
     fireEvent.click(await screen.findByTestId('bucket-policy-tab'));
@@ -162,7 +162,7 @@ describe('BucketDetailPage — the policy tab', () => {
   });
 
   it.each([OrgRole.Member, OrgRole.ReadOnly])('hides the Policy tab from %s', async (role) => {
-    mockIsIamRegion.mockReturnValue(true);
+    mockSupportsIamMethods.mockReturnValue(true);
     renderPage(role);
 
     await screen.findByTestId('bucket-objects-tab');
