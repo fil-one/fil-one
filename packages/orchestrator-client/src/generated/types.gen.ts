@@ -619,6 +619,12 @@ export type PostTenantsByTenantIdAccessKeysErrors = {
    *
    */
   422: Error;
+  /**
+   * The body carries `principalId` and the orchestrator does not
+   * serve the `iam` access model.
+   *
+   */
+  501: Error;
 };
 
 export type PostTenantsByTenantIdAccessKeysError =
@@ -726,6 +732,10 @@ export type GetTenantsByTenantIdPrincipalsErrors = {
    * Resource not found.
    */
   404: Error;
+  /**
+   * The orchestrator does not serve the `iam` access model.
+   */
+  501: Error;
 };
 
 export type GetTenantsByTenantIdPrincipalsError =
@@ -767,6 +777,10 @@ export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
    *
    */
   409: Error;
+  /**
+   * The orchestrator does not serve the `iam` access model.
+   */
+  501: Error;
 };
 
 export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdError =
@@ -801,6 +815,10 @@ export type GetTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
    * Resource not found.
    */
   404: Error;
+  /**
+   * The orchestrator does not serve the `iam` access model.
+   */
+  501: Error;
 };
 
 export type GetTenantsByTenantIdPrincipalsByPrincipalIdError =
@@ -846,6 +864,10 @@ export type PutTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
    * The `principalId` path value is not a valid principal id.
    */
   422: Error;
+  /**
+   * The orchestrator does not serve the `iam` access model.
+   */
+  501: Error;
 };
 
 export type PutTenantsByTenantIdPrincipalsByPrincipalIdError =
@@ -884,6 +906,10 @@ export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors = {
    * Resource not found.
    */
   404: Error;
+  /**
+   * The orchestrator does not serve the `iam` access model.
+   */
+  501: Error;
 };
 
 export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesError =
@@ -918,6 +944,10 @@ export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors = {
    * Resource not found.
    */
   404: Error;
+  /**
+   * The orchestrator does not serve the `iam` access model.
+   */
+  501: Error;
 };
 
 export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessError =
