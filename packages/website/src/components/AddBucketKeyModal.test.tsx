@@ -13,7 +13,7 @@ vi.mock('../lib/api.js', async () => ({
 }));
 
 // Every test here is about a region serving the `iam` access model.
-vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => true }));
+vi.mock('../lib/access-model.js', () => ({ supportsIamMethods: () => true }));
 
 import { AddBucketKeyModal } from './AddBucketKeyModal.js';
 

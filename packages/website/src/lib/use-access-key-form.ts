@@ -18,7 +18,7 @@ import {
   isObjectPermission,
   supportsBucketManagement,
 } from '@filone/shared';
-import { isIamRegion } from './access-model.js';
+import { supportsIamMethods } from './access-model.js';
 import { createAccessKey } from './api.js';
 import { expiresAtFromForm } from './time.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
@@ -78,7 +78,7 @@ export function useAccessKeyForm({
 
   // On an `iam` region a key is personal unless the caller chooses a service
   // key. Every other region takes only service keys.
-  const isOnIamRegion = isIamRegion(region);
+  const isOnIamRegion = supportsIamMethods(region);
   const keyType = isOnIamRegion ? chosenKeyType : 'service';
   const expiresAt = expiresAtFromForm(expiration, customDate);
   const request = buildCreateKeyRequest(keyType, {
