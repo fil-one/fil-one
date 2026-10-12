@@ -1538,7 +1538,7 @@ describe('signal forwarding', () => {
   it('listBuckets forwards the signal to S3 ListBuckets', async () => {
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
 
-    await orchestrator.listBuckets(tenantId, { signal });
+    await orchestrator.listBuckets(tenantId, undefined, { signal });
 
     expect(sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand))).toEqual({
       abortSignal: signal,
@@ -1559,7 +1559,7 @@ describe('signal forwarding', () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    await orchestrator.getBucket(tenantId, 'b', { signal });
+    await orchestrator.getBucket(tenantId, 'b', undefined, { signal });
 
     const sent = [
       sendOptionsOf(s3Mock.commandCalls(GetBucketVersioningCommand)),

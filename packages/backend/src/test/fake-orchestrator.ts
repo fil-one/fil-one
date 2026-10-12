@@ -6,8 +6,7 @@ import type {
   TenantInfo,
 } from '../lib/service-orchestrator.ts';
 import { S3Region, type TenantStatus } from '@filone/shared';
-import type { AccessModel } from '@filone/shared';
-import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
+import { delegateIamMethods, FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 import { canMemberAccessBucket } from '../lib/orchestrator/member-access.ts';
 
 export interface FakeOrchestrator {

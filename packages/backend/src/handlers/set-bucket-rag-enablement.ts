@@ -4,7 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
 import { S3_REGION, SetBucketRagEnabledSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import { supportsBucketPolicies, type RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
@@ -34,10 +34,10 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
  * member's policies. Turning indexing on also needs the member's policies to
  * grant listing and reading the bucket: the indexer lists and reads it with the
  * tenant's key, and the query path answers from that content. A region serving
- * scoped keys has no policies to consult.
+ * service keys has no policies to consult.
  */
 async function checkRagBucketAccess(
-  orchestrator: ServiceOrchestrator,
+  orchestrator: RegionOrchestrator,
   tenantId: string,
   bucketName: string,
   memberId: string | undefined,
@@ -49,8 +49,8 @@ async function checkRagBucketAccess(
       .body<ErrorResponse>({ message: 'Bucket not found' })
       .build();
   }
-  if (!enableIndexing || !memberId || orchestrator.accessModel !== 'iam') return undefined;
-  const access = await orchestrator.iam.resolveMemberAccess(tenantId, memberId);
+  if (!enableIndexing || !memberId || !supportsBucketPolicies(orchestrator)) return undefined;
+  const access = await orchestrator.resolveMemberAccess(tenantId, memberId);
   const actions = access.find((entry) => entry.bucketName === bucketName)?.actions ?? [];
   if (actions.includes('s3:ListBucket') && actions.includes('s3:GetObject')) return undefined;
   return new ResponseBuilder()

@@ -34,11 +34,11 @@ export async function filterBucketsByMemberAccess(
  * of their policies that {@link filterBucketsByMemberAccess} also uses.
  */
 export async function canMemberAccessBucket(
-  iam: IamMethods,
+  members: MemberOrchestrator,
   tenantId: string,
   userId: string,
   bucketName: string,
 ): Promise<boolean> {
-  const access = await iam.resolveMemberAccess(tenantId, userId);
+  const access = await members.resolveMemberAccess(tenantId, userId);
   return access.some((entry) => entry.bucketName === bucketName);
 }

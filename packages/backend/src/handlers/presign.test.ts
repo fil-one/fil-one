@@ -63,6 +63,7 @@ vi.mock('../lib/s3-presigner.ts', () => ({
 
 import { baseHandler } from './presign.ts';
 import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import { delegateIamMethods, FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -554,8 +555,8 @@ describe('presign baseHandler', () => {
     const mockResolveMemberAccess = vi.fn();
     const iamOrchestrator = {
       ...mockOrchestrator,
-      accessModel: 'iam',
-      iam: { resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args) },
+      ...delegateIamMethods(new FakeIamOrchestrator()),
+      resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args),
     };
     const grantActionsOnBucket = (bucketName: string, actions: string[]) => [
       { bucketName, actions },
@@ -675,7 +676,7 @@ describe('presign baseHandler', () => {
       expect(mockResolveMemberAccess).toHaveBeenCalledTimes(1);
     });
 
-    it('skips the access lookup on a scoped-keys region', async () => {
+    it('skips the access lookup on a service-keys region', async () => {
       mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
 
       const result = await baseHandler(

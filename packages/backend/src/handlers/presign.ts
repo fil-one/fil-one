@@ -16,7 +16,7 @@ import type {
   PresignResponseItem,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import { supportsBucketPolicies, type RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import type { S3ClientContext } from '../lib/s3-client.ts';
 import {
@@ -123,16 +123,16 @@ function getRequiredAction(op: PresignOp): PolicyAction {
  * link: a redeemed URL never re-enters the console. A bucket outside the
  * member's policies answers exactly like a bucket that does not exist, since a
  * distinct code would confirm it exists. An unscoped caller, and every region
- * serving scoped keys, skips the read.
+ * serving service keys, skips the read.
  */
 async function checkMemberBucketAccess(
-  orchestrator: ServiceOrchestrator,
+  orchestrator: RegionOrchestrator,
   tenantId: string,
   userId: string | undefined,
   ops: PresignOp[],
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  if (!userId || orchestrator.accessModel !== 'iam') return undefined;
-  const access = await orchestrator.iam.resolveMemberAccess(tenantId, userId);
+  if (!userId || !supportsBucketPolicies(orchestrator)) return undefined;
+  const access = await orchestrator.resolveMemberAccess(tenantId, userId);
   const grantedBucketActions = new Map<string, Set<PolicyAction>>(
     access.map((entry) => [entry.bucketName, new Set(entry.actions)]),
   );
