@@ -19,7 +19,7 @@ vi.mock('../lib/bucket-policy-api.js', async () => ({
   putBucketPolicy: (...a: unknown[]) => mockPutBucketPolicy(...a),
   deleteBucketPolicy: (...a: unknown[]) => mockDeleteBucketPolicy(...a),
 }));
-vi.mock('../lib/access-model.js', () => ({ isIamRegion: () => true }));
+vi.mock('../lib/access-model.js', () => ({ supportsIamMethods: () => true }));
 vi.mock('../lib/api.js', async () => ({
   ...(await vi.importActual<typeof import('../lib/api.js')>('../lib/api.js')),
   getMe: vi.fn(() => new Promise(() => {})),

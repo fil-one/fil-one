@@ -27,7 +27,7 @@ import type {
   ListAccessKeysResponse,
   BucketAnalyticsResponse,
 } from '@filone/shared';
-import { isIamRegion } from '../lib/access-model.js';
+import { supportsIamMethods } from '../lib/access-model.js';
 import { apiRequest } from '../lib/api.js';
 import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
@@ -347,7 +347,8 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   // The policy tab exists where a policy can: a region serving the `iam`
   // access model, for a role that may edit one. Reading takes the same
   // permission as editing, so the tab is absent rather than read-only.
-  const isPolicyTabVisible = useHasPermission('buckets.policy_manage') && isIamRegion(region);
+  const isPolicyTabVisible =
+    useHasPermission('buckets.policy_manage') && supportsIamMethods(region);
 
   const setCurrentPrefix = useCallback(
     (newPrefix: string) => {
