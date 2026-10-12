@@ -66,6 +66,34 @@ describe('AccessKeysTable — a principal-bound key', () => {
   });
 });
 
+describe('AccessKeysTable — the key type', () => {
+  const principalKey: AccessKey = {
+    id: '2',
+    type: 'principal',
+    principalId: 'user-1',
+    keyName: 'Laptop',
+    accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
+    createdAt: '2026-01-15T10:00:00Z',
+    status: 'active',
+  };
+
+  // The badge renders twice: in its column and inline under the name on small screens.
+  it.each([
+    ['service', 'Service', makeKey({})],
+    ['principal', 'Personal', principalKey],
+  ] as const)('labels a %s key %s', (type, label, key) => {
+    const { container } = renderWithProviders(<AccessKeysTable keys={[key]} />);
+    const badges = [...container.querySelectorAll('[data-key-type]')].map((badge) => [
+      badge.getAttribute('data-key-type'),
+      badge.textContent,
+    ]);
+    expect(badges).toEqual([
+      [type, label],
+      [type, label],
+    ]);
+  });
+});
+
 describe('AccessKeysTable — the controls a caller may not use', () => {
   // The table's own gating is prop-driven: a page that finds the caller cannot
   // mint or revoke keys passes undefined, and the surface disappears. That is
