@@ -8,6 +8,7 @@ import { keyScope } from '../lib/key-scope.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { supportsBucketPolicies } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -62,11 +63,12 @@ async function filterKeysWithBucketAccess(
       ? getOrchestratorForRegion(region)
       : undefined;
   // No `iam` region to ask, so no bucket policy can give a principal-bound key access.
-  if (orchestrator?.accessModel !== 'iam') return keys.filter((key) => key.type !== 'principal');
+  if (!orchestrator || !supportsBucketPolicies(orchestrator))
+    return keys.filter((key) => key.type !== 'principal');
   // Uses `isTenantReady`: a list must not create a tenant.
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   // No tenant or no policy on the bucket: no principal-bound key has access.
-  const stored = tenantId ? await orchestrator.iam.getBucketPolicy(tenantId, bucketName) : null;
+  const stored = tenantId ? await orchestrator.getBucketPolicy(tenantId, bucketName) : null;
   return keys.filter(
     (key) =>
       key.type !== 'principal' ||

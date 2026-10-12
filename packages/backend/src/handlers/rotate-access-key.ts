@@ -47,7 +47,7 @@ import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.t
 import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  ServiceOrchestrator,
+  RegionOrchestrator,
 } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
@@ -326,7 +326,7 @@ interface Rotation {
   keyId: string;
   /** The row, its permission set found present unless it is principal-bound. */
   stored: StoredKey;
-  orchestrator: ServiceOrchestrator;
+  orchestrator: RegionOrchestrator;
   tenantId: string;
   /** Who asked. Everything the mint needs about them is derived from this. */
   rotator: { orgId: string; userId: string; email?: string };

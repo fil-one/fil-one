@@ -677,6 +677,7 @@ describe('issueAccessKey bound to a principal', () => {
     await expect(
       orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
     ).resolves.toStrictEqual({
+      type: 'principal',
       id: 'did:key:z6Mk',
       accessKeyId: 'did:key:z6Mk',
       accessKeySecret: 'sk-secret',
@@ -691,6 +692,7 @@ describe('issueAccessKey bound to a principal', () => {
     await expect(
       orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', permissions: ['read'] }),
     ).resolves.toStrictEqual({
+      type: 'service',
       id: 'did:key:z6Mk',
       accessKeyId: 'did:key:z6Mk',
       accessKeySecret: 'sk-secret',
@@ -792,6 +794,7 @@ describe('issueAccessKey', () => {
     });
 
     expect(result).toEqual({
+      type: 'service',
       id: 'AKIAFORGE',
       accessKeyId: 'AKIAFORGE',
       accessKeySecret: 'sk-secret',

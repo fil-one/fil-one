@@ -22,10 +22,10 @@ vi.mock('sst', () => ({
 const IAM_REGION = S3Region.UsEast9;
 const iamFake = new FakeIamOrchestrator();
 const iamOrchestrator = fakeOrchestrator('forgeDev', { region: IAM_REGION, iam: iamFake });
-const scopedOrchestrator = fakeOrchestrator('aurora');
+const legacyOrchestrator = fakeOrchestrator('aurora');
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) =>
-    region === IAM_REGION ? iamOrchestrator : scopedOrchestrator,
+    region === IAM_REGION ? iamOrchestrator : legacyOrchestrator,
 }));
 vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: async (orgId: string) => fakeOrgProfile(orgId),

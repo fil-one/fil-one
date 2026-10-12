@@ -267,6 +267,7 @@ export const auroraOrchestrator = {
       signal: opts?.signal,
     });
     return {
+      type: 'service',
       id: key.id,
       accessKeyId: key.accessKeyId,
       accessKeySecret: key.accessKeySecret,
