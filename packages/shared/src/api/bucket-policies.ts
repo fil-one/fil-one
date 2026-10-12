@@ -139,7 +139,7 @@ export function getPolicyActionsInGroup(group: PolicyActionGroup): PolicyAction[
  * The two actions only an Owner may grant. Writing retention or a legal hold
  * is redeemed at the storage system, where its use cannot be audit-logged, and
  * can make an object undeletable for years; the same pair needs
- * `privileged.grant` on a scoped key (`access-key-permissions.ts`).
+ * `privileged.grant` on a service key (`access-key-permissions.ts`).
  */
 export const RETENTION_WRITE_ACTIONS: readonly PolicyAction[] = [
   's3:PutObjectRetention',

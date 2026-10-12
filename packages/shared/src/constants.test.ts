@@ -306,16 +306,16 @@ describe('supportsBucketManagement', () => {
 });
 
 describe('getRegionAccessModel', () => {
-  it('answers scoped-keys for every region', () => {
+  it('answers service-keys for every region', () => {
     const models = Object.fromEntries(
       Object.values(S3Region).map((region) => [region, getRegionAccessModel(region)]),
     );
 
     expect(models).toEqual({
-      [S3Region.EuWest1]: 'scoped-keys',
-      [S3Region.UsEast1]: 'scoped-keys',
-      [S3Region.EuCentral3]: 'scoped-keys',
-      [S3Region.UsEast9]: 'scoped-keys',
+      [S3Region.EuWest1]: 'service-keys',
+      [S3Region.UsEast1]: 'service-keys',
+      [S3Region.EuCentral3]: 'service-keys',
+      [S3Region.UsEast9]: 'service-keys',
     });
   });
 });

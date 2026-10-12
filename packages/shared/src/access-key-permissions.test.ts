@@ -9,7 +9,7 @@ vi.mock('./constants.ts', async (importOriginal) => {
   return {
     ...actual,
     getRegionAccessModel: (region: string) =>
-      region === actual.S3Region.UsEast9 ? 'iam' : 'scoped-keys',
+      region === actual.S3Region.UsEast9 ? 'iam' : 'service-keys',
   };
 });
 import {
@@ -287,7 +287,7 @@ describe('canRetainAccessKey', () => {
     expect(canRetainAccessKey(OrgRole.Admin, iamServiceKey)).toStrictEqual(KEPT);
   });
 
-  it('keeps a key on a scoped-keys region for a Member', () => {
+  it('keeps a key on a service-keys region for a Member', () => {
     expect(
       canRetainAccessKey(OrgRole.Member, { ...iamServiceKey, region: S3Region.EuWest1 }),
     ).toStrictEqual(KEPT);
