@@ -73,7 +73,7 @@ export async function baseHandler(
   // generic 500, hiding the healthy regions' buckets. Return what answered, name what did not.
   const settled = await Promise.allSettled(
     // `scopeToMemberId` scopes the listing to the member on a region serving the `iam`
-    // access model, where a bucket is reachable only through a policy naming
+    // access model, where a bucket is accessible only through a policy naming
     // them; every other region ignores it and answers tenant-wide as before.
     ready.map(({ orchestrator, tenantId }) =>
       orchestrator.listBuckets(tenantId, {
