@@ -48,7 +48,8 @@ import {
   PolicyPublishError,
   PolicyValidationError,
 } from '../errors.ts';
-import { createFilOneOrchestrator } from './orchestrator.ts';
+import { createFilOneOrchestrator } from './filone-orchestrator.ts';
+import { supportsBucketPolicies } from '../service-orchestrator.ts';
 import type { PolicyPrecondition } from '../iam-orchestrator.ts';
 
 const tenantId = '00000000-0000-0000-0000-000000000001';
@@ -70,41 +71,35 @@ const ok = (data: unknown, status = 200, headers?: Record<string, string>) =>
 const fail = (status: number, body: unknown = { message: 'error' }) =>
   buildSdkResult(status, undefined, body);
 
-function buildIamOrchestrator() {
-  const orchestrator = createFilOneOrchestrator({
+function buildOrchestrator(accessModel?: 'iam') {
+  return createFilOneOrchestrator({
     id: 'forge',
     region: S3Region.UsEast9,
     stage: 'test',
     s3EndpointUrl: 'https://s3.example.test',
     api: { baseUrl: 'https://api.example.test', accessToken: 'partner-key' },
-    accessModel: 'iam',
+    accessModel,
   });
-  if (orchestrator.accessModel !== 'iam') throw new Error('expected the iam arm');
+}
+
+function buildIamOrchestrator() {
+  const orchestrator = buildOrchestrator('iam');
+  if (!supportsBucketPolicies(orchestrator)) throw new Error('expected bucket policies');
   return orchestrator;
 }
 
 const orchestrator = buildIamOrchestrator();
-const iam = orchestrator.iam;
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('the access model', () => {
-  it('builds an orchestrator with an iam arm when the config asks for iam', () => {
-    expect(orchestrator).toMatchObject({ accessModel: 'iam', iam: expect.any(Object) });
-  });
-
-  it('builds a scoped-keys orchestrator without an iam arm when the config sets no access model', () => {
-    const scoped = createFilOneOrchestrator({
-      id: 'forge',
-      region: S3Region.EuCentral3,
-      stage: 'test',
-      s3EndpointUrl: 'https://s3.example.test',
-      api: { baseUrl: 'https://api.example.test', accessToken: 'partner-key' },
-    });
-    expect(scoped.accessModel).toBe('scoped-keys');
-    expect(scoped).not.toHaveProperty('iam');
+describe('createFilOneOrchestrator', () => {
+  it.each([
+    ['iam', true],
+    [undefined, false],
+  ] as const)('serves bucket policies for access model %s: %s', (accessModel, expected) => {
+    expect(supportsBucketPolicies(buildOrchestrator(accessModel))).toBe(expected);
   });
 });
 
@@ -112,7 +107,7 @@ describe('getBucketPolicy', () => {
   it('returns the policy and ETag the S3 read returned', async () => {
     mockGetPolicy.mockResolvedValue({ policy, etag: '"abc"' });
 
-    await expect(iam.getBucketPolicy(tenantId, 'photos')).resolves.toStrictEqual({
+    await expect(orchestrator.getBucketPolicy(tenantId, 'photos')).resolves.toStrictEqual({
       policy,
       etag: '"abc"',
     });
@@ -121,7 +116,7 @@ describe('getBucketPolicy', () => {
 
   it('returns null when the bucket has no policy', async () => {
     mockGetPolicy.mockResolvedValue(null);
-    await expect(iam.getBucketPolicy(tenantId, 'photos')).resolves.toBeNull();
+    await expect(orchestrator.getBucketPolicy(tenantId, 'photos')).resolves.toBeNull();
   });
 });
 
@@ -130,7 +125,7 @@ describe('putBucketPolicy', () => {
     mockPutPolicy.mockResolvedValue({ etag: '"v2"' });
 
     await expect(
-      iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
+      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
     ).resolves.toStrictEqual({ etag: '"v2"' });
     expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy, {
       ifMatch: '"v1"',
@@ -141,7 +136,7 @@ describe('putBucketPolicy', () => {
     mockPutPolicy.mockResolvedValue({ etag: '"v1"' });
 
     await expect(
-      iam.putBucketPolicy(tenantId, 'photos', policy, { ifNoneMatch: '*' }),
+      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifNoneMatch: '*' }),
     ).resolves.toStrictEqual({ etag: '"v1"' });
     expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy, {
       ifNoneMatch: '*',
@@ -158,7 +153,7 @@ describe('putBucketPolicy', () => {
     mockPutPolicy.mockRejectedValue(new PolicyPreconditionFailedError('photos'));
 
     await expect(
-      iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"old"' }),
+      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"old"' }),
     ).rejects.toBeInstanceOf(PolicyPreconditionFailedError);
     expect(mockPutPolicy).toHaveBeenCalledTimes(1);
   });
@@ -169,7 +164,7 @@ describe('putBucketPolicy', () => {
       .mockResolvedValueOnce({ etag: '"v2"' });
 
     await expect(
-      iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
+      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
     ).resolves.toStrictEqual({ etag: '"v2"' });
     expect(mockPutPolicy).toHaveBeenCalledTimes(2);
   });
@@ -178,7 +173,7 @@ describe('putBucketPolicy', () => {
     mockPutPolicy.mockRejectedValue(new PolicyPublishError());
 
     await expect(
-      iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
+      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
     ).rejects.toBeInstanceOf(PolicyPublishError);
     expect(mockPutPolicy).toHaveBeenCalledTimes(3);
   });
@@ -187,7 +182,7 @@ describe('putBucketPolicy', () => {
     mockPutPolicy.mockRejectedValue(new PolicyValidationError('unknown principal "bob"'));
 
     await expect(
-      iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
+      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
     ).rejects.toMatchObject({ name: 'PolicyValidationError', message: 'unknown principal "bob"' });
     expect(mockPutPolicy).toHaveBeenCalledTimes(1);
   });
@@ -195,7 +190,7 @@ describe('putBucketPolicy', () => {
   it('throws PolicyConflictError when the lock timeout persists through every retry', async () => {
     mockPutPolicy.mockRejectedValue(new PolicyConflictError());
     await expect(
-      iam.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
+      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
     ).rejects.toBeInstanceOf(PolicyConflictError);
     expect(mockPutPolicy).toHaveBeenCalledTimes(3);
   });
@@ -205,7 +200,7 @@ describe('deleteBucketPolicy', () => {
   it('passes the If-Match precondition to the S3 delete', async () => {
     mockDeletePolicy.mockResolvedValue(undefined);
     await expect(
-      iam.deleteBucketPolicy(tenantId, 'photos', { ifMatch: '"v1"' }),
+      orchestrator.deleteBucketPolicy(tenantId, 'photos', { ifMatch: '"v1"' }),
     ).resolves.toBeUndefined();
     expect(mockDeletePolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', {
       ifMatch: '"v1"',
@@ -216,7 +211,7 @@ describe('deleteBucketPolicy', () => {
 describe('principals', () => {
   it.each([201, 200])('syncMember resolves when the principal PUT answers %i', async (status) => {
     mockPutPrincipal.mockResolvedValueOnce(ok({ principalId: 'alice' }, status));
-    await expect(iam.syncMember(tenantId, 'alice')).resolves.toBeUndefined();
+    await expect(orchestrator.syncMember(tenantId, 'alice')).resolves.toBeUndefined();
     expect(mockPutPrincipal).toHaveBeenCalledWith(
       expect.objectContaining({ path: { tenantId, principalId: 'alice' } }),
     );
@@ -224,17 +219,19 @@ describe('principals', () => {
 
   it('syncMember throws PolicyValidationError when the storage system answers 422', async () => {
     mockPutPrincipal.mockResolvedValue(fail(422, { message: 'invalid principal id' }));
-    await expect(iam.syncMember(tenantId, '*')).rejects.toBeInstanceOf(PolicyValidationError);
+    await expect(orchestrator.syncMember(tenantId, '*')).rejects.toBeInstanceOf(
+      PolicyValidationError,
+    );
   });
 
   it('removeMember resolves when the storage system answers 204', async () => {
     mockDeletePrincipal.mockResolvedValueOnce(buildSdkResult(204));
-    await expect(iam.removeMember(tenantId, 'alice')).resolves.toBeUndefined();
+    await expect(orchestrator.removeMember(tenantId, 'alice')).resolves.toBeUndefined();
   });
 
   it('removeMember throws when the tenant is missing', async () => {
     mockDeletePrincipal.mockResolvedValueOnce(fail(404));
-    await expect(iam.removeMember(tenantId, 'alice')).rejects.toThrow(
+    await expect(orchestrator.removeMember(tenantId, 'alice')).rejects.toThrow(
       `Failed to remove principal "alice" for forge tenant ${tenantId}: the tenant does not exist`,
     );
   });
@@ -242,9 +239,9 @@ describe('principals', () => {
   it('listBucketPoliciesForMember returns each bucket with its policy', async () => {
     mockListPrincipalPolicies.mockResolvedValue(ok({ items: [{ bucketName: 'photos', policy }] }));
 
-    await expect(iam.listBucketPoliciesForMember(tenantId, 'alice')).resolves.toStrictEqual([
-      { bucketName: 'photos', policy },
-    ]);
+    await expect(
+      orchestrator.listBucketPoliciesForMember(tenantId, 'alice'),
+    ).resolves.toStrictEqual([{ bucketName: 'photos', policy }]);
   });
 
   it('resolveMemberAccess returns each bucket with the member’s actions', async () => {
@@ -252,7 +249,7 @@ describe('principals', () => {
       ok({ buckets: [{ name: 'photos', actions: ['s3:GetObject'] }] }),
     );
 
-    await expect(iam.resolveMemberAccess(tenantId, 'alice')).resolves.toStrictEqual([
+    await expect(orchestrator.resolveMemberAccess(tenantId, 'alice')).resolves.toStrictEqual([
       { bucketName: 'photos', actions: ['s3:GetObject'] },
     ]);
   });

@@ -8,15 +8,16 @@ import {
   PrincipalNotFoundError,
 } from '../lib/errors.ts';
 import type {
-  IamMethods,
+  BucketPolicyOrchestrator,
   IfMatchPrecondition,
+  MemberOrchestrator,
   MemberBucketPolicy,
   PolicyPrecondition,
   StoredBucketPolicy,
 } from '../lib/iam-orchestrator.ts';
 
 /**
- * An in-memory `iam` arm with the storage system's semantics: real ETags and
+ * An in-memory bucket-policy and member orchestrator with the storage system's semantics: real ETags and
  * preconditions, principals that must exist before a key binds to them, and
  * effective actions computed by the same shared function the console previews
  * with. Handler tests drive it where a real Hilt would be.
@@ -25,15 +26,17 @@ import type {
  * `seedBucket` names one, every other name is a {@link BucketNotFoundError}.
  * `failNext` makes one call throw, for the partial-failure paths.
  */
-export class FakeIamOrchestrator implements IamMethods {
+type FakedMethods = BucketPolicyOrchestrator & MemberOrchestrator;
+
+export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrchestrator {
   readonly principals = new Map<string, Set<string>>();
   readonly policies = new Map<string, Map<string, StoredBucketPolicy>>();
   readonly buckets = new Map<string, Set<string>>();
   /** Every call in order, for tests that assert what ran before what. */
-  readonly calls: Array<{ method: keyof IamMethods; tenantId: string; target: string }> = [];
+  readonly calls: Array<{ method: keyof FakedMethods; tenantId: string; target: string }> = [];
 
   private etagCounter = 0;
-  private readonly failures = new Map<keyof IamMethods, Error>();
+  private readonly failures = new Map<keyof FakedMethods, Error>();
 
   seedBucket(tenantId: string, bucketName: string): void {
     this.getOrCreateBuckets(tenantId).add(bucketName);
@@ -50,7 +53,7 @@ export class FakeIamOrchestrator implements IamMethods {
   }
 
   /** The next call to `method` throws `error`, once. */
-  failNext(method: keyof IamMethods, error: Error): void {
+  failNext(method: keyof FakedMethods, error: Error): void {
     this.failures.set(method, error);
   }
 
@@ -155,11 +158,11 @@ export class FakeIamOrchestrator implements IamMethods {
       .filter((access) => access.actions.length > 0);
   }
 
-  private recordCall(method: keyof IamMethods, tenantId: string, target: string): void {
+  private recordCall(method: keyof FakedMethods, tenantId: string, target: string): void {
     this.calls.push({ method, tenantId, target });
   }
 
-  private throwInjectedFailure(method: keyof IamMethods): void {
+  private throwInjectedFailure(method: keyof FakedMethods): void {
     const failure = this.failures.get(method);
     if (failure) {
       this.failures.delete(method);
@@ -208,4 +211,20 @@ export class FakeIamOrchestrator implements IamMethods {
     if (!set) this.buckets.set(tenantId, (set = new Set()));
     return set;
   }
+}
+
+/**
+ * The fake's methods bound to it, for spreading onto a fake orchestrator: a
+ * spread copies own properties only, and class methods live on the prototype.
+ */
+export function delegateIamMethods(iam: FakeIamOrchestrator): FakedMethods {
+  return {
+    getBucketPolicy: (...args) => iam.getBucketPolicy(...args),
+    putBucketPolicy: (...args) => iam.putBucketPolicy(...args),
+    deleteBucketPolicy: (...args) => iam.deleteBucketPolicy(...args),
+    syncMember: (...args) => iam.syncMember(...args),
+    removeMember: (...args) => iam.removeMember(...args),
+    listBucketPoliciesForMember: (...args) => iam.listBucketPoliciesForMember(...args),
+    resolveMemberAccess: (...args) => iam.resolveMemberAccess(...args),
+  };
 }

@@ -17,8 +17,8 @@
 // production at import time.
 
 import { getRegionAccessModel, getS3Endpoint, S3Region } from '@filone/shared';
-import { createFilOneOrchestrator } from '../orchestrator/orchestrator.ts';
-import type { ServiceOrchestrator } from '../service-orchestrator.ts';
+import { createFilOneOrchestrator } from '../orchestrator/filone-orchestrator.ts';
+import type { RegionOrchestrator } from '../service-orchestrator.ts';
 
 /** Management API endpoint and bearer credential of one Forge network's Hilt. */
 export interface ForgeManagementApi {
@@ -34,15 +34,15 @@ export interface ForgeManagementApi {
  *            the region.
  * @param s3 Overrides of the region's S3 endpoint (default getS3Endpoint()) and
  *           of the endpoint presigned URLs carry.
- * @returns A `ServiceOrchestrator` instance configured for the specified Forge
- *          region.
+ * @returns The orchestrator for the specified Forge region, with bucket
+ *          policies and members when the region serves `iam`.
  */
 export function createForgeOrchestrator(
   id: string,
   region: S3Region,
   api: ForgeManagementApi,
   s3: { endpointUrl?: string; presignEndpointUrl?: string } = {},
-): ServiceOrchestrator {
+): RegionOrchestrator {
   const stage = process.env.FILONE_STAGE!;
   return createFilOneOrchestrator({
     id,
@@ -51,9 +51,8 @@ export function createForgeOrchestrator(
     s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(region, stage),
     s3PresignEndpointUrl: s3.presignEndpointUrl,
     api,
-    // getRegionAccessModel from @filone/shared decides the model per region;
-    // the orchestrator only carries it, so the console and the handlers can
-    // never disagree.
+    // getRegionAccessModel from @filone/shared decides the model per region,
+    // so the console and the handlers can never disagree.
     accessModel: getRegionAccessModel(region),
   });
 }

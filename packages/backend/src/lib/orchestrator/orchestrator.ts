@@ -1,9 +1,9 @@
-// Reusable ServiceOrchestrator backed by the generic Service Orchestrator
+// Reusable LegacyServiceOrchestrator backed by the generic Service Orchestrator
 // Management API contract (docs/service-orchestrator-integration/
 // management-openapi.yaml). Any orchestrator implementing that contract (the
 // Forge network's Hilt is the first) is onboarded by calling
-// createFilOneOrchestrator with its config rather than writing a new
-// module.
+// createFilOneOrchestrator (filone-orchestrator.ts) with its config rather
+// than writing a new module.
 //
 // The interface methods are intentionally split into two layers (same shape
 // as fth-orchestrator.ts):
@@ -20,7 +20,6 @@ import {
   type TenantSetupDeps,
 } from './tenant-setup.ts';
 import { buildAccessKeyBody, describeAccessKeyBody } from './access-key-body.ts';
-import { buildIamMethods } from './iam.ts';
 import { extractApiCode, extractApiMessage } from './api-message.ts';
 import {
   AccessKeyAlreadyExistsError,
@@ -34,14 +33,10 @@ import type {
   BucketSummary,
   CreateBucketArgs,
   GetTenantUsageMetricsOptions,
-  IamMethods,
-  IamOrchestrator,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  OrchestratorCore,
+  LegacyServiceOrchestrator,
   OrchestratorRequestOptions,
-  ScopedKeysOrchestrator,
-  ServiceOrchestrator,
   StorageUsageSample,
   TenantInfo,
   TenantStatusProbe,
@@ -99,10 +94,9 @@ export interface FilOneOrchestratorConfig {
    */
   api: { client: Client } | { baseUrl: string; accessToken: string; fetch?: typeof fetch };
   /**
-   * Which arm of the interface this instance serves. `iam` attaches the
-   * principal and bucket-policy methods; the registry passes the shared
-   * `getRegionAccessModel(region)` so the two never disagree. Defaults to
-   * `scoped-keys`.
+   * `iam` builds the orchestrator with bucket policies and members; the
+   * registry passes the shared `getRegionAccessModel(region)` so the two never
+   * disagree. Defaults to `service-keys`.
    */
   accessModel?: AccessModel;
 }
@@ -112,18 +106,12 @@ export interface FilOneOrchestratorConfig {
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
-export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): ServiceOrchestrator {
-  return config.accessModel === 'iam'
-    ? new IamFilOneOrchestrator(config)
-    : new ScopedKeysFilOneOrchestrator(config);
-}
-
-// The core every arm shares. `implements OrchestratorCore` rather than
-// ServiceOrchestrator: the latter is a union, and a class may only implement an
-// object type. Each subclass implements its own arm, so an arm that forgot its
-// members would not compile.
-abstract class FilOneOrchestrator implements OrchestratorCore {
-  abstract readonly accessModel: AccessModel;
+/**
+ * The Management API orchestrator without bucket policies or members, for a
+ * Forge region whose network does not serve them yet. Delete it, folding it
+ * into FilOneOrchestrator, once every deployment does.
+ */
+export class LegacyFilOneOrchestrator implements LegacyServiceOrchestrator {
   readonly id: string;
   readonly region: S3Region;
 
@@ -414,9 +402,7 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
       );
     }
 
-    const principalId =
-      data.type === 'principal' &&
-      (data.principal ?? ('principalId' in body ? body.principalId : undefined));
+    const principalId = data.type === 'principal' ? data.principalId : undefined;
     return {
       // The contract has no identifier separate from the accessKeyId.
       id: data.accessKeyId,
@@ -561,19 +547,6 @@ abstract class FilOneOrchestrator implements OrchestratorCore {
     }
     return mapStorageSamples(data);
   }
-}
-
-// The two arms. `as const` on each discriminant is load-bearing: the abstract
-// declaration would otherwise widen the initializer back to AccessModel and the
-// union would stop narrowing.
-class ScopedKeysFilOneOrchestrator extends FilOneOrchestrator implements ScopedKeysOrchestrator {
-  readonly accessModel = 'scoped-keys' as const;
-}
-
-class IamFilOneOrchestrator extends FilOneOrchestrator implements IamOrchestrator {
-  readonly accessModel = 'iam' as const;
-  // Field initializers run after the base constructor, so `client` is set.
-  readonly iam: IamMethods = buildIamMethods(this.client, this.id, this);
 }
 
 function resolveClient(config: FilOneOrchestratorConfig): Client {

@@ -1,12 +1,14 @@
-// Builds the body of the storage system's create-access-key request. Both
-// orchestrator arms use it.
+// Builds the body of the storage system's create-access-key request.
 
-import type { AccessModel } from '@filone/shared';
 import type {
   CreateAccessKeyRequest,
   CreateServiceAccessKeyRequest,
 } from '@filone/orchestrator-client';
-import type { IssueAccessKeyOpts } from '../service-orchestrator.ts';
+import {
+  supportsBucketPolicies,
+  type IssueAccessKeyOpts,
+  type LegacyServiceOrchestrator,
+} from '../service-orchestrator.ts';
 import { AccessKeyValidationError } from '../errors.ts';
 import { buildPermissions } from './permissions.ts';
 
@@ -16,14 +18,15 @@ import { buildPermissions } from './permissions.ts';
  */
 export function buildAccessKeyBody(
   keyOpts: IssueAccessKeyOpts,
-  arm: { id: string; accessModel: AccessModel },
+  orchestrator: LegacyServiceOrchestrator,
 ): CreateAccessKeyRequest {
   const expiresAt = keyOpts.expiresAt ?? null;
   if ('principalId' in keyOpts) {
-    // Only the iam arm has principals to bind to. Aurora and FTH refuse the same way.
-    if (arm.accessModel !== 'iam') {
+    // Only an orchestrator with members has principals to bind to. Aurora and
+    // FTH refuse the same way.
+    if (!supportsBucketPolicies(orchestrator)) {
       throw new Error(
-        `${arm.id} serves scoped keys; a principal-bound key needs the iam access model`,
+        `${orchestrator.id} serves service keys only; a principal-bound key needs bucket policies`,
       );
     }
     // The type forbids these; a non-literal object can still carry them, and

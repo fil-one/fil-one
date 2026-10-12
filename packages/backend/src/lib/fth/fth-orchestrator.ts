@@ -42,7 +42,6 @@ import type {
   StorageUsageSample,
   TenantInfo,
   TenantUsageMetrics,
-  ScopedKeysOrchestrator,
 } from '../service-orchestrator.ts';
 import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
 import { dedupeByTimestamp, splitTimeRange } from '../time-range.ts';
@@ -98,7 +97,7 @@ export function createInstrumentedFthClient(): FthManagementClient {
 // The max-lines-per-function lint rule caps a function at 100 lines and the
 // orchestrator methods together run well past that, so they live on a class.
 // Callers only ever see createFthOrchestrator(client).
-class FthOrchestrator implements ScopedKeysOrchestrator {
+class FthOrchestrator implements LegacyServiceOrchestrator {
   readonly id = 'fth';
   readonly region = S3Region.UsEast1;
 
@@ -313,7 +312,7 @@ class FthOrchestrator implements ScopedKeysOrchestrator {
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
     if ('principalId' in keyOpts) {
-      throw new Error('FTH serves scoped keys; a principal-bound key needs the iam access model');
+      throw new Error('FTH serves service keys only; a principal-bound key needs bucket policies');
     }
     const storageUserId = await this.getFthConsoleStorageUserId(tenantId, requestOptions);
 

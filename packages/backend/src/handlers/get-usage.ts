@@ -6,7 +6,7 @@ import { countAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import { getProvisionedRegions } from '../lib/region-helpers.ts';
-import type { ServiceOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
+import type { RegionOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -124,7 +124,7 @@ function aggregateRegionUsages(regionUsages: RegionUsage[], accessKeyCount: numb
 }
 
 async function fetchRegionUsage(
-  orchestrator: ServiceOrchestrator,
+  orchestrator: RegionOrchestrator,
   tenantId: string,
   from: Date,
   to: Date,

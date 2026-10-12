@@ -56,7 +56,7 @@ import type { FthManagementClient } from './fth-management-client.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 
 import { createFthOrchestrator } from './fth-orchestrator.ts';
-import type { IssueAccessKeyOpts, ServiceOrchestrator } from '../service-orchestrator.ts';
+import type { IssueAccessKeyOpts, LegacyServiceOrchestrator } from '../service-orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -70,7 +70,7 @@ function profileItem(attrs: Record<string, string>) {
 
 // A fresh instance per test replaces a cache reset: the console storage-user
 // cache lives on the instance.
-let fthOrchestrator: ServiceOrchestrator;
+let fthOrchestrator: LegacyServiceOrchestrator;
 
 beforeEach(() => {
   ssmMock.reset();

@@ -4,7 +4,7 @@ import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
 import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
 import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
 import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
-import type { ServiceOrchestrator } from './service-orchestrator.ts';
+import type { LegacyServiceOrchestrator, RegionOrchestrator } from './service-orchestrator.ts';
 
 // Aurora is built at import; its module reads no secret while loading. FTH and
 // Forge are built lazily on the first request for their region and memoized,
@@ -15,15 +15,15 @@ import type { ServiceOrchestrator } from './service-orchestrator.ts';
 // bin/ scripts run without `sst shell`. The Forge api config arrives as a thunk
 // for the same reason: an argument evaluated at every registry call would touch
 // the secret on stages that never link it.
-let fthOrchestrator: ServiceOrchestrator | undefined;
-const forgeOrchestrators = new Map<string, ServiceOrchestrator>();
+let fthOrchestrator: LegacyServiceOrchestrator | undefined;
+const forgeOrchestrators = new Map<string, RegionOrchestrator>();
 
 function getForgeOrchestrator(
   id: string,
   region: S3Region,
   api: () => ForgeManagementApi,
   s3?: { endpointUrl?: string; presignEndpointUrl?: string },
-): ServiceOrchestrator {
+): RegionOrchestrator {
   let orchestrator = forgeOrchestrators.get(id);
   if (!orchestrator) {
     orchestrator = createForgeOrchestrator(id, region, api(), s3);
@@ -32,7 +32,7 @@ function getForgeOrchestrator(
   return orchestrator;
 }
 
-export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator {
+export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
   const stage = process.env.FILONE_STAGE!;
   if (isSupportedRegion(region, stage)) {
     switch (region) {
@@ -64,7 +64,7 @@ export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator 
   throw new Error(`Unsupported region "${String(region)}".`);
 }
 
-export function getAvailableOrchestrators(): ServiceOrchestrator[] {
+export function getAvailableOrchestrators(): RegionOrchestrator[] {
   const stage = process.env.FILONE_STAGE!;
   return getAvailableRegions(stage).map(getOrchestratorForRegion);
 }
