@@ -39,12 +39,11 @@ function parseSortDirection(value: string | undefined): SortDirection {
  * tenant's whole set. Owner and Admin are unscoped by role, so the policy store
  * is never read for them and a bucket with no policy is still theirs to see.
  *
- * Kept here rather than shared with the other `actAs` callers: this asks who is
- * unscoped, which `isRosterRole` only happens to answer today. The two part
- * company once a membership row can say `bucketScope: 'all'`, since a roster
- * statement never names such a member.
+ * Not `isRosterRole`: that asks whether the console names a role on every
+ * bucket's policy, and this asks whether a role sees every bucket. The two
+ * give the same answer today but answer different questions.
  */
-function scopedTo(role: string | undefined, userId: string): string | undefined {
+function getScopedMemberId(role: OrgRole | undefined, userId: string): string | undefined {
   return role === OrgRole.Owner || role === OrgRole.Admin ? undefined : userId;
 }
 
@@ -73,11 +72,13 @@ export async function baseHandler(
   // Fail open (FIL-1049): one region's ListBuckets 403 used to collapse the whole request into a
   // generic 500, hiding the healthy regions' buckets. Return what answered, name what did not.
   const settled = await Promise.allSettled(
-    // `actAs` scopes the listing to the member on a region serving the `iam`
+    // `scopeToMemberId` scopes the listing to the member on a region serving the `iam`
     // access model, where a bucket is reachable only through a policy naming
     // them; every other region ignores it and answers tenant-wide as before.
     ready.map(({ orchestrator, tenantId }) =>
-      orchestrator.listBuckets(tenantId, { actAs: scopedTo(membership?.role, userId) }),
+      orchestrator.listBuckets(tenantId, {
+        scopeToMemberId: getScopedMemberId(membership?.role, userId),
+      }),
     ),
   );
 
