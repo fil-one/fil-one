@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { S3Region, Stage, getRegionAccessModel } from '@filone/shared';
+import { S3Region, Stage } from '@filone/shared';
 
 // The registry builds every non-Aurora orchestrator lazily, on the first lookup
 // for its region. The FTH client reads its baseUrl from the environment and its
@@ -78,22 +78,5 @@ describe('getAvailableOrchestrators', () => {
     // Order follows `getAvailableRegions`, which groups by continent
     // (eu-west-1, eu-central-3, us-east-1, us-east-9) rather than by service.
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'forge', 'fth', 'forgeDev']);
-  });
-
-  // Two answers to the same question: the console reads the region's model
-  // without an orchestrator in hand, handlers read it off the one they resolved.
-  it('agrees with getRegionAccessModel on every region', () => {
-    process.env.FILONE_STAGE = Stage.Staging;
-    const orchestrators = getAvailableOrchestrators();
-
-    expect(orchestrators.map((o) => [o.region, o.accessModel])).toStrictEqual(
-      orchestrators.map((o) => [o.region, getRegionAccessModel(o.region)]),
-    );
-    expect(orchestrators.map((o) => o.accessModel)).toStrictEqual([
-      'scoped-keys',
-      'scoped-keys',
-      'scoped-keys',
-      'scoped-keys',
-    ]);
   });
 });

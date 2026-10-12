@@ -1,6 +1,5 @@
 import type {
   AccessKeyPermission,
-  AccessModel,
   GranularPermission,
   RetentionDurationType,
   RetentionMode,
@@ -10,7 +9,7 @@ import type {
 import type { S3ClientContext } from './s3-client.ts';
 import type { OrgProfileItem } from './org-profile.ts';
 
-// Retry budget for {@link ServiceOrchestrator.deleteTenant}. A DELETE 409s
+// Retry budget for {@link TenantOrchestrator.deleteTenant}. A DELETE 409s
 // unless the tenant is already `disabled`; both calls are synchronous, so a 409
 // means a competing writer re-activated it in between. Each attempt re-disables,
 // and the budget outlasts that writer. A 404 is not retried — see deleteTenant.
@@ -147,45 +146,8 @@ export interface TenantInfo {
   status?: TenantStatus;
 }
 
-/**
- * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.).
- * Each implementation handles tenant provisioning, bucket lifecycle,
- * access-key issuance, and presigning for a service orchestrator in a single region.
- *
- * ## orgId vs tenantId
- *
- * - `orgId` is our internal org identifier — a UUID generated on a user's
- *   first authenticated request and persisted in `UserInfoTable`.
- *   Orchestrator-agnostic, one per org, attached to every request via
- *   `event.requestContext.userInfo.orgId`.
- * - `tenantId` is the orchestrator-specific identifier (e.g. `auroraTenantId`).
- *   It maps 1:1 to `(orgId, orchestratorId)` and is stored on the
- *   `ORG#{orgId}/PROFILE` DDB row.
- *
- * `ensureTenantReady` takes `orgId` because it owns the setup state machine
- * (status, failure counts, transitions) which lives on the org row.
- * `isTenantReady` takes the pre-fetched `ORG#{orgId}/PROFILE` item (see
- * `getOrgProfile`) so callers consulting several orchestrators read the row
- * once. Every other method takes `tenantId` directly — those are stateless
- * calls, and callers are expected to have resolved org → tenant via
- * ensure/isReady first.
- */
-export interface ServiceOrchestrator {
-  /**
-   * The orchestrator's unique identifier (e.g. `aurora`, `fth`, etc.). It
-   * should have the format `^[a-z][a-zA-Z0-9_]*$`.
-   */
-  readonly id: string;
-  readonly region: S3Region;
-
-  /**
-   * How this backend decides what a credential may do, and therefore which
-   * rules the console applies to it. Every orchestrator serves `scoped-keys`
-   * today; see {@link getRegionAccessModel}, which answers the same question
-   * for callers holding a region rather than an orchestrator.
-   */
-  readonly accessModel: AccessModel;
-
+/** Tenant provisioning and lifecycle. */
+export interface TenantOrchestrator {
   /**
    * Resolves the org's tenant on this orchestrator, provisioning it if needed
    * and advancing the setup state machine on the `ORG#{orgId}/PROFILE` row.
@@ -222,26 +184,6 @@ export interface ServiceOrchestrator {
    */
   isTenantReady(orgProfile: OrgProfileItem | undefined): string | null;
 
-  createBucket(
-    tenantId: string,
-    args: CreateBucketArgs,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<void>;
-  deleteBucket(
-    tenantId: string,
-    bucketName: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<void>;
-  listBuckets(
-    tenantId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<BucketSummary[]>;
-  getBucket(
-    tenantId: string,
-    bucketName: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<BucketDetails | null>;
-
   /**
    * Sets the tenant's status on this orchestrator's API (e.g. locking or
    * unlocking writes when billing state changes). Like the other non-setup
@@ -276,7 +218,38 @@ export interface ServiceOrchestrator {
     tenantId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<TenantStatusProbe>;
+}
 
+/** Bucket lifecycle, and the S3 client context object requests sign with. */
+export interface BucketOrchestrator {
+  createBucket(
+    tenantId: string,
+    args: CreateBucketArgs,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<void>;
+  deleteBucket(
+    tenantId: string,
+    bucketName: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<void>;
+  listBuckets(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<BucketSummary[]>;
+  getBucket(
+    tenantId: string,
+    bucketName: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<BucketDetails | null>;
+
+  getS3ClientContext(
+    tenantId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<S3ClientContext>;
+}
+
+/** Access keys the tenant's S3 clients sign with. */
+export interface AccessKeyOrchestrator {
   issueAccessKey(
     tenantId: string,
     keyOpts: IssueAccessKeyOpts,
@@ -298,12 +271,10 @@ export interface ServiceOrchestrator {
     keyId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
+}
 
-  getS3ClientContext(
-    tenantId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<S3ClientContext>;
-
+/** Read-only usage and quota figures. */
+export interface UsageOrchestrator {
   /**
    * Returns the tenant's storage and egress usage as normalized time series
    * over `[from, to)`. Read-only — does not mutate tenant state. Backs both the
@@ -335,3 +306,42 @@ export interface ServiceOrchestrator {
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<StorageUsageSample[]>;
 }
+
+/**
+ * The features every orchestrator serves: tenants, buckets, access keys and
+ * usage. Aurora and FTH implement only this. Delete it once every deployment
+ * implements {@link ServiceOrchestrator}.
+ */
+export interface LegacyServiceOrchestrator
+  extends TenantOrchestrator, BucketOrchestrator, AccessKeyOrchestrator, UsageOrchestrator {
+  /**
+   * The orchestrator's unique identifier (e.g. `aurora`, `fth`, etc.). It
+   * should have the format `^[a-z][a-zA-Z0-9_]*$`.
+   */
+  readonly id: string;
+  readonly region: S3Region;
+}
+
+/**
+ * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.) in a single
+ * region, composed of one interface per feature.
+ *
+ * ## orgId vs tenantId
+ *
+ * - `orgId` is our internal org identifier — a UUID generated on a user's
+ *   first authenticated request and persisted in `UserInfoTable`.
+ *   Orchestrator-agnostic, one per org, attached to every request via
+ *   `event.requestContext.userInfo.orgId`.
+ * - `tenantId` is the orchestrator-specific identifier (e.g. `auroraTenantId`).
+ *   It maps 1:1 to `(orgId, orchestratorId)` and is stored on the
+ *   `ORG#{orgId}/PROFILE` DDB row.
+ *
+ * `ensureTenantReady` takes `orgId` because it owns the setup state machine
+ * (status, failure counts, transitions) which lives on the org row.
+ * `isTenantReady` takes the pre-fetched `ORG#{orgId}/PROFILE` item (see
+ * `getOrgProfile`) so callers consulting several orchestrators read the row
+ * once. Every other method takes `tenantId` directly — those are stateless
+ * calls, and callers are expected to have resolved org → tenant via
+ * ensure/isReady first.
+ */
+export type ServiceOrchestrator = LegacyServiceOrchestrator;

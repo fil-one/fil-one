@@ -1,4 +1,4 @@
-// Fortilyx (FTH) backed ServiceOrchestrator.
+// Fortilyx (FTH) backed LegacyServiceOrchestrator.
 //
 // The interface methods are intentionally split into two layers:
 //   - control-plane (ensureTenantReady, isTenantReady, issueAccessKey, ...)
@@ -37,7 +37,7 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   OrchestratorRequestOptions,
-  ServiceOrchestrator,
+  LegacyServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
   TenantInfo,
@@ -73,7 +73,7 @@ import { instrumentClient } from './fth-api-metrics.ts';
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
-export function createFthOrchestrator(client: FthManagementClient): ServiceOrchestrator {
+export function createFthOrchestrator(client: FthManagementClient): LegacyServiceOrchestrator {
   return new FthOrchestrator(client);
 }
 
@@ -92,10 +92,9 @@ export function createInstrumentedFthClient(): FthManagementClient {
 // The max-lines-per-function lint rule caps a function at 100 lines and the
 // orchestrator methods together run well past that, so they live on a class.
 // Callers only ever see createFthOrchestrator(client).
-class FthOrchestrator implements ServiceOrchestrator {
+class FthOrchestrator implements LegacyServiceOrchestrator {
   readonly id = 'fth';
   readonly region = S3Region.UsEast1;
-  readonly accessModel = 'scoped-keys';
 
   private readonly client: FthManagementClient;
 

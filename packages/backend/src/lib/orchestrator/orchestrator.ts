@@ -106,7 +106,6 @@ export function createFilOneOrchestrator(config: FilOneOrchestratorConfig): Serv
 class FilOneOrchestrator implements ServiceOrchestrator {
   readonly id: string;
   readonly region: S3Region;
-  readonly accessModel = 'scoped-keys';
 
   private readonly config: FilOneOrchestratorConfig;
   private readonly client: Client;
