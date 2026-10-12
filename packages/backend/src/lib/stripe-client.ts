@@ -40,22 +40,6 @@ export function getStripeClient(): Stripe {
   return cachedStripe;
 }
 
-let cachedSelfServeProductId: string | null = null;
-
-/**
- * The Stripe product behind the self-serve price, looked up once per warm
- * Lambda. Every self-serve price lives on it, the current one and the ones
- * earlier signups are grandfathered on, so it identifies a self-serve
- * subscription where the price id alone cannot. A failed lookup is not
- * cached, so the next call tries again.
- */
-export async function getSelfServeProductId(): Promise<string> {
-  if (cachedSelfServeProductId) return cachedSelfServeProductId;
-  const price = await getStripeClient().prices.retrieve(getBillingSecrets().STRIPE_PRICE_ID);
-  cachedSelfServeProductId = typeof price.product === 'string' ? price.product : price.product.id;
-  return cachedSelfServeProductId;
-}
-
 export async function updateCustomerMetadata(
   customerId: string,
   metadata: Record<string, string>,

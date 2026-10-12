@@ -17,7 +17,6 @@ vi.mock('sst', () => ({
 }));
 
 const mockSubscriptionsRetrieve = vi.fn();
-const mockGetSelfServeProductId = vi.fn();
 
 vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
@@ -27,7 +26,6 @@ vi.mock('../lib/stripe-client.ts', () => ({
     STRIPE_SECRET_KEY: 'sk_test_fake',
     STRIPE_PRICE_ID: 'price_test_fake',
   }),
-  getSelfServeProductId: () => mockGetSelfServeProductId(),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -84,9 +82,6 @@ function updatedKeys() {
 
 const METER_ID = 'mtr_61UONtrahRgx1CRqB41AQEKri8lBk7M8';
 const PRODUCT_ID = 'prod_UDQoxmv2XKmKsP';
-
-/** The product every self-serve price sits on, the current one and older ones. */
-const SELF_SERVE_PRODUCT_ID = 'prod_self_serve';
 
 /**
  * Current plan as Stripe returns it: $4.99/TB metered in GB, priced as a
@@ -234,7 +229,6 @@ describe('get-billing baseHandler', () => {
     vi.clearAllMocks();
     ddbMock.reset();
     mockClaimTrialIfEligible.mockResolvedValue('not-own-org');
-    mockGetSelfServeProductId.mockResolvedValue(SELF_SERVE_PRODUCT_ID);
   });
 
   // The distinction the endpoint rests on: absent status ⇒ inactive; present
@@ -868,8 +862,14 @@ describe('get-billing baseHandler', () => {
   // What the customer's plan is called, and what it charges
   // -------------------------------------------------------------------------
 
-  /** The product as Stripe returns it once expanded. */
-  const EXPANDED_PRODUCT = { id: PRODUCT_ID, object: 'product', name: 'Business', active: true };
+  /** A negotiated plan's product as Stripe returns it once expanded. */
+  const EXPANDED_PRODUCT = {
+    id: PRODUCT_ID,
+    object: 'product',
+    name: 'any internal name',
+    active: true,
+    metadata: { display_name: 'Business' },
+  };
 
   it('reports both ends of the billing period when the record holds them', async () => {
     ddbMock.on(GetItemCommand).resolves(
@@ -899,7 +899,7 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.currentPeriodStart).toBeUndefined();
   });
 
-  it('reports the plan name from the expanded Stripe product', async () => {
+  it("reports the plan name from the product's display_name metadata", async () => {
     ddbMock.on(GetItemCommand).resolves(activeRecordWith());
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsRetrieve.mockResolvedValue(
@@ -912,14 +912,16 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.planName).toBe('Business');
   });
 
-  it('does not surface the Stripe product name for the self-serve price', async () => {
+  it("does not surface the product's own name when the product has no display_name", async () => {
     ddbMock.on(GetItemCommand).resolves(activeRecordWith());
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsRetrieve.mockResolvedValue(
       stripeSubscription({
         ...TIERED_PRICE,
-        id: 'price_test_fake',
-        product: { id: PRODUCT_ID, object: 'product', name: 'Fil ONE Storage (GB)', active: true },
+        // Any self-serve price, the current one or one a customer is
+        // grandfathered on: its product carries no display_name.
+        id: 'price_any_old',
+        product: { id: PRODUCT_ID, object: 'product', name: 'Fil ONE Storage (GB)', metadata: {} },
       }),
     );
 
@@ -929,40 +931,10 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.planName).toBeUndefined();
   });
 
-  /** The self-serve product as Stripe returns it once expanded. */
-  const SELF_SERVE_PRODUCT = {
-    id: SELF_SERVE_PRODUCT_ID,
-    object: 'product',
-    name: 'Fil ONE Storage (GB)',
-    active: true,
-  };
-
-  it('does not surface the Stripe product name for a grandfathered self-serve price', async () => {
-    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
-    ddbMock.on(UpdateItemCommand).resolves({});
-    mockSubscriptionsRetrieve.mockResolvedValue(
-      stripeSubscription({
-        ...TIERED_PRICE,
-        id: 'price_old_self_serve',
-        product: SELF_SERVE_PRODUCT,
-      }),
-    );
-
-    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
-
-    const body = JSON.parse(String(result.body));
-    expect(body.subscription.planName).toBeUndefined();
-  });
-
-  it('does not surface the cached product name for a grandfathered self-serve price', async () => {
+  it('does not surface a product name cached before display_name was read', async () => {
     ddbMock.on(GetItemCommand).resolves(
       activeRecordWith({
-        stripePrice: {
-          ...CACHED_TIERED_PRICE,
-          id: 'price_old_self_serve',
-          product: SELF_SERVE_PRODUCT_ID,
-          product_name: 'Fil ONE Storage (GB)',
-        },
+        stripePrice: { ...CACHED_TIERED_PRICE, product_name: 'Fil ONE Storage (GB)' },
       }),
     );
     mockSubscriptionsRetrieve.mockRejectedValue(new Error('Stripe unavailable'));
@@ -973,22 +945,7 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.planName).toBeUndefined();
   });
 
-  it('still names a negotiated plan when the self-serve product cannot be looked up', async () => {
-    ddbMock.on(GetItemCommand).resolves(activeRecordWith());
-    ddbMock.on(UpdateItemCommand).resolves({});
-    mockSubscriptionsRetrieve.mockResolvedValue(
-      stripeSubscription({ ...TIERED_PRICE, product: EXPANDED_PRODUCT }),
-    );
-    mockGetSelfServeProductId.mockRejectedValue(new Error('Stripe unavailable'));
-
-    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
-
-    expect(result.statusCode).toBe(200);
-    const body = JSON.parse(String(result.body));
-    expect(body.subscription.planName).toBe('Business');
-  });
-
-  it('caches the product name, so an outage does not cost the customer their plan name', async () => {
+  it('caches the plan name, so an outage does not cost the customer their plan name', async () => {
     ddbMock.on(GetItemCommand).resolves(activeRecordWith());
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsRetrieve.mockResolvedValue(
@@ -997,13 +954,31 @@ describe('get-billing baseHandler', () => {
 
     await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
-    expect(storedStripePrice()).toStrictEqual({ ...CACHED_TIERED_PRICE, product_name: 'Business' });
+    expect(storedStripePrice()).toStrictEqual({
+      ...CACHED_TIERED_PRICE,
+      plan_display_name: 'Business',
+    });
   });
 
-  it('serves the cached product name when Stripe is unreachable', async () => {
+  it('refreshes the cache when display_name is set on the product of an unchanged price', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith({ stripePrice: CACHED_TIERED_PRICE }));
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(
+      stripeSubscription({ ...TIERED_PRICE, product: EXPANDED_PRODUCT }),
+    );
+
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(storedStripePrice()).toStrictEqual({
+      ...CACHED_TIERED_PRICE,
+      plan_display_name: 'Business',
+    });
+  });
+
+  it('serves the cached plan name when Stripe is unreachable', async () => {
     ddbMock.on(GetItemCommand).resolves(
       activeRecordWith({
-        stripePrice: { ...CACHED_TIERED_PRICE, product_name: 'Business' },
+        stripePrice: { ...CACHED_TIERED_PRICE, plan_display_name: 'Business' },
       }),
     );
     mockSubscriptionsRetrieve.mockRejectedValue(new Error('Stripe unavailable'));
