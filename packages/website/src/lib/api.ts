@@ -789,7 +789,7 @@ import type {
 
 /**
  * Mint an S3 access key. The body is the principal-bound shape for a personal
- * key on an `iam` region, and the scoped-key shape otherwise.
+ * key on an `iam` region, and the service-key shape otherwise.
  */
 export function createAccessKey(
   body: CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest,
