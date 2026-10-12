@@ -5,15 +5,15 @@ import {
   ConsoleApi,
   REGION,
   STORAGE_STATE,
-  adminsStatement,
+  buildAdminsStatement,
   allow,
-  credentials,
+  getCredentials,
   deny,
-  removeBucket,
-  rosterPolicy,
-  uniqueBucketName,
-  canonical,
-  chooseStatementAction,
+  emptyAndDeleteBucket,
+  buildRosterPolicy,
+  generateBucketName,
+  toCanonicalPolicy,
+  chooseStatementMenuAction,
 } from './policy.util.ts';
 
 // Granting a retention or legal-hold write is `privileged.grant`, which only an
@@ -23,9 +23,9 @@ import {
 // named outright is held to the stored policy by name, so an Admin may keep or
 // drop one an Owner wrote but not add one, even for an Owner.
 
-const ownerId = credentials('owner').userId;
-const adminId = credentials('admin').userId;
-const memberId = credentials('member').userId;
+const ownerId = getCredentials('owner').userId;
+const adminId = getCredentials('admin').userId;
+const memberId = getCredentials('member').userId;
 
 let orgId: string;
 let owner: ConsoleApi;
@@ -39,13 +39,13 @@ test.beforeAll(async () => {
 });
 
 test.beforeEach(async () => {
-  bucket = uniqueBucketName('priv');
+  bucket = generateBucketName('priv');
   await owner.createBucket(bucket);
 });
 
 test.afterEach(async () => {
   await runCleanup([
-    { label: `bucket ${bucket}`, run: () => removeBucket(owner, ownerId, bucket) },
+    { label: `bucket ${bucket}`, run: () => emptyAndDeleteBucket(owner, ownerId, bucket) },
   ]);
 });
 
@@ -54,100 +54,132 @@ test.afterAll(async () => {
   await admin.dispose();
 });
 
-const roster = () => rosterPolicy(ownerId, adminId).Statement;
+const getRosterStatements = () => buildRosterPolicy(ownerId, adminId).Statement;
 
-async function putAs(api: ConsoleApi, statement: PolicyStatement[], etag?: string) {
-  const res = await api.putPolicy(bucket, { policy: { Statement: statement }, etag });
-  // A write that lands answers 204 with no body.
+async function putPolicyAs(api: ConsoleApi, statements: PolicyStatement[], etag?: string) {
+  const res = await api.putPolicy(bucket, { policy: { Statement: statements }, etag });
+  // A write that succeeds answers 204 with no body.
   const text = await res.text();
-  return [res.status(), text ? (JSON.parse(text) as { code?: string }).code : undefined];
+  return {
+    status: res.status(),
+    code: text ? (JSON.parse(text) as { code?: string }).code : undefined,
+  };
 }
 
 test.describe('through the API', () => {
-  test('P1. an admin cannot newly grant a retention or legal-hold write', async () => {
-    const before = await owner.readPolicy(bucket);
-    const outcomes = [];
-    for (const grant of [
+  for (const [title, grant] of [
+    [
+      'P1a. an admin cannot newly grant s3:PutObjectRetention',
       allow([memberId], ['s3:PutObjectRetention']),
+    ],
+    [
+      'P1b. an admin cannot newly grant s3:PutObjectLegalHold',
       allow([memberId], ['s3:PutObjectLegalHold']),
-      allow([memberId], ['s3:*']),
+    ],
+    ['P1c. an admin cannot newly grant s3:*', allow([memberId], ['s3:*'])],
+    [
+      'P1d. an admin cannot newly grant s3:PutObjectLegalHold to everyone',
       allow('*', ['s3:PutObjectLegalHold']),
+    ],
+    [
+      'P1e. an admin cannot newly grant s3:PutObjectRetention to themselves',
       allow([adminId], ['s3:PutObjectRetention']),
-    ]) {
-      outcomes.push(await putAs(admin, [...roster(), grant], before.etag));
-    }
-    expect(outcomes).toEqual(Array(5).fill([403, 'RETENTION_GRANT_FORBIDDEN']));
-    expect(await owner.readPolicy(bucket)).toEqual(before);
-  });
+    ],
+  ] as const) {
+    test(title, async () => {
+      const before = await owner.readPolicy(bucket);
+      expect(await putPolicyAs(admin, [...getRosterStatements(), grant], before.etag)).toEqual({
+        status: 403,
+        code: 'RETENTION_GRANT_FORBIDDEN',
+      });
+      expect(await owner.readPolicy(bucket)).toEqual(before);
+    });
+  }
 
-  test('P2. an admin edits freely around the grants the owners already hold', async () => {
+  test("P2. an admin may save a policy that keeps the owners' s3:* statement", async () => {
     const { etag } = await admin.readPolicy(bucket);
-    const statement = [...roster(), allow([memberId], ['s3:ListBucket'], 'team')];
-    expect(await putAs(admin, statement, etag)).toEqual([204, undefined]);
-    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
-      canonical({ Statement: statement }),
+    const statement = [...getRosterStatements(), allow([memberId], ['s3:ListBucket'], 'team')];
+    expect(await putPolicyAs(admin, statement, etag)).toEqual({ status: 204, code: undefined });
+    expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
+      toCanonicalPolicy({ Statement: statement }),
     );
   });
 
   test('P3. an owner grants the pair, and an admin may keep or drop it', async () => {
     const granted = allow([memberId], ['s3:PutObjectRetention', 's3:PutObjectLegalHold'], 'hold');
     const { etag } = await owner.readPolicy(bucket);
-    expect(await putAs(owner, [...roster(), granted], etag)).toEqual([204, undefined]);
+    expect(await putPolicyAs(owner, [...getRosterStatements(), granted], etag)).toEqual({
+      status: 204,
+      code: undefined,
+    });
 
-    const kept = [...roster(), granted, allow([memberId], ['s3:ListBucket'], 'team')];
-    expect(await putAs(admin, kept, (await admin.readPolicy(bucket)).etag)).toEqual([
-      204,
-      undefined,
-    ]);
-    expect(await putAs(admin, roster(), (await admin.readPolicy(bucket)).etag)).toEqual([
-      204,
-      undefined,
-    ]);
-    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
-      canonical({ Statement: roster() }),
+    const kept = [...getRosterStatements(), granted, allow([memberId], ['s3:ListBucket'], 'team')];
+    expect(await putPolicyAs(admin, kept, (await admin.readPolicy(bucket)).etag)).toEqual({
+      status: 204,
+      code: undefined,
+    });
+    expect(
+      await putPolicyAs(admin, getRosterStatements(), (await admin.readPolicy(bucket)).etag),
+    ).toEqual({ status: 204, code: undefined });
+    expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
+      toCanonicalPolicy({ Statement: getRosterStatements() }),
     );
   });
 
   test('P4. an admin may deny the pair, since withholding is not granting', async () => {
     const statement = [
-      ...roster(),
+      ...getRosterStatements(),
       deny('*', ['s3:PutObjectRetention', 's3:PutObjectLegalHold'], 'no-holds'),
     ];
-    expect(await putAs(admin, statement, (await admin.readPolicy(bucket)).etag)).toEqual([
-      204,
-      undefined,
-    ]);
+    expect(await putPolicyAs(admin, statement, (await admin.readPolicy(bucket)).etag)).toEqual({
+      status: 204,
+      code: undefined,
+    });
   });
 
   test('P5. an admin writing a first policy may not grant s3:*, even to the owners', async () => {
     const { etag } = await owner.readPolicy(bucket);
     expect((await owner.deletePolicy(bucket, etag)).status()).toBe(204);
 
-    expect(await putAs(admin, roster())).toEqual([403, 'RETENTION_GRANT_FORBIDDEN']);
-    const statement = [adminsStatement(adminId), allow([memberId], ['s3:ListBucket'])];
-    expect(await putAs(admin, statement)).toEqual([204, undefined]);
+    expect(await putPolicyAs(admin, getRosterStatements())).toEqual({
+      status: 403,
+      code: 'RETENTION_GRANT_FORBIDDEN',
+    });
+    const statement = [buildAdminsStatement(adminId), allow([memberId], ['s3:ListBucket'])];
+    expect(await putPolicyAs(admin, statement)).toEqual({ status: 204, code: undefined });
   });
 
   test('P6. an admin may not name a retention write, even for an owner who holds s3:*', async () => {
     const { etag } = await admin.readPolicy(bucket);
-    const named = [...roster(), allow([ownerId], ['s3:PutObjectRetention'], 'owner-hold')];
-    expect(await putAs(admin, named, etag)).toEqual([403, 'RETENTION_GRANT_FORBIDDEN']);
+    const named = [
+      ...getRosterStatements(),
+      allow([ownerId], ['s3:PutObjectRetention'], 'owner-hold'),
+    ];
+    expect(await putPolicyAs(admin, named, etag)).toEqual({
+      status: 403,
+      code: 'RETENTION_GRANT_FORBIDDEN',
+    });
   });
 
   test('P7. an admin writing without a precondition meets the same cap', async () => {
     const before = await owner.readPolicy(bucket);
     const res = await admin.putPolicy(bucket, {
-      policy: { Statement: [...roster(), allow([memberId], ['s3:PutObjectRetention'])] },
+      policy: {
+        Statement: [...getRosterStatements(), allow([memberId], ['s3:PutObjectRetention'])],
+      },
       unconditional: true,
     });
-    expect([res.status(), (await res.json()).code]).toEqual([403, 'RETENTION_GRANT_FORBIDDEN']);
+    expect({ status: res.status(), code: (await res.json()).code }).toEqual({
+      status: 403,
+      code: 'RETENTION_GRANT_FORBIDDEN',
+    });
     expect(await owner.readPolicy(bucket)).toEqual(before);
   });
 });
 
 test.describe('in the editor', () => {
   // The Admin's tab acts in the Owner's org, which lives in sessionStorage.
-  const openAs = async (page: Page) => {
+  const openPolicyTab = async (page: Page) => {
     await page.addInitScript((id) => sessionStorage.setItem('filone:activeOrgId', id), orgId);
     await page.goto(`/buckets/${bucket}?region=${REGION}`);
     await page.getByTestId('bucket-policy-tab').click();
@@ -161,19 +193,19 @@ test.describe('in the editor', () => {
     test.use({ storageState: STORAGE_STATE.admin });
 
     test('PU1. the admin is not offered the privileged actions', async ({ page }) => {
-      await openAs(page);
-      await page.locator('#policy-add-statement').click();
+      await openPolicyTab(page);
+      await page.locator('#policy-add-statement-button').click();
       for (const action of PRIVILEGED_ROWS) await expect(actionRow(page, action)).toHaveCount(0);
       await expect(actionRow(page, 's3:GetObjectRetention')).toBeVisible();
     });
 
     test('PU2. the admin cannot save the owners statement back', async ({ page }) => {
       const { etag } = await owner.readPolicy(bucket);
-      await openAs(page);
-      await chooseStatementAction(page, 'Owners', 'edit');
+      await openPolicyTab(page);
+      await chooseStatementMenuAction(page, 'Owners', 'edit');
       // `s3:*` is pruned from what the admin may offer, leaving no action.
-      await expect(modal(page).locator('#policy-statement-submit')).toBeDisabled();
-      await modal(page).locator('#policy-statement-cancel').click();
+      await expect(modal(page).locator('#policy-statement-submit-button')).toBeDisabled();
+      await modal(page).locator('#policy-statement-cancel-button').click();
       await expect(page.getByTestId('policy-save-bar')).toBeHidden();
       expect((await owner.readPolicy(bucket)).etag).toBe(etag);
     });
@@ -183,19 +215,21 @@ test.describe('in the editor', () => {
     test.use({ storageState: STORAGE_STATE.owner });
 
     test('PU3. the owner grants a retention write from the editor', async ({ page }) => {
-      await openAs(page);
-      await page.locator('#policy-add-statement').click();
+      await openPolicyTab(page);
+      await page.locator('#policy-add-statement-button').click();
       for (const action of PRIVILEGED_ROWS) await expect(actionRow(page, action)).toBeVisible();
       await modal(page)
         .locator(`[data-testid="policy-principal-member"][data-user-id="${memberId}"]`)
         .click();
       await actionRow(page, 's3:PutObjectRetention').locator('[role="checkbox"]').click();
-      await modal(page).locator('#policy-statement-submit').click();
+      await modal(page).locator('#policy-statement-submit-button').click();
       await page.locator('#policy-save-button').click();
       await expect(page.getByTestId('policy-save-bar')).toBeHidden();
 
-      expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
-        canonical({ Statement: [...roster(), allow([memberId], ['s3:PutObjectRetention'])] }),
+      expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
+        toCanonicalPolicy({
+          Statement: [...getRosterStatements(), allow([memberId], ['s3:PutObjectRetention'])],
+        }),
       );
     });
   });

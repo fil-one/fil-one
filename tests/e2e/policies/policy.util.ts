@@ -51,14 +51,14 @@ export function requireEnv(name: string): string {
   return value;
 }
 
-export const credentials = (user: PolicyUser) => ({
+export const getCredentials = (user: PolicyUser) => ({
   email: requireEnv(`E2E_POLICY_${user.toUpperCase()}_EMAIL`),
   password: requireEnv(`E2E_POLICY_${user.toUpperCase()}_PASSWORD`),
   userId: requireEnv(`E2E_POLICY_${user.toUpperCase()}_USER_ID`),
 });
 
-export function uniqueBucketName(label: string): string {
-  return `pol-${label}-${randomUUID().slice(0, 8)}`;
+export function generateBucketName(prefix: string): string {
+  return `pol-${prefix}-${randomUUID().slice(0, 8)}`;
 }
 
 /** A console API session for one user, acting in `orgId`. */
@@ -107,13 +107,13 @@ export class ConsoleApi {
 
   // ── Policy ───────────────────────────────────────────────────────
 
-  getPolicy(bucket: string): Promise<APIResponse> {
+  fetchPolicyResponse(bucket: string): Promise<APIResponse> {
     return this.get(`/buckets/${bucket}/policy?region=${REGION}`);
   }
 
   /** The policy with the ETag its response header carried. */
   async readPolicy(bucket: string): Promise<GetBucketPolicyResponse & { etag: string }> {
-    const res = await this.getPolicy(bucket);
+    const res = await this.fetchPolicyResponse(bucket);
     expect(res.status(), await res.text()).toBe(200);
     const { policy } = (await res.json()) as GetBucketPolicyResponse;
     return { policy, etag: res.headers().etag! };
@@ -145,10 +145,10 @@ export class ConsoleApi {
     );
   }
 
-  /** Replace the policy with `statement`, reading the ETag first. */
-  async setStatements(bucket: string, statement: PolicyStatement[]): Promise<string> {
+  /** Replace the policy with `statements`, reading the ETag first. Returns the new ETag. */
+  async replaceStatements(bucket: string, statements: PolicyStatement[]): Promise<string> {
     const { etag } = await this.readPolicy(bucket);
-    const res = await this.putPolicy(bucket, { policy: { Statement: statement }, etag });
+    const res = await this.putPolicy(bucket, { policy: { Statement: statements }, etag });
     expect(res.status(), await res.text()).toBe(204);
     return res.headers().etag!;
   }
@@ -176,7 +176,7 @@ export class ConsoleApi {
     return buckets.map((b) => b.bucketName);
   }
 
-  async mintKey(): Promise<CreateAccessKeyResponse> {
+  async createAccessKey(): Promise<CreateAccessKeyResponse> {
     const res = await this.send('POST', '/access-keys', {
       keyName: `policy-e2e-${randomUUID().slice(0, 8)}`,
       region: REGION,
@@ -216,7 +216,7 @@ export class ConsoleApi {
   }
 }
 
-export function s3For(key: CreateAccessKeyResponse): S3Client {
+export function createS3Client(key: CreateAccessKeyResponse): S3Client {
   return new S3Client({
     endpoint: S3_ENDPOINT,
     region: REGION,
@@ -226,7 +226,7 @@ export function s3For(key: CreateAccessKeyResponse): S3Client {
 }
 
 /** The S3 error a call failed with, as `<status> <code>`, or `ok`. */
-export async function outcome(call: Promise<unknown>): Promise<string> {
+export async function getS3Outcome(call: Promise<unknown>): Promise<string> {
   try {
     await call;
     return 'ok';
@@ -234,6 +234,16 @@ export async function outcome(call: Promise<unknown>): Promise<string> {
     if (err instanceof S3ServiceException) return `${err.$metadata.httpStatusCode} ${err.name}`;
     throw err;
   }
+}
+
+/** A client signed with a new key of `api`'s user, recorded in `createdKeys` for cleanup. */
+export async function createS3ClientWithNewKey(
+  api: ConsoleApi,
+  createdKeys: { api: ConsoleApi; id: string }[],
+): Promise<S3Client> {
+  const key = await api.createAccessKey();
+  createdKeys.push({ api, id: key.id });
+  return createS3Client(key);
 }
 
 export const listObjects = (s3: S3Client, bucket: string) =>
@@ -245,11 +255,11 @@ export const putObject = (s3: S3Client, bucket: string, key: string) =>
 export const deleteObject = (s3: S3Client, bucket: string, key: string) =>
   s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 
-export function ownersStatement(ownerId: string): PolicyStatement {
+export function buildOwnersStatement(ownerId: string): PolicyStatement {
   return { Sid: 'filone-owners', Effect: 'Allow', Principal: [ownerId], Action: ['s3:*'] };
 }
 
-export function adminsStatement(adminId: string): PolicyStatement {
+export function buildAdminsStatement(adminId: string): PolicyStatement {
   return {
     Sid: 'filone-admins',
     Effect: 'Allow',
@@ -259,8 +269,8 @@ export function adminsStatement(adminId: string): PolicyStatement {
 }
 
 /** What a bucket the Owner or the Admin creates carries: the org's roster. */
-export function rosterPolicy(ownerId: string, adminId: string): BucketPolicy {
-  return { Statement: [ownersStatement(ownerId), adminsStatement(adminId)] };
+export function buildRosterPolicy(ownerId: string, adminId: string): BucketPolicy {
+  return { Statement: [buildOwnersStatement(ownerId), buildAdminsStatement(adminId)] };
 }
 
 export function allow(
@@ -284,26 +294,26 @@ export function deny(
  * policy in: the owner's grant goes back first, so a fresh owner key can list
  * and delete what is left.
  */
-export async function removeBucket(
+export async function emptyAndDeleteBucket(
   owner: ConsoleApi,
   ownerId: string,
   bucket: string,
 ): Promise<void> {
-  const current = await owner.getPolicy(bucket);
+  const current = await owner.fetchPolicyResponse(bucket);
   if (
     current.status() === 404 &&
     ((await current.json()) as { code?: string }).code !== 'POLICY_NOT_FOUND'
   ) {
     return; // Already gone.
   }
-  const policy: BucketPolicy = { Statement: [ownersStatement(ownerId)] };
+  const policy: BucketPolicy = { Statement: [buildOwnersStatement(ownerId)] };
   const etag = current.ok() ? current.headers().etag : undefined;
   const put = await owner.putPolicy(bucket, { policy, etag });
   expect(put.status(), await put.text()).toBe(204);
 
-  const key = await owner.mintKey();
+  const key = await owner.createAccessKey();
   try {
-    const s3 = s3For(key);
+    const s3 = createS3Client(key);
     // Every version and delete marker, so a versioned bucket empties too, and
     // any upload a test left open.
     const { Versions = [], DeleteMarkers = [] } = await s3.send(
@@ -311,7 +321,7 @@ export async function removeBucket(
     );
     // An unversioned bucket lists its objects under the literal version "null",
     // which a gateway may refuse as a version-scoped delete; only a suspended
-    // bucket needs it kept (as s3-bulk-delete.ts does).
+    // bucket needs it kept (as packages/backend/src/lib/s3-bulk-delete.ts does).
     const { Status } = await s3.send(new GetBucketVersioningCommand({ Bucket: bucket }));
     for (const { Key, VersionId } of [...Versions, ...DeleteMarkers]) {
       const scoped = VersionId !== 'null' || Status === 'Suspended';
@@ -334,7 +344,7 @@ export async function removeBucket(
  * statements are ordered by their encoding. Compare policies through this,
  * since a read comes back canonical whatever order a write sent.
  */
-export function canonical(policy: BucketPolicy): BucketPolicy {
+export function toCanonicalPolicy(policy: BucketPolicy): BucketPolicy {
   const set = (values: readonly string[]) => [...new Set(values)].sort();
   const statement = policy.Statement.map((st) => ({
     ...st,
@@ -349,13 +359,13 @@ export function canonical(policy: BucketPolicy): BucketPolicy {
  * Edit or remove a statement card from its overflow menu. The menu panel is
  * portalled out of the card, so the item is found from the page.
  */
-export async function chooseStatementAction(
+export async function chooseStatementMenuAction(
   page: Page,
-  label: string,
+  title: string,
   action: 'edit' | 'remove',
 ): Promise<void> {
   await page
-    .locator(`[data-testid="policy-statement"][data-statement-label="${label}"]`)
+    .locator(`[data-testid="policy-statement"][data-statement-title="${title}"]`)
     .getByTestId('policy-statement-actions')
     .click();
   await page.getByTestId(`policy-statement-${action}`).click();

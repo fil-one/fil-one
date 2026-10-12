@@ -57,7 +57,7 @@ export function PolicyStatementCard({
 }: PolicyStatementCardProps) {
   const title = getStatementTitle(statement, index);
   return (
-    <Card padding="md" shadow={false} data-testid="policy-statement" data-statement-label={label}>
+    <Card padding="md" shadow={false} data-testid="policy-statement" data-statement-title={title}>
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <Badge color={statement.Effect === 'Allow' ? 'green' : 'red'} size="sm" weight="medium">

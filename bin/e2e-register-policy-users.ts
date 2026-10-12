@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 
 // One-time setup for the bucket policy e2e suite (tests/e2e/policies): signs up
-// the Owner, Admin, Member, ReadOnly and Leaver users it drives, on a local stage, and records their
-// credentials in the gitignored .env.e2e.local that playwright.config.ts loads.
+// the users it drives, on a local stage, and records their credentials in the
+// gitignored .env.e2e.local that playwright.config.ts loads.
 //
 // Usage:
 //   node bin/e2e-register-policy-users.ts signup  <consoleOrigin> [ROLE...]
 //   node bin/e2e-register-policy-users.ts verify  <verificationUrl>
 //   node bin/e2e-register-policy-users.ts finish  <consoleOrigin> [ROLE...]
 //
-// ROLE is OWNER, ADMIN, MEMBER, READONLY or LEAVER (the member the removal case
-// takes out of the org); without one, all five. `signup` creates the
-// accounts through Auth0's signup with generated
-// passwords and writes the addresses and passwords. Open the verification links
+// ROLE is one of ROLES below; without one, all of them. `signup` creates the
+// accounts through Auth0's signup with generated passwords and writes the
+// addresses and passwords. Open the verification links
 // Auth0 mails with `verify` (or in any browser), then `finish` logs each account
 // in once, which creates its personal organization, and writes its user id.
 //
@@ -25,7 +24,7 @@ import { chromium, type Page } from '@playwright/test';
 const ENV_FILE = '.env.e2e.local';
 const ROLES = ['OWNER', 'ADMIN', 'MEMBER', 'READONLY', 'LEAVER'] as const;
 type Role = (typeof ROLES)[number];
-const PRIMARY = 'button[data-action-button-primary="true"]';
+const PRIMARY_BUTTON_SELECTOR = 'button[data-action-button-primary="true"]';
 
 function readEnv(): Record<string, string> {
   if (!existsSync(ENV_FILE)) return {};
@@ -49,7 +48,7 @@ function generatePassword(): string {
   return `${randomBytes(18).toString('base64url')}Aa1!`;
 }
 
-async function withPage(run: (page: Page) => Promise<void>): Promise<void> {
+async function withBrowserPage(run: (page: Page) => Promise<void>): Promise<void> {
   const browser = await chromium.launch({ headless: false });
   try {
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
@@ -59,17 +58,17 @@ async function withPage(run: (page: Page) => Promise<void>): Promise<void> {
   }
 }
 
-async function signup(origin: string, roles: readonly Role[]): Promise<void> {
+async function signUpUsers(origin: string, roles: readonly Role[]): Promise<void> {
   const env = readEnv();
   for (const role of roles) {
     const email = `srdjan+policy-${role.toLowerCase()}@fil.org`;
     const password = generatePassword();
-    await withPage(async (page) => {
+    await withBrowserPage(async (page) => {
       await page.goto(`${origin}/login?screen_hint=signup`);
       await page.locator('#email').fill(email);
-      await page.locator(PRIMARY).click();
+      await page.locator(PRIMARY_BUTTON_SELECTOR).click();
       await page.locator('#password').fill(password);
-      await page.locator(PRIMARY).click();
+      await page.locator(PRIMARY_BUTTON_SELECTOR).click();
       await page.waitForURL((url) => !url.pathname.startsWith('/u/signup'));
       console.log(`${role}: signup submitted, now at ${new URL(page.url()).pathname}`);
     });
@@ -79,23 +78,23 @@ async function signup(origin: string, roles: readonly Role[]): Promise<void> {
   }
 }
 
-async function verify(url: string): Promise<void> {
-  await withPage(async (page) => {
+async function openVerificationLink(url: string): Promise<void> {
+  await withBrowserPage(async (page) => {
     await page.goto(url);
     await page.waitForLoadState('networkidle');
     console.log(`verification page: ${(await page.locator('h1').first().textContent())?.trim()}`);
   });
 }
 
-async function finish(origin: string, roles: readonly Role[]): Promise<void> {
+async function recordUserIds(origin: string, roles: readonly Role[]): Promise<void> {
   const env = readEnv();
   for (const role of roles) {
-    await withPage(async (page) => {
+    await withBrowserPage(async (page) => {
       await page.goto(origin);
       await page.locator('#username').fill(env[`E2E_POLICY_${role}_EMAIL`]);
-      await page.locator(PRIMARY).click();
+      await page.locator(PRIMARY_BUTTON_SELECTOR).click();
       await page.locator('#password').fill(env[`E2E_POLICY_${role}_PASSWORD`]);
-      await page.locator(PRIMARY).click();
+      await page.locator(PRIMARY_BUTTON_SELECTOR).click();
       const skipPasskey = page.locator('button[value="abort-passkey-enrollment"]');
       await Promise.race([
         skipPasskey.waitFor({ state: 'visible' }),
@@ -118,14 +117,14 @@ async function finish(origin: string, roles: readonly Role[]): Promise<void> {
   }
 }
 
-const [command, arg, ...named] = process.argv.slice(2);
+const [command, arg, ...roleArgs] = process.argv.slice(2);
 if (!arg) {
   throw new Error('Usage: e2e-register-policy-users.ts <signup|verify|finish> <url> [ROLE...]');
 }
-const unknown = named.filter((r) => !(ROLES as readonly string[]).includes(r));
+const unknown = roleArgs.filter((r) => !(ROLES as readonly string[]).includes(r));
 if (unknown.length > 0) throw new Error(`Unknown role: ${unknown.join(', ')}`);
-const roles = named.length > 0 ? (named as Role[]) : ROLES;
-if (command === 'signup') await signup(arg, roles);
-else if (command === 'verify') await verify(arg);
-else if (command === 'finish') await finish(arg, roles);
+const roles = roleArgs.length > 0 ? (roleArgs as Role[]) : ROLES;
+if (command === 'signup') await signUpUsers(arg, roles);
+else if (command === 'verify') await openVerificationLink(arg);
+else if (command === 'finish') await recordUserIds(arg, roles);
 else throw new Error(`Unknown command: ${command}`);

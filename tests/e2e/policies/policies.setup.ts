@@ -4,17 +4,18 @@ import { test as setup, expect } from '@playwright/test';
 import { maybeSkipPasskeyEnrollment } from '../destructive/passkey.util.ts';
 import { activateSubscription } from '../destructive/billing-reset.util.ts';
 import { resolvePersonalOrgId, seedMembership } from '../destructive/invite.util.ts';
-import { REGION, STORAGE_STATE, credentials, type PolicyUser } from './policy.util.ts';
+import { REGION, STORAGE_STATE, getCredentials, type PolicyUser } from './policy.util.ts';
 
 // Logs in every user, gives the Owner's org an active subscription, and seats
 // the rest in it. The Leaver is a second Member that only the removal case
 // uses, so taking them out of the org disturbs no other spec. The seat is seeded rather than
 // invited, as members.spec.ts does; the Member's Hilt principal is created
-// lazily, the first time they mint a key.
+// lazily, the first time they create a key.
+// A Hilt principal is the storage-side identity bucket policies name and a user's keys act as.
 
 for (const user of ['owner', 'admin', 'member', 'readonly', 'leaver'] as PolicyUser[]) {
   setup(`authenticate the policy ${user}`, async ({ page }) => {
-    const { email, password } = credentials(user);
+    const { email, password } = getCredentials(user);
     await page.goto('/');
     await page.locator('#username').fill(email);
     await page.locator('button[data-action-button-primary="true"]').click();
@@ -42,7 +43,7 @@ for (const user of ['owner', 'admin', 'member', 'readonly', 'leaver'] as PolicyU
 }
 
 setup('seat everyone in the owner org', async () => {
-  const owner = credentials('owner');
+  const owner = getCredentials('owner');
   const orgId = await resolvePersonalOrgId(owner.userId);
   // `paid` only picks the subscription state activateSubscription writes.
   await activateSubscription('paid', owner.userId);
@@ -54,7 +55,7 @@ setup('seat everyone in the owner org', async () => {
   ] as const) {
     await seedMembership({
       orgId,
-      userId: credentials(user).userId,
+      userId: getCredentials(user).userId,
       role,
       invitedBy: owner.userId,
     });

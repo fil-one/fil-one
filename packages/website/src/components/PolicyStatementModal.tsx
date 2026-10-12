@@ -166,11 +166,11 @@ export function PolicyStatementModal({
       </ModalBody>
       <ModalFooter>
         <div className="flex justify-end gap-2">
-          <Button id="policy-statement-cancel" variant="ghost" onClick={onClose}>
+          <Button id="policy-statement-cancel-button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button
-            id="policy-statement-submit"
+            id="policy-statement-submit-button"
             variant="primary"
             disabled={!canSubmit}
             onClick={submit}

@@ -81,7 +81,7 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
               </Button>
             )}
             <Button
-              id="policy-add-statement"
+              id="policy-add-statement-button"
               variant="primary"
               size="sm"
               icon={PlusIcon}
@@ -242,7 +242,7 @@ export function LoadedPolicyView({
       {draft.statements.length === 0 ? (
         <div
           data-testid="policy-empty"
-          data-empty-state={draft.hasUnsavedEdits ? 'cleared' : 'none'}
+          data-empty-state={draft.hasUnsavedEdits ? 'all-statements-removed' : 'no-policy'}
         >
           <EmptyStateCard
             icon={ShieldCheckIcon}
@@ -254,7 +254,7 @@ export function LoadedPolicyView({
             }
           >
             <Button
-              id="policy-empty-add-statement"
+              id="policy-empty-add-statement-button"
               variant="primary"
               icon={PlusIcon}
               onClick={onAdd}

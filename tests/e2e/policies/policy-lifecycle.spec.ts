@@ -1,11 +1,6 @@
-import type { S3Client } from '@aws-sdk/client-s3';
 import { test, expect } from '@playwright/test';
 import { ROSTER_ADMIN_ACTIONS } from '@filone/shared';
-import type {
-  CreateAccessKeyResponse,
-  PolicyStatement,
-  RotateAccessKeyResponse,
-} from '@filone/shared';
+import type { PolicyStatement, RotateAccessKeyResponse } from '@filone/shared';
 import {
   resolvePersonalOrgId,
   runCleanup,
@@ -15,63 +10,51 @@ import {
 import {
   ConsoleApi,
   REGION,
-  adminsStatement,
+  buildAdminsStatement,
   allow,
-  credentials,
+  getCredentials,
   listObjects,
-  outcome,
-  ownersStatement,
-  removeBucket,
-  rosterPolicy,
-  s3For,
-  uniqueBucketName,
-  canonical,
+  getS3Outcome,
+  buildOwnersStatement,
+  emptyAndDeleteBucket,
+  buildRosterPolicy,
+  createS3Client,
+  createS3ClientWithNewKey,
+  generateBucketName,
+  toCanonicalPolicy,
 } from './policy.util.ts';
 
 // What membership changes and key and bucket deletion do to policies and keys.
 // These move the org's roster, so the project runs one test at a time. The
-// removal case takes out the Leaver, whom no other spec uses, and seats them
-// again afterwards.
+// removal case takes out the Leaver, whom no other spec uses, and the file
+// seats them again when it finishes.
 
 test.describe.configure({ mode: 'serial' });
 
-const ownerId = credentials('owner').userId;
-const adminId = credentials('admin').userId;
-const memberId = credentials('member').userId;
-const leaverId = credentials('leaver').userId;
+const ownerId = getCredentials('owner').userId;
+const adminId = getCredentials('admin').userId;
+const memberId = getCredentials('member').userId;
+const leaverId = getCredentials('leaver').userId;
 
 let orgId: string;
 let owner: ConsoleApi;
 let member: ConsoleApi;
 let leaver: ConsoleApi;
 const buckets: string[] = [];
-const minted: { api: ConsoleApi; id: string }[] = [];
+const createdKeys: { api: ConsoleApi; id: string }[] = [];
 
-async function mint(api: ConsoleApi): Promise<CreateAccessKeyResponse> {
-  const key = await api.mintKey();
-  minted.push({ api, id: key.id });
-  return key;
-}
-
-async function freshS3(api: ConsoleApi): Promise<S3Client> {
-  return s3For(await mint(api));
-}
-
-async function newBucket(statements: PolicyStatement[] = []): Promise<string> {
-  const bucket = uniqueBucketName('life');
+async function createTrackedBucket(statements: PolicyStatement[] = []): Promise<string> {
+  const bucket = generateBucketName('life');
   await owner.createBucket(bucket);
   buckets.push(bucket);
   if (statements.length > 0) {
-    await owner.setStatements(bucket, [...rosterPolicy(ownerId, adminId).Statement, ...statements]);
+    await owner.replaceStatements(bucket, [
+      ...buildRosterPolicy(ownerId, adminId).Statement,
+      ...statements,
+    ]);
   }
   return bucket;
 }
-
-/** The Leaver back in the Owner's org as a Member, whatever B2 did. */
-const restoreLeaver = {
-  label: 'leaver seat',
-  run: () => seedMembership({ orgId, userId: leaverId, role: 'member', invitedBy: ownerId }),
-};
 
 test.beforeAll(async () => {
   orgId = await resolvePersonalOrgId(ownerId);
@@ -86,48 +69,68 @@ test.afterAll(async () => {
   await runCleanup([
     ...buckets.map((bucket) => ({
       label: `bucket ${bucket}`,
-      run: () => removeBucket(owner, ownerId, bucket),
+      run: () => emptyAndDeleteBucket(owner, ownerId, bucket),
     })),
-    ...minted.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
+    ...createdKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
+    // The Leaver back in the Owner's org as a Member.
+    {
+      label: 'leaver seat',
+      run: () => seedMembership({ orgId, userId: leaverId, role: 'member', invitedBy: ownerId }),
+    },
   ]);
   await Promise.all([owner.dispose(), member.dispose(), leaver.dispose()]);
 });
 
 test('B1. a promotion and a demotion rewrite the admins statement on every bucket', async () => {
-  const team = allow([adminId], ['s3:ListBucket'], 'team');
-  const bucket = await newBucket([team]);
+  const adminListStatement = allow([adminId], ['s3:ListBucket'], 'team');
+  const bucket = await createTrackedBucket([adminListStatement]);
   try {
     const promoted = await owner.setRole(memberId, 'admin');
     expect(promoted.status(), await promoted.text()).toBe(200);
-    const { policySync } = await promoted.json();
-    expect(policySync).toEqual([
-      { region: REGION, bucketsReached: expect.any(Number), bucketsFailed: [] },
+    const { policySyncReports } = await promoted.json();
+    expect(policySyncReports).toEqual([
+      {
+        region: REGION,
+        bucketsUpdated: expect.any(Number),
+        bucketsFailed: [],
+        bucketListFailed: false,
+      },
     ]);
 
     const { policy } = await owner.readPolicy(bucket);
-    expect(canonical(policy)).toEqual(
-      canonical({
+    expect(toCanonicalPolicy(policy)).toEqual(
+      toCanonicalPolicy({
         Statement: [
-          ownersStatement(ownerId),
+          buildOwnersStatement(ownerId),
           {
             Sid: 'filone-admins',
             Effect: 'Allow',
             Principal: [adminId, memberId],
             Action: ROSTER_ADMIN_ACTIONS,
           },
-          team,
+          adminListStatement,
         ],
       }),
     );
-    expect(await outcome(listObjects(await freshS3(member), bucket))).toBe('ok');
+    expect(
+      await getS3Outcome(listObjects(await createS3ClientWithNewKey(member, createdKeys), bucket)),
+    ).toBe('ok');
 
     const demoted = await owner.setRole(memberId, 'member');
     expect(demoted.status(), await demoted.text()).toBe(200);
-    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
-      canonical({ Statement: [ownersStatement(ownerId), adminsStatement(adminId), team] }),
+    expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
+      toCanonicalPolicy({
+        Statement: [
+          buildOwnersStatement(ownerId),
+          buildAdminsStatement(adminId),
+          adminListStatement,
+        ],
+      }),
     );
 
-    expect(await outcome(listObjects(await freshS3(member), bucket))).toBe('404 NoSuchBucket');
+    expect(
+      await getS3Outcome(listObjects(await createS3ClientWithNewKey(member, createdKeys), bucket)),
+    ).toBe('404 NoSuchBucket');
   } finally {
     await runCleanup([
       {
@@ -138,57 +141,75 @@ test('B1. a promotion and a demotion rewrite the admins statement on every bucke
   }
 });
 
-test('B2. removing a member takes their keys and every statement naming them', async () => {
-  const bucket = await newBucket([allow([leaverId], ['s3:ListBucket'], 'leaver-only')]);
-  // Minted and not yet used, so the gateway holds nothing cached for it.
-  const key = await mint(leaver);
+let leaverBucket: string;
+
+test('B2a. removing a member takes their keys and every statement naming them', async () => {
+  leaverBucket = await createTrackedBucket([allow([leaverId], ['s3:ListBucket'], 'leaver-only')]);
+  // Created and not yet used, so the gateway holds nothing cached for it.
+  const key = await leaver.createAccessKey();
+  createdKeys.push({ api: leaver, id: key.id });
   const byId = (a: string, b: string) => a.localeCompare(b);
-  const held = (await leaver.listKeyIds()).sort(byId);
-  expect(held).toContain(key.id);
-  try {
-    const removed = await owner.removeMember(leaverId);
-    expect(removed.status(), await removed.text()).toBe(200);
-    const { revokedKeys = [] } = await removed.json();
-    expect(revokedKeys.map((k: { id: string }) => k.id).sort(byId)).toEqual(held);
+  const leaverKeyIds = (await leaver.listKeyIds()).sort(byId);
+  expect(leaverKeyIds).toContain(key.id);
+  const removed = await owner.removeMember(leaverId);
+  expect(removed.status(), await removed.text()).toBe(200);
+  const { keysRevoked = [] } = await removed.json();
+  expect(keysRevoked.map((k: { id: string }) => k.id).sort(byId)).toEqual(leaverKeyIds);
 
-    expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
-      canonical(rosterPolicy(ownerId, adminId)),
-    );
-    expect(await outcome(listObjects(s3For(key), bucket))).toBe('403 InvalidAccessKeyId');
-
-    // A removed member is no longer a principal of the tenant.
-    const { etag } = await owner.readPolicy(bucket);
-    const named = await owner.putPolicy(bucket, {
-      policy: { Statement: [ownersStatement(ownerId), allow([leaverId], ['s3:ListBucket'])] },
-      etag,
-    });
-    expect(named.status()).toBe(400);
-  } finally {
-    await runCleanup([restoreLeaver]);
-  }
-});
-
-test('B3. a bucket deleted and created again under its name starts from the roster', async () => {
-  const bucket = await newBucket([allow([memberId], ['s3:ListBucket'], 'member-read')]);
-  expect([200, 204]).toContain((await owner.deleteBucket(bucket)).status());
-  await owner.createBucket(bucket);
-  expect(canonical((await owner.readPolicy(bucket)).policy)).toEqual(
-    canonical(rosterPolicy(ownerId, adminId)),
+  expect(toCanonicalPolicy((await owner.readPolicy(leaverBucket)).policy)).toEqual(
+    toCanonicalPolicy(buildRosterPolicy(ownerId, adminId)),
+  );
+  expect(await getS3Outcome(listObjects(createS3Client(key), leaverBucket))).toBe(
+    '403 InvalidAccessKeyId',
   );
 });
 
-test('B4. a deleted principal key stops working and a rotated one is replaced by a working key', async () => {
-  const bucket = await newBucket([allow([memberId], ['s3:ListBucket'])]);
-  const deleted = await mint(member);
-  await member.deleteKey(deleted.id);
-  expect(await outcome(listObjects(s3For(deleted), bucket))).toBe('403 InvalidAccessKeyId');
+test('B2b. a policy naming a removed member is refused', async () => {
+  const { etag } = await owner.readPolicy(leaverBucket);
+  const writeNamingRemovedMember = await owner.putPolicy(leaverBucket, {
+    policy: {
+      Statement: [buildOwnersStatement(ownerId), allow([leaverId], ['s3:ListBucket'])],
+    },
+    etag,
+  });
+  const body = await writeNamingRemovedMember.text();
+  // A validation refusal carries a message and no code.
+  expect({ status: writeNamingRemovedMember.status(), code: JSON.parse(body).code }, body).toEqual({
+    status: 400,
+    code: undefined,
+  });
+});
 
-  const old = await mint(member);
+test('B3. a bucket deleted and created again under its name starts from the roster', async () => {
+  const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'], 'member-read')]);
+  expect([200, 204]).toContain((await owner.deleteBucket(bucket)).status());
+  await owner.createBucket(bucket);
+  expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
+    toCanonicalPolicy(buildRosterPolicy(ownerId, adminId)),
+  );
+});
+
+test('B4a. a deleted principal key stops working', async () => {
+  const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'])]);
+  const deleted = await member.createAccessKey();
+  createdKeys.push({ api: member, id: deleted.id });
+  await member.deleteKey(deleted.id);
+  expect(await getS3Outcome(listObjects(createS3Client(deleted), bucket))).toBe(
+    '403 InvalidAccessKeyId',
+  );
+});
+
+test('B4b. a rotated principal key is replaced by a working key', async () => {
+  const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'])]);
+  const old = await member.createAccessKey();
+  createdKeys.push({ api: member, id: old.id });
   const rotated = await member.rotateKey(old.id);
   expect(rotated.status(), await rotated.text()).toBe(201);
   const replacement = (await rotated.json()) as RotateAccessKeyResponse;
-  minted.push({ api: member, id: replacement.id });
+  createdKeys.push({ api: member, id: replacement.id });
   expect(replacement.previousKeyRevoked).toBe(true);
-  expect(await outcome(listObjects(s3For(replacement), bucket))).toBe('ok');
-  expect(await outcome(listObjects(s3For(old), bucket))).toBe('403 InvalidAccessKeyId');
+  expect(await getS3Outcome(listObjects(createS3Client(replacement), bucket))).toBe('ok');
+  expect(await getS3Outcome(listObjects(createS3Client(old), bucket))).toBe(
+    '403 InvalidAccessKeyId',
+  );
 });

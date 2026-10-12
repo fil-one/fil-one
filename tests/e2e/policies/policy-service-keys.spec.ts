@@ -7,15 +7,15 @@ import {
   REGION,
   SEEDED_KEY,
   STORAGE_STATE,
-  credentials,
+  getCredentials,
   deny,
   listObjects,
-  outcome,
+  getS3Outcome,
   putObject,
-  removeBucket,
-  rosterPolicy,
-  s3For,
-  uniqueBucketName,
+  emptyAndDeleteBucket,
+  buildRosterPolicy,
+  createS3Client,
+  generateBucketName,
   type PolicyUser,
 } from './policy.util.ts';
 
@@ -26,17 +26,17 @@ import {
 test.describe.configure({ mode: 'serial' });
 
 const ROLES: PolicyUser[] = ['owner', 'admin', 'member', 'readonly'];
-const ids = Object.fromEntries(ROLES.map((r) => [r, credentials(r).userId])) as Record<
+const userIdByRole = Object.fromEntries(ROLES.map((r) => [r, getCredentials(r).userId])) as Record<
   PolicyUser,
   string
 >;
 
 let orgId: string;
-let api: Record<PolicyUser, ConsoleApi>;
+let apiByRole: Record<PolicyUser, ConsoleApi>;
 const buckets: string[] = [];
-const minted: { api: ConsoleApi; id: string }[] = [];
+const createdKeys: { api: ConsoleApi; id: string }[] = [];
 
-const serviceKeyBody = (scope: string[]) => ({
+const buildServiceKeyRequest = (scope: string[]) => ({
   keyName: `policy-e2e-svc-${randomUUID().slice(0, 8)}`,
   region: REGION,
   permissions: ['read', 'write', 'list', 'delete'],
@@ -45,24 +45,27 @@ const serviceKeyBody = (scope: string[]) => ({
   expiresAt: null,
 });
 
-async function mintServiceKey(user: PolicyUser, scope: string[]): Promise<CreateAccessKeyResponse> {
-  const res = await api[user].send('POST', '/access-keys', serviceKeyBody(scope));
+async function createServiceKey(
+  user: PolicyUser,
+  scope: string[],
+): Promise<CreateAccessKeyResponse> {
+  const res = await apiByRole[user].send('POST', '/access-keys', buildServiceKeyRequest(scope));
   expect(res.status(), await res.text()).toBe(201);
   const key = (await res.json()) as CreateAccessKeyResponse;
-  minted.push({ api: api[user], id: key.id });
+  createdKeys.push({ api: apiByRole[user], id: key.id });
   return key;
 }
 
-async function newBucket(): Promise<string> {
-  const bucket = uniqueBucketName('svc');
-  await api.owner.createBucket(bucket);
+async function createTrackedBucket(): Promise<string> {
+  const bucket = generateBucketName('svc');
+  await apiByRole.owner.createBucket(bucket);
   buckets.push(bucket);
   return bucket;
 }
 
 test.beforeAll(async () => {
-  orgId = await resolvePersonalOrgId(ids.owner);
-  api = Object.fromEntries(
+  orgId = await resolvePersonalOrgId(userIdByRole.owner);
+  apiByRole = Object.fromEntries(
     await Promise.all(ROLES.map(async (r) => [r, await ConsoleApi.open(r, orgId)])),
   );
 });
@@ -72,43 +75,51 @@ test.afterAll(async () => {
   await runCleanup([
     ...buckets.map((bucket) => ({
       label: `bucket ${bucket}`,
-      run: () => removeBucket(api.owner, ids.owner, bucket),
+      run: () => emptyAndDeleteBucket(apiByRole.owner, userIdByRole.owner, bucket),
     })),
-    ...minted.map(({ api: a, id }) => ({ label: `key ${id}`, run: () => a.deleteKey(id) })),
+    ...createdKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
   ]);
-  await Promise.all(ROLES.map((r) => api[r].dispose()));
+  await Promise.all(ROLES.map((r) => apiByRole[r].dispose()));
 });
 
-test('S1. an owner service key reaches its bucket under any policy, and no other', async () => {
-  const inScope = await newBucket();
-  const outOfScope = await newBucket();
+test('S1. an owner service key accesses its scoped bucket despite a deny-all policy, and no other bucket', async () => {
+  const inScope = await createTrackedBucket();
+  const outOfScope = await createTrackedBucket();
   // A deny naming everyone locks every principal out. A service key is not one.
-  await api.owner.setStatements(inScope, [
-    ...rosterPolicy(ids.owner, ids.admin).Statement,
+  await apiByRole.owner.replaceStatements(inScope, [
+    ...buildRosterPolicy(userIdByRole.owner, userIdByRole.admin).Statement,
     deny('*', ['s3:*']),
   ]);
 
-  const key = await mintServiceKey('owner', [inScope]);
+  const key = await createServiceKey('owner', [inScope]);
   expect(key).not.toHaveProperty('principalId');
 
-  const s3 = s3For(key);
-  expect(await outcome(putObject(s3, inScope, SEEDED_KEY))).toBe('ok');
-  expect(await outcome(listObjects(s3, inScope))).toBe('ok');
+  const s3 = createS3Client(key);
+  expect(await getS3Outcome(putObject(s3, inScope, SEEDED_KEY))).toBe('ok');
+  expect(await getS3Outcome(listObjects(s3, inScope))).toBe('ok');
   // Outside its list the key is refused.
-  expect(await outcome(listObjects(s3, outOfScope))).toBe('403 AccessDenied');
+  expect(await getS3Outcome(listObjects(s3, outOfScope))).toBe('403 AccessDenied');
 });
 
-test('S2. an admin may mint one; a member and a readonly user may not', async () => {
-  const bucket = await newBucket();
-  await mintServiceKey('admin', [bucket]);
+test('S2. an admin may create a service key; a member and a readonly user may not', async () => {
+  const bucket = await createTrackedBucket();
+  await createServiceKey('admin', [bucket]);
 
-  const member = await api.member.send('POST', '/access-keys', serviceKeyBody([bucket]));
+  const member = await apiByRole.member.send(
+    'POST',
+    '/access-keys',
+    buildServiceKeyRequest([bucket]),
+  );
   expect([member.status(), ((await member.json()) as { message: string }).message]).toEqual([
     403,
     'Only an Owner or an Admin can create a service key on this region.',
   ]);
   // A readonly user cannot mint a key of any kind; the chain refuses first.
-  const readonly = await api.readonly.send('POST', '/access-keys', serviceKeyBody([bucket]));
+  const readonly = await apiByRole.readonly.send(
+    'POST',
+    '/access-keys',
+    buildServiceKeyRequest([bucket]),
+  );
   expect(readonly.status()).toBe(403);
 });
 
@@ -120,18 +131,18 @@ test.describe('the key form', () => {
       await page.goto('/api-keys/create');
       await page.locator('#key-name').fill(`policy-e2e-svc-ui-${randomUUID().slice(0, 8)}`);
       await page.locator('#key-region').selectOption(REGION);
-      await expect(page.getByTestId('access-key-follows-policy')).toBeVisible();
+      await expect(page.getByTestId('access-key-follows-bucket-policy')).toBeVisible();
 
-      await page.getByTestId('access-key-kind-service').click();
+      await page.getByTestId('access-key-type-service').click();
       await expect(page.getByTestId('access-key-permissions')).toBeVisible();
-      await expect(page.getByTestId('access-key-follows-policy')).toHaveCount(0);
+      await expect(page.getByTestId('access-key-follows-bucket-policy')).toHaveCount(0);
 
       const created = page.waitForResponse(
         (r) => r.url().endsWith('/api/access-keys') && r.request().method() === 'POST',
       );
       await page.locator('#create-api-key-submit-button').click();
       const key = (await (await created).json()) as CreateAccessKeyResponse;
-      minted.push({ api: api.owner, id: key.id });
+      createdKeys.push({ api: apiByRole.owner, id: key.id });
       expect(key).not.toHaveProperty('principalId');
 
       await page.locator('#save-credentials-done-button').click();
@@ -139,7 +150,7 @@ test.describe('the key form', () => {
         `[data-testid="access-key-row"][data-access-key-id="${key.accessKeyId}"]`,
       );
       await expect(row.getByTestId('permission-badge-bucket-info')).toBeVisible();
-      await expect(row.getByTestId('permission-badge-follows-policy')).toHaveCount(0);
+      await expect(row.getByTestId('permission-badge-follows-bucket-policy')).toHaveCount(0);
     });
   });
 
@@ -156,8 +167,8 @@ test.describe('the key form', () => {
       await page.goto('/api-keys/create');
       await page.locator('#key-name').fill('policy-e2e-svc-member');
       await page.locator('#key-region').selectOption(REGION);
-      await expect(page.getByTestId('access-key-follows-policy')).toBeVisible();
-      await expect(page.getByTestId('access-key-kind-service')).toHaveCount(0);
+      await expect(page.getByTestId('access-key-follows-bucket-policy')).toBeVisible();
+      await expect(page.getByTestId('access-key-type-service')).toHaveCount(0);
     });
   });
 });

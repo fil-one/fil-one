@@ -8,47 +8,47 @@ import {
   SEEDED_KEY,
   STORAGE_STATE,
   allow,
-  credentials,
+  getCredentials,
   deleteObject,
   listObjects,
-  outcome,
+  getS3Outcome,
   putObject,
-  removeBucket,
-  rosterPolicy,
-  s3For,
-  uniqueBucketName,
+  emptyAndDeleteBucket,
+  buildRosterPolicy,
+  createS3ClientWithNewKey,
+  generateBucketName,
   type PolicyUser,
-  canonical,
+  toCanonicalPolicy,
 } from './policy.util.ts';
 
 // The same bucket as each role sees it: the Owner and the Admin are unscoped
-// and reach it through the roster statements, the Member and the ReadOnly user
-// only through a statement naming them. A role still caps what the console lets
+// and get access through the roster statements, the Member and the ReadOnly
+// user only through a statement naming them. A role still caps what the console lets
 // a user do, whatever the policy grants them.
 
 test.describe.configure({ mode: 'serial' });
 
 const ROLES: PolicyUser[] = ['owner', 'admin', 'member', 'readonly'];
-const ids = Object.fromEntries(ROLES.map((r) => [r, credentials(r).userId])) as Record<
+const userIdByRole = Object.fromEntries(ROLES.map((r) => [r, getCredentials(r).userId])) as Record<
   PolicyUser,
   string
 >;
 
 let orgId: string;
-let api: Record<PolicyUser, ConsoleApi>;
+let apiByRole: Record<PolicyUser, ConsoleApi>;
 const buckets: string[] = [];
-const minted: { api: ConsoleApi; id: string }[] = [];
+const createdKeys: { api: ConsoleApi; id: string }[] = [];
 
-async function newBucket(): Promise<string> {
-  const bucket = uniqueBucketName('role');
-  await api.owner.createBucket(bucket);
+async function createTrackedBucket(): Promise<string> {
+  const bucket = generateBucketName('role');
+  await apiByRole.owner.createBucket(bucket);
   buckets.push(bucket);
   return bucket;
 }
 
 test.beforeAll(async () => {
-  orgId = await resolvePersonalOrgId(ids.owner);
-  api = Object.fromEntries(
+  orgId = await resolvePersonalOrgId(userIdByRole.owner);
+  apiByRole = Object.fromEntries(
     await Promise.all(ROLES.map(async (r) => [r, await ConsoleApi.open(r, orgId)])),
   );
 });
@@ -59,25 +59,25 @@ test.afterAll(async () => {
   await runCleanup([
     ...buckets.map((bucket) => ({
       label: `bucket ${bucket}`,
-      run: () => removeBucket(api.owner, ids.owner, bucket),
+      run: () => emptyAndDeleteBucket(apiByRole.owner, userIdByRole.owner, bucket),
     })),
-    ...minted.map(({ api: a, id }) => ({ label: `key ${id}`, run: () => a.deleteKey(id) })),
+    ...createdKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
   ]);
-  await Promise.all(ROLES.map((r) => api[r].dispose()));
+  await Promise.all(ROLES.map((r) => apiByRole[r].dispose()));
 });
 
 test('R1. only the owner and the admin may read or write a policy', async () => {
-  const bucket = await newBucket();
-  const { etag, policy } = await api.owner.readPolicy(bucket);
+  const bucket = await createTrackedBucket();
+  const { etag, policy } = await apiByRole.owner.readPolicy(bucket);
   const statuses = [];
   for (const role of ROLES) {
     statuses.push([
       role,
-      (await api[role].getPolicy(bucket)).status(),
+      (await apiByRole[role].fetchPolicyResponse(bucket)).status(),
       (
-        await api[role].putPolicy(bucket, {
+        await apiByRole[role].putPolicy(bucket, {
           policy,
-          etag: (await api.owner.readPolicy(bucket)).etag,
+          etag: (await apiByRole.owner.readPolicy(bucket)).etag,
         })
       ).status(),
     ]);
@@ -94,17 +94,17 @@ test('R1. only the owner and the admin may read or write a policy', async () => 
 test('R2. every role but readonly may create a bucket and mint a key', async () => {
   const outcomes = [];
   for (const role of ROLES) {
-    const bucket = uniqueBucketName(`r2-${role}`);
-    const created = await api[role].send('POST', '/buckets', {
+    const bucket = generateBucketName(`r2-${role}`);
+    const created = await apiByRole[role].send('POST', '/buckets', {
       bucketName: bucket,
       region: REGION,
     });
     if (created.status() === 201) buckets.push(bucket);
-    const key = await api[role].send('POST', '/access-keys', {
+    const key = await apiByRole[role].send('POST', '/access-keys', {
       keyName: `r2-${role}`,
       region: REGION,
     });
-    if (key.status() === 201) minted.push({ api: api[role], id: (await key.json()).id });
+    if (key.status() === 201) createdKeys.push({ api: apiByRole[role], id: (await key.json()).id });
     outcomes.push([role, created.status(), key.status()]);
   }
   expect(outcomes).toEqual([
@@ -116,26 +116,24 @@ test('R2. every role but readonly may create a bucket and mint a key', async () 
 });
 
 test('R3. a bucket the admin creates carries the roster and no creator statement', async () => {
-  const bucket = uniqueBucketName('r3');
-  await api.admin.createBucket(bucket);
+  const bucket = generateBucketName('r3');
+  await apiByRole.admin.createBucket(bucket);
   buckets.push(bucket);
-  expect(canonical((await api.owner.readPolicy(bucket)).policy)).toEqual(
-    canonical(rosterPolicy(ids.owner, ids.admin)),
+  expect(toCanonicalPolicy((await apiByRole.owner.readPolicy(bucket)).policy)).toEqual(
+    toCanonicalPolicy(buildRosterPolicy(userIdByRole.owner, userIdByRole.admin)),
   );
 });
 
-test('R4. on a new bucket the roster reaches the owner and the admin, nobody else', async () => {
-  const bucket = await newBucket();
+test('R4. on a new bucket the roster grants the owner and the admin access, and nobody else', async () => {
+  const bucket = await createTrackedBucket();
   const results = [];
   for (const role of ['owner', 'admin', 'member'] as const) {
-    const key = await api[role].mintKey();
-    minted.push({ api: api[role], id: key.id });
-    const s3 = s3For(key);
+    const s3 = await createS3ClientWithNewKey(apiByRole[role], createdKeys);
     results.push([
       role,
-      await outcome(putObject(s3, bucket, `${role}.txt`)),
-      await outcome(listObjects(s3, bucket)),
-      await outcome(deleteObject(s3, bucket, `${role}.txt`)),
+      await getS3Outcome(putObject(s3, bucket, `${role}.txt`)),
+      await getS3Outcome(listObjects(s3, bucket)),
+      await getS3Outcome(deleteObject(s3, bucket, `${role}.txt`)),
     ]);
   }
   expect(results).toEqual([
@@ -145,15 +143,15 @@ test('R4. on a new bucket the roster reaches the owner and the admin, nobody els
   ]);
 });
 
-test('R5. the console lists a bucket to the roles that reach it', async () => {
-  const bucket = await newBucket();
-  await api.owner.setStatements(bucket, [
-    ...rosterPolicy(ids.owner, ids.admin).Statement,
-    allow([ids.member], ['s3:ListBucket']),
+test('R5. the console lists a bucket to the roles a statement grants access', async () => {
+  const bucket = await createTrackedBucket();
+  await apiByRole.owner.replaceStatements(bucket, [
+    ...buildRosterPolicy(userIdByRole.owner, userIdByRole.admin).Statement,
+    allow([userIdByRole.member], ['s3:ListBucket']),
   ]);
   const listed = [];
   for (const role of ROLES) {
-    listed.push([role, (await api[role].listBucketNames()).includes(bucket)]);
+    listed.push([role, (await apiByRole[role].listBucketNames()).includes(bucket)]);
   }
   expect(listed).toEqual([
     ['owner', true],
@@ -164,17 +162,16 @@ test('R5. the console lists a bucket to the roles that reach it', async () => {
 });
 
 test('R6. readonly reads what a policy grants and no more than the role allows', async () => {
-  const bucket = await newBucket();
-  const ownerKey = await api.owner.mintKey();
-  minted.push({ api: api.owner, id: ownerKey.id });
-  await putObject(s3For(ownerKey), bucket, SEEDED_KEY);
+  const bucket = await createTrackedBucket();
+  await putObject(await createS3ClientWithNewKey(apiByRole.owner, createdKeys), bucket, SEEDED_KEY);
   // Even a write grant does not let readonly write: the role caps the console.
-  await api.owner.setStatements(bucket, [
-    ...rosterPolicy(ids.owner, ids.admin).Statement,
-    allow([ids.readonly], ['s3:ListBucket', 's3:GetObject', 's3:PutObject']),
+  await apiByRole.owner.replaceStatements(bucket, [
+    ...buildRosterPolicy(userIdByRole.owner, userIdByRole.admin).Statement,
+    allow([userIdByRole.readonly], ['s3:ListBucket', 's3:GetObject', 's3:PutObject']),
   ]);
 
-  const presign = (op: object) => api.readonly.send('POST', `/presign?region=${REGION}`, [op]);
+  const presign = (op: object) =>
+    apiByRole.readonly.send('POST', `/presign?region=${REGION}`, [op]);
   const got = await presign({ op: 'getObject', bucket, key: SEEDED_KEY });
   expect(got.status(), await got.text()).toBe(200);
   const download = await fetch(((await got.json()) as { items: { url: string }[] }).items[0].url);
@@ -188,58 +185,22 @@ test('R6. readonly reads what a policy grants and no more than the role allows',
     fileName: 'readonly.txt',
   });
   expect(put.status()).toBe(403);
-  expect((await api.readonly.listBucketNames()).includes(bucket)).toBe(true);
-});
-
-test("R8. the first policy is the server's own, whatever a creator sends", async () => {
-  // The create request carries no policy; the server builds the roster from the
-  // org's membership and sends it on the create itself, so a creator who asks
-  // for more gets the default and nothing else.
-  const asked = { Statement: [allow('*', ['s3:*'], 'mine')] };
-  const results = [];
-  for (const role of ['admin', 'member'] as const) {
-    const bucket = uniqueBucketName(`r8-${role}`);
-    const created = await api[role].send('POST', '/buckets', {
-      bucketName: bucket,
-      region: REGION,
-      policy: asked,
-    });
-    if (created.status() === 201) buckets.push(bucket);
-    results.push([role, created.status(), canonical((await api.owner.readPolicy(bucket)).policy)]);
-  }
-  expect(results).toEqual([
-    ['admin', 201, canonical(rosterPolicy(ids.owner, ids.admin))],
-    [
-      'member',
-      201,
-      canonical({
-        Statement: [
-          ...rosterPolicy(ids.owner, ids.admin).Statement,
-          {
-            Sid: 'filone-creator',
-            Effect: 'Allow',
-            Principal: [ids.member],
-            Action: ROSTER_ADMIN_ACTIONS,
-          },
-        ],
-      }),
-    ],
-  ]);
+  expect((await apiByRole.readonly.listBucketNames()).includes(bucket)).toBe(true);
 });
 
 test.describe('the Policy tab', () => {
   let bucket: string;
   test.beforeAll(async () => {
-    bucket = await newBucket();
-    await api.owner.setStatements(bucket, [
-      ...rosterPolicy(ids.owner, ids.admin).Statement,
-      allow([ids.member, ids.readonly], ['s3:ListBucket', 's3:GetObject']),
+    bucket = await createTrackedBucket();
+    await apiByRole.owner.replaceStatements(bucket, [
+      ...buildRosterPolicy(userIdByRole.owner, userIdByRole.admin).Statement,
+      allow([userIdByRole.member, userIdByRole.readonly], ['s3:ListBucket', 's3:GetObject']),
     ]);
   });
 
   // The tab waits on the caller's permissions, which /api/me carries, so the
   // count is read only once that has answered.
-  const expectTab = async (page: Page, shown: boolean) => {
+  const expectPolicyTabVisibility = async (page: Page, shown: boolean) => {
     await page.addInitScript((id) => sessionStorage.setItem('filone:activeOrgId', id), orgId);
     const me = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/me');
     await page.goto(`/buckets/${bucket}?region=${REGION}`);
@@ -257,8 +218,48 @@ test.describe('the Policy tab', () => {
     test.describe(role, () => {
       test.use({ storageState: STORAGE_STATE[role] });
       test(`R7. the tab is ${shown ? 'shown to' : 'hidden from'} the ${role}`, async ({ page }) => {
-        await expectTab(page, shown);
+        await expectPolicyTabVisibility(page, shown);
       });
     });
   }
+});
+
+test("R8. the first policy is the server's own, whatever a creator sends", async () => {
+  // The create request carries no policy; the server builds the roster from the
+  // org's membership and sends it on the create itself, so a creator who asks
+  // for more gets the default and nothing else.
+  const requestedPolicy = { Statement: [allow('*', ['s3:*'], 'mine')] };
+  const results = [];
+  for (const role of ['admin', 'member'] as const) {
+    const bucket = generateBucketName(`r8-${role}`);
+    const created = await apiByRole[role].send('POST', '/buckets', {
+      bucketName: bucket,
+      region: REGION,
+      policy: requestedPolicy,
+    });
+    if (created.status() === 201) buckets.push(bucket);
+    results.push([
+      role,
+      created.status(),
+      toCanonicalPolicy((await apiByRole.owner.readPolicy(bucket)).policy),
+    ]);
+  }
+  expect(results).toEqual([
+    ['admin', 201, toCanonicalPolicy(buildRosterPolicy(userIdByRole.owner, userIdByRole.admin))],
+    [
+      'member',
+      201,
+      toCanonicalPolicy({
+        Statement: [
+          ...buildRosterPolicy(userIdByRole.owner, userIdByRole.admin).Statement,
+          {
+            Sid: 'filone-creator',
+            Effect: 'Allow',
+            Principal: [userIdByRole.member],
+            Action: ROSTER_ADMIN_ACTIONS,
+          },
+        ],
+      }),
+    ],
+  ]);
 });
