@@ -75,7 +75,7 @@ describe('useBucketPolicy', () => {
     expect(mockGet).toHaveBeenCalledWith('photos', S3Region.UsEast9);
   });
 
-  it('does not fetch the policy on a scoped-keys region', () => {
+  it('does not fetch the policy on a service-keys region', () => {
     const { result } = renderUseBucketPolicy(S3Region.EuWest1);
 
     expect(result.current).toMatchObject({
