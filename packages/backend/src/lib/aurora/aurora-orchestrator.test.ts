@@ -548,6 +548,7 @@ describe('auroraOrchestrator', () => {
       });
 
       expect(result).toEqual({
+        type: 'service',
         id: 'k1',
         accessKeyId: 'AK1',
         accessKeySecret: 'secret',

@@ -12,7 +12,7 @@ import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
-import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
+import { delegateIamMethods, FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -27,7 +27,7 @@ vi.mock('../../../shared/src/constants.ts', async (importOriginal) => {
   return {
     ...actual,
     getRegionAccessModel: (region: string) =>
-      region === actual.S3Region.UsEast9 ? 'iam' : 'scoped-keys',
+      region === actual.S3Region.UsEast9 ? 'iam' : 'service-keys',
   };
 });
 
@@ -53,8 +53,7 @@ const iamFake = new FakeIamOrchestrator();
 const iamOrchestrator = {
   id: 'forgeDev',
   region: S3Region.UsEast9,
-  accessModel: 'iam',
-  iam: iamFake,
+  ...delegateIamMethods(iamFake),
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
   findAccessKeyByName: (...args: unknown[]) => mockFindAccessKeyByName(...args),
@@ -85,6 +84,7 @@ vi.mock('../middleware/subscription-guard.ts', () => ({
 
 import { baseHandler } from './create-access-key.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
+import type { IssuedAccessKey } from '../lib/service-orchestrator.ts';
 import {
   buildEvent,
   membershipFor,
@@ -120,8 +120,9 @@ function validBody({
 /** A key only an Owner may mint, so a demotion to Admin strands it. */
 const PRIVILEGED = { granularPermissions: ['PutObjectRetention'] };
 
-function issuedAccessKey() {
+function issuedAccessKey(): IssuedAccessKey {
   return {
+    type: 'service',
     id: 'aurora-key-1',
     accessKeyId: 'AKIA1234567890',
     accessKeySecret: 'secret-abc-123',
@@ -1282,7 +1283,7 @@ describe('create-access-key baseHandler', () => {
       iamFake.calls.length = 0;
       mockEnsureTenantReady.mockResolvedValue('tenant-9');
       mockIssueAccessKey.mockImplementation((_tenantId: string, opts: { principalId?: string }) =>
-        Promise.resolve({ ...issuedAccessKey(), principalId: opts.principalId }),
+        Promise.resolve({ ...issuedAccessKey(), type: 'principal', principalId: opts.principalId }),
       );
       // The org shows no key under this name yet.
       ddbMock.on(QueryCommand).resolves({ Items: [] });
@@ -1306,7 +1307,11 @@ describe('create-access-key baseHandler', () => {
       let syncedBeforeMint: string[] = [];
       mockIssueAccessKey.mockImplementation((_tenantId: string, opts: { principalId?: string }) => {
         syncedBeforeMint = iamFake.calls.map((call) => `${call.method}:${call.target}`);
-        return Promise.resolve({ ...issuedAccessKey(), principalId: opts.principalId });
+        return Promise.resolve({
+          ...issuedAccessKey(),
+          type: 'principal',
+          principalId: opts.principalId,
+        });
       });
 
       await baseHandler(buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }));

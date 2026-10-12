@@ -610,6 +610,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     );
 
     expect(result).toEqual({
+      type: 'service',
       id: 'AKIAFTH',
       accessKeyId: 'AKIAFTH',
       accessKeySecret: 'sk-secret',

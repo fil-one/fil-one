@@ -12,6 +12,8 @@ export type {
   IssuePrincipalKeyOpts,
   IssueServiceKeyOpts,
   IssuedAccessKey,
+  IssuedPrincipalKey,
+  IssuedServiceKey,
 } from './access-key-orchestrator.ts';
 export type {
   BucketDetails,

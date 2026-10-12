@@ -6,6 +6,7 @@ import {
   CreatePrincipalAccessKeySchema,
   S3Region,
   excessKeyPermissions,
+  getRegionAccessModel,
   isSupportedRegion,
 } from '@filone/shared';
 import type {
@@ -30,7 +31,11 @@ import { listOrgAccessKeys } from '../lib/member-keys.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
-import type { IssuedAccessKey, RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import {
+  supportsBucketPolicies,
+  type IssuedAccessKey,
+  type RegionOrchestrator,
+} from '../lib/service-orchestrator.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import {
@@ -98,8 +103,8 @@ export async function baseHandler(
   // the intent, because it mints nothing: a failure here leaves no credential
   // anywhere, and an intent left dangling by it would read to an operator as a
   // possible orphan key.
-  if (plan.type === 'principal' && orchestrator.accessModel === 'iam') {
-    await orchestrator.iam.syncMember(tenantId, userId);
+  if (plan.type === 'principal' && supportsBucketPolicies(orchestrator)) {
+    await orchestrator.syncMember(tenantId, userId);
   }
 
   // Fail-closed, and before the vendor: the credential is created at the storage
@@ -176,7 +181,7 @@ export async function baseHandler(
       accessKeyId: accessKey.accessKeyId,
       secretAccessKey: accessKey.accessKeySecret,
       createdAt: accessKey.createdAt,
-      ...(accessKey.principalId ? { principalId: accessKey.principalId } : {}),
+      ...(accessKey.type === 'principal' ? { principalId: accessKey.principalId } : {}),
     })
     .build();
 }
@@ -198,7 +203,7 @@ function buildKeyMintPlan(data: CreateKeyRequest, userId: string) {
       opts: { keyName: data.keyName, principalId: userId, expiresAt },
       auditDetails: { boundToPrincipal: true },
       buildRowFields: (issued: IssuedAccessKey) => ({
-        principalId: issued.principalId ?? userId,
+        principalId: issued.type === 'principal' ? issued.principalId : userId,
         ...optionalKeyAttributes({ expiresAt }),
       }),
     };
@@ -230,10 +235,10 @@ function buildKeyMintPlan(data: CreateKeyRequest, userId: string) {
 function checkServiceKeyAuthority(
   event: AuthenticatedEvent,
   request: CreateAccessKeyRequest,
-  orchestrator: ServiceOrchestrator,
+  orchestrator: RegionOrchestrator,
 ): APIGatewayProxyStructuredResultV2 | undefined {
   const denied = checkCreatorAuthority(event, request);
-  if (denied || orchestrator.accessModel !== 'iam') return denied;
+  if (denied || !supportsBucketPolicies(orchestrator)) return denied;
   return requirePermission(
     event,
     'keys.create_service',
@@ -267,7 +272,7 @@ function isPrincipalKeyRequest(rawBody: string | undefined): boolean {
     ) {
       return false;
     }
-    return getOrchestratorForRegion(body.region).accessModel === 'iam';
+    return getRegionAccessModel(body.region) === 'iam';
   } catch {
     return false;
   }

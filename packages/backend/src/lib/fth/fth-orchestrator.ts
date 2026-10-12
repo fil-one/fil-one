@@ -341,6 +341,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
       );
 
       return {
+        type: 'service',
         id: accessKey.accessKeyId,
         accessKeyId: accessKey.accessKeyId,
         accessKeySecret: accessKey.secretAccessKey,

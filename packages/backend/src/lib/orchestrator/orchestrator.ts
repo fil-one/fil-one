@@ -407,15 +407,16 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
       );
     }
 
-    const principalId = data.type === 'principal' ? data.principalId : undefined;
-    return {
+    const issued = {
       // The contract has no identifier separate from the accessKeyId.
       id: data.accessKeyId,
       accessKeyId: data.accessKeyId,
       accessKeySecret: data.secretAccessKey,
       createdAt: data.createdAt,
-      ...(principalId ? { principalId } : {}),
     };
+    return data.type === 'principal'
+      ? { ...issued, type: 'principal', principalId: data.principalId }
+      : { ...issued, type: 'service' };
   }
 
   async findAccessKeyByName(
