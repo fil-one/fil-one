@@ -21,7 +21,7 @@ import {
 
 // A service key on an `iam` region: its own permissions and bucket list, and
 // no bucket policy. Only an Owner or an Admin may mint one, and the creator cap
-// and the bucket scope bound it as they do on a scoped-key region.
+// and the bucket scope bound it as they do on a service-key region.
 
 test.describe.configure({ mode: 'serial' });
 

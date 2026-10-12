@@ -71,12 +71,13 @@ test.afterAll(async () => {
       label: `bucket ${bucket}`,
       run: () => emptyAndDeleteBucket(owner, ownerId, bucket),
     })),
-    ...createdKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
-    // The Leaver back in the Owner's org as a Member.
+    // The Leaver back in the Owner's org as a Member, before the key deletes:
+    // a removed member's own delete is refused, and their keys are already gone.
     {
       label: 'leaver seat',
       run: () => seedMembership({ orgId, userId: leaverId, role: 'member', invitedBy: ownerId }),
     },
+    ...createdKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
   ]);
   await Promise.all([owner.dispose(), member.dispose(), leaver.dispose()]);
 });
