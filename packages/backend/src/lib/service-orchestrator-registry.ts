@@ -3,6 +3,7 @@ import { Resource } from 'sst';
 import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
 import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
 import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
+import { getNetworkAccessModels } from './network-access-model.ts';
 import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
 import type { LegacyServiceOrchestrator, RegionOrchestrator } from './service-orchestrator.ts';
 
@@ -45,6 +46,7 @@ export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
         return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], region, () => ({
           baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
           accessToken: Resource.ForgeManagementApiToken.value,
+          accessModel: getNetworkAccessModels().forge,
         }));
       case S3Region.UsEast9:
         return getForgeOrchestrator(
@@ -53,6 +55,7 @@ export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
           () => ({
             baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
             accessToken: Resource.ForgeDevManagementApiToken.value,
+            accessModel: getNetworkAccessModels().forgeDev,
           }),
           {
             endpointUrl: process.env.FORGE_DEV_S3_ENDPOINT_URL,

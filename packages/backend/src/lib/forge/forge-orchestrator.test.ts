@@ -7,7 +7,11 @@ vi.hoisted(() => {
 
 import { createForgeOrchestrator } from './forge-orchestrator.ts';
 
-const api = { baseUrl: 'https://forge.test', accessToken: 'fkid.fsecret' };
+const api = {
+  baseUrl: 'https://forge.test',
+  accessToken: 'fkid.fsecret',
+  accessModel: 'service-keys',
+} as const;
 
 describe('createForgeOrchestrator', () => {
   it('builds a region-specific orchestrator with custom ID', () => {

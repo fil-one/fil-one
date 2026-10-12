@@ -16,26 +16,28 @@
 // are linked only on non-production stages, so eager construction would crash
 // production at import time.
 
-import { getRegionAccessModel, getS3Endpoint, S3Region } from '@filone/shared';
+import { getS3Endpoint, S3Region, type AccessModel } from '@filone/shared';
 import { createFilOneOrchestrator } from '../orchestrator/filone-orchestrator.ts';
 import type { RegionOrchestrator } from '../service-orchestrator.ts';
 
-/** Management API endpoint and bearer credential of one Forge network's Hilt. */
+/** Management API endpoint, bearer credential and access model of one Forge network's Hilt. */
 export interface ForgeManagementApi {
   baseUrl: string;
   accessToken: string;
+  /** Whether this network's Hilt serves bucket policies and members, from deploy config. */
+  accessModel: AccessModel;
 }
 
 /**
  * @param id The unique identifier for the Forge orchestrator. It should have
  *           the format `^[a-z][a-zA-Z0-9_]*$`.
  * @param region The S3 region the orchestrator will manage.
- * @param api The Hilt endpoint and bearer token of the Forge network hosting
- *            the region.
+ * @param api The Hilt endpoint, bearer token and access model of the Forge
+ *            network hosting the region.
  * @param s3 Overrides of the region's S3 endpoint (default getS3Endpoint()) and
  *           of the endpoint presigned URLs carry.
  * @returns The orchestrator for the specified Forge region, with bucket
- *          policies and members when the region serves `iam`.
+ *          policies and members when its network serves `iam`.
  */
 export function createForgeOrchestrator(
   id: string,
@@ -50,9 +52,7 @@ export function createForgeOrchestrator(
     stage,
     s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(region, stage),
     s3PresignEndpointUrl: s3.presignEndpointUrl,
-    api,
-    // getRegionAccessModel from @filone/shared decides the model per region,
-    // so the console and the handlers can never disagree.
-    accessModel: getRegionAccessModel(region),
+    api: { baseUrl: api.baseUrl, accessToken: api.accessToken },
+    accessModel: api.accessModel,
   });
 }

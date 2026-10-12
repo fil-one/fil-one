@@ -254,7 +254,7 @@ export const auroraOrchestrator = {
   ): Promise<IssuedAccessKey> {
     if ('principalId' in keyOpts) {
       throw new Error(
-        'Aurora serves service keys only; a principal-bound key needs bucket policies',
+        'Aurora supports service keys only; a principal-bound key needs the IAM access model',
       );
     }
     const key = await createAuroraAccessKey({

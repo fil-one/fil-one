@@ -26,7 +26,7 @@ export function buildAccessKeyBody(
     // FTH refuse the same way.
     if (!supportsBucketPolicies(orchestrator)) {
       throw new Error(
-        `${orchestrator.id} serves service keys only; a principal-bound key needs bucket policies`,
+        `${orchestrator.id} supports service keys only; a principal-bound key needs the IAM access model`,
       );
     }
     // The type forbids these; a non-literal object can still carry them, and
