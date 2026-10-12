@@ -14,6 +14,7 @@ import type { KeyMintFence } from './access-key-mint-seq.ts';
 import { getDynamoClient } from './ddb-client.ts';
 import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION } from './dynamo-records.ts';
 import type { AccessKeyRecord } from './dynamo-records.ts';
+import { getNetworkAccessModels } from './network-access-model.ts';
 
 /**
  * An org's access-key rows, and which of them a member could still mint.
@@ -117,6 +118,7 @@ export function reviewAccessKeysForRole(
     unattributedKeyCount: 0,
   };
 
+  const networkAccessModels = getNetworkAccessModels();
   for (const accessKey of accessKeys) {
     if (!accessKey.createdBy) {
       review.unattributedKeyCount += 1;
@@ -124,7 +126,7 @@ export function reviewAccessKeysForRole(
     }
     if (accessKey.createdBy !== userId) continue;
 
-    const retention = canRetainAccessKey(role, accessKey);
+    const retention = canRetainAccessKey(role, accessKey, networkAccessModels);
     if (retention.retained) {
       review.retainedKeyCount += 1;
       continue;

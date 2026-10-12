@@ -56,6 +56,7 @@ import { authorize, requireOrgMembershipMiddleware } from '../middleware/authori
 import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
+import { getNetworkAccessModels } from '../lib/network-access-model.ts';
 
 const dynamo = getDynamoClient();
 
@@ -144,11 +145,15 @@ async function prepareRotation(
 
   // The same question a role narrowing asks of a key its holder already has,
   // and the same answer: a key is reissued when its holder could mint it today.
-  const retention = canRetainAccessKey(membership?.role ?? NO_ROLE, {
-    permissions,
-    granularPermissions: stored.granularPermissions,
-    region: stored.region,
-  });
+  const retention = canRetainAccessKey(
+    membership?.role ?? NO_ROLE,
+    {
+      permissions,
+      granularPermissions: stored.granularPermissions,
+      region: stored.region,
+    },
+    getNetworkAccessModels(),
+  );
   if (!retention.retained) return refusedRotation(retention);
 
   if (hasExpired(stored.expiresAt)) {
