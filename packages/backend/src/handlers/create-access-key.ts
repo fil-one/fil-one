@@ -6,7 +6,6 @@ import {
   CreatePrincipalAccessKeySchema,
   S3Region,
   excessKeyPermissions,
-  getRegionAccessModel,
   isSupportedRegion,
 } from '@filone/shared';
 import type {
@@ -30,6 +29,7 @@ import type { KeyMinter, MintedKey } from '../lib/key-mint.ts';
 import { listOrgAccessKeys } from '../lib/member-keys.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { supportsIamMethods } from '../lib/network-access-model.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
 import {
   supportsBucketPolicies,
@@ -272,7 +272,7 @@ function isPrincipalKeyRequest(rawBody: string | undefined): boolean {
     ) {
       return false;
     }
-    return getRegionAccessModel(body.region) === 'iam';
+    return supportsIamMethods(body.region);
   } catch {
     return false;
   }
