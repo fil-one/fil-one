@@ -16,14 +16,14 @@
 // kinds. For each provisioned account the reset drops the region's S3 Vectors
 // indexes and RagIndexerTable rows, deletes the region's ACCESSKEY# rows,
 // deletes the region's console credentials from SSM, and removes the tenant-id
-// attribute last — the inverse of setup, so an interrupted run stays resumable
-// instead of orphaning state nothing can name. For eu-west-1 it also rewinds
-// `auroraSetupStatus` to FILONE_ORG_CREATED and drops
-// `auroraSetupFailureCount`, because Aurora's setup state machine throws on any
-// other status. Regional ACCESSKEY# rows and RAG rows are planned by their own
-// region, so an account whose pointer is already gone still has them deleted:
-// a key minted between an earlier run's scan and its pointer removal is picked
-// up by the next run.
+// and registered-principals attributes last — the inverse of setup, so an
+// interrupted run stays resumable instead of orphaning state nothing can name.
+// For eu-west-1 it also rewinds `auroraSetupStatus` to FILONE_ORG_CREATED and
+// drops `auroraSetupFailureCount`, because Aurora's setup state machine throws
+// on any other status. Regional ACCESSKEY# rows and RAG rows are planned by
+// their own region, so an account whose pointer is already gone still has them
+// deleted: a key minted between an earlier run's scan and its pointer removal
+// is picked up by the next run.
 //
 // Production is refused before the first AWS call: every region there carries
 // real customer data, and a reset takes the region away from every account at
@@ -123,6 +123,10 @@ try {
 
 const orchestratorId = orchestratorIdForRegion(region)!;
 const tenantIdAttribute = `${orchestratorId}TenantId`;
+// The members registered as principals at the old tenant (getPrincipalsAttributeName
+// in packages/backend/src/lib/org-profile.ts). Left behind, the new tenant would
+// never register them.
+const principalsAttribute = `${orchestratorId}Principals`;
 
 // Keep in sync with the RagVectorBucket name in sst.config.ts.
 const vectorBucket = `filone-${stage}-rag-vectors`;
@@ -466,7 +470,8 @@ async function deleteSsmParameters(names: readonly string[]): Promise<number> {
 }
 
 /**
- * Remove the tenant-id attribute, and for Aurora rewind the setup state.
+ * Remove the tenant-id and registered-principals attributes, and for Aurora
+ * rewind the setup state.
  *
  * Aurora's setup state machine throws on an unexpected `auroraSetupStatus` and
  * `advanceStatus()` conditions on FILONE_ORG_CREATED, so dropping
@@ -476,7 +481,7 @@ async function deleteSsmParameters(names: readonly string[]): Promise<number> {
  */
 async function clearTenantLink(account: AccountPlan): Promise<boolean> {
   const setClauses = ['updatedAt = :now'];
-  const removeClauses = ['#tenantIdAttr'];
+  const removeClauses = ['#tenantIdAttr', '#principalsAttr'];
   const values: Record<string, AttributeValue> = { ':now': { S: new Date().toISOString() } };
 
   if (orchestratorId === 'aurora') {
@@ -493,7 +498,10 @@ async function clearTenantLink(account: AccountPlan): Promise<boolean> {
         UpdateExpression: `SET ${setClauses.join(', ')} REMOVE ${removeClauses.join(', ')}`,
         // Never upsert a phantom account row.
         ConditionExpression: 'attribute_exists(sk)',
-        ExpressionAttributeNames: { '#tenantIdAttr': tenantIdAttribute },
+        ExpressionAttributeNames: {
+          '#tenantIdAttr': tenantIdAttribute,
+          '#principalsAttr': principalsAttribute,
+        },
         ExpressionAttributeValues: values,
       }),
     );
