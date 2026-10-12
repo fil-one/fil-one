@@ -125,9 +125,14 @@ export function reviewAccessKeysForRole(
       continue;
     }
     if (accessKey.createdBy !== userId) continue;
-    // A principal-bound key is never revoked by a role change.
+    // A principal-bound key follows the bucket policies, so a role change
+    // keeps it; removal, which leaves no role, revokes it.
     if (accessKey.principalId) {
-      review.retainedKeyCount += 1;
+      if (role === NO_ROLE) {
+        review.keysToRevoke.push({ ...accessKey, reason: 'role_cannot_mint', excess: [] });
+      } else {
+        review.retainedKeyCount += 1;
+      }
       continue;
     }
 
@@ -164,10 +169,10 @@ export async function reviewMemberAccessKeysForRole(
  * landing between them is counted by the fence and missing from the list.
  *
  * Removal asks about `NO_ROLE`, the narrowing to nothing: no role is left to
- * mint under, so `canRetainAccessKey` condemns every attributed service key.
- * A principal-bound key is never revoked by a role change; removing the
- * principal at the storage system removes it. Rows with no recorded creator are
- * outside this rule, as they are outside every other.
+ * mint under, so every attributed key is revoked: a service key because
+ * `canRetainAccessKey` condemns it, a principal-bound key because its member is
+ * gone. Any other role change keeps principal-bound keys. Rows with no recorded
+ * creator are outside this rule, as they are outside every other.
  */
 export async function reviewKeysForRoleChange(
   orgId: string,
