@@ -49,6 +49,7 @@ process.env.FILONE_STAGE = 'test';
 import { baseHandler } from './set-bucket-rag-enablement.ts';
 import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
+import { policyOf, statement } from '../test/policy-statements.ts';
 import {
   fakeOrchestrator,
   stubMemberScopedGetBucket,
@@ -304,9 +305,11 @@ describe('set-bucket-rag-enablement member scope on an iam region', () => {
   function buildIamOrchestratorGrantingOnMyBucket(actions: PolicyAction[]): FakeOrchestrator {
     const iam = new FakeIamOrchestrator();
     iam.seedPrincipal(tenantFor('forge', 'org-1'), USER_1);
-    iam.seedPolicy(tenantFor('forge', 'org-1'), 'my-bucket', {
-      Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: actions }],
-    });
+    iam.seedPolicy(
+      tenantFor('forge', 'org-1'),
+      'my-bucket',
+      policyOf(statement('my-bucket', 'Allow', [USER_1], actions)),
+    );
     const orchestrator = fakeOrchestrator('forge', {
       bucket: BUCKET,
       iam,

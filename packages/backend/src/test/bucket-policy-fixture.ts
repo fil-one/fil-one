@@ -4,7 +4,7 @@ import { vi } from 'vitest';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { mockClient } from 'aws-sdk-client-mock';
-import { S3Region } from '@filone/shared';
+import { POLICY_VERSION, S3Region, toPolicyPrincipal } from '@filone/shared';
 import type { BucketPolicy } from '@filone/shared';
 import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 import { fakeOrchestrator, tenantFor } from './fake-orchestrator.ts';
@@ -17,7 +17,15 @@ export const SERVICE_KEYS_REGION = S3Region.EuWest1;
 export const BUCKET_NAME = 'photos';
 
 export const grantGetObjectToUser: BucketPolicy = {
-  Statement: [{ Effect: 'Allow', Principal: [USER_ID], Action: ['s3:GetObject'] }],
+  Version: POLICY_VERSION,
+  Statement: [
+    {
+      Effect: 'Allow',
+      Principal: toPolicyPrincipal([USER_ID]),
+      Action: ['s3:GetObject'],
+      Resource: [`arn:aws:s3:::${BUCKET_NAME}/*`],
+    },
+  ],
 };
 
 export const iam = new FakeIamOrchestrator();

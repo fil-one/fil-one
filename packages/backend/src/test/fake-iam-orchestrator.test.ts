@@ -1,12 +1,11 @@
-import { describe, it, expect } from 'vitest';
 import type { BucketPolicy } from '@filone/shared';
+import { describe, it, expect } from 'vitest';
 import { PolicyValidationError } from '../lib/errors.ts';
 import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
+import { policyOf, statement } from './policy-statements.ts';
 
 describe('FakeIamOrchestrator principal reads', () => {
-  const grantReadToEveryone: BucketPolicy = {
-    Statement: [{ Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] }],
-  };
+  const grantReadToEveryone = policyOf(statement('photos', 'Allow', '*', ['s3:GetObject']));
 
   it('resolveMemberAccess answers no buckets for a principal that was never added', async () => {
     const fake = new FakeIamOrchestrator();
@@ -28,9 +27,7 @@ describe('FakeIamOrchestrator policy writes', () => {
     const fake = new FakeIamOrchestrator();
     await fake.syncMember('t1', 'u1');
     await fake.syncMember('t1', 'u2');
-    const policy: BucketPolicy = {
-      Statement: [{ Effect: 'Allow', Principal: ['u2'], Action: ['s3:GetObject'] }],
-    };
+    const policy = policyOf(statement('photos', 'Allow', ['u2'], ['s3:GetObject']));
     const etag = fake.seedPolicy('t1', 'photos', policy);
     await fake.removeMember('t1', 'u1');
     await expect(fake.getBucketPolicy('t1', 'photos')).resolves.toStrictEqual({ policy, etag });
@@ -38,9 +35,7 @@ describe('FakeIamOrchestrator policy writes', () => {
 
   it('putBucketPolicy throws PolicyValidationError when a statement names an unknown principal', async () => {
     const fake = new FakeIamOrchestrator();
-    const policy: BucketPolicy = {
-      Statement: [{ Effect: 'Allow', Principal: ['ghost'], Action: ['s3:GetObject'] }],
-    };
+    const policy = policyOf(statement('photos', 'Allow', ['ghost'], ['s3:GetObject']));
     await expect(
       fake.putBucketPolicy('t1', 'photos', policy, { ifNoneMatch: '*' }),
     ).rejects.toBeInstanceOf(PolicyValidationError);

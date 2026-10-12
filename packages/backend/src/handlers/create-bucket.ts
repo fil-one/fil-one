@@ -71,7 +71,9 @@ export async function baseHandler(
 
   // A new bucket starts with one statement naming its creator on a region that
   // serves policies, and with none on a `service-keys` region.
-  const policy = supportsIamMethods(region) ? getCreatorBucketPolicy(userId) : undefined;
+  const policy = supportsIamMethods(region)
+    ? getCreatorBucketPolicy({ creatorId: userId, bucketName })
+    : undefined;
   const policyAudit = policy
     ? await auditDefaultBucketPolicy({ event, orgId, userId, region, bucketName })
     : undefined;
@@ -120,6 +122,7 @@ export async function baseHandler(
     .build();
 }
 
+/**
 /**
  * The default policy is written at the storage system with the bucket, so it is
  * recorded like every other policy write: an intent before the call and a

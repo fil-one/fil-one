@@ -38,6 +38,7 @@ process.env.FILONE_STAGE = 'test';
 import { baseHandler } from './get-bucket-rag-enablement.ts';
 import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
+import { policyOf, statement } from '../test/policy-statements.ts';
 import {
   fakeOrchestrator,
   stubMemberScopedGetBucket,
@@ -254,9 +255,11 @@ describe('get-bucket-rag-enablement member scope on an iam region', () => {
     mockGetEnablement.mockResolvedValue(enablementRecord());
     const iam = new FakeIamOrchestrator();
     iam.seedPrincipal(tenantFor('forge', 'org-1'), USER_1);
-    iam.seedPolicy(tenantFor('forge', 'org-1'), 'other-bucket', {
-      Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: ['s3:GetObject'] }],
-    });
+    iam.seedPolicy(
+      tenantFor('forge', 'org-1'),
+      'other-bucket',
+      policyOf(statement('other-bucket', 'Allow', [USER_1], ['s3:GetObject'])),
+    );
     orch = fakeOrchestrator('forge', { bucket: BUCKET, iam });
     stubMemberScopedGetBucket(orch, iam, BUCKET);
     mockGetOrchestratorForRegion.mockReturnValue(orch);

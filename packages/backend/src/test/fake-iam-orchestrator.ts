@@ -1,4 +1,4 @@
-import { getEffectiveActions } from '@filone/shared';
+import { getEffectiveActions, getPrincipalIds, toPolicyPrincipal } from '@filone/shared';
 import type { BucketPolicy, MemberBucketAccess } from '@filone/shared';
 import {
   BucketNotFoundError,
@@ -68,15 +68,22 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
     this.getOrCreatePrincipals(tenantId).delete(userId);
     for (const [bucketName, stored] of this.getOrCreatePolicies(tenantId)) {
       const appliesToUser = (s: BucketPolicy['Statement'][number]) =>
-        s.Principal !== '*' && s.Principal.includes(userId);
+        getPrincipalIds(s.Principal).includes(userId);
       if (!stored.policy.Statement.some(appliesToUser)) continue;
       const remainingStatements = stored.policy.Statement.map((s) =>
-        s.Principal === '*' ? s : { ...s, Principal: s.Principal.filter((p) => p !== userId) },
-      ).filter((s) => s.Principal === '*' || s.Principal.length > 0);
+        s.Principal === '*'
+          ? s
+          : {
+              ...s,
+              Principal: toPolicyPrincipal(
+                getPrincipalIds(s.Principal).filter((p) => p !== userId),
+              ),
+            },
+      ).filter((s) => s.Principal === '*' || s.Principal.AWS.length > 0);
       if (remainingStatements.length === 0) this.getOrCreatePolicies(tenantId).delete(bucketName);
       else
         this.getOrCreatePolicies(tenantId).set(bucketName, {
-          policy: { Statement: remainingStatements },
+          policy: { ...stored.policy, Statement: remainingStatements },
           etag: this.createEtag(),
         });
     }
@@ -101,8 +108,7 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
     const current = this.getOrCreatePolicies(tenantId).get(bucketName);
     this.assertPreconditionHolds(bucketName, current, precondition);
     for (const statement of policy.Statement) {
-      if (statement.Principal === '*') continue;
-      for (const principal of statement.Principal) {
+      for (const principal of getPrincipalIds(statement.Principal)) {
         if (!this.getOrCreatePrincipals(tenantId).has(principal)) {
           // The S3 write answers MalformedPolicy, which the console maps to
           // PolicyValidationError.
@@ -139,7 +145,9 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
     if (!this.getOrCreatePrincipals(tenantId).has(userId)) return [];
     return [...this.getOrCreatePolicies(tenantId)]
       .filter(([, stored]) =>
-        stored.policy.Statement.some((s) => s.Principal === '*' || s.Principal.includes(userId)),
+        stored.policy.Statement.some(
+          (s) => s.Principal === '*' || getPrincipalIds(s.Principal).includes(userId),
+        ),
       )
       .map(([bucketName, { policy }]) => ({ bucketName, policy }));
   }
