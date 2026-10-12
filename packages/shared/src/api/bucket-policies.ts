@@ -2,18 +2,34 @@ import { z } from 'zod';
 
 /**
  * Bucket policies, as the Forge storage system stores them (fil-one/RFC#30,
- * "Bucket policies").
+ * "Bucket policies"): an AWS bucket policy document, reduced to what the
+ * storage system evaluates.
  *
- * A policy is one bucket's own document: a list of statements, each naming an
- * effect, the principals it applies to, and the S3 actions it covers. The
- * console keeps no copy; it reads the document from the orchestrator, edits it,
- * and writes it back under the ETag it read, which travels in the `ETag` and
- * `If-Match` headers. Principals are console user ids,
- * which the orchestrator stores verbatim and never interprets.
+ * ```json
+ * {
+ *   "Version": "2012-10-17",
+ *   "Statement": [{
+ *     "Sid": "filone-owners",
+ *     "Effect": "Allow",
+ *     "Principal": {"AWS": ["arn:aws:iam:::user/<userId>"]},
+ *     "Action": ["s3:GetObject", "s3:ListBucket"],
+ *     "Resource": ["arn:aws:s3:::<bucket>", "arn:aws:s3:::<bucket>/*"]
+ *   }]
+ * }
+ * ```
  *
- * This module is the one place the wire shape is spelled out. The RFC review
- * still weighs an AWS-style nested principal object, so a change to the shape
- * is a change here and nowhere else.
+ * The console keeps no copy; it reads the document from the orchestrator,
+ * edits it, and writes it back under the ETag it read, which travels in the
+ * `ETag` and `If-Match` headers. A principal is a console user id, named by
+ * its user ARN with an empty account field since the bucket already fixes the
+ * tenant; `*` names every member. The helpers here convert at that boundary,
+ * so the console's own code and UI handle bare user ids. `Resource` names the
+ * policy's bucket, as the bucket ARN for the three bucket actions and the
+ * objects ARN for every other action; {@link getStatementResources} derives
+ * it from a statement's actions. The storage system returns the canonical
+ * form: lists sorted and deduplicated, statements reordered.
+ *
+ * This module is the one place the wire shape is spelled out.
  */
 
 /**
@@ -152,17 +168,42 @@ export type PolicyEffect = (typeof POLICY_EFFECTS)[number];
 /** Names every live principal of the tenant. The one spelling of the wildcard. */
 export const POLICY_WILDCARD_PRINCIPAL = '*';
 
+/** The policy language version the console writes. The storage system also reads the 2008 one. */
+export const POLICY_VERSION = '2012-10-17';
+const POLICY_VERSIONS = [POLICY_VERSION, '2008-10-17'] as const;
+
 export const PRINCIPAL_ID_MAX_LENGTH = 255;
 export const POLICY_SID_MAX_LENGTH = 128;
 
+const PRINCIPAL_ARN_PREFIX = 'arn:aws:iam:::user/';
+
+/** The ARN a document names a member by. */
+export function toPrincipalArn(userId: string): string {
+  return PRINCIPAL_ARN_PREFIX + userId;
+}
+
+/** The member id a document's user ARN names. A value without the prefix is returned as is. */
+export function fromPrincipalArn(arn: string): string {
+  return arn.startsWith(PRINCIPAL_ARN_PREFIX) ? arn.slice(PRINCIPAL_ARN_PREFIX.length) : arn;
+}
+
 // A member is named by its console user id, which is a UUID (`middleware/auth.ts`).
 const PrincipalIdSchema = z
-  .uuid('A principal id is a console user id, a UUID')
-  .min(1, 'A principal id is required')
-  .max(PRINCIPAL_ID_MAX_LENGTH, `A principal id is at most ${PRINCIPAL_ID_MAX_LENGTH} characters`)
-  .refine((id) => id !== POLICY_WILDCARD_PRINCIPAL, {
-    message: 'Name every member with the bare "*" string, never inside a list',
-  });
+  .uuid()
+  .min(1)
+  .max(PRINCIPAL_ID_MAX_LENGTH)
+  .refine((id) => id !== POLICY_WILDCARD_PRINCIPAL);
+
+const PrincipalArnSchema = z
+  .string()
+  .refine(
+    (arn) =>
+      arn.startsWith(PRINCIPAL_ARN_PREFIX) &&
+      PrincipalIdSchema.safeParse(fromPrincipalArn(arn)).success,
+    `A member is named by ${toPrincipalArn('<console user id>')}; "*" names everyone as the bare string`,
+  );
+
+const S3_RESOURCE_ARN = /^arn:aws:s3:::[^/*?]+(\/\*)?$/;
 
 /**
  * One statement. Strict, as the storage system's decoder is: a field this
@@ -177,18 +218,29 @@ export const PolicyStatementSchema = z
     Principal: z.union([
       z.literal(POLICY_WILDCARD_PRINCIPAL),
       z
-        .array(PrincipalIdSchema)
-        .min(1, 'A statement names at least one member')
-        // A member named twice is still one member; keep the first mention.
-        .transform((ids) => [...new Set(ids)]),
+        .object({
+          AWS: z
+            .array(PrincipalArnSchema)
+            .min(1, 'A statement names at least one member')
+            // A member named twice is still one member; keep the first mention.
+            .transform((arns) => [...new Set(arns)]),
+        })
+        .strict(),
     ]),
     Action: z
       .array(z.enum(POLICY_ACTIONS_WITH_WILDCARD))
       .min(1, 'A statement grants or denies at least one action'),
+    /** The bucket's ARN, its objects ARN, or both; see {@link getStatementResources}. */
+    Resource: z
+      .array(
+        z.string().regex(S3_RESOURCE_ARN, 'A resource is a bucket or its objects, never a prefix'),
+      )
+      .min(1, 'A statement names the bucket it applies to'),
   })
   .strict();
 
 export type PolicyStatement = z.infer<typeof PolicyStatementSchema>;
+export type PolicyPrincipal = PolicyStatement['Principal'];
 
 /**
  * The document. An empty statement list is refused: a bucket with no
@@ -196,16 +248,57 @@ export type PolicyStatement = z.infer<typeof PolicyStatementSchema>;
  */
 export const BucketPolicySchema = z
   .object({
+    Version: z.enum(POLICY_VERSIONS),
     Statement: z.array(PolicyStatementSchema).min(1, 'A policy has at least one statement'),
   })
   .strict();
 
 export type BucketPolicy = z.infer<typeof BucketPolicySchema>;
 
+/** The member ids a principal names; none for `*`. */
+export function getPrincipalIds(principal: PolicyPrincipal): string[] {
+  return principal === POLICY_WILDCARD_PRINCIPAL ? [] : principal.AWS.map(fromPrincipalArn);
+}
+
+/** The principal naming the given members. */
+export function toPolicyPrincipal(userIds: readonly string[]): PolicyPrincipal {
+  return { AWS: userIds.map(toPrincipalArn) };
+}
+
+/**
+ * The three actions that act on the bucket rather than on its objects. The
+ * split is the storage system's, which evaluates a statement against the ARN
+ * its actions need.
+ */
+const BUCKET_ACTIONS: readonly PolicyAction[] = [
+  's3:ListBucket',
+  's3:ListBucketMultipartUploads',
+  's3:ListBucketVersions',
+];
+
+/**
+ * What a statement's `Resource` must name for its actions on `bucketName`:
+ * the bucket ARN for a bucket action, the objects ARN for an object action,
+ * both for `s3:*`.
+ */
+export function getStatementResources(
+  bucketName: string,
+  actions: readonly PolicyActionOrWildcard[],
+): string[] {
+  const isWildcard = actions.includes(POLICY_ACTION_WILDCARD);
+  const isBucketAction = (a: PolicyActionOrWildcard) => BUCKET_ACTIONS.includes(a as PolicyAction);
+  const resources: string[] = [];
+  if (isWildcard || actions.some(isBucketAction)) resources.push(`arn:aws:s3:::${bucketName}`);
+  if (isWildcard || actions.some((a) => !isBucketAction(a)))
+    resources.push(`arn:aws:s3:::${bucketName}/*`);
+  return resources;
+}
+
 /** True when the statement's Principal is `*` or lists the principal. */
 function isPrincipalInStatement(statement: PolicyStatement, principalId: string): boolean {
   return (
-    statement.Principal === POLICY_WILDCARD_PRINCIPAL || statement.Principal.includes(principalId)
+    statement.Principal === POLICY_WILDCARD_PRINCIPAL ||
+    statement.Principal.AWS.includes(toPrincipalArn(principalId))
   );
 }
 
@@ -233,11 +326,9 @@ export function getEffectiveActions(policy: BucketPolicy, principalId: string): 
   return [...allowed].filter((action) => !denied.has(action)).sort();
 }
 
-/** Every principal a document names outright. */
+/** Every member id a document names outright. */
 export function getNamedPrincipals(policy: BucketPolicy | null): string[] {
-  return (policy?.Statement ?? []).flatMap((statement) =>
-    statement.Principal === POLICY_WILDCARD_PRINCIPAL ? [] : statement.Principal,
-  );
+  return (policy?.Statement ?? []).flatMap((statement) => getPrincipalIds(statement.Principal));
 }
 
 /**
@@ -272,17 +363,38 @@ export const CREATOR_ACTIONS: PolicyAction[] = POLICY_ACTIONS.filter(
   (action) => !RETENTION_WRITE_ACTIONS.includes(action),
 );
 
+/** An Allow statement for `userIds` on `bucketName`, its Resource derived from the actions. */
+function buildAllowStatement(
+  sid: string,
+  userIds: readonly string[],
+  actions: PolicyActionOrWildcard[],
+  bucketName: string,
+): PolicyStatement {
+  return {
+    Sid: sid,
+    Effect: 'Allow',
+    Principal: toPolicyPrincipal(userIds),
+    Action: actions,
+    Resource: getStatementResources(bucketName, actions),
+  };
+}
+
 /**
  * The policy a new bucket carries in its create request: one Allow naming the
  * creator, whatever their role. An ordinary statement, shown under its Sid and
  * edited or removed like any other. The console writes no other statement and
  * never rewrites a policy on its own.
  */
-export function getCreatorBucketPolicy(creatorId: string): BucketPolicy {
+export function getCreatorBucketPolicy({
+  creatorId,
+  bucketName,
+}: {
+  creatorId: string;
+  bucketName: string;
+}): BucketPolicy {
   return {
-    Statement: [
-      { Sid: 'creator', Effect: 'Allow', Principal: [creatorId], Action: [...CREATOR_ACTIONS] },
-    ],
+    Version: POLICY_VERSION,
+    Statement: [buildAllowStatement('creator', [creatorId], [...CREATOR_ACTIONS], bucketName)],
   };
 }
 
