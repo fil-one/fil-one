@@ -30,7 +30,7 @@ describe('SlowOperationIndicator', () => {
     act(() => {
       vi.advanceTimersByTime(400);
     });
-    expect(screen.getByRole('status').querySelector('p')).toBeNull();
+    expect(screen.queryByText(/this may take a moment/)).toBeNull();
   });
 
   it('renders the reassurance message after 1200 ms', () => {
@@ -38,6 +38,6 @@ describe('SlowOperationIndicator', () => {
     act(() => {
       vi.advanceTimersByTime(1200);
     });
-    expect(screen.getByRole('status').querySelector('p')).not.toBeNull();
+    expect(screen.getByText(/this may take a moment/)).toBeInTheDocument();
   });
 });

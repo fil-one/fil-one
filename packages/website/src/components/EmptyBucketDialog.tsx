@@ -10,7 +10,6 @@ import { Input } from './Input';
 import { Label } from './Label';
 import { Modal, ModalBody, ModalFooter } from './Modal';
 import { ProgressBar } from './ProgressBar';
-import { Spinner } from './Spinner';
 
 export type EmptyBucketDialogProps = {
   open: boolean;
@@ -112,19 +111,12 @@ export function EmptyBucketDialog({
               id="empty-bucket-confirm-button"
               variant="destructive"
               className="flex-1"
-              disabled={!confirmed || starting}
+              disabled={!confirmed}
+              loading={starting}
+              loadingLabel="Starting deletion"
               onClick={onConfirm}
             >
-              {/* Button wraps its children in a plain span, so the spinner's
-                  block-level root would sit above the label. This row keeps
-                  them side by side, and text-current keeps the arc the same
-                  colour as the label rather than brand blue. */}
-              <span className="inline-flex items-center gap-2">
-                {starting && (
-                  <Spinner ariaLabel="Starting deletion" size={14} colorClassName="text-current" />
-                )}
-                Delete everything
-              </span>
+              Delete everything
             </Button>
           )}
         </div>
