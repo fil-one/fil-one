@@ -5,7 +5,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, PlanId, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import type { BillingInfo, ErrorResponse } from '@filone/shared';
 import type Stripe from 'stripe';
-import { getBillingSecrets, getStripeClient } from '../lib/stripe-client.ts';
+import { getBillingSecrets, getSelfServeProductId, getStripeClient } from '../lib/stripe-client.ts';
 import {
   readSubscription,
   updateSubscription,
@@ -68,7 +68,7 @@ export async function baseHandler(
     const currentStatus = await evaluateStatusTransitions(billingRecord, storedStatus, owner);
     const response = buildBillingResponse(billingRecord, currentStatus, {
       paymentMethod: cachedPaymentMethod(billingRecord),
-      ...describePrice(billingRecord.stripePrice),
+      ...(await describePrice(billingRecord.stripePrice)),
     });
     return new ResponseBuilder().status(200).body(response).build();
   }
@@ -141,30 +141,48 @@ interface StripeSubscriptionDetails {
 }
 
 /** Everything the response says about the billed price, from one snapshot. */
-function describePrice(price: StripePriceDetails | undefined): {
+async function describePrice(price: StripePriceDetails | undefined): Promise<{
   monthlyMinimumCents: number | undefined;
   planName: string | undefined;
   pricePerTbCents: number | undefined;
-} {
+}> {
   return {
     monthlyMinimumCents: deriveMonthlyMinimumCents(price),
-    planName: isSelfServePrice(price) ? undefined : price?.product_name,
+    planName: await customerFacingPlanName(price),
     pricePerTbCents: derivePricePerTbCents(price),
   };
 }
 
 /**
- * Whether this is the self-serve Pay-as-you-go price everyone signs up on.
+ * The Stripe product's name, unless the price is a self-serve Pay-as-you-go one.
  *
- * Its Stripe product is named for internal bookkeeping ("Fil ONE Storage
+ * The self-serve product is named for internal bookkeeping ("Fil ONE Storage
  * (GB)"), not for a customer to read, so it must not stand in for the plan
  * name the console already gives that price ("Pay as you go" from `planId`,
  * see `planTitle()` in packages/website/src/lib/billing-view.ts). Only a
- * genuinely negotiated price — one Stripe was told a real plan name for —
- * should override that.
+ * genuinely negotiated price, on a product Stripe was told a real plan name
+ * for, should override that.
+ *
+ * Self-serve is decided by product, not price: customers who signed up before
+ * a price change stay on the older price, which sits on the same product. When
+ * the product cannot be looked up, only the current price id is recognised:
+ * a grandfathered customer may briefly see the bookkeeping name, which beats
+ * calling a negotiated plan "Pay as you go", and the page still loads.
  */
-function isSelfServePrice(price: StripePriceDetails | undefined): boolean {
-  return price?.id === getBillingSecrets().STRIPE_PRICE_ID;
+async function customerFacingPlanName(
+  price: StripePriceDetails | undefined,
+): Promise<string | undefined> {
+  if (!price?.product_name) return undefined;
+  if (price.id === getBillingSecrets().STRIPE_PRICE_ID) return undefined;
+  if (!price.product) return price.product_name;
+  try {
+    return price.product === (await getSelfServeProductId()) ? undefined : price.product_name;
+  } catch (err) {
+    console.warn('[get-billing] Failed to look up the self-serve product', {
+      error: (err as Error).message,
+    });
+    return price.product_name;
+  }
 }
 
 /**
@@ -270,7 +288,7 @@ async function resolveStripeSubscriptionDetails(
   return {
     // Use cached payment method from DB if Stripe fetch didn't return one
     paymentMethod: paymentMethod ?? cachedPaymentMethod(billingRecord),
-    ...describePrice(price),
+    ...(await describePrice(price)),
   };
 }
 
