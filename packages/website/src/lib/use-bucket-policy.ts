@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BucketPolicy, S3Region } from '@filone/shared';
 
-import { isIamRegion } from './access-model.js';
+import { supportsIamMethods } from './access-model.js';
 import {
   deleteBucketPolicy,
   getBucketPolicy,
@@ -26,7 +26,7 @@ import { useHasPermission } from './use-permissions.js';
 export function useBucketPolicy(bucketName: string, region: S3Region) {
   const queryClient = useQueryClient();
   const canManagePolicy = useHasPermission('buckets.policy_manage');
-  const isAvailable = canManagePolicy && isIamRegion(region);
+  const isAvailable = canManagePolicy && supportsIamMethods(region);
   const policyQueryKey = queryKeys.bucketPolicy(bucketName, region);
 
   const query = useQuery({
