@@ -4,7 +4,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { GetBucketPolicyResponse } from '@filone/shared';
 import {
-  POLICIES_UNAVAILABLE_MESSAGE,
+  policiesUnavailableResponse,
   toPolicyErrorResponse,
   policyNotFoundResponse,
   resolvePolicyRouteTarget,
@@ -37,9 +37,7 @@ export async function baseHandler(
   const { bucketName, region } = routeTarget.target;
 
   const orchestrator = getOrchestratorForRegion(region);
-  if (!supportsBucketPolicies(orchestrator)) {
-    return policyNotFoundResponse(POLICIES_UNAVAILABLE_MESSAGE);
-  }
+  if (!supportsBucketPolicies(orchestrator)) return policiesUnavailableResponse();
 
   const { orgId } = getUserInfo(event);
   // isTenantReady rather than ensureTenantReady: a read must not create a tenant.

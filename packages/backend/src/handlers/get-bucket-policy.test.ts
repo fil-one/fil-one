@@ -75,12 +75,12 @@ describe('get-bucket-policy baseHandler', () => {
     });
   });
 
-  it('answers 404 POLICY_NOT_FOUND in a region without the iam access model', async () => {
+  it('answers 501 in a region whose network does not serve the iam access model', async () => {
     const result = await baseHandler(buildGetEvent(SERVICE_KEYS_REGION));
 
     expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
-      statusCode: 404,
-      body: { code: ApiErrorCode.POLICY_NOT_FOUND },
+      statusCode: 501,
+      body: { message: 'Bucket policies are not available in this region' },
     });
     expect(iam.calls).toHaveLength(0);
   });

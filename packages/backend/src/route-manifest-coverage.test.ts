@@ -740,7 +740,7 @@ describe('the caps routes apply on top of their declared permission', () => {
    * and `privileged.grant` for a statement that grants a retention write. On a
    * first policy (`If-None-Match: *`) that check runs before the region is
    * read, so it answers even in a region without bucket policies: a caller who
-   * may grant reaches the region check, and anyone else gets the 403.
+   * may grant reaches the region check (501), and anyone else gets the 403.
    */
   describe('granting a retention write through a policy needs privileged.grant', () => {
     const buildPolicyGrantRequest = (action: string): RouteRequest => ({
@@ -768,8 +768,8 @@ describe('the caps routes apply on top of their declared permission', () => {
       });
 
       expect({ ...result, body: errorBody(result) }).toMatchObject({
-        statusCode: 404,
-        body: { code: ApiErrorCode.POLICY_NOT_FOUND },
+        statusCode: 501,
+        body: { message: 'Bucket policies are not available in this region' },
       });
     });
 
@@ -780,8 +780,8 @@ describe('the caps routes apply on top of their declared permission', () => {
       });
 
       expect({ ...result, body: errorBody(result) }).toMatchObject({
-        statusCode: 404,
-        body: { code: ApiErrorCode.POLICY_NOT_FOUND },
+        statusCode: 501,
+        body: { message: 'Bucket policies are not available in this region' },
       });
     });
 

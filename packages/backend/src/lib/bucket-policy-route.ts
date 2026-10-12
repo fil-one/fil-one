@@ -108,17 +108,23 @@ export async function resolveIamWriteTarget(
   | { response: APIGatewayProxyStructuredResultV2 }
 > {
   const orchestrator = getOrchestratorForRegion(region);
-  // A region without the `iam` access model has no policies. It answers as a
-  // bucket with no policy, so the routes stay hidden until a region declares
-  // `iam` through `getRegionAccessModel`.
-  if (!supportsBucketPolicies(orchestrator)) {
-    return { response: policyNotFoundResponse(POLICIES_UNAVAILABLE_MESSAGE) };
-  }
+  if (!supportsBucketPolicies(orchestrator)) return { response: policiesUnavailableResponse() };
   if (await isOrgDeleting(orgId, { consistent: true }))
     return { response: accountDeletedResponse() };
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return { response: tenantNotReadyResponse() };
   return { orchestrator, tenantId };
+}
+
+/**
+ * The answer on a region whose Forge network does not serve the `iam` access
+ * model: the routes exist, but its storage system has no policies to serve.
+ */
+export function policiesUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(501)
+    .body<ErrorResponse>({ message: POLICIES_UNAVAILABLE_MESSAGE })
+    .build();
 }
 
 export function policyNotFoundResponse(
