@@ -34,8 +34,9 @@ test.describe('trial user joins a second organization', () => {
   test.use({ storageState: STORAGE_STATE[INVITEE] });
   test.describe.configure({ mode: 'serial' });
 
-  const hostUserId = requireUserId(HOST);
-  const inviteeUserId = requireUserId(INVITEE);
+  // Read after the setup project, which records the ids on a fresh stack.
+  let hostUserId: string;
+  let inviteeUserId: string;
 
   let hostOrgId: string;
   let hostOrgName: string;
@@ -43,6 +44,8 @@ test.describe('trial user joins a second organization', () => {
   let invitation: SeededInvitation;
 
   test.beforeAll(async () => {
+    hostUserId = requireUserId(HOST);
+    inviteeUserId = requireUserId(INVITEE);
     hostOrgId = await resolvePersonalOrgId(hostUserId);
     const personalOrgId = await resolvePersonalOrgId(inviteeUserId);
     [hostOrgName, personalOrgName] = await Promise.all([

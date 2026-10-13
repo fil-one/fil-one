@@ -44,13 +44,16 @@ test.describe('trial owner transfers the organization', () => {
   test.use({ storageState: STORAGE_STATE[OWNER] });
   test.describe.configure({ mode: 'serial' });
 
-  const ownerUserId = requireUserId(OWNER);
-  const successorUserId = requireUserId(SUCCESSOR);
+  // Read after the setup project, which records the ids on a fresh stack.
+  let ownerUserId: string;
+  let successorUserId: string;
 
   let orgId: string;
   let orgName: string;
 
   test.beforeAll(async () => {
+    ownerUserId = requireUserId(OWNER);
+    successorUserId = requireUserId(SUCCESSOR);
     orgId = await resolvePersonalOrgId(ownerUserId);
     orgName = await readOrgName(orgId);
 
