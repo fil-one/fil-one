@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
+import { Menu, MenuButton, MenuItem, MenuItems, MenuSeparator } from '@headlessui/react';
 import {
   CaretDownIcon,
   ClockCounterClockwiseIcon,
@@ -164,7 +164,12 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
                 </MenuItem>
               ))}
 
-              <div className="my-1 border-t border-zinc-100" />
+              {/* Only when something sits below it: a sole membership outside
+                  the beta has no switcher rows and no Create organization, and
+                  a divider with nothing under it is a stray line. */}
+              {(orgsBeta || (me?.memberships?.length ?? 0) > 1) && (
+                <MenuSeparator className="my-1 border-t border-zinc-100" />
+              )}
               <OrgSwitcher
                 memberships={me?.memberships}
                 activeOrgId={me?.orgId}

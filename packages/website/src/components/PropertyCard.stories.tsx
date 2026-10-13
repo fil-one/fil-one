@@ -11,7 +11,7 @@ const meta: Meta<typeof PropertyCard> = {
     label: 'Retention',
     value: 'Compliance · 15 days',
     enabled: true,
-    tooltip: 'Applied to every object in this bucket.',
+    tooltip: 'How long new objects stay protected from deletion or changes.',
   },
 };
 
