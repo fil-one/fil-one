@@ -67,37 +67,27 @@ jobs:
 
       # The rest stay placeholders: this stack sends no logs, metrics or CRM updates.
       - name: Set SST secrets
+        # Each env var carries its SST secret's name.
         run: |
-          pnpm exec sst secret set Auth0ClientId "$AUTH0_CLIENT_ID"
-          pnpm exec sst secret set Auth0ClientSecret "$AUTH0_CLIENT_SECRET"
-          pnpm exec sst secret set Auth0MgmtClientId "$AUTH0_MGMT_CLIENT_ID"
-          pnpm exec sst secret set Auth0MgmtClientSecret "$AUTH0_MGMT_CLIENT_SECRET"
-          pnpm exec sst secret set Auth0MgmtRuntimeClientId "$AUTH0_MGMT_RUNTIME_CLIENT_ID"
-          pnpm exec sst secret set Auth0MgmtRuntimeClientSecret "$AUTH0_MGMT_RUNTIME_CLIENT_SECRET"
-          pnpm exec sst secret set StripeSecretKey "$STRIPE_SECRET_KEY"
-          pnpm exec sst secret set StripePriceId "$STRIPE_PRICE_ID"
-          pnpm exec sst secret set StripePublishableKey "$STRIPE_PUBLISHABLE_KEY"
-          pnpm exec sst secret set AuroraBackofficeToken "$AURORA_BACKOFFICE_TOKEN"
-          pnpm exec sst secret set FthManagementApiToken "$FTH_MANAGEMENT_API_TOKEN"
-          pnpm exec sst secret set ForgeManagementApiToken "$FORGE_MANAGEMENT_API_TOKEN"
-          pnpm exec sst secret set ForgeDevManagementApiToken "$FORGE_DEV_MANAGEMENT_API_TOKEN"
-          pnpm exec sst secret set SendGridApiKey "$SENDGRID_API_KEY"
+          for s in Auth0ClientId Auth0ClientSecret Auth0MgmtClientId Auth0MgmtClientSecret Auth0MgmtRuntimeClientId Auth0MgmtRuntimeClientSecret StripeSecretKey StripePriceId StripePublishableKey AuroraBackofficeToken FthManagementApiToken ForgeManagementApiToken ForgeDevManagementApiToken SendGridApiKey; do
+            pnpm exec sst secret set "$s" "${!s}"
+          done
           pnpm exec sst secret set DeletionCodeHmacKey "$(openssl rand -hex 32)"
         env:
-          AUTH0_CLIENT_ID: ${{ secrets.CI_AUTH0_CLIENT_ID }}
-          AUTH0_CLIENT_SECRET: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
-          AUTH0_MGMT_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_CLIENT_ID }}
-          AUTH0_MGMT_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_CLIENT_SECRET }}
-          AUTH0_MGMT_RUNTIME_CLIENT_ID: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_ID }}
-          AUTH0_MGMT_RUNTIME_CLIENT_SECRET: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_SECRET }}
-          STRIPE_SECRET_KEY: ${{ secrets.CI_STRIPE_SECRET_KEY }}
-          STRIPE_PRICE_ID: ${{ secrets.CI_STRIPE_PRICE_ID }}
-          STRIPE_PUBLISHABLE_KEY: ${{ secrets.CI_STRIPE_PUBLISHABLE_KEY }}
-          AURORA_BACKOFFICE_TOKEN: ${{ secrets.CI_AURORA_BACKOFFICE_TOKEN }}
-          FTH_MANAGEMENT_API_TOKEN: ${{ secrets.CI_FTH_MANAGEMENT_API_TOKEN }}
-          FORGE_MANAGEMENT_API_TOKEN: ${{ secrets.CI_FORGE_MANAGEMENT_API_TOKEN }}
-          FORGE_DEV_MANAGEMENT_API_TOKEN: ${{ secrets.CI_FORGE_DEV_MANAGEMENT_API_TOKEN }}
-          SENDGRID_API_KEY: ${{ secrets.CI_SENDGRID_API_KEY }}
+          Auth0ClientId: ${{ secrets.CI_AUTH0_CLIENT_ID }}
+          Auth0ClientSecret: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
+          Auth0MgmtClientId: ${{ secrets.CI_AUTH0_MGMT_CLIENT_ID }}
+          Auth0MgmtClientSecret: ${{ secrets.CI_AUTH0_MGMT_CLIENT_SECRET }}
+          Auth0MgmtRuntimeClientId: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_ID }}
+          Auth0MgmtRuntimeClientSecret: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_SECRET }}
+          StripeSecretKey: ${{ secrets.CI_STRIPE_SECRET_KEY }}
+          StripePriceId: ${{ secrets.CI_STRIPE_PRICE_ID }}
+          StripePublishableKey: ${{ secrets.CI_STRIPE_PUBLISHABLE_KEY }}
+          AuroraBackofficeToken: ${{ secrets.CI_AURORA_BACKOFFICE_TOKEN }}
+          FthManagementApiToken: ${{ secrets.CI_FTH_MANAGEMENT_API_TOKEN }}
+          ForgeManagementApiToken: ${{ secrets.CI_FORGE_MANAGEMENT_API_TOKEN }}
+          ForgeDevManagementApiToken: ${{ secrets.CI_FORGE_DEV_MANAGEMENT_API_TOKEN }}
+          SendGridApiKey: ${{ secrets.CI_SENDGRID_API_KEY }}
 
       - name: Deploy to floci
         run: pnpm deploy:local | tee deploy.log
