@@ -67,14 +67,13 @@ paths:
         returns the existing tenant rather than failing. The `tenantId`
         is supplied by FilOne (a UUID) in the URL path and reused as the
         `{tenantId}` path parameter in all subsequent calls.
+
+        The request has no body. A tenant is not bound to a region: each
+        of its buckets is served by the region whose S3 Gateway created
+        it, so one tenant may hold buckets in every region the Service
+        Orchestrator manages.
       security:
         - PartnerKey: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateTenantRequest'
       responses:
         '200':
           description: Tenant already existed (idempotent re-call).
@@ -90,8 +89,6 @@ paths:
                 $ref: '#/components/schemas/Tenant'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/Internal'
     get:
@@ -475,20 +472,6 @@ components:
         * `active` — read/write
         * `write-locked` — read-only; uploads and bucket creation blocked
         * `disabled` — all access blocked, data persisted
-
-    CreateTenantRequest:
-      type: object
-      required: [region]
-      properties:
-        region:
-          type: string
-          minLength: 1
-          description: |
-            Region identifier the tenant's data is provisioned in — the
-            same region name used in the S3 Gateway hostname
-            (`https://s3.{region}.filonecontent.com`), e.g. `us-east-1`. A Service
-            Orchestrator may manage more than one region; it must reject
-            (422) region values it does not serve.
 
     Tenant:
       type: object
