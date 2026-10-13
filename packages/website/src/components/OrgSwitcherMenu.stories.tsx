@@ -19,11 +19,16 @@ const ORG_A = '11111111-1111-1111-1111-111111111111';
 const ORG_B = '22222222-2222-2222-2222-222222222222';
 
 /** The menu reads the org and its memberships from `/me`. */
-function withMemberships(memberships: OrgMembershipSummary[]): Decorator {
+function withMemberships(memberships: OrgMembershipSummary[], orgsBeta = true): Decorator {
   return (Story) => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     client.setQueryDefaults(queryKeys.me, { staleTime: Infinity });
-    seedPermissions(client, OrgRole.Owner, { orgId: ORG_A, orgName: 'Acme', memberships });
+    seedPermissions(client, OrgRole.Owner, {
+      orgId: ORG_A,
+      orgName: 'Acme',
+      memberships,
+      orgsBeta,
+    });
     return (
       <QueryClientProvider client={client}>
         <Story />
@@ -80,6 +85,14 @@ export const Closed: Story = {};
 /** A single-org account still gets the control: Create organization stays reachable. */
 export const SoleMembership: Story = {
   decorators: [withMemberships([{ orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner }])],
+};
+
+/**
+ * A single org outside the organizations beta: no switcher rows and no Create
+ * organization, so the menu ends at Billing with no divider under it.
+ */
+export const SoleMembershipOutsideBeta: Story = {
+  decorators: [withMemberships([{ orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner }], false)],
 };
 
 /** Collapsed sidebar: the name and chevron drop, leaving only the avatar. */
