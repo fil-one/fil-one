@@ -1,5 +1,15 @@
 import * as matchers from '@testing-library/jest-dom/matchers';
+import type { TestingLibraryMatchers } from '@testing-library/jest-dom/matchers';
 import { expect } from 'vitest';
+
+// jest-dom's own vitest typings declare `Assertion<T>` with the single type
+// parameter of vitest 4, which cannot merge into vitest 5's `Matchers<R, T>`.
+declare module 'vitest' {
+  // The type parameters must match vitest's own declaration for the merge to
+  // work. jest-dom takes the assertion's return type as its second parameter.
+  // oxlint-disable-next-line typescript/no-explicit-any
+  interface Matchers<R, T> extends TestingLibraryMatchers<any, R> {}
+}
 
 expect.extend(matchers);
 
