@@ -67,7 +67,7 @@ export function BucketDrawer({ bucket, onClose, onStopIndexing }: BucketDrawerPr
         role="dialog"
         aria-modal="true"
         aria-label={`RAG query playground for ${bucket.name}`}
-        className={`fixed inset-y-0 right-0 z-40 flex w-[460px] flex-col border-l border-zinc-200 bg-white shadow-2xl transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed inset-y-0 right-0 z-40 flex w-[460px] flex-col bg-white shadow-xl transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
       >
         <DrawerHeader bucket={bucket} onClose={handleClose} />
         <StatsBar bucket={bucket} />

@@ -254,17 +254,20 @@ it makes page content look like it is hovering, and it destroys the contrast tha
 mark a real overlay. `shadow-xs` is deliberately authored at 3% opacity, which reads as a
 hairline lift rather than a shadow, and is the ceiling for anything in the page.
 
-The console currently spans seven levels. 14 `shadow-sm` uses sit on resting surfaces and
-should become `Card` or `shadow-xs`, and
-`shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]` duplicates `--shadow-xs` at a slightly
-different opacity.
+**Rings are not elevation.** A `box-shadow` that draws an outline (for example
+`shadow-[0px_0px_0px_1px_theme(colors.brand.100)]`) is a ring. Use a `ring-*` utility so it
+is not mistaken for one.
 
-**Exception:** `box-shadow` used as a ring rather than elevation (for example
-`shadow-[0px_0px_0px_1px_theme(colors.brand.100)]` for a selected state) is not elevation.
-Use a `ring-*` utility instead so it is not mistaken for one.
+**Two exceptions:**
 
-**Check:** Every `shadow-*` in a diff is on an overlay, or is `shadow-xs`, or is a ring
-expressed with `ring-*`.
+- **`shadow-auth-card`** on the auth screens (`AuthCard`, `InvitationOutcome`). It matches
+  the shadow `docs/auth0/universal-login-template.liquid` sets on Auth0's hosted card, so
+  the console's auth screens and Auth0's read as one surface. Change both together.
+- **`shadow-sm` on the `Switch` thumb.** The thumb is a control raised off its track, not a
+  resting surface.
+
+**Check:** Every `shadow-*` in a diff is on an overlay, is `shadow-xs`, is a ring expressed
+with `ring-*`, or is one of the two exceptions above.
 
 ## 10. Style focus with `focus-visible`, never `focus`
 
