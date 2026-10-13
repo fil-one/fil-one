@@ -39,7 +39,7 @@ import { OrgDeletingError } from '../org-profile.ts';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
-const deps = { client, id: 'forge', stage: 'test', region: 'us-east-1' };
+const deps = { client, id: 'forge', stage: 'test' };
 const ssmPath = `/filone/test/forge-s3/access-key/${orgId}`;
 
 function profileItem(attrs: Record<string, string>) {
@@ -193,7 +193,6 @@ describe('ensureTenantReady', () => {
       expect.objectContaining({
         client,
         path: { tenantId: orgId },
-        body: { region: 'us-east-1' },
         throwOnError: false,
       }),
     );
@@ -233,8 +232,9 @@ describe('ensureTenantReady', () => {
   });
 
   it('scopes the SSM path and PROFILE attribute per id', async () => {
-    // Region-encoded ids (multi-region Forge) must not collide across regions and
-    // must produce a valid hyphenated DynamoDB attribute name via ExpressionAttributeNames.
+    // One id per Forge network: the tenant it records is shared by every region
+    // the network serves, and the id must produce a valid hyphenated DynamoDB
+    // attribute name via ExpressionAttributeNames.
     const regionDeps = { ...deps, id: 'forge' };
     stubHappyPath();
 
