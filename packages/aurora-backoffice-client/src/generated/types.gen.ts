@@ -5,10 +5,15 @@ export type ClientOptions = {
 };
 
 export type BucketsBucketOwnerResponse = {
-  orgId?: string;
   partnerId?: string;
   tenantId?: string;
 };
+
+export type BucketsBucketStatus =
+  | 'CreationInProgress'
+  | 'Created'
+  | 'DeletionInProgress'
+  | 'Deleted';
 
 export type BucketsListBucketsResponse = {
   createdAt?: string;
@@ -16,6 +21,7 @@ export type BucketsListBucketsResponse = {
   id?: string;
   name?: string;
   objectLock?: boolean;
+  status?: BucketsBucketStatus;
   tenantId?: string;
   versioning?: boolean;
 };
@@ -29,6 +35,90 @@ export type BucketsPaginatedListBucketsResponse = {
 
 export type CommonReturnMessage = {
   message?: string;
+};
+
+export type CreditsAccount = {
+  createdAt?: string;
+  postedBalanceNanoUsd?: number;
+  revision?: number;
+  tenantId?: string;
+  unallocatedNanoUsd?: number;
+  updatedAt?: string;
+};
+
+export type CreditsAccountEntry = {
+  amountNanoUsd?: number;
+  createdAt?: string;
+  id?: string;
+  metadata?: {
+    [key: string]: unknown;
+  };
+  sourceId?: string;
+  sourceType?: string;
+  tenantId?: string;
+};
+
+export type CreditsAdjustmentRequest = {
+  amountNanoUsd?: number;
+  operationId?: string;
+  reason?: string;
+  reference?: string;
+};
+
+export type CreditsBalance = {
+  accountRevision?: number;
+  oldestConsumptionReportedAt?: string;
+  settledFundedBalanceNanoUsd?: number;
+  tenantId?: string;
+};
+
+export type CreditsMutationResult = {
+  account?: CreditsAccount;
+  applied?: boolean;
+  entry?: CreditsAccountEntry;
+};
+
+export type CreditsPaginatedEntriesResponse = {
+  items?: Array<CreditsAccountEntry>;
+  page?: number;
+  pageSize?: number;
+  totalCount?: number;
+};
+
+export type CreditsWallet = {
+  /**
+   * nil until the first ledger entry creates the account row
+   */
+  account?: CreditsAccount;
+  balance?: CreditsBalance;
+};
+
+export type ModelInferenceUsageResponse = {
+  series?: Array<ModelInferenceUsageSeries>;
+};
+
+export type ModelInferenceUsageSample = {
+  cacheReadCostNanoUsd?: number;
+  cachedTokens?: number;
+  completionTokens?: number;
+  errors?: number;
+  inputCostNanoUsd?: number;
+  outputCostNanoUsd?: number;
+  promptTokens?: number;
+  requests?: number;
+  timestamp?: string;
+  totalCostNanoUsd?: number;
+  totalTokens?: number;
+  windowSizeSeconds?: number;
+};
+
+export type ModelInferenceUsageSeries = {
+  samples?: Array<ModelInferenceUsageSample>;
+  tags?: ModelInferenceUsageSeriesKey;
+};
+
+export type ModelInferenceUsageSeriesKey = {
+  model?: string;
 };
 
 export type ModelOperationMetricsResponse = {
@@ -98,6 +188,7 @@ export type ModelStorageMetricsSample = {
 export type ModelsAuthComponentSetupStatus = {
   enabled?: boolean;
   lastSetupStep?: ModelsSetupStep;
+  lastTeardownStep?: ModelsTeardownStep;
   properties?: ModelsEmptyComponentProperties;
 };
 
@@ -110,28 +201,41 @@ export type ModelsBackofficeEnvironmentResponse = {
   tracingUrl?: string;
 };
 
-export type ModelsComponent = {
-  enabled?: boolean;
-  lastSetupStep?: ModelsSetupStep;
-  lastStepAt?: string;
-  name?: ModelsComponentName;
-  properties?: {
-    [key: string]: unknown;
-  };
-  tenantId?: string;
-};
-
-export type ModelsComponentName = 'S3' | 'Compute' | 'Auth' | 'Unknown';
-
 export type ModelsComponentsStatus = {
   auth?: ModelsAuthComponentSetupStatus;
   compute?: ModelsComputeComponentSetupStatus;
+  inference?: ModelsInferenceComponentSetupStatus;
   s3?: ModelsS3ComponentSetupStatus;
+};
+
+export type ModelsComputeComponentDetails = {
+  enabled?: boolean;
+  lastSetupStep?: ModelsSetupStep;
+  lastTeardownStep?: ModelsTeardownStep;
+  properties?: ModelsComputeComponentProperties;
+};
+
+export type ModelsComputeComponentLimitsProperties = {
+  cpuCountLimit?: number;
+  instancesCountLimit?: number;
+  memoryMiBLimit?: number;
+  networkCountLimit?: number;
+  primaryStorageGiBLimit?: number;
+  publicIpCountLimit?: number;
+  secondaryStorageGiBLimit?: number;
+  snapshotCountLimit?: number;
+  volumeCountLimit?: number;
+  vpcCountLimit?: number;
+};
+
+export type ModelsComputeComponentProperties = {
+  limits?: ModelsComputeComponentLimitsProperties;
 };
 
 export type ModelsComputeComponentSetupStatus = {
   enabled?: boolean;
   lastSetupStep?: ModelsSetupStep;
+  lastTeardownStep?: ModelsTeardownStep;
   properties?: ModelsEmptyComponentProperties;
 };
 
@@ -151,10 +255,22 @@ export type ModelsCreateTenantRequest = {
   regionId?: string;
 };
 
+export type ModelsCreateTenantResponse = {
+  id?: string;
+  name?: string;
+};
+
 export type ModelsCreateTokenPortalRequest = {
   description?: string;
   expiresAt?: string;
   name?: string;
+};
+
+export type ModelsCreateTokenPortalRequestV2 = {
+  description?: string;
+  expiresAt?: string;
+  name?: string;
+  permissions: Array<RbacPortalPermission>;
 };
 
 export type ModelsCreateUserResponse = {
@@ -181,6 +297,38 @@ export type ModelsGetWarmTierCredentialResponse = {
   name?: string;
 };
 
+export type ModelsInferenceBackend = {
+  defaultEnabled?: boolean;
+  enabled?: boolean;
+  id?: string;
+};
+
+export type ModelsInferenceComponentDetails = {
+  enabled?: boolean;
+  lastSetupStep?: ModelsSetupStep;
+  lastTeardownStep?: ModelsTeardownStep;
+  properties?: ModelsInferenceComponentResponseProperties;
+};
+
+export type ModelsInferenceComponentResponseProperties = {
+  backendOverrides?: {
+    [key: string]: boolean;
+  };
+  backends?: Array<ModelsInferenceBackend>;
+  prepaidCreditsRequired?: boolean;
+};
+
+export type ModelsInferenceComponentSetupProperties = {
+  prepaidCreditsRequired?: boolean;
+};
+
+export type ModelsInferenceComponentSetupStatus = {
+  enabled?: boolean;
+  lastSetupStep?: ModelsSetupStep;
+  lastTeardownStep?: ModelsTeardownStep;
+  properties?: ModelsInferenceComponentSetupProperties;
+};
+
 export type ModelsMutateThemeRequest = {
   colors?: ModelsThemeColors;
   icon?: string;
@@ -204,6 +352,13 @@ export type ModelsPaginatedS3CredentialResponse = {
 
 export type ModelsPaginatedTenantsResponse = {
   items?: Array<ModelsTenantWithMetricsBackofficeResponse>;
+  page?: number;
+  pageSize?: number;
+  totalCount?: number;
+};
+
+export type ModelsPaginatedTenantsResponseV2 = {
+  items?: Array<ModelsTenantWithMetricsBackofficeResponseV2>;
   page?: number;
   pageSize?: number;
   totalCount?: number;
@@ -238,6 +393,7 @@ export type ModelsPartnerConfigResponse = {
 };
 
 export type ModelsPartnerResponse = {
+  billingEnabled?: boolean;
   database?: string;
   id?: string;
   name?: string;
@@ -266,13 +422,21 @@ export type ModelsRegionResponse = {
   warmTierCredentialId?: string;
 };
 
+export type ModelsS3ComponentLimits = {
+  accessKeyQuantityLimit?: number;
+  bucketQuantityLimit?: number;
+  bucketSizeLimitBytes?: number;
+};
+
 export type ModelsS3ComponentProperties = {
   bucketSharingEnabled?: boolean;
+  limits?: ModelsS3ComponentLimits;
 };
 
 export type ModelsS3ComponentSetupStatus = {
   enabled?: boolean;
   lastSetupStep?: ModelsSetupStep;
+  lastTeardownStep?: ModelsTeardownStep;
   properties?: ModelsS3ComponentProperties;
 };
 
@@ -293,13 +457,40 @@ export type ModelsSetupStep =
   | 'CLOUDSTACK_USER_KEYS_CREATED'
   | 'FINISHED';
 
-export type ModelsTenantBackofficeResponse = {
+export type ModelsTeardownStep =
+  | 'NOT_STARTED'
+  | 'FINISHED'
+  | 'ORGANIZATION_DELETED'
+  | 'SHARES_REVOKED'
+  | 'ACCESS_DENIED'
+  | 'ACCESS_KEYS_DELETED'
+  | 'ROOT_KEYS_DESTROYED';
+
+export type ModelsTenantStatus = 'DISABLED' | 'LOCKED' | 'WRITE_LOCKED' | 'ACTIVE';
+
+export type ModelsTenantWithMetricsBackofficeResponse = {
+  /**
+   * Deprecated - moved to S3 component properties
+   */
   accessKeyQuantityLimit?: number;
+  bucketCount?: number;
+  /**
+   * Deprecated - moved to S3 component properties
+   */
   bucketQuantityLimit?: number;
+  /**
+   * Deprecated - moved to S3 component properties
+   */
   bucketSizeLimit?: number;
   components?: ModelsComponentsStatus;
   createdAt?: string;
+  /**
+   * DeletedAt is set once tenant deletion has been requested; per-component teardown
+   * progress is reported in Components.*.LastTeardownStep.
+   */
+  deletedAt?: string;
   id?: string;
+  keyCount?: number;
   name?: string;
   orgId?: string;
   partnerId?: string;
@@ -308,20 +499,11 @@ export type ModelsTenantBackofficeResponse = {
   status?: ModelsTenantStatus;
 };
 
-export type ModelsTenantSetupResponse = {
-  components?: ModelsComponentsStatus;
-  id?: string;
-};
-
-export type ModelsTenantStatus = 'DISABLED' | 'LOCKED' | 'WRITE_LOCKED' | 'ACTIVE';
-
-export type ModelsTenantWithMetricsBackofficeResponse = {
-  accessKeyQuantityLimit?: number;
+export type ModelsTenantWithMetricsBackofficeResponseV2 = {
   bucketCount?: number;
-  bucketQuantityLimit?: number;
-  bucketSizeLimit?: number;
   components?: ModelsComponentsStatus;
   createdAt?: string;
+  deletedAt?: string;
   id?: string;
   keyCount?: number;
   name?: string;
@@ -369,6 +551,7 @@ export type ModelsTokenBackOfficeResponse = {
   description?: string;
   expiresAt?: string;
   id?: string;
+  lastUsedAt?: string;
   name?: string;
   permissions?: Array<string>;
 };
@@ -378,6 +561,7 @@ export type ModelsTokenBackOfficeResponseBase = {
   description?: string;
   expiresAt?: string;
   id?: string;
+  lastUsedAt?: string;
   name?: string;
 };
 
@@ -386,6 +570,7 @@ export type ModelsTokenCreateBackOfficeResponse = {
   description?: string;
   expiresAt?: string;
   id?: string;
+  lastUsedAt?: string;
   name?: string;
   permissions?: Array<string>;
   token?: string;
@@ -396,7 +581,9 @@ export type ModelsTokenCreatePortalResponse = {
   description?: string;
   expiresAt?: string;
   id?: string;
+  lastUsedAt?: string;
   name?: string;
+  permissions?: Array<RbacPortalPermission>;
   token?: string;
 };
 
@@ -419,7 +606,9 @@ export type ModelsTokenPortalResponse = {
   description?: string;
   expiresAt?: string;
   id?: string;
+  lastUsedAt?: string;
   name?: string;
+  permissions?: Array<RbacPortalPermission>;
 };
 
 export type ModelsUserInfoResponse = {
@@ -456,6 +645,59 @@ export type ModelsWarmTierCredentialBase = {
   name?: string;
 };
 
+export type RbacPortalPermission =
+  | 'read:s3:access_keys'
+  | 'create:s3:access_keys'
+  | 'delete:s3:access_keys'
+  | 'read:s3:buckets'
+  | 'create:s3:buckets'
+  | 'update:s3:buckets'
+  | 'delete:s3:buckets'
+  | 'clone:s3:bucket_objects'
+  | 'read:s3:bucket_shares'
+  | 'create:s3:bucket_shares'
+  | 'delete:s3:bucket_shares'
+  | 'read:s3:storage_analytics'
+  | 'read:s3:operations_analytics'
+  | 'read:compute:catalog'
+  | 'read:compute:jobs'
+  | 'read:compute:events'
+  | 'read:compute:instances'
+  | 'create:compute:instances'
+  | 'update:compute:instances'
+  | 'operate:compute:instances'
+  | 'delete:compute:instances'
+  | 'read:compute:ssh_keys'
+  | 'create:compute:ssh_keys'
+  | 'delete:compute:ssh_keys'
+  | 'read:compute:vpcs'
+  | 'create:compute:vpcs'
+  | 'delete:compute:vpcs'
+  | 'read:compute:public_ips'
+  | 'create:compute:public_ips'
+  | 'delete:compute:public_ips'
+  | 'read:compute:networks'
+  | 'create:compute:networks'
+  | 'delete:compute:networks'
+  | 'read:compute:volumes'
+  | 'create:compute:volumes'
+  | 'update:compute:volumes'
+  | 'delete:compute:volumes'
+  | 'read:compute:snapshots'
+  | 'create:compute:snapshots'
+  | 'restore:compute:snapshots'
+  | 'delete:compute:snapshots'
+  | 'execute:inference:requests'
+  | 'read:inference:analytics'
+  | 'read:portal:tenants'
+  | 'read:portal:tags'
+  | 'update:portal:tags'
+  | 'read:portal:messages'
+  | 'update:portal:messages'
+  | 'read:portal:tokens'
+  | 'create:portal:tokens'
+  | 'delete:portal:tokens';
+
 export type RolesPaginatedRoleResponse = {
   items?: Array<RolesRoleResponse>;
   page?: number;
@@ -468,12 +710,86 @@ export type RolesRoleResponse = {
   name?: string;
 };
 
+export type ServicesInferenceComponentUpdateRequest = {
+  enabled?: boolean;
+  properties?: ServicesInferenceUpdateComponentProperties;
+};
+
+export type ServicesInferenceUpdateComponentProperties = {
+  backendOverrides?: {
+    [key: string]: boolean;
+  };
+  prepaidCreditsRequired?: boolean;
+};
+
 export type ServicesUpdateComponentRequest = {
   enabled?: boolean;
 };
 
+export type TemplatesAddMessageRequest = {
+  tags?: Array<string>;
+  templateId?: string;
+  variables?: {
+    [key: string]: unknown;
+  };
+};
+
+export type TemplatesAddMessageRequestBase = {
+  templateId?: string;
+  variables?: {
+    [key: string]: unknown;
+  };
+};
+
+export type TemplatesAddMessageResponse = {
+  id?: string;
+};
+
+export type TemplatesBackofficeMessageListResponse = {
+  items?: Array<TemplatesBackofficeMessageResponse>;
+  page?: number;
+  pageSize?: number;
+  totalCount?: number;
+};
+
+export type TemplatesBackofficeMessagePreview = {
+  content?: string;
+  dismissible?: boolean;
+  type?: 'info' | 'warning' | 'error';
+};
+
+export type TemplatesBackofficeMessageResponse = {
+  createdAt?: string;
+  dismissedAt?: string;
+  id?: string;
+  tags?: Array<string>;
+  templateId?: string;
+  updatedAt?: string;
+  variables?: {
+    [key: string]: unknown;
+  };
+};
+
+export type TemplatesMassUpdateMessageRequest = {
+  messages?: Array<TemplatesAddMessageRequestBase>;
+  tags?: Array<string>;
+};
+
+export type TemplatesUpdateMessageRequest = {
+  variables?: {
+    [key: string]: unknown;
+  };
+};
+
 export type TenantsUpdateStatusRequest = {
   status?: ModelsTenantStatus;
+};
+
+export type UsersInviteParams = {
+  email?: string;
+  role?: string;
+  tenantId?: string;
+  userId?: string;
 };
 
 export type UsersMemberResponse = {
@@ -491,8 +807,9 @@ export type UsersPaginatedMemberListResponse = {
 
 export type UsersRegisterParams = {
   email?: string;
-  role?: string;
-  tenantId?: string;
+  firstName?: string;
+  lastName?: string;
+  password?: string;
 };
 
 export type GetBucketOperationMetricsData = {
@@ -616,6 +933,67 @@ export type GetBucketStorageMetricsResponses = {
 
 export type GetBucketStorageMetricsResponse =
   GetBucketStorageMetricsResponses[keyof GetBucketStorageMetricsResponses];
+
+export type GetTenantInferenceUsageBackofficeData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query: {
+    /**
+     * Start of time range (RFC3339)
+     */
+    from: string;
+    /**
+     * End of time range (RFC3339)
+     */
+    to: string;
+    /**
+     * Resample window duration (e.g. 5m, 1h)
+     */
+    window?: string;
+    /**
+     * Group by fields (comma-separated): model
+     */
+    groupBy?: string;
+  };
+  url: '/analytics/v1/{partnerId}/tenants/{tenantId}/inference';
+};
+
+export type GetTenantInferenceUsageBackofficeErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Access denied
+   */
+  403: CommonReturnMessage;
+  /**
+   * Internal server error
+   */
+  500: CommonReturnMessage;
+};
+
+export type GetTenantInferenceUsageBackofficeError =
+  GetTenantInferenceUsageBackofficeErrors[keyof GetTenantInferenceUsageBackofficeErrors];
+
+export type GetTenantInferenceUsageBackofficeResponses = {
+  /**
+   * Inference usage metrics
+   */
+  200: ModelInferenceUsageResponse;
+};
+
+export type GetTenantInferenceUsageBackofficeResponse =
+  GetTenantInferenceUsageBackofficeResponses[keyof GetTenantInferenceUsageBackofficeResponses];
 
 export type GetTenantOperationMetricsData = {
   body?: never;
@@ -1060,6 +1438,176 @@ export type GetTokenResponses = {
 
 export type GetTokenResponse = GetTokenResponses[keyof GetTokenResponses];
 
+export type CreateTenantTokenV2Data = {
+  /**
+   * Token creation request
+   */
+  body: ModelsCreateTokenPortalRequestV2;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/auth/v2/partners/{partnerId}/tenants/{tenantId}/tokens';
+};
+
+export type CreateTenantTokenV2Errors = {
+  /**
+   * Invalid request body or parameters
+   */
+  400: CommonReturnMessage;
+  /**
+   * Token with this name already exists
+   */
+  409: CommonReturnMessage;
+  /**
+   * Error while creating token
+   */
+  500: CommonReturnMessage;
+};
+
+export type CreateTenantTokenV2Error = CreateTenantTokenV2Errors[keyof CreateTenantTokenV2Errors];
+
+export type CreateTenantTokenV2Responses = {
+  /**
+   * Tenant token created
+   */
+  201: ModelsTokenCreatePortalResponse;
+};
+
+export type CreateTenantTokenV2Response =
+  CreateTenantTokenV2Responses[keyof CreateTenantTokenV2Responses];
+
+export type AdjustTenantInferenceCreditsData = {
+  /**
+   * Credit adjustment
+   */
+  body: CreditsAdjustmentRequest;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/inference/v1/{partnerId}/tenants/{tenantId}/credits/adjustments';
+};
+
+export type AdjustTenantInferenceCreditsErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Operation conflict
+   */
+  409: CommonReturnMessage;
+};
+
+export type AdjustTenantInferenceCreditsError =
+  AdjustTenantInferenceCreditsErrors[keyof AdjustTenantInferenceCreditsErrors];
+
+export type AdjustTenantInferenceCreditsResponses = {
+  /**
+   * Adjustment result
+   */
+  200: CreditsMutationResult;
+};
+
+export type AdjustTenantInferenceCreditsResponse =
+  AdjustTenantInferenceCreditsResponses[keyof AdjustTenantInferenceCreditsResponses];
+
+export type ListTenantInferenceCreditEntriesData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: {
+    /**
+     * Page number
+     */
+    page?: number;
+    /**
+     * Page size
+     */
+    pageSize?: number;
+  };
+  url: '/inference/v1/{partnerId}/tenants/{tenantId}/credits/entries';
+};
+
+export type ListTenantInferenceCreditEntriesErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+};
+
+export type ListTenantInferenceCreditEntriesError =
+  ListTenantInferenceCreditEntriesErrors[keyof ListTenantInferenceCreditEntriesErrors];
+
+export type ListTenantInferenceCreditEntriesResponses = {
+  /**
+   * Credit ledger entries
+   */
+  200: CreditsPaginatedEntriesResponse;
+};
+
+export type ListTenantInferenceCreditEntriesResponse =
+  ListTenantInferenceCreditEntriesResponses[keyof ListTenantInferenceCreditEntriesResponses];
+
+export type GetTenantInferenceCreditWalletData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/inference/v1/{partnerId}/tenants/{tenantId}/credits/wallet';
+};
+
+export type GetTenantInferenceCreditWalletErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+};
+
+export type GetTenantInferenceCreditWalletError =
+  GetTenantInferenceCreditWalletErrors[keyof GetTenantInferenceCreditWalletErrors];
+
+export type GetTenantInferenceCreditWalletResponses = {
+  /**
+   * Credit wallet
+   */
+  200: CreditsWallet;
+};
+
+export type GetTenantInferenceCreditWalletResponse =
+  GetTenantInferenceCreditWalletResponses[keyof GetTenantInferenceCreditWalletResponses];
+
 export type ListPartnerRegionsData = {
   body?: never;
   path: {
@@ -1285,6 +1833,46 @@ export type GetPartnerResponses = {
 
 export type GetPartnerResponse = GetPartnerResponses[keyof GetPartnerResponses];
 
+export type GetBucketOwnerFromPartnerData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Bucket name
+     */
+    bucketName: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/buckets/{bucketName}/owner';
+};
+
+export type GetBucketOwnerFromPartnerErrors = {
+  /**
+   * Bucket not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Internal server error
+   */
+  500: CommonReturnMessage;
+};
+
+export type GetBucketOwnerFromPartnerError =
+  GetBucketOwnerFromPartnerErrors[keyof GetBucketOwnerFromPartnerErrors];
+
+export type GetBucketOwnerFromPartnerResponses = {
+  /**
+   * Bucket owner information
+   */
+  200: BucketsBucketOwnerResponse;
+};
+
+export type GetBucketOwnerFromPartnerResponse =
+  GetBucketOwnerFromPartnerResponses[keyof GetBucketOwnerFromPartnerResponses];
+
 export type GetConfigData = {
   body?: never;
   path: {
@@ -1409,6 +1997,7 @@ export type ListTenantsData = {
      * Page size
      */
     pageSize?: number;
+    orgName?: string;
   };
   url: '/v1/partners/{partnerId}/tenants';
 };
@@ -1467,10 +2056,50 @@ export type CreateTenantResponses = {
   /**
    * Tenant created successfully
    */
-  201: ModelsTenantBackofficeResponse;
+  201: ModelsCreateTenantResponse;
 };
 
 export type CreateTenantResponse = CreateTenantResponses[keyof CreateTenantResponses];
+
+export type DeleteTenantData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}';
+};
+
+export type DeleteTenantErrors = {
+  /**
+   * Tenant not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Deletion not possible (unsupported component set up, component setup incomplete, or another update in progress)
+   */
+  409: CommonReturnMessage;
+  /**
+   * Error deleting tenant
+   */
+  500: CommonReturnMessage;
+};
+
+export type DeleteTenantError = DeleteTenantErrors[keyof DeleteTenantErrors];
+
+export type DeleteTenantResponses = {
+  /**
+   * Tenant deleted
+   */
+  204: unknown;
+};
 
 export type GetTenantData = {
   body?: never;
@@ -1552,6 +2181,44 @@ export type ListBucketsResponses = {
 };
 
 export type ListBucketsResponse = ListBucketsResponses[keyof ListBucketsResponses];
+
+export type GetAuthComponentData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Auth';
+};
+
+export type GetAuthComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Not found
+   */
+  404: CommonReturnMessage;
+};
+
+export type GetAuthComponentError = GetAuthComponentErrors[keyof GetAuthComponentErrors];
+
+export type GetAuthComponentResponses = {
+  /**
+   * Component status
+   */
+  200: ModelsAuthComponentSetupStatus;
+};
+
+export type GetAuthComponentResponse = GetAuthComponentResponses[keyof GetAuthComponentResponses];
 
 export type UpdateAuthComponentData = {
   /**
@@ -1638,6 +2305,45 @@ export type SetupAuthComponentResponses = {
 export type SetupAuthComponentResponse =
   SetupAuthComponentResponses[keyof SetupAuthComponentResponses];
 
+export type GetComputeComponentData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Compute';
+};
+
+export type GetComputeComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Not found
+   */
+  404: CommonReturnMessage;
+};
+
+export type GetComputeComponentError = GetComputeComponentErrors[keyof GetComputeComponentErrors];
+
+export type GetComputeComponentResponses = {
+  /**
+   * Component details
+   */
+  200: ModelsComputeComponentDetails;
+};
+
+export type GetComputeComponentResponse =
+  GetComputeComponentResponses[keyof GetComputeComponentResponses];
+
 export type UpdateComputeComponentData = {
   /**
    * Component update fields
@@ -1677,9 +2383,9 @@ export type UpdateComputeComponentError =
 
 export type UpdateComputeComponentResponses = {
   /**
-   * Component setup status
+   * Component details
    */
-  200: ModelsComputeComponentSetupStatus;
+  200: ModelsComputeComponentDetails;
 };
 
 export type UpdateComputeComponentResponse =
@@ -1717,13 +2423,134 @@ export type SetupComputeComponentError =
 
 export type SetupComputeComponentResponses = {
   /**
-   * Component setup status
+   * Component details
    */
-  200: ModelsComputeComponentSetupStatus;
+  200: ModelsComputeComponentDetails;
 };
 
 export type SetupComputeComponentResponse =
   SetupComputeComponentResponses[keyof SetupComputeComponentResponses];
+
+export type GetInferenceComponentData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Inference';
+};
+
+export type GetInferenceComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Not found
+   */
+  404: CommonReturnMessage;
+};
+
+export type GetInferenceComponentError =
+  GetInferenceComponentErrors[keyof GetInferenceComponentErrors];
+
+export type GetInferenceComponentResponses = {
+  /**
+   * Component details
+   */
+  200: ModelsInferenceComponentDetails;
+};
+
+export type GetInferenceComponentResponse =
+  GetInferenceComponentResponses[keyof GetInferenceComponentResponses];
+
+export type UpdateInferenceComponentData = {
+  /**
+   * Component update fields
+   */
+  body: ServicesInferenceComponentUpdateRequest;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Inference';
+};
+
+export type UpdateInferenceComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Not found
+   */
+  404: CommonReturnMessage;
+};
+
+export type UpdateInferenceComponentError =
+  UpdateInferenceComponentErrors[keyof UpdateInferenceComponentErrors];
+
+export type UpdateInferenceComponentResponses = {
+  /**
+   * Component setup status
+   */
+  200: ModelsInferenceComponentSetupStatus;
+};
+
+export type UpdateInferenceComponentResponse =
+  UpdateInferenceComponentResponses[keyof UpdateInferenceComponentResponses];
+
+export type GetS3ComponentData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/S3';
+};
+
+export type GetS3ComponentErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Not found
+   */
+  404: CommonReturnMessage;
+};
+
+export type GetS3ComponentError = GetS3ComponentErrors[keyof GetS3ComponentErrors];
+
+export type GetS3ComponentResponses = {
+  /**
+   * Component status
+   */
+  200: ModelsS3ComponentSetupStatus;
+};
+
+export type GetS3ComponentResponse = GetS3ComponentResponses[keyof GetS3ComponentResponses];
 
 export type UpdateS3ComponentData = {
   /**
@@ -1811,52 +2638,6 @@ export type SetupS3ComponentResponses = {
 
 export type SetupS3ComponentResponse = SetupS3ComponentResponses[keyof SetupS3ComponentResponses];
 
-export type GetComponentData = {
-  body?: never;
-  path: {
-    /**
-     * Partner ID
-     */
-    partnerId: string;
-    /**
-     * Tenant ID
-     */
-    tenantId: string;
-    /**
-     * Component name (S3, Compute, Auth)
-     */
-    component: string;
-  };
-  query?: never;
-  url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/{component}';
-};
-
-export type GetComponentErrors = {
-  /**
-   * Bad request
-   */
-  400: CommonReturnMessage;
-  /**
-   * Tenant Not found
-   */
-  404: CommonReturnMessage;
-  /**
-   * Internal server error
-   */
-  500: CommonReturnMessage;
-};
-
-export type GetComponentError = GetComponentErrors[keyof GetComponentErrors];
-
-export type GetComponentResponses = {
-  /**
-   * Success
-   */
-  200: ModelsComponent;
-};
-
-export type GetComponentResponse = GetComponentResponses[keyof GetComponentResponses];
-
 export type ListTenantMembersData = {
   body?: never;
   path: {
@@ -1909,7 +2690,7 @@ export type ListTenantMembersResponses = {
 export type ListTenantMembersResponse =
   ListTenantMembersResponses[keyof ListTenantMembersResponses];
 
-export type SetupTenantData = {
+export type DeleteTenantMessagesData = {
   body?: never;
   path: {
     /**
@@ -1921,31 +2702,357 @@ export type SetupTenantData = {
      */
     tenantId: string;
   };
-  query?: never;
-  url: '/v1/partners/{partnerId}/tenants/{tenantId}/setup';
+  query: {
+    /**
+     * Message tags
+     */
+    tags: Array<string>;
+  };
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages';
 };
 
-export type SetupTenantErrors = {
+export type DeleteTenantMessagesErrors = {
+  /**
+   * Message not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error deleting message
+   */
+  500: CommonReturnMessage;
+};
+
+export type DeleteTenantMessagesError =
+  DeleteTenantMessagesErrors[keyof DeleteTenantMessagesErrors];
+
+export type DeleteTenantMessagesResponses = {
+  /**
+   * No content
+   */
+  204: unknown;
+};
+
+export type ListTenantMessagesBackofficeData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: {
+    /**
+     * Page number
+     */
+    page?: number;
+    /**
+     * Page size
+     */
+    pageSize?: number;
+    templateId?: string;
+  };
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages';
+};
+
+export type ListTenantMessagesBackofficeErrors = {
+  /**
+   * Error listing messages
+   */
+  500: CommonReturnMessage;
+};
+
+export type ListTenantMessagesBackofficeError =
+  ListTenantMessagesBackofficeErrors[keyof ListTenantMessagesBackofficeErrors];
+
+export type ListTenantMessagesBackofficeResponses = {
+  /**
+   * Tenant messages
+   */
+  200: TemplatesBackofficeMessageListResponse;
+};
+
+export type ListTenantMessagesBackofficeResponse =
+  ListTenantMessagesBackofficeResponses[keyof ListTenantMessagesBackofficeResponses];
+
+export type CreateTenantMessageData = {
+  /**
+   * Message creation request
+   */
+  body: TemplatesAddMessageRequest;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages';
+};
+
+export type CreateTenantMessageErrors = {
   /**
    * Bad request
    */
   400: CommonReturnMessage;
   /**
-   * Internal server error
+   * Template not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error creating message
    */
   500: CommonReturnMessage;
 };
 
-export type SetupTenantError = SetupTenantErrors[keyof SetupTenantErrors];
+export type CreateTenantMessageError = CreateTenantMessageErrors[keyof CreateTenantMessageErrors];
 
-export type SetupTenantResponses = {
+export type CreateTenantMessageResponses = {
   /**
-   * Setup response
+   * Message created successfully
    */
-  200: ModelsTenantSetupResponse;
+  201: TemplatesAddMessageResponse;
 };
 
-export type SetupTenantResponse = SetupTenantResponses[keyof SetupTenantResponses];
+export type CreateTenantMessageResponse =
+  CreateTenantMessageResponses[keyof CreateTenantMessageResponses];
+
+export type MassUpdateTenantMessagesData = {
+  /**
+   * Mass update request
+   */
+  body: TemplatesMassUpdateMessageRequest;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages';
+};
+
+export type MassUpdateTenantMessagesErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Template not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error mass updating messages
+   */
+  500: CommonReturnMessage;
+};
+
+export type MassUpdateTenantMessagesError =
+  MassUpdateTenantMessagesErrors[keyof MassUpdateTenantMessagesErrors];
+
+export type MassUpdateTenantMessagesResponses = {
+  /**
+   * No content
+   */
+  204: unknown;
+};
+
+export type DeleteTenantMessageData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+    /**
+     * Message ID
+     */
+    messageId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages/{messageId}';
+};
+
+export type DeleteTenantMessageErrors = {
+  /**
+   * Message not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error deleting message
+   */
+  500: CommonReturnMessage;
+};
+
+export type DeleteTenantMessageError = DeleteTenantMessageErrors[keyof DeleteTenantMessageErrors];
+
+export type DeleteTenantMessageResponses = {
+  /**
+   * No content
+   */
+  204: unknown;
+};
+
+export type GetTenantMessageData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+    /**
+     * Message ID
+     */
+    messageId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages/{messageId}';
+};
+
+export type GetTenantMessageErrors = {
+  /**
+   * Message not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error getting message
+   */
+  500: CommonReturnMessage;
+};
+
+export type GetTenantMessageError = GetTenantMessageErrors[keyof GetTenantMessageErrors];
+
+export type GetTenantMessageResponses = {
+  /**
+   * Tenant message
+   */
+  200: TemplatesBackofficeMessageResponse;
+};
+
+export type GetTenantMessageResponse = GetTenantMessageResponses[keyof GetTenantMessageResponses];
+
+export type UpdateTenantMessageData = {
+  /**
+   * New message values
+   */
+  body: TemplatesUpdateMessageRequest;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+    /**
+     * Message ID
+     */
+    messageId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages/{messageId}';
+};
+
+export type UpdateTenantMessageErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Message not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error updating message
+   */
+  500: CommonReturnMessage;
+};
+
+export type UpdateTenantMessageError = UpdateTenantMessageErrors[keyof UpdateTenantMessageErrors];
+
+export type UpdateTenantMessageResponses = {
+  /**
+   * Message created successfully
+   */
+  204: unknown;
+};
+
+export type GetTenantMessagePreviewData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+    /**
+     * Message ID
+     */
+    messageId: string;
+  };
+  query?: {
+    /**
+     * Preview locale
+     */
+    locale?: string;
+    /**
+     * Preview timezone
+     */
+    timezone?: string;
+  };
+  url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages/{messageId}/preview';
+};
+
+export type GetTenantMessagePreviewErrors = {
+  /**
+   * Invalid preview options
+   */
+  400: CommonReturnMessage;
+  /**
+   * Message or template not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error rendering message preview
+   */
+  500: CommonReturnMessage;
+};
+
+export type GetTenantMessagePreviewError =
+  GetTenantMessagePreviewErrors[keyof GetTenantMessagePreviewErrors];
+
+export type GetTenantMessagePreviewResponses = {
+  /**
+   * Tenant message preview
+   */
+  200: TemplatesBackofficeMessagePreview;
+};
+
+export type GetTenantMessagePreviewResponse =
+  GetTenantMessagePreviewResponses[keyof GetTenantMessagePreviewResponses];
 
 export type SetTenantStatusData = {
   /**
@@ -2257,9 +3364,9 @@ export type CreateUserErrors = {
    */
   400: CommonReturnMessage;
   /**
-   * Tenant or role not found
+   * User already exists
    */
-  404: CommonReturnMessage;
+  409: CommonReturnMessage;
   /**
    * Failed to create user
    */
@@ -2276,6 +3383,47 @@ export type CreateUserResponses = {
 };
 
 export type CreateUserResponse = CreateUserResponses[keyof CreateUserResponses];
+
+export type InviteUserData = {
+  /**
+   * User invite parameters
+   */
+  body: UsersInviteParams;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/users/invite';
+};
+
+export type InviteUserErrors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Tenant or role not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Failed to create user
+   */
+  500: CommonReturnMessage;
+};
+
+export type InviteUserError = InviteUserErrors[keyof InviteUserErrors];
+
+export type InviteUserResponses = {
+  /**
+   * User created successfully
+   */
+  201: ModelsCreateUserResponse;
+};
+
+export type InviteUserResponse = InviteUserResponses[keyof InviteUserResponses];
 
 export type GetUserData = {
   body?: never;
@@ -2314,6 +3462,47 @@ export type GetUserResponses = {
 };
 
 export type GetUserResponse = GetUserResponses[keyof GetUserResponses];
+
+export type ResendVerificationEmailData = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * User ID
+     */
+    userId: string;
+  };
+  query?: never;
+  url: '/v1/partners/{partnerId}/users/{userId}/resend-email';
+};
+
+export type ResendVerificationEmailErrors = {
+  /**
+   * User not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Email already verified
+   */
+  409: CommonReturnMessage;
+  /**
+   * Internal server error
+   */
+  500: CommonReturnMessage;
+};
+
+export type ResendVerificationEmailError =
+  ResendVerificationEmailErrors[keyof ResendVerificationEmailErrors];
+
+export type ResendVerificationEmailResponses = {
+  /**
+   * Email verification sent successfully
+   */
+  204: unknown;
+};
 
 export type ListPortalRolesData = {
   body?: never;
@@ -2489,3 +3678,122 @@ export type GetWarmTierCredentialResponses = {
 
 export type GetWarmTierCredentialResponse =
   GetWarmTierCredentialResponses[keyof GetWarmTierCredentialResponses];
+
+export type ListTenantsV2Data = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+  };
+  query?: {
+    /**
+     * Page number
+     */
+    page?: number;
+    /**
+     * Page size
+     */
+    pageSize?: number;
+    orgName?: string;
+  };
+  url: '/v2/partners/{partnerId}/tenants';
+};
+
+export type ListTenantsV2Errors = {
+  /**
+   * Error getting tenants
+   */
+  500: CommonReturnMessage;
+};
+
+export type ListTenantsV2Error = ListTenantsV2Errors[keyof ListTenantsV2Errors];
+
+export type ListTenantsV2Responses = {
+  /**
+   * List of tenants
+   */
+  200: ModelsPaginatedTenantsResponseV2;
+};
+
+export type ListTenantsV2Response = ListTenantsV2Responses[keyof ListTenantsV2Responses];
+
+export type CreateTenantV2Data = {
+  /**
+   * Tenant creation parameters
+   */
+  body: ModelsCreateTenantRequest;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+  };
+  query?: never;
+  url: '/v2/partners/{partnerId}/tenants';
+};
+
+export type CreateTenantV2Errors = {
+  /**
+   * Bad request
+   */
+  400: CommonReturnMessage;
+  /**
+   * Region not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error creating tenant
+   */
+  500: CommonReturnMessage;
+};
+
+export type CreateTenantV2Error = CreateTenantV2Errors[keyof CreateTenantV2Errors];
+
+export type CreateTenantV2Responses = {
+  /**
+   * Tenant created successfully
+   */
+  201: ModelsCreateTenantResponse;
+};
+
+export type CreateTenantV2Response = CreateTenantV2Responses[keyof CreateTenantV2Responses];
+
+export type GetTenantV2Data = {
+  body?: never;
+  path: {
+    /**
+     * Partner ID
+     */
+    partnerId: string;
+    /**
+     * Tenant ID
+     */
+    tenantId: string;
+  };
+  query?: never;
+  url: '/v2/partners/{partnerId}/tenants/{tenantId}';
+};
+
+export type GetTenantV2Errors = {
+  /**
+   * Tenant not found
+   */
+  404: CommonReturnMessage;
+  /**
+   * Error getting tenant
+   */
+  500: CommonReturnMessage;
+};
+
+export type GetTenantV2Error = GetTenantV2Errors[keyof GetTenantV2Errors];
+
+export type GetTenantV2Responses = {
+  /**
+   * Tenant details
+   */
+  200: ModelsTenantWithMetricsBackofficeResponseV2;
+};
+
+export type GetTenantV2Response = GetTenantV2Responses[keyof GetTenantV2Responses];

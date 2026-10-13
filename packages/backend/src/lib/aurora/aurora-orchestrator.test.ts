@@ -51,12 +51,15 @@ vi.mock('./aurora-backoffice.ts', async (importOriginal) => {
     ...original,
     updateTenantStatus: (...args: unknown[]) => mockUpdateAuroraTenantStatusApi(...args),
     getTenantStatus: (...args: unknown[]) => mockGetAuroraTenantStatusApi(...args),
-    getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
-    getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
-    getBucketStorageSamples: (...args: unknown[]) => mockGetBucketStorageSamples(...args),
     getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...args),
   };
 });
+
+vi.mock('./aurora-backoffice-metrics.ts', () => ({
+  getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
+  getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
+  getBucketStorageSamples: (...args: unknown[]) => mockGetBucketStorageSamples(...args),
+}));
 
 const mockPortalListBuckets = vi.fn();
 const mockPortalGetBucketInfo = vi.fn();
@@ -794,12 +797,13 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('getTenantInfo', () => {
-    it('maps backoffice tenant info, applying defaults for missing fields', async () => {
+    it('maps backoffice tenant info, reading limits from the S3 component', async () => {
       mockGetTenantInfo.mockResolvedValue({
         bucketCount: 2,
-        bucketQuantityLimit: 50,
         keyCount: 3,
-        accessKeyQuantityLimit: 200,
+        components: {
+          s3: { properties: { limits: { bucketQuantityLimit: 50, accessKeyQuantityLimit: 200 } } },
+        },
         status: 'ACTIVE',
       });
 

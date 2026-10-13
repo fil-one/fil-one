@@ -25,15 +25,17 @@ import {
   findAuroraAccessKeyByName,
 } from '../aurora/aurora-portal.ts';
 import {
-  getOperationsSamples,
-  getStorageSamples,
   getTenantStatus as getAuroraTenantStatusApi,
   mapFromModelsTenantStatus,
   mapToModelsTenantStatus,
   updateTenantStatus as updateAuroraTenantStatusApi,
-  getBucketStorageSamples,
   getTenantInfo,
 } from '../aurora/aurora-backoffice.ts';
+import {
+  getBucketStorageSamples,
+  getOperationsSamples,
+  getStorageSamples,
+} from './aurora-backoffice-metrics.ts';
 import { isOrgSetupComplete } from '../org-setup-status.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
@@ -319,11 +321,12 @@ export const auroraOrchestrator = {
 
   async getTenantInfo(tenantId: string, opts?: OrchestratorRequestOptions): Promise<TenantInfo> {
     const info = await getTenantInfo({ tenantId, signal: opts?.signal });
+    const limits = info.components?.s3?.properties?.limits;
     return {
       bucketCount: info.bucketCount ?? 0,
-      bucketLimit: info.bucketQuantityLimit ?? 100,
+      bucketLimit: limits?.bucketQuantityLimit ?? 100,
       keyCount: info.keyCount ?? 0,
-      accessKeyLimit: info.accessKeyQuantityLimit ?? 300,
+      accessKeyLimit: limits?.accessKeyQuantityLimit ?? 300,
       status: mapFromModelsTenantStatus(info.status),
     };
   },
