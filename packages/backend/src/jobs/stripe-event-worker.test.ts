@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  DynamoDBClient,
+  GetItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { SQSEvent } from 'aws-lambda';
 import { type MetricEvent, reportMetric } from '../lib/metrics.ts';
@@ -280,7 +285,8 @@ describe('stripe-event-worker handler', () => {
           ':now': { S: expect.any(String) },
           ':orgId': { S: MOCK_ORG_ID },
         },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
+        ConditionExpression:
+          'attribute_exists(pk) AND ((attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND attribute_not_exists(deletedAt))',
       });
     });
 
@@ -474,7 +480,8 @@ describe('stripe-event-worker handler', () => {
           ':now': { S: expect.any(String) },
           ':orgId': { S: MOCK_ORG_ID },
         },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
+        ConditionExpression:
+          'attribute_exists(pk) AND ((attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND attribute_not_exists(deletedAt))',
       });
     });
 
@@ -803,9 +810,9 @@ describe('stripe-event-worker handler', () => {
     });
 
     it('still applies an update arriving under a new subscription id', async () => {
-      // The upsert keeps last-writer-wins: an upgrade legitimately arrives
-      // under an id the row has never seen, and refusing it as superseded would
-      // leave the account on the plan it just left.
+      // Across subscription ids the upsert keeps last-writer-wins: an upgrade
+      // legitimately arrives under an id the row has never seen, and refusing it
+      // as superseded would leave the account on the plan it just left.
       setupStripeEvent('customer.subscription.updated', mockSubscription());
       setupCustomerRetrieve();
       setupStoredIdentity({ subscriptionId: 'sub_the_previous_one' });
@@ -816,6 +823,21 @@ describe('stripe-event-worker handler', () => {
         S: MOCK_SUBSCRIPTION_ID,
       });
       expect(supersededEmissions()).toHaveLength(0);
+    });
+  });
+
+  describe('a late update for the subscription Stripe ended', () => {
+    it('acknowledges the event when the row refuses it', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      setupStripeEvent('customer.subscription.updated', mockSubscription());
+      // The row carries canceledAt and names this subscription, so DynamoDB
+      // refuses the conditional write.
+      ddbMock
+        .on(UpdateItemCommand)
+        .rejects(new ConditionalCheckFailedException({ message: 'ended', $metadata: {} }));
+
+      await expect(deliver()).resolves.toBeUndefined();
+      warnSpy.mockRestore();
     });
   });
 

@@ -307,6 +307,9 @@ async function updateBillingRecord({
         ':now': { S: new Date().toISOString() },
         ...backfill.values,
       },
+      // A late event for the subscription Stripe ended may not revive the row;
+      // an event for a new subscription id, after reactivation, still writes.
+      ConditionExpression: 'attribute_not_exists(canceledAt) OR subscriptionId <> :subId',
       guardAgainstScrub: { caller: 'subscription.updated' },
     },
   );
