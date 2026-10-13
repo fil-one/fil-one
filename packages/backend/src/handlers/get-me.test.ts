@@ -760,26 +760,30 @@ describe('GET /api/me handler', () => {
       expect(parseBody(result).orgsBeta).toBe(true);
     });
 
+    const verifiedFoundationCaller = {
+      sub: MOCK_SUB,
+      email: 'any-person@fil.org',
+      email_verified: true,
+    };
+
     it('is true for a verified @fil.org caller who holds no row', async () => {
-      mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: 'any-person@fil.org', email_verified: true },
-      });
+      mockJwtVerify.mockResolvedValue({ payload: verifiedFoundationCaller });
       profileResolves();
 
       const result = await handler(authenticatedEvent(), buildContext());
 
-      expect(parseBody(result).orgsBeta).toBe(true);
+      expect(parseBody(result)).toMatchObject({ orgsBeta: true });
     });
 
     it('is false for an unverified @fil.org caller who holds no row', async () => {
       mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: 'any-person@fil.org', email_verified: false },
+        payload: { ...verifiedFoundationCaller, email_verified: false },
       });
       profileResolves();
 
       const result = await handler(authenticatedEvent(), buildContext());
 
-      expect(parseBody(result).orgsBeta).toBe(false);
+      expect(parseBody(result)).toMatchObject({ orgsBeta: false });
     });
   });
 
