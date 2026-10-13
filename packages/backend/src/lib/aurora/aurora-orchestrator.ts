@@ -25,15 +25,18 @@ import {
   findAuroraAccessKeyByName,
 } from '../aurora/aurora-portal.ts';
 import {
-  getOperationsSamples,
-  getStorageSamples,
   getTenantStatus as getAuroraTenantStatusApi,
   mapFromModelsTenantStatus,
   mapToModelsTenantStatus,
   updateTenantStatus as updateAuroraTenantStatusApi,
-  getBucketStorageSamples,
   getTenantInfo,
+  deleteAuroraTenant,
 } from '../aurora/aurora-backoffice.ts';
+import {
+  getBucketStorageSamples,
+  getOperationsSamples,
+  getStorageSamples,
+} from './aurora-backoffice-metrics.ts';
 import { isOrgSetupComplete } from '../org-setup-status.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
@@ -60,6 +63,14 @@ export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting
 
 function getStage(): string {
   return process.env.FILONE_STAGE!;
+}
+
+/**
+ * Aurora serves tenant DELETE on its dev backoffice only; sst.config.ts sets the
+ * flag on every stage except production. Read per call so tests can flip it.
+ */
+function isTenantDeleteEnabled(): boolean {
+  return process.env.AURORA_TENANT_DELETE_ENABLED === 'true';
 }
 
 /** Object-lock and retention fields off a portal single-bucket response. */
@@ -122,8 +133,11 @@ export const auroraOrchestrator = {
           allowMissing: true,
           signal: opts?.signal,
         });
-        // TODO(FIL-919): delete the tenant once Aurora's Backoffice API exposes a
-        // DELETE. Until then buckets and objects survive the teardown.
+        // Disabling first cuts access even when Aurora refuses the DELETE (409:
+        // component setup incomplete, or another update in progress).
+        if (isTenantDeleteEnabled()) {
+          await deleteAuroraTenant({ tenantId, signal: opts?.signal });
+        }
       },
       { ...TENANT_DELETE_RETRY, signal: opts?.signal },
     );
@@ -319,11 +333,12 @@ export const auroraOrchestrator = {
 
   async getTenantInfo(tenantId: string, opts?: OrchestratorRequestOptions): Promise<TenantInfo> {
     const info = await getTenantInfo({ tenantId, signal: opts?.signal });
+    const limits = info.components?.s3?.properties?.limits;
     return {
       bucketCount: info.bucketCount ?? 0,
-      bucketLimit: info.bucketQuantityLimit ?? 100,
+      bucketLimit: limits?.bucketQuantityLimit ?? 100,
       keyCount: info.keyCount ?? 0,
-      accessKeyLimit: info.accessKeyQuantityLimit ?? 300,
+      accessKeyLimit: limits?.accessKeyQuantityLimit ?? 300,
       status: mapFromModelsTenantStatus(info.status),
     };
   },
