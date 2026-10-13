@@ -23,7 +23,9 @@ export function Spinner({
   const arc = circumference * 0.75;
 
   return (
-    <div className="flex flex-col items-center gap-3" role="status">
+    // Spans, not a div and a p: a spinner sits inside buttons, where only
+    // phrasing content is valid.
+    <span className="flex flex-col items-center gap-3" role="status">
       <svg
         width={size}
         height={size}
@@ -56,7 +58,7 @@ export function Spinner({
           transform={`rotate(-90 ${size / 2} ${size / 2})`}
         />
       </svg>
-      {message && <p className="text-xs leading-relaxed text-zinc-500">{message}</p>}
-    </div>
+      {message && <span className="text-xs leading-relaxed text-zinc-500">{message}</span>}
+    </span>
   );
 }

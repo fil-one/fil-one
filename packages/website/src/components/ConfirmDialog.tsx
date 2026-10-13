@@ -4,7 +4,6 @@ import { WarningCircleIcon } from '@phosphor-icons/react/dist/ssr';
 import { Modal, ModalBody, ModalFooter } from './Modal';
 import { Button } from './Button';
 import { IconBox } from './IconBox';
-import { Spinner } from './Spinner';
 
 export type ConfirmDialogProps = {
   open: boolean;
@@ -73,10 +72,11 @@ export function ConfirmDialog({
             id="confirm-dialog-confirm-button"
             variant="destructive"
             className="flex-1"
-            disabled={loading || confirmDisabled}
+            disabled={confirmDisabled}
+            loading={loading}
+            loadingLabel="Processing"
             onClick={() => void handleConfirm()}
           >
-            {loading && <Spinner ariaLabel="Processing" size={14} />}
             {confirmLabel}
           </Button>
         </div>
