@@ -16,7 +16,7 @@
     "@aws-sdk/util-dynamodb": "^3.996.2",
     "@filone/aurora-backoffice-client": "workspace:*",
     "@filone/aurora-portal-client": "workspace:*",
-    "sst": "^4.5.12",
+    "sst": "^4.17.2",
     "stripe": "^22.0.2"
   },
   "devDependencies": {

@@ -208,7 +208,7 @@ function ActionMenu({ onRotate, onDelete }: { onRotate?: () => void; onDelete?: 
         <div
           ref={menuRef}
           style={{ top: pos.top, right: pos.right }}
-          className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
+          className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-md"
         >
           {onRotate && (
             <button

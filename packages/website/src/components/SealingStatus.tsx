@@ -10,11 +10,12 @@ import { DOCS_URL } from '@filone/shared';
 
 import { Badge } from './Badge.js';
 import { Button } from './Button.js';
+import { Card } from './Card.js';
 import { IconBox } from './IconBox.js';
 
 export function SealingStatus() {
   return (
-    <div className="mb-6 rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+    <Card className="mb-6">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
@@ -39,6 +40,6 @@ export function SealingStatus() {
           Go to buckets →
         </Button>
       </div>
-    </div>
+    </Card>
   );
 }

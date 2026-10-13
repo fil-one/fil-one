@@ -45,9 +45,9 @@
     "lint-staged": "^16.4.0",
     "oxfmt": "^0.45.0",
     "oxlint": "^1.87.0",
-    "oxlint-plugin-complexity": "^2.1.1",
+    "oxlint-plugin-complexity": "^3.0.1",
     "oxlint-tsgolint": "^7.0.2003",
-    "sst": "^4.5.12"
+    "sst": "^4.17.2"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs}": "oxlint --disable-nested-config --report-unused-disable-directives",
