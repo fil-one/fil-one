@@ -771,6 +771,9 @@ export default $config({
         : 'https://api-portal.dev.aur.lu/api',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
+      // Aurora serves tenant DELETE on its dev backoffice only. Turn it on for
+      // production once Aurora ships it there.
+      AURORA_TENANT_DELETE_ENABLED: isProduction ? 'false' : 'true',
     };
 
     const fthEnv = {
@@ -997,9 +1000,10 @@ export default $config({
     const allowedRedirectOrigins = allowedOrigins.join(',');
 
     // ── Account deletion ─────────────────────────────────────────────
-    // Off on every stage until FIL-919 gives Aurora a tenant DELETE. Gates the
-    // self-serve routes only — the customer.deleted trigger stays live. Keep in
-    // step with packages/website/src/lib/account-deletion.ts.
+    // Off on every stage until Aurora serves its tenant DELETE in production
+    // (AURORA_TENANT_DELETE_ENABLED). Gates the self-serve routes only — the
+    // customer.deleted trigger stays live. Keep in step with
+    // packages/website/src/lib/account-deletion.ts.
     const accountDeletionEnabled = 'false';
 
     // Catches payloads that exhaust Lambda's async retries. The sweeper

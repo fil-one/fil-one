@@ -1,6 +1,7 @@
 import {
   createClient,
   createTenantV2,
+  deleteTenant,
   createTenantTokenV2,
   getTenantV2,
   listTenantsV2,
@@ -354,7 +355,7 @@ export async function updateTenantStatus({
 }: {
   tenantId: string;
   status: ModelsTenantStatus;
-  /** Treat a 404 as success — for callers whose goal is the tenant being gone. */
+  /** Treat a 404 or 410 as success — for callers whose goal is the tenant being gone. */
   allowMissing?: boolean;
   /** Aborts the backoffice request. The caller owns the deadline. */
   signal?: AbortSignal;
@@ -371,8 +372,38 @@ export async function updateTenantStatus({
   });
 
   if (error) {
-    if (allowMissing && response?.status === 404) return;
+    // 410: Aurora has started deleting the tenant, which also leaves it gone.
+    if (allowMissing && (response?.status === 404 || response?.status === 410)) return;
     throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
+}
+
+// Aurora tears the tenant down asynchronously and the call is idempotent:
+// repeating it resumes an interrupted teardown. A 404 means the tenant is
+// already gone, which is the goal.
+export async function deleteAuroraTenant({
+  tenantId,
+  signal,
+}: {
+  tenantId: string;
+  /** Aborts the backoffice request. The caller owns the deadline. */
+  signal?: AbortSignal;
+}): Promise<void> {
+  const partnerId = process.env.AURORA_PARTNER_ID!;
+  const client = createBackofficeClient();
+
+  const { error, response } = await deleteTenant({
+    client,
+    signal,
+    path: { partnerId, tenantId },
+    throwOnError: false,
+  });
+
+  if (error) {
+    if (response?.status === 404) return;
+    throw new Error(`Aurora tenant deletion failed for tenant ${tenantId}`, {
       cause: error,
     });
   }
