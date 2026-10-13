@@ -30,7 +30,7 @@ jobs:
         run: pnpm build
 
       - name: Test
-        run: pnpm test
+        run: pnpm test:unit
 
   check-storybook:
     runs-on: ubuntu-latest
