@@ -7,7 +7,6 @@ import { Modal, ModalBody, ModalFooter, ModalHeader } from '../Modal';
 import { Input } from '../Input';
 import { Textarea } from '../TextArea';
 import { Button } from '../Button';
-import { Spinner } from '../Spinner';
 import { useToast } from '../Toast';
 import { getMe } from '../../lib/api.js';
 import { submitContactSalesForm } from '../../lib/hubspot.js';
@@ -158,19 +157,13 @@ export function ContactSalesDialog({ open, onClose }: ContactSalesDialogProps) {
         </Button>
         <Button
           variant="primary"
-          icon={submitting ? undefined : PaperPlaneTiltIcon}
+          icon={PaperPlaneTiltIcon}
           onClick={() => void handleSubmit()}
-          disabled={submitting}
+          loading={submitting}
+          loadingLabel="Sending"
           className="flex-1"
         >
-          {submitting ? (
-            <span className="flex items-center gap-2">
-              <Spinner ariaLabel="Sending" size={14} />
-              Sending…
-            </span>
-          ) : (
-            'Send message'
-          )}
+          {submitting ? 'Sending…' : 'Send message'}
         </Button>
       </ModalFooter>
     </Modal>
