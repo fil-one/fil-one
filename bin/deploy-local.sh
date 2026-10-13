@@ -6,8 +6,8 @@ set -euo pipefail
 # Usage: pnpm deploy:local            (stage defaults to "local")
 #        STAGE=mine pnpm deploy:local
 #
-# Requires `floci start`. Unset secrets get a placeholder; set the real ones with
-#   eval "$(floci env)" && LOCAL=true pnpm exec sst secret set <Name> --stage local
+# Requires `pnpm floci:start`. Unset secrets get a placeholder; README.md's
+# "Setting secrets" sets the real ones.
 # Login needs Auth0ClientId/Secret for the shared dev tenant, with
 # https://localhost:5173 registered there (docs/Auth0OneTimeSetup.md). Billing needs
 # a sandbox StripeSecretKey/StripePublishableKey/StripePriceId and the Stripe CLI.
@@ -18,8 +18,7 @@ cd "$(dirname "$0")/.."
 STAGE="${STAGE:-local}"
 
 missing=()
-tools=(floci pnpm node aws)
-[ "${SMELT:-}" = true ] && tools+=(docker)
+tools=(docker pnpm node aws)
 for bin in "${tools[@]}"; do
   command -v "$bin" >/dev/null || missing+=("$bin")
 done
@@ -28,13 +27,11 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
-eval "$(floci env)"
-if command -v docker >/dev/null &&
-  [ "$(docker inspect floci --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
+source bin/floci-env.sh
+if [ "$(docker inspect floci --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
     sed -n 's/^FLOCI_STORAGE_MODE=//p')" != persistent ]; then
-  echo "warning: floci keeps state in memory; restart it with \`floci start --persist ~/.floci/data\`" >&2
+  echo "warning: floci keeps state in memory; restart it with \`pnpm floci:start\`" >&2
 fi
-unset AWS_PROFILE
 export LOCAL=true
 
 sst() { pnpm exec sst "$@" --stage "$STAGE"; }

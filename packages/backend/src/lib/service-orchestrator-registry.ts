@@ -22,11 +22,11 @@ function getForgeOrchestrator(
   id: string,
   region: S3Region,
   api: () => ForgeManagementApi,
-  s3?: { endpointUrl?: string; presignEndpointUrl?: string },
+  s3EndpointUrl?: string,
 ): ServiceOrchestrator {
   let orchestrator = forgeOrchestrators.get(id);
   if (!orchestrator) {
-    orchestrator = createForgeOrchestrator(id, region, api(), s3);
+    orchestrator = createForgeOrchestrator(id, region, api(), s3EndpointUrl);
     forgeOrchestrators.set(id, orchestrator);
   }
   return orchestrator;
@@ -54,10 +54,7 @@ export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator 
             baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
             accessToken: Resource.ForgeDevManagementApiToken.value,
           }),
-          {
-            endpointUrl: process.env.FORGE_DEV_S3_ENDPOINT_URL,
-            presignEndpointUrl: process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL,
-          },
+          process.env.FORGE_DEV_S3_ENDPOINT_URL,
         );
     }
   }

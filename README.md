@@ -146,6 +146,8 @@ pnpm exec playwright install --with-deps
 | `E2E_UNPAID_EMAIL` / `E2E_UNPAID_PASSWORD` / `E2E_UNPAID_USER_ID` | Unpaid test user                                      |
 | `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`    | Trial test user                                       |
 
+On a stack where the accounts do not exist yet, such as a fresh [local stack](#local-stack), set `E2E_<ROLE>_AUTH0_ID` (the account's Auth0 `sub`) instead of `E2E_<ROLE>_USER_ID`. The setup then creates the account on first login, names its org, claims its trial, and records the user id in `.auth/<role>.user-id`.
+
 In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`) so the billing-state reset can write to the staging `BillingTable`.
 
 #### Seeded buckets per region
@@ -181,7 +183,7 @@ After a run, an HTML report is generated at `playwright-report/`. To view it:
 pnpm exec playwright show-report
 ```
 
-> CI runs these tests automatically against preview deployments on PRs.
+> On every PR, [.github/workflows/e2e-local.yaml](.github/workflows/e2e-local.yaml) deploys the branch into floci and runs `full-chromium` and `multi-org` against it, with the `E2E_<ROLE>_AUTH0_ID` secrets. The stack starts empty, so each run creates new accounts, Stripe sandbox customers, and buckets in the hosted storage regions.
 
 #### Subscription state reset
 
@@ -205,10 +207,9 @@ The `.auth/` directory is gitignored — the JSON files are regenerated on every
 
 1. Add an entry to [tests/e2e/roles.ts](tests/e2e/roles.ts) `STORAGE_STATE`.
 2. Add the role's desired subscription state to `DESIRED_STATE` in [tests/e2e/billing-reset.ts](tests/e2e/billing-reset.ts).
-3. Add the role to the `roles` array in [tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) (with `email`, `password`, `userId`).
-4. Add `E2E_<ROLE>_EMAIL`, `E2E_<ROLE>_PASSWORD`, `E2E_<ROLE>_USER_ID` to `REQUIRED_CREDENTIAL_VARS` in [playwright.config.ts](playwright.config.ts).
-5. Add the same three vars to the `env:` block in both [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml), and provision the corresponding GitHub secrets.
-6. If the role needs a seeded bucket per region, add it to `SEED_PLAN` in [tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts), with `needsActiveSubscription: true` when its desired subscription state blocks writes.
+3. Add the role to `ROLES` in [tests/e2e/destructive/auth.setup.ts](tests/e2e/destructive/auth.setup.ts).
+4. Add `E2E_<ROLE>_EMAIL`, `E2E_<ROLE>_PASSWORD` and `E2E_<ROLE>_USER_ID` to the `env:` block in both [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml), the same with `E2E_<ROLE>_AUTH0_ID` instead of `_USER_ID` in [.github/workflows/e2e-local.yaml](.github/workflows/e2e-local.yaml), and provision the corresponding GitHub secrets.
+5. If the role needs a seeded bucket per region, add it to `SEED_PLAN` in [tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts), with `needsActiveSubscription: true` when its desired subscription state blocks writes.
 
 #### Multi-org suite
 
@@ -217,7 +218,7 @@ The `.auth/` directory is gitignored — the JSON files are regenerated on every
 Against staging it runs as part of `pnpm test:e2e`. Against a [local stack](#local-stack) whose console runs on a port other than 5173, keep `BASE_URL` at `https://localhost:5173`, the only origin Auth0 accepts, and set `E2E_ORIGIN_REWRITE` to the real origin. The fixture then reroutes the browser's requests there:
 
 ```bash
-eval "$(floci env)"; export LOCAL=true AWS_REGION=us-east-1
+source bin/floci-env.sh; export LOCAL=true
 BASE_URL=https://localhost:5173 E2E_ORIGIN_REWRITE=https://localhost:5185 \
   pnpm exec sst shell --stage local-org -- pnpm exec playwright test --project=multi-org --workers=1
 ```
@@ -259,17 +260,17 @@ The console runs on the Vite dev server at `https://localhost:5173` and calls th
 
 #### Requirements
 
-| Tool                                                   | Needed for                                          |
-| ------------------------------------------------------ | --------------------------------------------------- |
-| [floci CLI](https://github.com/floci-io/floci), Docker | The emulator.                                       |
-| Node.js, pnpm                                          | Building and deploying.                             |
-| AWS CLI                                                | Writing the Stripe webhook secret into floci's SSM. |
-| [Stripe CLI](https://docs.stripe.com/stripe-cli)       | Forwarding webhooks. Optional; billing needs it.    |
+| Tool                                             | Needed for                                          |
+| ------------------------------------------------ | --------------------------------------------------- |
+| Docker                                           | Running [floci](https://github.com/floci-io/floci). |
+| Node.js, pnpm                                    | Building and deploying.                             |
+| AWS CLI                                          | Writing the Stripe webhook secret into floci's SSM. |
+| [Stripe CLI](https://docs.stripe.com/stripe-cli) | Forwarding webhooks. Optional; billing needs it.    |
 
 A local stage talks to the same hosted services as a personal dev stack:
 
 - Auth0: local stages use the shared dev tenant. Login redirects back to `https://localhost:5173/api/auth/callback`, which has to be registered in that tenant once (see [`docs/Auth0OneTimeSetup.md`](docs/Auth0OneTimeSetup.md)). Set `Auth0ClientId`, `Auth0ClientSecret`, `Auth0MgmtRuntimeClientId` and `Auth0MgmtRuntimeClientSecret`.
-- Stripe: use a sandbox. Set `StripeSecretKey`, `StripePublishableKey` and `StripePriceId` from it, and create a billing meter with event name `gb_month_meter` there. Run `stripe login` against the same sandbox.
+- Stripe: use the sandbox that staging, PR previews and personal stages share; its `gb_month_meter` billing meter already exists. Set `StripeSecretKey`, `StripePublishableKey` and `StripePriceId` from it, and run `stripe login` against it.
 - Storage providers: the Aurora, FTH and Forge regions work once their tokens are set. A region whose token is still a placeholder fails on first use.
 
 The deploy skips `SetupStack`, so it registers nothing in Auth0 or Stripe and there is nothing to clean up in either when the stage is removed.
@@ -279,8 +280,7 @@ The deploy skips `SetupStack`, so it registers nothing in Auth0 or Stripe and th
 The first deploy gives every unset secret the value `placeholder`. Replace the ones you need from a shell pointed at floci:
 
 ```bash
-eval "$(floci env)"
-unset AWS_PROFILE
+source bin/floci-env.sh
 export LOCAL=true SST_STAGE=local
 pnpm exec sst secret list                  # the header must read "# filone/local"
 pnpm exec sst secret set StripeSecretKey   # reads the value from stdin
@@ -291,11 +291,11 @@ Without `SST_STAGE` or `--stage`, SST falls back to the stage in `.sst/stage`, w
 #### Deploying
 
 ```bash
-floci start --persist ~/.floci/data
+pnpm floci:start
 pnpm deploy:local
 ```
 
-Start floci with `--persist`. Without it floci keeps everything in memory: a restart wipes the stage, its SST state and its secrets, and memory use grows with every deploy until floci runs out of heap and fails Lambda invocations with 500s.
+`pnpm floci:start` runs floci in Docker with its state in `~/.floci/data` (`FLOCI_DATA` picks another directory). `FLOCI_DATA=` keeps everything in memory instead: a restart then wipes the stage, its SST state and its secrets, and memory use grows with every deploy until floci runs out of heap and fails Lambda invocations with 500s.
 
 The script checks the required tools, fills missing secrets with placeholders, builds, and deploys. When `stripe login` has been run, it stores the `stripe listen` signing secret in floci's SSM; the secret stays the same across `stripe listen` restarts. It ends by printing the API URL and two commands:
 
@@ -330,23 +330,21 @@ mkdir -p packages/website/.cert && cd packages/website/.cert && mkcert localhost
 
 Smelt needs to run with `INGOT_REGION=us-east-9`, the region the console expects. The deploy then:
 
-- sets the Hilt URL to `http://host.docker.internal:15110` and the S3 endpoint to `http://host.docker.internal:15130` (`SMELT_HOST` overrides the host name), with presigned URLs on `http://localhost:15130`;
+- sets the Hilt URL to `http://host.docker.internal:15110` (`SMELT_HOST` overrides the host name) and the S3 endpoint to `http://ingot.localhost:15130`;
 - copies smelt's Hilt partner key into the stage's `ForgeDevManagementApiToken`.
 
 The partner key replaces any hosted Forge dev token on the stage. To go back to the hosted network, set `ForgeDevManagementApiToken` again and deploy without `SMELT`.
 
-floci's Lambda containers reach smelt through `host.docker.internal`. Presigned URLs, which the browser fetches directly, use `http://localhost:15130` instead: an `https://` page may fetch `http://localhost` but not other plain-HTTP hosts.
-
-Ingot only accepts browser requests from origins in `cors_allowed_origins` (`systems/ingot/config/config.yaml` in smelt). Add `https://localhost:5173` there and restart Ingot. To test Hilt changes, rebuild smelt's workspace binaries as its README describes; smelt runs whatever binary it last built.
+Lambdas and the browser reach Ingot under the same name, so presigned URLs carry the host they were signed for. Browsers resolve `*.localhost` to loopback and let an `https://` page fetch it over plain HTTP; `pnpm floci:start` gives floci's Lambda containers an `/etc/hosts` entry pointing `ingot.localhost` at the host. Smelt's Ingot admits `https://localhost:5173` in its `cors_allowed_origins`. To test Hilt changes, rebuild smelt's workspace binaries as its README describes; smelt runs whatever binary it last built.
 
 #### Removing
 
 ```bash
-eval "$(floci env)"
+source bin/floci-env.sh
 LOCAL=true pnpm exec sst remove --stage local
 ```
 
-With `--persist`, the stage lives in `~/.floci/data` and survives `floci stop --remove`. Deleting that directory resets the emulator.
+The stage lives in `~/.floci/data` and survives `docker rm -f floci`. Deleting that directory resets the emulator.
 
 ### Staging / Production
 
