@@ -13,9 +13,10 @@ export type ExpectedZodIssue = PartialIssue<z.core.$ZodIssue>;
 type PartialIssue<Issue> = Issue extends unknown ? Partial<Issue> : never;
 
 declare module 'vitest' {
-  // The type parameter must match vitest's own declaration for the merge to work.
-  // oxlint-disable-next-line typescript/no-explicit-any
-  interface Matchers<T = any> {
+  // The type parameters must match vitest's own declaration for the merge to
+  // work. `R` is the assertion's return type: `void`, or `Promise<void>` after
+  // `.resolves` and `.rejects`.
+  interface Matchers<R, T> {
     /**
      * Checks that a `safeParse()` result is a rejection with exactly these
      * issues, in this order.
@@ -26,7 +27,7 @@ declare module 'vitest' {
      *   path: ['name'],
      * });
      */
-    toMatchZodValidationError: (...issues: [ExpectedZodIssue, ...ExpectedZodIssue[]]) => T;
+    toMatchZodValidationError: (...issues: [ExpectedZodIssue, ...ExpectedZodIssue[]]) => R;
   }
 }
 
