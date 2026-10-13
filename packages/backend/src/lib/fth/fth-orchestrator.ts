@@ -70,8 +70,24 @@ import type { FthManagementClient } from './fth-management-client.ts';
 import { instrumentClient } from './fth-api-metrics.ts';
 
 // FTH rejects a 1d timeseries spanning more than 92 days ("range exceeds 92 days
-// for interval 1d"); longer billing periods are fetched in chunks.
-const MAX_FTH_1D_RANGE_MS = 92 * 24 * 60 * 60 * 1000;
+// for interval 1d"); longer billing periods are fetched in 90-day chunks.
+const DAY_MS = 24 * 60 * 60 * 1000;
+const FTH_1D_CHUNK_MS = 90 * DAY_MS;
+
+// Chunk boundaries fall on UTC midnight, so the later chunk holds a boundary day whole.
+function splitFth1dRange(from: string, to: string): Array<{ from: string; to: string }> {
+  const fromMs = Date.parse(from);
+  if (!Number.isFinite(fromMs)) return [{ from, to }];
+  const dayStart = new Date(fromMs - (fromMs % DAY_MS)).toISOString();
+  const ranges = splitTimeRange(dayStart, to, FTH_1D_CHUNK_MS);
+  ranges[0] = { ...ranges[0], from };
+  return ranges;
+}
+
+/** Dedupes by timestamp, keeping the last sample, in the original order. */
+function keepLastByTimestamp<T extends { timestamp: string }>(samples: T[]): T[] {
+  return dedupeByTimestamp([...samples].reverse()).reverse();
+}
 
 // Versioning / object-lock are applied as separate, idempotent S3 calls after the
 // bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
@@ -410,7 +426,7 @@ class FthOrchestrator implements ServiceOrchestrator {
     const interval = metricsOpts.interval ?? '1d';
     const ranges =
       interval === '1d'
-        ? splitTimeRange(metricsOpts.from, metricsOpts.to, MAX_FTH_1D_RANGE_MS)
+        ? splitFth1dRange(metricsOpts.from, metricsOpts.to)
         : [{ from: metricsOpts.from, to: metricsOpts.to }];
     const responses = await Promise.all(
       ranges.map((r) =>
@@ -435,8 +451,7 @@ class FthOrchestrator implements ServiceOrchestrator {
         timestamp: new Date(p.ts!).toISOString(),
         bytesUsed: p.egress_bytes ?? 0,
       }));
-    // A boundary day can come back from both adjacent chunks.
-    return { storage: dedupeByTimestamp(storage), egress: dedupeByTimestamp(egress) };
+    return { storage: keepLastByTimestamp(storage), egress: keepLastByTimestamp(egress) };
   }
 
   async getTenantInfo(

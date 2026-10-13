@@ -1140,48 +1140,49 @@ describe('fthOrchestrator.getTenantUsageMetrics', () => {
     );
   });
 
-  it('splits a 1d range over 92 days into chunks and merges their points once', async () => {
+  it('splits a 1d range over 90 days at UTC midnight and keeps the later chunk on a shared day', async () => {
     mockGetClientMetricsTimeseries
       .mockResolvedValueOnce({
         points: [
           { ts: '2026-01-01T00:00:00Z', usage_avg_bytes: 1, object_count_avg: 1, egress_bytes: 10 },
-          { ts: '2026-04-03T00:00:00Z', usage_avg_bytes: 2, object_count_avg: 2, egress_bytes: 20 },
+          // The boundary day as a zero-length sliver of the first chunk.
+          { ts: '2026-04-01T00:00:00Z', usage_avg_bytes: 0, object_count_avg: 0, egress_bytes: 0 },
         ],
       })
       .mockResolvedValueOnce({
         points: [
-          { ts: '2026-04-03T00:00:00Z', usage_avg_bytes: 2, object_count_avg: 2, egress_bytes: 20 },
+          { ts: '2026-04-01T00:00:00Z', usage_avg_bytes: 2, object_count_avg: 2, egress_bytes: 20 },
           { ts: '2026-05-30T00:00:00Z', usage_avg_bytes: 3, object_count_avg: 3, egress_bytes: 30 },
         ],
       });
 
     const result = await fthOrchestrator.getTenantUsageMetrics(
       fthClientId,
-      { from: '2026-01-01T00:00:00.000Z', to: '2026-05-31T00:00:00.000Z' },
+      { from: '2026-01-01T07:02:05.000Z', to: '2026-05-31T00:00:00.000Z' },
       { signal },
     );
 
     expect(mockGetClientMetricsTimeseries.mock.calls).toEqual([
       [
         fthClientId,
-        { from: '2026-01-01T00:00:00.000Z', to: '2026-04-03T00:00:00.000Z', interval: '1d' },
+        { from: '2026-01-01T07:02:05.000Z', to: '2026-04-01T00:00:00.000Z', interval: '1d' },
         { signal },
       ],
       [
         fthClientId,
-        { from: '2026-04-03T00:00:00.000Z', to: '2026-05-31T00:00:00.000Z', interval: '1d' },
+        { from: '2026-04-01T00:00:00.000Z', to: '2026-05-31T00:00:00.000Z', interval: '1d' },
         { signal },
       ],
     ]);
     expect(result).toEqual({
       storage: [
         { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 1, objectCount: 1 },
-        { timestamp: '2026-04-03T00:00:00.000Z', bytesUsed: 2, objectCount: 2 },
+        { timestamp: '2026-04-01T00:00:00.000Z', bytesUsed: 2, objectCount: 2 },
         { timestamp: '2026-05-30T00:00:00.000Z', bytesUsed: 3, objectCount: 3 },
       ],
       egress: [
         { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 10 },
-        { timestamp: '2026-04-03T00:00:00.000Z', bytesUsed: 20 },
+        { timestamp: '2026-04-01T00:00:00.000Z', bytesUsed: 20 },
         { timestamp: '2026-05-30T00:00:00.000Z', bytesUsed: 30 },
       ],
     });
