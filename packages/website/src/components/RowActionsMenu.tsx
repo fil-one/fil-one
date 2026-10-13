@@ -73,8 +73,10 @@ export function RowActionsMenu({
       <MenuItems
         anchor="bottom end"
         // Sized to match `BucketActionMenu` — the console's canonical
-        // dropdown size (DESIGN.md rule 4a).
-        className="z-50 mt-1 min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-md focus:outline-none"
+        // dropdown size (DESIGN.md rule 4a). No outline on the panel: it holds
+        // focus while the arrow keys move between items, so the highlighted
+        // item is what shows a keyboard user where they are.
+        className="z-50 mt-1 min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-md outline-none"
       >
         {actions.map((action) => (
           <MenuItem key={action.label} disabled={action.disabled}>
@@ -90,7 +92,7 @@ export function RowActionsMenu({
                 // caller with no idea which item they are on.
                 action.destructive
                   ? 'text-red-600 data-focus:bg-red-50'
-                  : 'text-zinc-700 data-focus:bg-zinc-50',
+                  : 'text-zinc-700 data-focus:bg-zinc-100',
                 'disabled:cursor-not-allowed disabled:opacity-50',
               )}
             >
