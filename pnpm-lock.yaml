@@ -176,11 +176,11 @@ importers:
         specifier: workspace:*
         version: link:../shared
       '@middy/core':
-        specifier: ^7.2.2
-        version: 7.2.2
+        specifier: ^7.9.2
+        version: 7.9.2
       '@middy/http-header-normalizer':
-        specifier: ^7.2.2
-        version: 7.2.2
+        specifier: ^7.9.2
+        version: 7.9.2
       disposable-domains:
         specifier: ^2.0.1
         version: 2.0.1
@@ -1363,21 +1363,21 @@ packages:
       '@types/react': '>=16'
       react: '>=16'
 
-  '@middy/core@7.2.2':
-    resolution: {integrity: sha512-UO1skdDb0ZRrbOlD4h0+FnOUqhT0YuA8ppuzNhaQGzz6CnQ3uYdKMrfgfoMChQ5HReNFhzejUa/LhRPX2CPvdA==}
+  '@middy/core@7.9.2':
+    resolution: {integrity: sha512-3VJ8m6KjGyMMHjgbmAxHai8f97VOU71XTyjFI+lnLqC0Dng+5zxXfuagFXUQTHRL2xj16p+mKmWtbTnxkwF5zw==}
     engines: {node: '>=22'}
     peerDependencies:
-      '@aws/durable-execution-sdk-js': ^1.0.0
+      '@aws/durable-execution-sdk-js': ^2.0.0
     peerDependenciesMeta:
       '@aws/durable-execution-sdk-js':
         optional: true
 
-  '@middy/http-header-normalizer@7.2.2':
-    resolution: {integrity: sha512-pbcAEdb+I/ShEaDjz0bOoZiD4biHraIb2l8qXEGlxrNfiyfooP15wrQ4JW/10C6BQsYka1OuEqOg7ju01GLpgg==}
+  '@middy/http-header-normalizer@7.9.2':
+    resolution: {integrity: sha512-er/x7UGiDPO4tYiyZx2Hi4Qh99SQbj5/aa1m15OKhOZFiaOlrnfbyzMiPNAeSIgBZ2clJVrxL74RTL4BSAjqLA==}
     engines: {node: '>=22'}
 
-  '@middy/util@7.2.2':
-    resolution: {integrity: sha512-f9oCObbYpKf7uhYP3tl+NKrOBg5sHNIVxxIM+wiMETb4jExpGUkssn1pXj81lqx8LsIYj0Z47wz73ibMIkIJNg==}
+  '@middy/util@7.9.2':
+    resolution: {integrity: sha512-H2NDN08V2LKk04mnEOH0PMuSTckKpbYXamL2BsGP/QigQx0uXKaVISVK9/DLLEp3VxJofBTTBXK1QT0lypm8gg==}
     engines: {node: '>=22'}
 
   '@noble/hashes@1.8.0':
@@ -6590,13 +6590,15 @@ snapshots:
       '@types/react': 19.2.14
       react: 19.2.5
 
-  '@middy/core@7.2.2':
+  '@middy/core@7.9.2':
     dependencies:
-      '@middy/util': 7.2.2
+      '@middy/util': 7.9.2
 
-  '@middy/http-header-normalizer@7.2.2': {}
+  '@middy/http-header-normalizer@7.9.2':
+    dependencies:
+      '@middy/util': 7.9.2
 
-  '@middy/util@7.2.2': {}
+  '@middy/util@7.9.2': {}
 
   '@noble/hashes@1.8.0':
     optional: true
