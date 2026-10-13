@@ -148,7 +148,7 @@ export function BucketsPage() {
         onClose={cancelDelete}
         onConfirm={confirmDelete}
         title="Delete bucket"
-        description="This bucket will be permanently deleted. The bucket must be empty — delete its objects and object versions first."
+        description="This bucket will be permanently deleted. The bucket must be empty: delete its objects and object versions first."
         confirmLabel="Delete bucket"
       />
     </PageLayout>
