@@ -68,6 +68,14 @@ describe('hasOrgsBetaAccess', () => {
     }
   });
 
+  it('grants a verified @fil.org email without reading either row', async () => {
+    // Foundation staff are in the beta by default, as they are for RAG.
+    expect(await hasOrgsBetaAccess({ verifiedEmail: 'Any-Person@FIL.org', orgId: ORG_ID })).toBe(
+      true,
+    );
+    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(0);
+  });
+
   it('makes no read at all for a caller with no verified email and no org grant', async () => {
     await hasOrgsBetaAccess({ orgId: ORG_ID });
 

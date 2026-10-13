@@ -62,7 +62,7 @@ export function getRegionLabel(region: S3RegionLike | null | undefined): string 
   return REGION_LABELS[r as S3Region] ?? r;
 }
 
-/** Filecoin Foundation email domain, allowlisted for early-access features (e.g. RAG). */
+/** Filecoin Foundation email domain, allowlisted for early-access features (RAG, the organizations beta). */
 export const FOUNDATION_EMAIL_DOMAIN = '@fil.org';
 
 /**
