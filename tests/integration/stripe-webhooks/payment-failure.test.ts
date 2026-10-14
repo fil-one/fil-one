@@ -12,6 +12,7 @@ import {
   pollForPaymentMethod,
   getBillingRecord,
   testOrgId,
+  waitForEventHandled,
   waitForWebhookMark,
 } from './helpers.js';
 
@@ -74,6 +75,20 @@ describe('Payment Failure (customer.subscription.updated to past_due)', () => {
       sk: { S: 'EVENT' },
       eventType: { S: 'invoice.payment_failed' },
       processedAt: { S: expect.any(String) },
+      ttl: { N: expect.any(String) },
+    });
+  });
+
+  it('records the event as handled once the worker has processed it', async () => {
+    const invoiceId = await createAndFailInvoice(cusId);
+
+    const { eventId, handled } = await waitForEventHandled('invoice.payment_failed', invoiceId);
+
+    expect(handled).toStrictEqual({
+      pk: { S: `WEBHOOK#${eventId}` },
+      sk: { S: 'HANDLED' },
+      eventType: { S: 'invoice.payment_failed' },
+      handledAt: { S: expect.any(String) },
       ttl: { N: expect.any(String) },
     });
   });

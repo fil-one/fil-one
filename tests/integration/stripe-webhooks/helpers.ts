@@ -273,6 +273,32 @@ export async function advancePastPeriodEnd(clockId: string, subscriptionId: stri
   await pollTestClockReady({ clockId });
 }
 
+/** The Stripe event about `objectId`, then the WEBHOOK#<eventId> item under `sk`. */
+async function waitForWebhookItem(
+  eventType: string,
+  objectId: string,
+  sk: 'EVENT' | 'HANDLED',
+): Promise<{ eventId: string; item: Record<string, AttributeValue> }> {
+  const eventId = await pollUntil(async () => {
+    const { data } = await getStripeClient().events.list({ type: eventType, limit: 20 });
+    // Every object an event carries has an id; Stripe types data.object as a
+    // union that does not say so.
+    const event = data.find((e) => (e.data.object as { id?: string }).id === objectId);
+    return event?.id ?? null;
+  }, 60_000);
+
+  const item = await pollUntil(async () => {
+    const { Item } = await getDynamoClient().send(
+      new GetItemCommand({
+        TableName: getBillingTableName(),
+        Key: { pk: { S: `WEBHOOK#${eventId}` }, sk: { S: sk } },
+      }),
+    );
+    return Item ?? null;
+  }, 60_000);
+  return { eventId, item };
+}
+
 /**
  * The mark the webhook writes once it has queued the Stripe event about
  * `objectId`. Without it, a duplicate Stripe sends after the queue's 5-minute
@@ -282,34 +308,21 @@ export async function waitForWebhookMark(
   eventType: string,
   objectId: string,
 ): Promise<{ eventId: string; mark: Record<string, AttributeValue> }> {
-  const eventId = await pollUntil(async () => {
-    const { data } = await getStripeClient().events.list({ type: eventType, limit: 20 });
-    // Every object an event carries has an id; Stripe types data.object as a
-    // union that does not say so.
-    const event = data.find((e) => (e.data.object as { id?: string }).id === objectId);
-    return event?.id ?? null;
-  }, 60_000);
-
-  const mark = await pollUntil(async () => {
-    const { Item } = await getDynamoClient().send(
-      new GetItemCommand({
-        TableName: getBillingTableName(),
-        Key: { pk: { S: `WEBHOOK#${eventId}` }, sk: { S: 'EVENT' } },
-      }),
-    );
-    return Item ?? null;
-  }, 30_000);
-  return { eventId, mark };
+  const { eventId, item } = await waitForWebhookItem(eventType, objectId, 'EVENT');
+  return { eventId, mark: item };
 }
 
 /**
- * Wait until the worker has had the Stripe event about `objectId` in hand: the
- * settle window after the webhook's mark covers the worker that consumes the
- * queue, so a test can assert that the event changed nothing.
+ * Wait until the worker has handled the Stripe event about `objectId`, so a
+ * test can assert that the event changed nothing. The worker records each
+ * event once its handler has returned.
  */
-export async function waitForEventHandled(eventType: string, objectId: string): Promise<void> {
-  await waitForWebhookMark(eventType, objectId);
-  await sleep(10 * 1000);
+export async function waitForEventHandled(
+  eventType: string,
+  objectId: string,
+): Promise<{ eventId: string; handled: Record<string, AttributeValue> }> {
+  const { eventId, item } = await waitForWebhookItem(eventType, objectId, 'HANDLED');
+  return { eventId, handled: item };
 }
 
 /**
