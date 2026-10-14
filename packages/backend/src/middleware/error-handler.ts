@@ -1,7 +1,13 @@
 import type { MiddlewareObj, Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
+import type { ErrorResponse } from '@filone/shared';
+import { IamRegionRefusedError } from '../lib/errors.ts';
 import { OrgDeletingError } from '../lib/org-profile.ts';
-import { accountDeletedResponse, unexpectedFailureResponse } from '../lib/response-builder.ts';
+import {
+  ResponseBuilder,
+  accountDeletedResponse,
+  unexpectedFailureResponse,
+} from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
 export function errorHandlerMiddleware(): MiddlewareObj<
@@ -19,6 +25,21 @@ export function errorHandlerMiddleware(): MiddlewareObj<
         orgId: request.error.orgId,
       });
       request.response = accountDeletedResponse();
+      return;
+    }
+
+    // A storage region would not register or remove the member's principal, so
+    // the membership write was refused and the same request tries again.
+    if (request.error instanceof IamRegionRefusedError) {
+      const { action, regions } = request.error;
+      console.warn('[error-handler] membership write refused by an iam region', {
+        action,
+        regions,
+      });
+      request.response = new ResponseBuilder()
+        .status(502)
+        .body<ErrorResponse>({ message: getIamRegionRefusedMessage(action, regions.join(', ')) })
+        .build();
       return;
     }
 
@@ -41,4 +62,10 @@ export function errorHandlerMiddleware(): MiddlewareObj<
   };
 
   return { onError };
+}
+
+function getIamRegionRefusedMessage(action: 'register' | 'remove', regions: string): string {
+  return action === 'remove'
+    ? `The member could not be removed from ${regions}, so they are still in this organization. Try again.`
+    : `The invitation could not be accepted on ${regions}. Try again.`;
 }

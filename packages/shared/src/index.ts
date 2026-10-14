@@ -114,7 +114,6 @@ export type {
   ListMembersResponse,
   MemberSummary,
   AccessKeySummary,
-  PolicySyncReport,
   RemoveMemberResponse,
   RoleChangePreviewResponse,
   UpdateMemberRoleFailure,
@@ -249,7 +248,6 @@ export type {
   PolicyEffect,
   PolicyStatement,
   PutBucketPolicyRequest,
-  Roster,
 } from './api/bucket-policies.ts';
 export {
   DELETION_CODE_LENGTH,

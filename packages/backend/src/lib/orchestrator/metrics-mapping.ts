@@ -1,4 +1,5 @@
 // Translating the Management API's metrics shapes into the interface's.
+// Pure, and split out so orchestrator.ts stays within its line budget.
 
 import type { TenantStatus } from '@filone/shared';
 import type { Metrics } from '@filone/orchestrator-client';

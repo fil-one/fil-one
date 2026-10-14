@@ -18,6 +18,7 @@ import {
   membershipRows,
   ownerCountItem,
 } from '../lib/membership-changes.ts';
+import { registerNewMember } from '../lib/member-principals.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
 import {
   OrgDeletingError,
@@ -94,6 +95,11 @@ export async function baseHandler(
   ]);
   const items = existing ? [] : joinItems(invitation, userId);
   const labels = existing ? [] : joinLabels(invitation);
+
+  // A new member becomes a principal on each region serving the `iam` access
+  // model before the membership is written, so a region that refuses leaves
+  // them out of the org and the same request tries again.
+  if (!existing) await registerNewMember({ orgId: invitation.orgId, userId });
 
   try {
     await commitAudited({

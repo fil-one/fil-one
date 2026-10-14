@@ -27,6 +27,8 @@ import { PolicyValidationError } from '../errors.ts';
 import { FilOneOrchestrator } from './orchestrator.ts';
 
 const ALICE = '00000000-0000-0000-0000-00000000000a';
+/** A principal the storage system does not know. */
+const GHOST = '00000000-0000-0000-0000-0000000000ee';
 
 const tenantId = '00000000-0000-0000-0000-000000000001';
 const policy: BucketPolicy = {
@@ -104,4 +106,29 @@ describe('principals', () => {
       { bucketName: 'photos', actions: ['s3:GetObject'] },
     ]);
   });
+
+  it.each([
+    {
+      read: 'listBucketPoliciesForMember',
+      arrange: () => mockListPrincipalPolicies.mockResolvedValue(fail(404)),
+      call: () => orchestrator.listBucketPoliciesForMember(tenantId, GHOST),
+    },
+    {
+      read: 'resolveMemberAccess',
+      arrange: () => mockGetPrincipalAccess.mockResolvedValue(fail(404)),
+      call: () => orchestrator.resolveMemberAccess(tenantId, GHOST),
+    },
+  ])(
+    '$read answers nothing for a principal the storage system does not know',
+    async ({ arrange, call }) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      arrange();
+
+      try {
+        await expect(call()).resolves.toStrictEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
 });

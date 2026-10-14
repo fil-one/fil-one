@@ -34,9 +34,6 @@ vi.mock('jose', () => ({
 // suite has no reason to stand up.
 const mockDeleteAccessKey = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  // No region serves the `iam` access model here, so the principal removal
-  // finds nothing to reach.
-  getAvailableOrchestrators: () => [],
   getOrchestratorForRegion: (region: string) => ({
     id: region === 'us-east-1' ? 'fth' : 'aurora',
     region,
@@ -47,15 +44,9 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
 
 // The principal removal on `iam` regions, stubbed so the suite can assert its
 // place in the order and what its refusal does; its own suite covers the call.
-const mockRemovePrincipals = vi.fn(async (_args: unknown) => ({
-  removed: [] as string[],
-  failed: [] as string[],
-}));
-vi.mock('../lib/iam-policy-fanout.ts', async () => ({
-  ...(await vi.importActual<typeof import('../lib/iam-policy-fanout.ts')>(
-    '../lib/iam-policy-fanout.ts',
-  )),
-  removeMemberPrincipalFromIamRegions: (args: unknown) => mockRemovePrincipals(args),
+const mockRemoveMemberPrincipal = vi.fn(async (_args: unknown) => {});
+vi.mock('../lib/member-principals.ts', () => ({
+  removeMemberPrincipal: (args: unknown) => mockRemoveMemberPrincipal(args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -68,6 +59,7 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './remove-member.ts';
+import { IamRegionRefusedError } from '../lib/errors.ts';
 import { OrgKeys } from '../lib/org-membership.ts';
 import { inviteExpiresAt } from '../lib/invitations.ts';
 import {
@@ -1119,6 +1111,7 @@ describe('the principal on iam regions', () => {
     ddbMock.reset();
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: EMAIL, email_verified: true },
     });
@@ -1137,16 +1130,15 @@ describe('the principal on iam regions', () => {
           orgId: { S: ORG_ID },
         },
       });
-    mockRemovePrincipals.mockResolvedValue({ removed: [], failed: [] });
+    mockRemoveMemberPrincipal.mockResolvedValue(undefined);
     callerHolds(OrgRole.Owner);
     targetHolds(OrgRole.Member);
   });
 
   it('removes the principal before writing the membership transaction', async () => {
     const order: string[] = [];
-    mockRemovePrincipals.mockImplementation(async () => {
+    mockRemoveMemberPrincipal.mockImplementation(async () => {
       order.push('principal');
-      return { removed: [S3Region.UsEast9], failed: [] };
     });
     ddbMock.on(TransactWriteItemsCommand).callsFake(() => {
       order.push('transaction');
@@ -1157,8 +1149,8 @@ describe('the principal on iam regions', () => {
 
     expect(result).toMatchObject({ statusCode: 200 });
     expect(order).toStrictEqual(['principal', 'transaction']);
-    expect(mockRemovePrincipals.mock.calls).toStrictEqual([
-      [{ orgId: ORG_ID, orgProfile: undefined, userId: TARGET_ID }],
+    expect(mockRemoveMemberPrincipal.mock.calls).toStrictEqual([
+      [{ orgProfile: undefined, userId: TARGET_ID }],
     ]);
   });
 
@@ -1173,7 +1165,7 @@ describe('the principal on iam regions', () => {
 
     await handler(removeEvent(), buildContext());
 
-    expect(mockRemovePrincipals).toHaveBeenCalledWith(
+    expect(mockRemoveMemberPrincipal).toHaveBeenCalledWith(
       expect.objectContaining({
         orgProfile: expect.objectContaining({ forgeDevTenantId: { S: 'tenant-fresh' } }),
       }),
@@ -1181,7 +1173,9 @@ describe('the principal on iam regions', () => {
   });
 
   it('leaves the member in the org when a region refuses to remove the principal', async () => {
-    mockRemovePrincipals.mockResolvedValue({ removed: [], failed: [S3Region.UsEast9] });
+    mockRemoveMemberPrincipal.mockRejectedValue(
+      new IamRegionRefusedError('remove', [S3Region.UsEast9]),
+    );
     ddbMock.on(TransactWriteItemsCommand).resolves({});
 
     const result = await handler(removeEvent(), buildContext());
