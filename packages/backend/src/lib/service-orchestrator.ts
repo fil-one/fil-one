@@ -110,7 +110,7 @@ export type RegionOrchestrator = LegacyServiceOrchestrator | ServiceOrchestrator
 
 /**
  * Whether the orchestrator serves bucket policies and members (fil-one/RFC#30).
- * A caller holding only a region asks the model of the region's network instead.
+ * A caller holding only a region asks `getRegionAccessModel` instead.
  */
 export function supportsBucketPolicies(
   orchestrator: RegionOrchestrator,

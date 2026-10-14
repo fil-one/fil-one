@@ -4,11 +4,7 @@ import type {
   CreateAccessKeyRequest,
   CreateServiceAccessKeyRequest,
 } from '@filone/orchestrator-client';
-import {
-  supportsBucketPolicies,
-  type IssueAccessKeyOpts,
-  type LegacyServiceOrchestrator,
-} from '../service-orchestrator.ts';
+import type { IssueAccessKeyOpts } from '../service-orchestrator.ts';
 import { AccessKeyValidationError } from '../errors.ts';
 import { buildPermissions } from './permissions.ts';
 
@@ -16,19 +12,9 @@ import { buildPermissions } from './permissions.ts';
  * A principal-bound key sends only its name, `principalId` and expiry; a
  * service key sends its permissions and bucket list.
  */
-export function buildAccessKeyBody(
-  keyOpts: IssueAccessKeyOpts,
-  orchestrator: LegacyServiceOrchestrator,
-): CreateAccessKeyRequest {
+export function buildAccessKeyBody(keyOpts: IssueAccessKeyOpts): CreateAccessKeyRequest {
   const expiresAt = keyOpts.expiresAt ?? null;
   if ('principalId' in keyOpts) {
-    // Only an orchestrator with members has principals to bind to. Aurora and
-    // FTH refuse the same way.
-    if (!supportsBucketPolicies(orchestrator)) {
-      throw new Error(
-        `${orchestrator.id} supports service keys only; a principal-bound key needs the IAM access model`,
-      );
-    }
     // The type forbids these; a non-literal object can still carry them, and
     // dropping them would mint a key the caller did not ask for. `bucketScope`
     // is a field of the create-key handler's request, not of these options,

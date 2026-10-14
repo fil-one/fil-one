@@ -66,15 +66,10 @@ import {
   BucketNotFoundError,
   PrincipalNotFoundError,
 } from '../errors.ts';
-import {
-  supportsBucketPolicies,
-  type IssueAccessKeyOpts,
-  type OrchestratorRequestOptions,
-} from '../service-orchestrator.ts';
+import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
-import { createFilOneOrchestrator } from './filone-orchestrator.ts';
-import type { FilOneOrchestratorConfig } from './orchestrator.ts';
+import { FilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).
@@ -91,16 +86,13 @@ function fail(status: number, message = 'error') {
   return { data: undefined, error: { message }, response: { status } };
 }
 
-function buildOrchestrator(
-  overrides?: Pick<Partial<FilOneOrchestratorConfig>, 'api' | 'accessModel'>,
-) {
-  return createFilOneOrchestrator({
+function buildOrchestrator(overrides?: Pick<Partial<FilOneOrchestratorConfig>, 'api'>) {
+  return new FilOneOrchestrator({
     id: 'forge',
     region: S3Region.UsEast1,
     stage: 'test',
     s3EndpointUrl: 'https://us-east-1.s3.test.example.com',
     api: overrides?.api ?? { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
-    accessModel: overrides?.accessModel,
   });
 }
 
@@ -130,7 +122,7 @@ beforeEach(() => {
   _resetS3CredentialsCacheForTesting();
 });
 
-describe('createFilOneOrchestrator config', () => {
+describe('FilOneOrchestrator config', () => {
   it('exposes the configured id and region', () => {
     expect(orchestrator.id).toBe('forge');
     expect(orchestrator.region).toBe(S3Region.UsEast1);
@@ -578,8 +570,6 @@ describe('getBucket', () => {
 });
 
 describe('issueAccessKey bound to a principal', () => {
-  // Only an orchestrator with members mints a principal-bound key.
-  const orchestrator = buildOrchestrator({ accessModel: 'iam' });
   const principalKeyCreated = {
     accessKeyId: 'did:key:z6Mk',
     name: 'laptop',
@@ -635,7 +625,6 @@ describe('issueAccessKey bound to a principal', () => {
 });
 
 describe('issueAccessKey 422 classification', () => {
-  const orchestrator = buildOrchestrator({ accessModel: 'iam' });
   function failWith422(message: string, code: string) {
     return { data: undefined, error: { message, code }, response: { status: 422 } };
   }
@@ -661,8 +650,6 @@ describe('issueAccessKey 422 classification', () => {
 });
 
 describe('issueAccessKey with a mixed shape', () => {
-  const orchestrator = buildOrchestrator({ accessModel: 'iam' });
-
   it.each([
     ['permissions', ['read']],
     ['granularPermissions', ['s3:GetObject']],
@@ -700,16 +687,6 @@ describe('issueAccessKey with a mixed shape', () => {
     // @ts-expect-error a principal-bound key carries no permissions of its own
     const opts: IssueAccessKeyOpts = { keyName: 'k', principalId: 'alice', permissions: ['read'] };
     expect(opts).toBeDefined();
-  });
-});
-
-describe('issueAccessKey on a legacy orchestrator', () => {
-  it('throws without calling the API when a legacy orchestrator gets a principal-bound key', async () => {
-    expect(supportsBucketPolicies(orchestrator)).toBe(false);
-    await expect(
-      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
-    ).rejects.toThrow(/needs the IAM access model/);
-    expect(mockCreateAccessKey).not.toHaveBeenCalled();
   });
 });
 

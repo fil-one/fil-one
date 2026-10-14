@@ -23,6 +23,7 @@ import {
   getAvailableOrchestrators,
 } from './service-orchestrator-registry.ts';
 import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
+import { supportsBucketPolicies } from './service-orchestrator.ts';
 
 afterEach(() => {
   delete process.env.FILONE_STAGE;
@@ -81,36 +82,20 @@ describe('getAvailableOrchestrators', () => {
   });
 });
 
-describe('the access model of each Forge network', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
+describe('bucket policies by region', () => {
+  it('are served by the Forge orchestrators and not by Aurora or FTH', () => {
+    process.env.FILONE_STAGE = Stage.Staging;
+
+    const served = getAvailableOrchestrators().map((orchestrator) => [
+      orchestrator.region,
+      supportsBucketPolicies(orchestrator),
+    ]);
+
+    expect(served).toStrictEqual([
+      [S3Region.EuWest1, false],
+      [S3Region.EuCentral3, true],
+      [S3Region.UsEast1, false],
+      [S3Region.UsEast9, true],
+    ]);
   });
-
-  // The registry caches each Forge orchestrator, so every case loads it afresh.
-  it.each([
-    ['iam', 'service-keys', { eu: true, us: false }],
-    ['service-keys', 'iam', { eu: false, us: true }],
-  ] as const)(
-    'serves bucket policies on the network set to iam (FORGE_ACCESS_MODEL=%s, FORGE_DEV_ACCESS_MODEL=%s)',
-    async (forge, forgeDev, expected) => {
-      process.env.FILONE_STAGE = Stage.Staging;
-      vi.stubEnv('FORGE_ACCESS_MODEL', forge);
-      vi.stubEnv('FORGE_DEV_ACCESS_MODEL', forgeDev);
-      vi.resetModules();
-      const registry = await import('./service-orchestrator-registry.ts');
-      const { supportsBucketPolicies } = await import('./service-orchestrator.ts');
-
-      const served = registry
-        .getAvailableOrchestrators()
-        .map((orchestrator) => [orchestrator.region, supportsBucketPolicies(orchestrator)]);
-
-      // Aurora and FTH never serve them, whatever the Forge networks run.
-      expect(served).toStrictEqual([
-        [S3Region.EuWest1, false],
-        [S3Region.EuCentral3, expected.eu],
-        [S3Region.UsEast1, false],
-        [S3Region.UsEast9, expected.us],
-      ]);
-    },
-  );
 });

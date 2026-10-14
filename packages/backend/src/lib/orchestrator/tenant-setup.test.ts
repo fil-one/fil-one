@@ -272,40 +272,18 @@ describe('ensureTenantReady', () => {
     's3:AbortMultipartUpload',
     's3:DeleteObject',
     's3:DeleteObjectVersion',
+    's3:GetBucketPolicy',
+    's3:PutBucketPolicy',
+    's3:DeleteBucketPolicy',
   ];
 
-  it('requests no bucket-configuration actions for the console key', async () => {
+  it('requests the bucket-policy actions but no bucket-configuration actions for the console key', async () => {
     stubHappyPath();
 
     await ensureTenantReady(deps, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
     expect(permissions).toStrictEqual(consoleKeyPermissions);
-  });
-
-  // Only an iam region's storage system knows the policy actions; a
-  // service-keys region refuses the whole key request over them.
-  it('omits the bucket-policy permissions from the console key on a service-keys region', async () => {
-    stubHappyPath();
-
-    await ensureTenantReady({ ...deps, accessModel: 'service-keys' }, orgId);
-
-    const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).toStrictEqual(consoleKeyPermissions);
-  });
-
-  it('adds the bucket-policy permissions to the console key on an iam region', async () => {
-    stubHappyPath();
-
-    await ensureTenantReady({ ...deps, accessModel: 'iam' }, orgId);
-
-    const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).toStrictEqual([
-      ...consoleKeyPermissions,
-      's3:GetBucketPolicy',
-      's3:PutBucketPolicy',
-      's3:DeleteBucketPolicy',
-    ]);
   });
 
   describe('409 recovery (crash between key creation and SSM write)', () => {
