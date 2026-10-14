@@ -53,13 +53,10 @@ its creator's authority. It left bucket scope to this milestone.
 
 ## Proposed access model
 
-Each Forge network declares the model its backend serves, `'service-keys' |
-'iam'`, in deploy config: the console's env file for the stage carries
-`VITE_FORGE_ACCESS_MODEL` and `VITE_FORGE_DEV_ACCESS_MODEL`, and `sst.config.ts`
-hands the backend the same values. A network moves to `iam` when its Hilt does,
-with no code change. A region takes the model of the network serving it
-(`getRegionNetwork`, `getNetworkAccessModel`); Aurora and FTH serve
-`service-keys`.
+The orchestrator serving a region decides the model, `'service-keys' | 'iam'`,
+because it defines which features it supports: Forge serves `iam`, Aurora and
+FTH serve `service-keys`. `getRegionAccessModel(region)` mirrors that for code
+holding only a region.
 
 A **principal** is a member as the storage system knows them, `(tenantId,
 userId)` and nothing more. It carries no permissions of its own: the storage
@@ -261,10 +258,10 @@ The interface splits by feature: `TenantOrchestrator`, `BucketOrchestrator`
 (with the S3 client context), `AccessKeyOrchestrator` and `UsageOrchestrator`,
 which every orchestrator serves, plus `BucketPolicyOrchestrator` and
 `MemberOrchestrator`. `ServiceOrchestrator` extends all six.
-`LegacyServiceOrchestrator` extends only the first four; Aurora, FTH and a Forge
-region not yet on IAM implement it, and it goes once every deployment implements
+`LegacyServiceOrchestrator` extends only the first four; Aurora and FTH implement
+it, and it goes once every deployment implements
 `ServiceOrchestrator`. A caller narrows with `supportsBucketPolicies`, and a
-caller holding only a region asks the model of the region's network.
+caller holding only a region asks `getRegionAccessModel`.
 
 The policy and member methods are shaped after AWS IAM, minus its request bodies:
 
@@ -398,9 +395,9 @@ refuses any bucket it does not know, which retires the warm chains by itself.
 ## The IAM contract for Forge
 
 These requirements are a revision of the management API contract and of the S3
-operations the gateway forwards to it, added as an optional capability set. A
-Forge region declares `iam` when its network serves that revision. Only Forge is
-asked to implement it. One Forge network serves one region, so a tenant id is
+operations the gateway forwards to it, required of every orchestrator that
+implements the contract. Every Forge network serves it. Only Forge is asked to
+implement it. One Forge network serves one region, so a tenant id is
 unique per region and the contract carries no region qualifier.
 
 **What Hilt has today.** Tenants, their access keys, and their buckets, plus the
@@ -471,25 +468,22 @@ Merges to `main` auto-deploy to production, so every step is independently
 production-safe and a migration ships as a script-only PR before anything that
 depends on it.
 
-1. The `accessModel` discriminant and the interface split, with every region
-   declaring `service-keys`. Merged, no behavior change.
+1. The interface split, with the Forge orchestrator serving `iam` and Aurora
+   and FTH serving `service-keys`.
 2. Role-narrowing revocation with its preview route, dialogs, email, and audit
    shape. Merged. It revokes nothing by itself; a key is revoked only by a later
    narrowing that leaves it above the new role.
-3. The IAM console surfaces, `buckets.policy_manage`, and the IAM fake. Dark,
-   because no region declares `iam`, and behind the `ORGS_BETA` row pattern
-   besides, where granting an org access is a row rather than a redeploy.
+3. The IAM console surfaces, `buckets.policy_manage`, and the IAM fake, behind
+   the `ORGS_BETA` row pattern, where granting an org access is a row rather
+   than a redeploy.
 4. The `getBucket` existence change and the access check on the routes that act
-   for a scoped member, both dark until a region declares `iam`.
-5. The per-network flip when a Hilt network ships the contract. The gateway
-   ships before the management API, since it has to enforce the new action sets
-   before any key depends on them. Every existing key keeps working as a
-   service key through the flip, the console's own credential included. The
-   console writes principals for existing members through the provisioning
-   sweep, writes a policy per bucket naming the org's Owners and Admins, and
-   changes the registry entry last. `eu-central-3` and `us-east-9` flip on
-   their own schedules. After the flip, Hilt availability gates membership
-   writes for orgs with a tenant on that network.
+   for a scoped member.
+5. Each Forge network runs the Hilt release with the contract before the
+   console that needs it deploys. Every existing key keeps working as a service
+   key, the console's own credential included. The console writes principals
+   for existing members through the provisioning sweep and writes a policy per
+   bucket naming the org's Owners and Admins. Hilt availability gates
+   membership writes for orgs with a Forge tenant.
 
 ## Options considered
 

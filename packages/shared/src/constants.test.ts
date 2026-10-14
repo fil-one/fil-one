@@ -15,9 +15,7 @@ import {
   AUTH0_DOMAIN_BY_CONSOLE_ORIGIN,
   getAvailableRegions,
   supportsBucketManagement,
-  getNetworkAccessModel,
-  getRegionNetwork,
-  parseAccessModel,
+  getRegionAccessModel,
   isFoundationEmail,
   isSupportedRegion,
   formatRegion,
@@ -27,7 +25,6 @@ import {
   S3Region,
   Stage,
 } from './constants.ts';
-import type { ForgeNetwork, NetworkAccessModels } from './constants.ts';
 
 describe('constants', () => {
   it('TB_BYTES equals 10^12', () => {
@@ -308,62 +305,18 @@ describe('supportsBucketManagement', () => {
   });
 });
 
-describe('getRegionNetwork', () => {
-  it('names the Forge network behind each region, and none for Aurora and FTH', () => {
-    const networks = Object.fromEntries(
-      Object.values(S3Region).map((region) => [region, getRegionNetwork(region)]),
+describe('getRegionAccessModel', () => {
+  it('answers iam for the Forge regions and service-keys for Aurora and FTH', () => {
+    const models = Object.fromEntries(
+      Object.values(S3Region).map((region) => [region, getRegionAccessModel(region)]),
     );
 
-    expect(networks).toStrictEqual({
-      [S3Region.EuWest1]: undefined,
-      [S3Region.UsEast1]: undefined,
-      [S3Region.EuCentral3]: 'forge',
-      [S3Region.UsEast9]: 'forgeDev',
+    expect(models).toEqual({
+      [S3Region.EuWest1]: 'service-keys',
+      [S3Region.UsEast1]: 'service-keys',
+      [S3Region.EuCentral3]: 'iam',
+      [S3Region.UsEast9]: 'iam',
     });
-  });
-});
-
-describe('getNetworkAccessModel', () => {
-  // Only the network under test differs from service keys.
-  const withIamOn = (network: ForgeNetwork): NetworkAccessModels => ({
-    forge: 'service-keys',
-    forgeDev: 'service-keys',
-    [network]: 'iam',
-  });
-
-  it.each(['forge', 'forgeDev'] as const)(
-    'answers iam for the %s network when it is set to iam',
-    (network) => {
-      expect(getNetworkAccessModel(network, withIamOn(network))).toBe('iam');
-    },
-  );
-
-  it('answers the other network as set, not as the one under test', () => {
-    expect(getNetworkAccessModel('forge', withIamOn('forgeDev'))).toBe('service-keys');
-  });
-
-  it('answers service-keys for a region on no Forge network, whatever the networks serve', () => {
-    expect(getNetworkAccessModel(undefined, { forge: 'iam', forgeDev: 'iam' })).toBe(
-      'service-keys',
-    );
-  });
-});
-
-describe('parseAccessModel', () => {
-  it.each([
-    [undefined, 'service-keys'],
-    ['', 'service-keys'],
-    ['service-keys', 'service-keys'],
-    ['iam', 'iam'],
-  ] as const)('reads %j as %s', (value, expected) => {
-    expect(parseAccessModel(value)).toBe(expected);
-  });
-
-  it('throws on a value that names no access model', () => {
-    // The pre-RFC name, which a stale env file might still carry.
-    expect(() => parseAccessModel('scoped-keys')).toThrow(
-      new Error('Unknown access model "scoped-keys"; expected service-keys or iam'),
-    );
   });
 });
 

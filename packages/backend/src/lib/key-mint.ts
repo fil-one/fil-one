@@ -19,7 +19,6 @@ import { cancelledLabels, creatorRoleStillMintsCheck } from './membership-change
 import { resolveMembership } from './org-membership.ts';
 import { ResponseBuilder } from './response-builder.ts';
 import type { ServiceOrchestrator } from './service-orchestrator.ts';
-import { getNetworkAccessModels } from './network-access-model.ts';
 
 /**
  * The half of a mint that happens after the vendor has answered.
@@ -260,7 +259,7 @@ export async function discardRecordedKey({
  */
 export async function keyExceedsCurrentRole({ orgId, userId, key }: KeyMinter): Promise<boolean> {
   const current = (await resolveMembership(orgId, userId))?.role ?? NO_ROLE;
-  return !canRetainAccessKey(current, key, getNetworkAccessModels()).retained;
+  return !canRetainAccessKey(current, key).retained;
 }
 
 /**

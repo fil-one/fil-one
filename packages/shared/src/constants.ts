@@ -129,50 +129,16 @@ export function supportsBucketManagement(region: S3Region): boolean {
  */
 export type AccessModel = 'service-keys' | 'iam';
 
-const ACCESS_MODELS: readonly AccessModel[] = ['service-keys', 'iam'];
-
-/** A Forge network, by the orchestrator id it is registered under. */
-export type ForgeNetwork = 'forge' | 'forgeDev';
-
 /**
- * The access model each Forge network serves. It comes from deploy config, so
- * a network moves to `iam` when its Hilt does, without a code change.
+ * The access model of the orchestrator serving a region: the Forge orchestrator
+ * serves bucket policies and members, while Aurora and FTH cannot model a
+ * principal.
+ *
+ * Mirrored here rather than read off the orchestrator so the console can decide
+ * without one in hand.
  */
-export type NetworkAccessModels = Record<ForgeNetwork, AccessModel>;
-
-const FORGE_NETWORK_BY_REGION: Partial<Record<S3Region, ForgeNetwork>> = {
-  [S3Region.EuCentral3]: 'forge',
-  [S3Region.UsEast9]: 'forgeDev',
-};
-
-/** The Forge network serving a region, or undefined for the Aurora and FTH regions. */
-export function getRegionNetwork(region: S3Region): ForgeNetwork | undefined {
-  return FORGE_NETWORK_BY_REGION[region];
-}
-
-/**
- * The access model a network serves. A region on no Forge network serves
- * service keys: Aurora and FTH cannot model a principal.
- */
-export function getNetworkAccessModel(
-  network: ForgeNetwork | undefined,
-  networkAccessModels: NetworkAccessModels,
-): AccessModel {
-  return network ? networkAccessModels[network] : 'service-keys';
-}
-
-/**
- * Reads an access model from deploy config. Unset means `service-keys`; any
- * other value outside {@link AccessModel} is a misconfiguration and throws, so
- * a typo cannot quietly turn a network's IAM off.
- */
-export function parseAccessModel(value: string | undefined): AccessModel {
-  if (!value) return 'service-keys';
-  const model = ACCESS_MODELS.find((candidate) => candidate === value);
-  if (!model) {
-    throw new Error(`Unknown access model "${value}"; expected ${ACCESS_MODELS.join(' or ')}`);
-  }
-  return model;
+export function getRegionAccessModel(region: S3Region): AccessModel {
+  return region === S3Region.EuCentral3 || region === S3Region.UsEast9 ? 'iam' : 'service-keys';
 }
 
 /**
