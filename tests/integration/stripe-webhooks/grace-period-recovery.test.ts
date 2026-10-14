@@ -40,6 +40,11 @@ describe('Grace Period (invoice.payment_succeeded)', () => {
     const invoiceId = await createAndPayInvoice(cusId);
     await waitForEventHandled('invoice.payment_succeeded', invoiceId);
 
-    expect(await getBillingRecord(userId)).toStrictEqual(before);
+    // Stripe also sends customer.updated around the invoice, which rewrites the
+    // same payment method and stamps updatedAt.
+    expect(await getBillingRecord(userId)).toStrictEqual({
+      ...before,
+      updatedAt: { S: expect.any(String) },
+    });
   });
 });
