@@ -108,6 +108,20 @@ describe('AccessKeysTable — the row menu', () => {
     expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
   });
 
+  it('offers only Delete for an expired key, even when rotation is on offer', () => {
+    renderWithProviders(
+      <AccessKeysTable
+        keys={[makeKey({ status: 'expired', expiresAt: '2026-06-01' })]}
+        onDelete={async () => {}}
+        onRotate={async () => {}}
+      />,
+    );
+    openMenu();
+
+    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+  });
+
   it('keeps the actions column for a row that may only be rotated', () => {
     renderWithProviders(<AccessKeysTable keys={[makeKey({})]} onRotate={async () => {}} />);
     openMenu();
