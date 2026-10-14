@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
-import { ApiErrorCode } from '@filone/shared';
+import { ApiErrorCode, S3Region } from '@filone/shared';
 import { errorHandlerMiddleware } from './error-handler.ts';
 import { OrgDeletingError } from '../lib/org-profile.ts';
+import { IamRegionRefusedError } from '../lib/errors.ts';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 type ErrorRequest = Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
@@ -58,6 +59,35 @@ describe('errorHandlerMiddleware', () => {
       }),
     });
   });
+
+  it.each([
+    {
+      action: 'remove' as const,
+      message: `The member could not be removed from ${S3Region.UsEast9}, so they are still in this organization. Try again.`,
+    },
+    {
+      action: 'register' as const,
+      message: `The invitation could not be accepted on ${S3Region.UsEast9}. Try again.`,
+    },
+  ])(
+    'maps IamRegionRefusedError on $action to 502 naming the region',
+    async ({ action, message }) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { onError } = errorHandlerMiddleware();
+      const request = buildErrorRequest(new IamRegionRefusedError(action, [S3Region.UsEast9]));
+
+      try {
+        await onError!(request);
+      } finally {
+        warn.mockRestore();
+      }
+
+      expect(request.response).toMatchObject({
+        statusCode: 502,
+        body: JSON.stringify({ message }),
+      });
+    },
+  );
 
   it('does not expose the original error message in the response', async () => {
     const { onError } = errorHandlerMiddleware();

@@ -51,7 +51,6 @@ import type {
 } from '../service-orchestrator.ts';
 import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
-import { registerMemberPrincipals } from './principals.ts';
 import { normalizeStatus } from './metrics-mapping.ts';
 import type { S3ClientContext } from '../s3-client.ts';
 import { createS3Client } from '../s3-client.ts';
@@ -181,18 +180,11 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     };
   }
 
-  /**
-   * Provisioning, plus the principals the tenant's policies will name — a
-   * member the storage system does not know cannot be named on a bucket
-   * policy.
-   */
   async ensureTenantReady(
     orgId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<string | null> {
-    const tenantId = await ensureManagementTenantReady(this.setupDeps, orgId, requestOptions);
-    if (tenantId) await registerMemberPrincipals(this, this.id, orgId, tenantId);
-    return tenantId;
+    return ensureManagementTenantReady(this.setupDeps, orgId, requestOptions);
   }
 
   isTenantReady(orgProfile: OrgProfileItem | undefined): string | null {

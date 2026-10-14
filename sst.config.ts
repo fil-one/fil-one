@@ -1280,15 +1280,7 @@ export default $config({
       // design — the role is unwritten and the retry finds fewer keys.
       'update-member-role': {
         extraEnv: orchestratorEnv,
-        // The roster fan-out lists and rewrites bucket policies, signed with
-        // the tenant's console S3 key, so it reads the S3 key parameters of
-        // the Forge regions.
-        permissions: [
-          {
-            actions: ['ssm:GetParameter'],
-            resources: [auroraApiKeySsmArn, forgeS3KeySsmArn, forgeDevS3KeySsmArn],
-          },
-        ],
+        permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
         timeout: '30 seconds',
       },
@@ -1433,6 +1425,8 @@ export default $config({
       // than from the request, since the link goes to somebody else's inbox.
       // OrgLogoBucketName, to check the joined org's logo is one of its uploads.
       'accept-invitation': {
+        // Registers the new member as a principal on each ready iam region.
+        extraEnv: orchestratorEnv,
         extraLink: [orgLogoBucketName],
       },
       'create-invitation': {

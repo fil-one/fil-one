@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { BucketPolicy } from '@filone/shared';
-import { PolicyValidationError, PrincipalNotFoundError } from '../lib/errors.ts';
+import { PolicyValidationError } from '../lib/errors.ts';
 import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 
 describe('FakeIamOrchestrator principal reads', () => {
@@ -8,22 +8,18 @@ describe('FakeIamOrchestrator principal reads', () => {
     Statement: [{ Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] }],
   };
 
-  it('resolveMemberAccess throws PrincipalNotFoundError for a principal that was never added', async () => {
+  it('resolveMemberAccess answers no buckets for a principal that was never added', async () => {
     const fake = new FakeIamOrchestrator();
     fake.seedPolicy('t1', 'photos', grantReadToEveryone);
-    await expect(fake.resolveMemberAccess('t1', 'ghost')).rejects.toBeInstanceOf(
-      PrincipalNotFoundError,
-    );
+    await expect(fake.resolveMemberAccess('t1', 'ghost')).resolves.toStrictEqual([]);
   });
 
-  it('listBucketPoliciesForMember throws PrincipalNotFoundError for a removed principal', async () => {
+  it('listBucketPoliciesForMember answers no policies for a removed principal', async () => {
     const fake = new FakeIamOrchestrator();
     await fake.syncMember('t1', 'u1');
     await fake.removeMember('t1', 'u1');
     fake.seedPolicy('t1', 'photos', grantReadToEveryone);
-    await expect(fake.listBucketPoliciesForMember('t1', 'u1')).rejects.toBeInstanceOf(
-      PrincipalNotFoundError,
-    );
+    await expect(fake.listBucketPoliciesForMember('t1', 'u1')).resolves.toStrictEqual([]);
   });
 });
 

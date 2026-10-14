@@ -28,6 +28,13 @@ vi.mock('@filone/orchestrator-client', () => ({
   deleteTenantsByTenantId: (options: Record<string, unknown>) => mockDeleteTenant(options),
 }));
 
+const mockListMembers = vi.fn(async (_orgId: string) => [] as { userId: string }[]);
+vi.mock('../org-membership.ts', () => ({ listMembers: (orgId: string) => mockListMembers(orgId) }));
+const mockSyncPrincipal = vi.fn(async (..._args: unknown[]) => {});
+vi.mock('./members.ts', () => ({
+  syncPrincipal: (...args: unknown[]) => mockSyncPrincipal(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
 
@@ -231,6 +238,36 @@ describe('ensureTenantReady', () => {
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
       ':tenantId': { S: orgId },
     });
+  });
+
+  it('registers every current member as a principal before the pointer write', async () => {
+    stubHappyPath();
+    mockListMembers.mockResolvedValueOnce([{ userId: 'any-user' }, { userId: 'other-user' }]);
+    const order: string[] = [];
+    mockSyncPrincipal.mockImplementation(async (_routes, _tenantId, userId) => {
+      order.push(`sync:${String(userId)}`);
+    });
+    ddbMock.on(UpdateItemCommand).callsFake(() => {
+      order.push('pointer');
+      return {};
+    });
+
+    await ensureTenantReady(deps, orgId);
+
+    expect(mockSyncPrincipal.mock.calls).toStrictEqual([
+      [{ client, orchestratorId: 'forge' }, orgId, 'any-user'],
+      [{ client, orchestratorId: 'forge' }, orgId, 'other-user'],
+    ]);
+    expect(order).toStrictEqual(['sync:any-user', 'sync:other-user', 'pointer']);
+  });
+
+  it('returns null and writes no pointer when a member cannot be registered', async () => {
+    stubHappyPath();
+    mockListMembers.mockResolvedValueOnce([{ userId: 'any-user' }]);
+    mockSyncPrincipal.mockRejectedValueOnce(new Error('region down'));
+
+    await expect(ensureTenantReady(deps, orgId)).resolves.toBeNull();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('scopes the SSM path and PROFILE attribute per id', async () => {

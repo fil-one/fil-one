@@ -1,3 +1,5 @@
+import type { S3Region } from '@filone/shared';
+
 export class BucketAlreadyExistsError extends Error {
   constructor(bucketName: string, options?: ErrorOptions) {
     super(`Bucket "${bucketName}" already exists`, options);
@@ -148,5 +150,19 @@ export class PrincipalNotFoundError extends Error {
     super(`Principal "${principalId}" does not exist at the storage system`, options);
     this.name = 'PrincipalNotFoundError';
     this.principalId = principalId;
+  }
+}
+
+// A region serving the `iam` access model would not register or remove a
+// member's principal. The membership write that needed it is refused, and the
+// same request tries again; the error middleware answers it with a 502.
+export class IamRegionRefusedError extends Error {
+  readonly action: 'register' | 'remove';
+  readonly regions: S3Region[];
+  constructor(action: 'register' | 'remove', regions: S3Region[], options?: ErrorOptions) {
+    super(`${regions.join(', ')} refused to ${action} the member's principal`, options);
+    this.name = 'IamRegionRefusedError';
+    this.action = action;
+    this.regions = regions;
   }
 }

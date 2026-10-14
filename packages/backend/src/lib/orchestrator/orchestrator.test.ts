@@ -53,11 +53,6 @@ vi.mock('./metrics.ts', () => ({
   instrumentClient: vi.fn(),
 }));
 
-const { mockRegisterMemberPrincipals } = vi.hoisted(() => ({
-  mockRegisterMemberPrincipals: vi.fn(),
-}));
-vi.mock('./principals.ts', () => ({ registerMemberPrincipals: mockRegisterMemberPrincipals }));
-
 // putBucketPolicy adds If-None-Match through command middleware, which the S3
 // client mock never runs, so the header can only be checked in the arguments
 // putBucketPolicy is called with.
@@ -177,16 +172,6 @@ describe('ensureTenantReady', () => {
     expect(result).toBe(tenantId);
     // putTenant is issued by tenant-setup; short-circuit means no create call.
     expect(mockCreateAccessKey).not.toHaveBeenCalled();
-  });
-
-  it("registers the org's members as principals once the tenant is ready", async () => {
-    ddbMock.on(GetItemCommand).resolves({ Item: profileItem({ forgeTenantId: tenantId }) });
-
-    await orchestrator.ensureTenantReady(orgId);
-
-    expect(mockRegisterMemberPrincipals.mock.calls).toStrictEqual([
-      [orchestrator, 'forge', orgId, tenantId],
-    ]);
   });
 });
 

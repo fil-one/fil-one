@@ -5,7 +5,6 @@ import {
   PolicyNotFoundError,
   PolicyPreconditionFailedError,
   PolicyValidationError,
-  PrincipalNotFoundError,
 } from '../lib/errors.ts';
 import type {
   BucketPolicyOrchestrator,
@@ -135,8 +134,8 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
   ): Promise<MemberBucketPolicy[]> {
     this.recordCall('listBucketPoliciesForMember', tenantId, userId);
     this.throwInjectedFailure('listBucketPoliciesForMember');
-    // Hilt answers the access reads 404 for a principal it does not know.
-    if (!this.getOrCreatePrincipals(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);
+    // A principal Hilt does not know is named in no policy.
+    if (!this.getOrCreatePrincipals(tenantId).has(userId)) return [];
     return [...this.getOrCreatePolicies(tenantId)]
       .filter(([, stored]) =>
         stored.policy.Statement.some((s) => s.Principal === '*' || s.Principal.includes(userId)),
@@ -147,8 +146,8 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
   async resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]> {
     this.recordCall('resolveMemberAccess', tenantId, userId);
     this.throwInjectedFailure('resolveMemberAccess');
-    // Hilt answers the access reads 404 for a principal it does not know.
-    if (!this.getOrCreatePrincipals(tenantId).has(userId)) throw new PrincipalNotFoundError(userId);
+    // A principal Hilt does not know reaches no bucket.
+    if (!this.getOrCreatePrincipals(tenantId).has(userId)) return [];
     return [...this.getOrCreatePolicies(tenantId)]
       .map(([bucketName, stored]) => ({
         bucketName,

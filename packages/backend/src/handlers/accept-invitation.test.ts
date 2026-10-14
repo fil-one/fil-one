@@ -8,7 +8,7 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
@@ -37,7 +37,15 @@ const ddbMock = mockClient(DynamoDBClient);
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
+// The principal registration on `iam` regions, stubbed so the suite can assert
+// its place in the order and what its refusal does; its own suite covers the call.
+const mockRegisterNewMember = vi.fn(async (_args: unknown) => {});
+vi.mock('../lib/member-principals.ts', () => ({
+  registerNewMember: (args: unknown) => mockRegisterNewMember(args),
+}));
+
 import { handler } from './accept-invitation.ts';
+import { IamRegionRefusedError } from '../lib/errors.ts';
 import { OrgKeys } from '../lib/org-membership.ts';
 import { hashInviteToken, inviteExpiresAt } from '../lib/invitations.ts';
 import { buildEvent, buildContext, NO_MEMBERSHIP } from '../test/lambda-test-utilities.ts';
@@ -794,5 +802,50 @@ describe('POST /api/invitations/accept handler', () => {
 
     expect(result).toMatchObject({ statusCode: 400 });
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('registers the new member on the iam regions before the join transaction', async () => {
+    stubInvitation();
+    const order: string[] = [];
+    mockRegisterNewMember.mockImplementation(async () => {
+      order.push('register');
+    });
+    ddbMock.on(TransactWriteItemsCommand).callsFake(() => {
+      order.push('transaction');
+      return {};
+    });
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(order).toStrictEqual(['register', 'transaction']);
+    expect(mockRegisterNewMember.mock.calls).toStrictEqual([
+      [{ orgId: INVITING_ORG_ID, userId: USER_ID }],
+    ]);
+  });
+
+  it('refuses the invitation and writes nothing when an iam region refuses the member', async () => {
+    stubInvitation();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockRegisterNewMember.mockRejectedValue(
+      new IamRegionRefusedError('register', [S3Region.UsEast9]),
+    );
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 502 });
+    expect(body(result)).toStrictEqual({
+      message: `The invitation could not be accepted on ${S3Region.UsEast9}. Try again.`,
+    });
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('registers nothing for somebody who is already a member', async () => {
+    stubMembershipInInvitingOrg(OrgRole.Admin);
+    stubInvitation({ role: OrgRole.Member });
+
+    await handler(acceptEvent(), buildContext());
+
+    expect(mockRegisterNewMember).not.toHaveBeenCalled();
   });
 });
