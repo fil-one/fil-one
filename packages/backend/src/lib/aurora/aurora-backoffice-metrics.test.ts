@@ -199,6 +199,29 @@ describe('getStorageSamples', () => {
       expect(result).toEqual([...range1Samples, ...range2Samples]);
     });
 
+    it('splits a mid-day start at UTC midnight and keeps the later reading of the boundary day', async () => {
+      const from = '2024-01-01T07:02:05.000Z';
+      const boundary = '2024-02-10T00:00:00.000Z';
+      const to = '2024-03-03T00:00:00.000Z';
+      mockGetStorage
+        .mockResolvedValueOnce({
+          data: { samples: [{ timestamp: boundary, bytesUsed: 0 }] },
+          error: undefined,
+        })
+        .mockResolvedValueOnce({
+          data: { samples: [{ timestamp: boundary, bytesUsed: 250 }] },
+          error: undefined,
+        });
+
+      const result = await getStorageSamples({ tenantId: 'tenant-1', from, to, window: '24h' });
+
+      expect(mockGetStorage.mock.calls.map(([options]) => options.query)).toStrictEqual([
+        { from, to: boundary, window: '24h' },
+        { from: boundary, to, window: '24h' },
+      ]);
+      expect(result).toStrictEqual([{ timestamp: boundary, bytesUsed: 250 }]);
+    });
+
     it('dedupes overlapping boundary samples by timestamp', async () => {
       const fromMs = Date.UTC(2024, 0, 1);
       const toMs = fromMs + 62 * DAY_MS;
