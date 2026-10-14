@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import type { AccessKey } from '@filone/shared';
 import { AccessKeysTable } from './AccessKeysTable.js';
 import { ToastProvider } from './Toast/ToastProvider';
+import { formatCalendarDate } from '../lib/time.js';
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<ToastProvider>{ui}</ToastProvider>);
@@ -141,5 +142,34 @@ describe('AccessKeysTable — who rotated a key', () => {
 
     expect(screen.getByText('Created by')).toBeInTheDocument();
     expect(screen.getByText('Rotated by Grace Hopper')).toBeInTheDocument();
+  });
+});
+
+describe('AccessKeysTable — key status', () => {
+  // The status renders twice per row (inline on small screens, in its own
+  // column from `sm` up), and jsdom applies no breakpoints, so each appears twice.
+  it('shows Expired with the expiry date for an expired key', () => {
+    renderWithProviders(
+      <AccessKeysTable keys={[makeKey({ status: 'expired', expiresAt: '2026-06-01' })]} />,
+    );
+
+    expect(screen.getAllByText('Expired')).toHaveLength(2);
+    expect(screen.getAllByText(formatCalendarDate('2026-06-01'))).toHaveLength(2);
+    expect(screen.queryByText('Active')).not.toBeInTheDocument();
+  });
+
+  it('shows Active and no date for a key that has not expired yet', () => {
+    renderWithProviders(
+      <AccessKeysTable keys={[makeKey({ status: 'active', expiresAt: '2099-01-01' })]} />,
+    );
+
+    expect(screen.getAllByText('Active')).toHaveLength(2);
+    expect(screen.queryByText(formatCalendarDate('2099-01-01'))).not.toBeInTheDocument();
+  });
+
+  it('has no Last Used column', () => {
+    renderWithProviders(<AccessKeysTable keys={[makeKey({})]} />);
+
+    expect(screen.queryByRole('columnheader', { name: 'Last Used' })).not.toBeInTheDocument();
   });
 });

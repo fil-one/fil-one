@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 
@@ -8,9 +8,13 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { countAccessKeysInScope, getAccessKeysInScope } from './access-key-inventory.ts';
+import {
+  countAccessKeysInScope,
+  getAccessKeysInScope,
+  isAccessKeyExpired,
+} from './access-key-inventory.ts';
 
-function row(id: string, createdBy?: string, recovered?: boolean) {
+function row(id: string, createdBy?: string, recovered?: boolean, expiresAt?: string) {
   return {
     sk: { S: `ACCESSKEY#${id}` },
     keyName: { S: `Key ${id}` },
@@ -21,6 +25,7 @@ function row(id: string, createdBy?: string, recovered?: boolean) {
     bucketScope: { S: 'all' },
     ...(createdBy ? { createdBy: { S: createdBy } } : {}),
     ...(recovered ? { recovered: { BOOL: true } } : {}),
+    ...(expiresAt ? { expiresAt: { S: expiresAt } } : {}),
   };
 }
 
@@ -90,6 +95,52 @@ describe('getAccessKeysInScope', () => {
     const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
     expect(input.FilterExpression).toBe('#region = :region');
     expect(input.ExpressionAttributeValues?.[':region']).toEqual({ S: 'us-east-1' });
+  });
+});
+
+describe('getAccessKeysInScope status', () => {
+  beforeEach(() => {
+    ddbMock.reset();
+    vi.useFakeTimers({ now: new Date('2026-06-15T12:00:00Z') });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    { expiresAt: undefined, status: 'active' },
+    { expiresAt: '2026-06-16', status: 'active' },
+    { expiresAt: '2026-06-01', status: 'expired' },
+  ])(
+    'reports $status for a key expiring on $expiresAt, whatever the stored status says',
+    async ({ expiresAt, status }) => {
+      // Every stored row says `active`; the listing must not echo it.
+      ddbMock.on(QueryCommand).resolves({ Items: [row('1', 'any-user', false, expiresAt)] });
+
+      const [key] = await getAccessKeysInScope('org-1', { sees: 'all' });
+
+      expect(key).toMatchObject({ status, expiresAt: expiresAt ?? null });
+    },
+  );
+});
+
+describe('isAccessKeyExpired', () => {
+  const now = new Date('2026-06-15T12:00:00Z');
+
+  it.each([
+    { expiresAt: null, expired: false, when: 'the key never expires' },
+    { expiresAt: '2026-06-16', expired: false, when: 'the expiry date is tomorrow' },
+    { expiresAt: '2026-06-15', expired: true, when: 'the expiry date is today (UTC)' },
+    { expiresAt: '2026-06-14', expired: true, when: 'the expiry date has passed' },
+    // Not a date: only a bad write can store this.
+    { expiresAt: 'not-a-date', expired: true, when: 'the stored expiry is unparseable' },
+  ])('returns $expired when $when', ({ expiresAt, expired }) => {
+    expect(isAccessKeyExpired(expiresAt, now)).toBe(expired);
+  });
+
+  it('returns true from the first instant of the expiry date (UTC)', () => {
+    expect(isAccessKeyExpired('2026-06-15', new Date('2026-06-15T00:00:00Z'))).toBe(true);
   });
 });
 

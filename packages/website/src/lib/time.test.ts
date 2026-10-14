@@ -3,6 +3,7 @@ import {
   daysRemainingLabel,
   daysUntil,
   expiresAtFromForm,
+  formatCalendarDate,
   formatDate,
   formatDateTime,
   pluralizeDays,
@@ -112,6 +113,21 @@ describe('formatDate', () => {
     // Use midday UTC so local timezone offset doesn't shift the calendar date
     const result = formatDate('2026-03-15T12:00:00Z');
     expect(result).toContain('15');
+  });
+});
+
+describe('formatCalendarDate', () => {
+  it('shows a bare date as that calendar day, whatever the local time zone', () => {
+    // Local midnight on 1 June is 1 June in every time zone, so this is the
+    // expected text. Parsing '2026-06-01' as local time would give 31 May
+    // anywhere west of UTC.
+    const firstOfJune = new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    }).format(new Date(2026, 5, 1));
+
+    expect(formatCalendarDate('2026-06-01')).toBe(firstOfJune);
   });
 });
 

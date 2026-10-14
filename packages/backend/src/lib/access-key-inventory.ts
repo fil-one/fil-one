@@ -130,20 +130,40 @@ async function runQuery(
   }
 }
 
+/**
+ * Whether a key's expiry date has arrived. `expiresAt` is a bare `YYYY-MM-DD`
+ * date, which parses as midnight UTC, so a key stops being active from the
+ * start of its expiry date.
+ */
+export function isAccessKeyExpired(
+  expiresAt: string | null | undefined,
+  now = new Date(),
+): boolean {
+  if (!expiresAt) return false;
+  const expiry = Date.parse(expiresAt);
+  // An unparseable expiry is treated as expired rather than as forever: the only
+  // way one gets stored is a bad write, and the safe reading of "we do not know
+  // when this stops being valid" is that it already has.
+  return Number.isNaN(expiry) || expiry <= now.getTime();
+}
+
 function toAccessKey(record: Record<string, unknown>): AccessKey {
+  const expiresAt = (record.expiresAt as string | undefined) ?? null;
   return {
     id: (record.sk as string).replace(AccessKeyKeys.keySkPrefix(), ''),
     keyName: record.keyName as string,
     accessKeyId: record.accessKeyId as string,
     createdAt: record.createdAt as string,
-    status: record.status as AccessKey['status'],
+    // Computed rather than read: the stored `status` is written once as
+    // `active` and nothing updates it when the key expires.
+    status: isAccessKeyExpired(expiresAt) ? 'expired' : 'active',
     permissions: record.permissions as AccessKey['permissions'],
     granularPermissions:
       (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
     bucketScope: record.bucketScope as AccessKey['bucketScope'],
     buckets: record.buckets as string[] | undefined,
     region: (record.region as AccessKey['region']) ?? DEFAULT_ACCESS_KEY_REGION,
-    expiresAt: (record.expiresAt as string | undefined) ?? null,
+    expiresAt,
     // Shipped so the console can gate the per-row revoke button on the same
     // rule the delete route enforces.
     ...(record.createdBy ? { createdBy: record.createdBy as string } : {}),

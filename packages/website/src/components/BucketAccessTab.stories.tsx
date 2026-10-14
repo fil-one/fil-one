@@ -13,7 +13,6 @@ const mockKeys: AccessKey[] = [
     keyName: 'Production API Key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
     createdAt: '2026-01-15T10:00:00Z',
-    lastUsedAt: '2026-04-08T14:30:00Z',
     status: 'active',
     permissions: ['read', 'write', 'list'],
     bucketScope: 'specific',
