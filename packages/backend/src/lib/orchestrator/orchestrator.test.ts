@@ -630,20 +630,9 @@ describe('listBuckets', () => {
       },
     ]);
   });
-
-  it('returns every tenant bucket on a service-keys region even when a member is named', async () => {
-    stubTenantListing();
-
-    const result = await orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
-
-    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos', 'backups']);
-    expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
-  });
 });
 
-describe('listBuckets on an iam region', () => {
-  const iamOrchestrator = buildOrchestrator({ accessModel: 'iam' });
-
+describe('listBuckets for a member', () => {
   const buildAccessResponse = (...bucketNames: string[]) => ({
     data: { buckets: bucketNames.map((name) => ({ name, actions: ['s3:ListBucket'] })) },
     error: undefined,
@@ -654,7 +643,7 @@ describe('listBuckets on an iam region', () => {
     stubTenantListing();
     mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
 
-    const result = await iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
+    const result = await orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
 
     expect(result.map((b) => b.bucketName)).toStrictEqual(['photos']);
   });
@@ -663,7 +652,7 @@ describe('listBuckets on an iam region', () => {
     stubTenantListing();
     mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
 
-    await iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
+    await orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
 
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
       expect.objectContaining({ path: { tenantId, principalId: MEMBER_ID } }),
@@ -674,7 +663,7 @@ describe('listBuckets on an iam region', () => {
     stubTenantListing();
 
     // Tenant-wide callers omit the member and must keep seeing every bucket.
-    const result = await iamOrchestrator.listBuckets(tenantId);
+    const result = await orchestrator.listBuckets(tenantId);
 
     expect(result.map((b) => b.bucketName)).toStrictEqual(['photos', 'backups']);
     expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
@@ -687,7 +676,7 @@ describe('listBuckets on an iam region', () => {
     // The caller's fan-out turns this into an unavailable region. Returning the
     // tenant listing here would hand the member every bucket name it holds.
     await expect(
-      iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID }),
+      orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID }),
     ).rejects.toThrow(
       new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),
     );
@@ -698,7 +687,7 @@ describe('listBuckets on an iam region', () => {
     mockGetPrincipalAccess.mockReturnValue(buildAccessResponse());
 
     await expect(
-      iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID }),
+      orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID }),
     ).resolves.toStrictEqual([]);
   });
 
@@ -707,7 +696,7 @@ describe('listBuckets on an iam region', () => {
     mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
     const signal = new AbortController().signal;
 
-    await iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID, signal });
+    await orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID, signal });
 
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
     // aws-sdk-client-mock types `args` as `[command]`, but the call carries the send options too.
