@@ -78,11 +78,7 @@ import {
   PrincipalNotFoundError,
 } from '../errors.ts';
 import { grantGetObjectToUser } from '../../test/bucket-policy-fixture.ts';
-import {
-  supportsBucketPolicies,
-  type IssueAccessKeyOpts,
-  type OrchestratorRequestOptions,
-} from '../service-orchestrator.ts';
+import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
 import { FilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
@@ -409,7 +405,7 @@ describe('createBucket', () => {
       return { etag: '"e1"' };
     });
 
-    await buildOrchestrator({ accessModel: 'iam' }).createBucket(tenantId, {
+    await orchestrator.createBucket(tenantId, {
       bucketName: 'my-bucket',
       versioning: true,
       policy: grantGetObjectToUser,
@@ -422,7 +418,7 @@ describe('createBucket', () => {
     s3Mock.on(CreateBucketCommand).resolves({});
     mockPutBucketPolicy.mockResolvedValue({ etag: '"e1"' });
 
-    await buildOrchestrator({ accessModel: 'iam' }).createBucket(tenantId, {
+    await orchestrator.createBucket(tenantId, {
       bucketName: 'my-bucket',
       policy: grantGetObjectToUser,
     });
@@ -438,7 +434,7 @@ describe('createBucket', () => {
       .mockRejectedValueOnce(new PolicyConflictError())
       .mockResolvedValue({ etag: '"e1"' });
 
-    await buildOrchestrator({ accessModel: 'iam' }).createBucket(tenantId, {
+    await orchestrator.createBucket(tenantId, {
       bucketName: 'my-bucket',
       policy: grantGetObjectToUser,
     });
@@ -453,7 +449,7 @@ describe('createBucket', () => {
 
     // The handler answers 400 only for a PolicyValidationError.
     await expect(
-      buildOrchestrator({ accessModel: 'iam' }).createBucket(tenantId, {
+      orchestrator.createBucket(tenantId, {
         bucketName: 'my-bucket',
         policy: grantGetObjectToUser,
       }),
