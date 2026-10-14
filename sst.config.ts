@@ -1282,7 +1282,7 @@ export default $config({
         extraEnv: orchestratorEnv,
         // The roster fan-out lists and rewrites bucket policies, signed with
         // the tenant's console S3 key, so it reads the S3 key parameters of
-        // regions with `accessModel: 'iam'`.
+        // the Forge regions.
         permissions: [
           {
             actions: ['ssm:GetParameter'],
