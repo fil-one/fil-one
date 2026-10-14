@@ -1,23 +1,41 @@
-import type {
-  AccessKeyPermission,
-  GranularPermission,
-  RetentionDurationType,
-  RetentionMode,
-  S3Region,
-  TenantStatus,
-} from '@filone/shared';
-import type { S3ClientContext } from './s3-client.ts';
-import type { OrgProfileItem } from './org-profile.ts';
-import type { BucketPolicyOrchestrator, MemberOrchestrator } from './iam-orchestrator.ts';
+import type { S3Region } from '@filone/shared';
+import type { AccessKeyOrchestrator } from './access-key-orchestrator.ts';
+import type { BucketOrchestrator } from './bucket-orchestrator.ts';
+import type { BucketPolicyOrchestrator } from './bucket-policy-orchestrator.ts';
+import type { MemberOrchestrator } from './member-orchestrator.ts';
+import type { TenantOrchestrator } from './tenant-orchestrator.ts';
+import type { UsageOrchestrator } from './usage-orchestrator.ts';
 
 export type {
+  AccessKeyOrchestrator,
+  IssueAccessKeyOpts,
+  IssuePrincipalKeyOpts,
+  IssueServiceKeyOpts,
+  IssuedAccessKey,
+} from './access-key-orchestrator.ts';
+export type {
+  BucketDetails,
+  BucketOrchestrator,
+  BucketProtection,
+  BucketSummary,
+  CreateBucketArgs,
+} from './bucket-orchestrator.ts';
+export type {
   BucketPolicyOrchestrator,
-  MemberOrchestrator,
   IfMatchPrecondition,
-  MemberBucketPolicy,
   PolicyPrecondition,
   StoredBucketPolicy,
-} from './iam-orchestrator.ts';
+} from './bucket-policy-orchestrator.ts';
+export type { MemberBucketPolicy, MemberOrchestrator } from './member-orchestrator.ts';
+export type { TenantOrchestrator, TenantStatusProbe } from './tenant-orchestrator.ts';
+export type {
+  EgressUsageSample,
+  GetTenantUsageMetricsOptions,
+  StorageUsageSample,
+  TenantInfo,
+  TenantUsageMetrics,
+  UsageOrchestrator,
+} from './usage-orchestrator.ts';
 
 // Retry budget for {@link TenantOrchestrator.deleteTenant}. A DELETE 409s
 // unless the tenant is already `disabled`; both calls are synchronous, so a 409
@@ -30,312 +48,14 @@ export interface OrchestratorRequestOptions {
   signal?: AbortSignal;
 }
 
-/**
- * Object-lock and retention state. Neither orchestrator's bucket *list* carries
- * it, and a per-bucket read on every row would mean an N+1 on a page every user
- * hits, so it's loaded only for a single bucket (see {@link BucketDetails}).
- */
-export interface BucketProtection {
-  objectLockEnabled?: boolean;
-  defaultRetention?: RetentionMode;
-  retentionDuration?: number;
-  retentionDurationType?: RetentionDurationType;
-}
-
-/**
- * A row in the bucket list: only what each provider's native list call already
- * returns inline, so listing a tenant's buckets costs one call per orchestrator
- * regardless of bucket count. Versioning and object-lock aren't included for the
- * same reason — both cost a call per bucket on at least one orchestrator.
- */
-export interface BucketSummary {
-  bucketName: string;
-  region: S3Region;
-  createdAt: string;
-  isPublic: boolean;
-  encrypted: boolean;
-}
-
-/** A single-bucket read, which always loads versioning and the protection state. */
-export interface BucketDetails extends BucketProtection {
-  bucketName: string;
-  region: S3Region;
-  createdAt: string;
-  isPublic: boolean;
-  versioning: boolean;
-  encrypted: boolean;
-}
-
-export interface CreateBucketArgs {
-  bucketName: string;
-  versioning?: boolean;
-  lock?: boolean;
-  retention?: {
-    enabled: boolean;
-    mode: RetentionMode;
-    duration: number;
-    durationType: RetentionDurationType;
-  };
-}
-
-/** A service key: its own permissions and bucket list, fixed at creation. */
-export interface IssueServiceKeyOpts {
-  keyName: string;
-  permissions: AccessKeyPermission[];
-  granularPermissions?: GranularPermission[];
-  buckets?: string[];
-  expiresAt?: string | null;
-}
-
-/**
- * A key bound to a principal. It carries nothing of its own: what it may do is
- * whatever the bucket policies give that principal at the time of each request.
- * Only a region serving the `iam` access model mints one.
- */
-export interface IssuePrincipalKeyOpts {
-  /** Unique within the principal, so two members may each hold a `laptop`. */
-  keyName: string;
-  principalId: string;
-  expiresAt?: string | null;
-  permissions?: never;
-  granularPermissions?: never;
-  buckets?: never;
-}
-
-/** The request's shape is the key's kind, as it is at the storage system. */
-export type IssueAccessKeyOpts = IssueServiceKeyOpts | IssuePrincipalKeyOpts;
-
-export interface IssuedAccessKey {
-  id: string;
-  accessKeyId: string;
-  accessKeySecret: string;
-  createdAt: string;
-  /** The member a principal-bound key belongs to; absent on a service key. */
-  principalId?: string;
-}
-
-/**
- * A single point in a tenant's storage-usage time series.
- */
-export interface StorageUsageSample {
-  /** Canonical ISO-8601 UTC timestamp (e.g. `2026-01-01T10:00:00.000Z`). */
-  timestamp: string;
-  bytesUsed: number;
-  /** 0 when the orchestrator's source has no object-count series. */
-  objectCount: number;
-}
-
-/** A single point in a tenant's egress time series. `timestamp` is canonical ISO-8601 UTC (see {@link StorageUsageSample}). */
-export interface EgressUsageSample {
-  /** Canonical ISO-8601 UTC timestamp (e.g. `2026-01-01T10:00:00.000Z`). */
-  timestamp: string;
-  bytesUsed: number;
-}
-
-/** Normalized, orchestrator-agnostic usage/egress time series for a tenant. */
-export interface TenantUsageMetrics {
-  storage: StorageUsageSample[];
-  egress: EgressUsageSample[];
-}
-
-export interface GetTenantUsageMetricsOptions {
-  /** Inclusive start timestamp, RFC3339 UTC. */
-  from: string;
-  /** Exclusive end timestamp, RFC3339 UTC. */
-  to: string;
-  /** Sampling window applied to BOTH series. Defaults to '1d'. */
-  interval?: string;
-}
-
-/**
- * Result of a live tenant-status probe against an orchestrator's API.
- *
- * - `ok` carries the normalized {@link TenantStatus}, or `undefined` when the
- *   orchestrator reports a status value we don't model.
- * - `not_found` means the orchestrator has no such tenant (e.g. 404).
- * - `error` means the probe could not be completed (transport/server error);
- *   `cause` is the underlying error.
- */
-export type TenantStatusProbe =
-  | { kind: 'ok'; status: TenantStatus | undefined }
-  | { kind: 'not_found' }
-  | { kind: 'error'; cause: unknown };
-
-/**
- * Normalized, orchestrator-agnostic tenant quota and status snapshot.
- *
- * `keyCount` / `accessKeyLimit` are raw values that include the per-tenant
- * system key (and its reserved slot): `filone-console` on Aurora,
- * `filone-console-v2` on FTH. Callers that surface user-managed keys should
- * subtract one per tenant.
- */
-export interface TenantInfo {
-  bucketCount: number;
-  bucketLimit: number;
-  keyCount: number;
-  accessKeyLimit: number;
-  status?: TenantStatus;
-}
-
-/** Tenant provisioning and lifecycle. */
-export interface TenantOrchestrator {
+/** Which orchestrator this is, and the region it serves. */
+export interface OrchestratorCore {
   /**
-   * Resolves the org's tenant on this orchestrator, provisioning it if needed
-   * and advancing the setup state machine on the `ORG#{orgId}/PROFILE` row.
-   *
-   * This call has side effects: it may issue API calls towards service orchestrators,
-   * write to DDB, increment failure counters, and transition status between setup states.
-   * Only call from write paths (POST/PUT/DELETE handlers, background jobs);
-   * GET handlers should use `getOrgProfile` + {@link isTenantReady}.
-   *
-   * @param orgId - Internal org UUID from `event.requestContext.userInfo.orgId`.
-   * @returns The resolved `tenantId` once the tenant is fully provisioned,
-   *          or `null` if setup is still in progress or has failed.
+   * The orchestrator's unique identifier (e.g. `aurora`, `fth`, etc.). It
+   * should have the format `^[a-z][a-zA-Z0-9_]*$`.
    */
-  ensureTenantReady(
-    orgId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<string | null>;
-
-  /**
-   * Side-effect-free readiness check: extracts this orchestrator's `tenantId`
-   * from a pre-fetched `ORG#{orgId}/PROFILE` item (see `getOrgProfile`),
-   * returning it only if the tenant is already fully set up. Pure and
-   * synchronous — callers that consult several orchestrators read the row
-   * once instead of once per orchestrator.
-   *
-   * Unlike {@link ensureTenantReady}, this never advances the setup state
-   * machine, issues Portal/Backoffice API calls, or performs any I/O — safe
-   * to call from GET handlers and other read paths where triggering
-   * provisioning would be inappropriate.
-   *
-   * @param orgProfile - The PROFILE item, or `undefined` when the row is missing.
-   * @returns The `tenantId` if ready, otherwise `null` (not yet provisioned,
-   *          in progress, or failed).
-   */
-  isTenantReady(orgProfile: OrgProfileItem | undefined): string | null;
-
-  /**
-   * Sets the tenant's status on this orchestrator's API (e.g. locking or
-   * unlocking writes when billing state changes). Like the other non-setup
-   * methods this is stateless and takes a `tenantId` directly — it calls the
-   * orchestrator API only and does not write to DDB.
-   */
-  updateTenantStatus(
-    tenantId: string,
-    status: TenantStatus,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<void>;
-
-  /**
-   * Permanently deletes the tenant and everything it owns (buckets, objects,
-   * access keys). Irreversible and synchronous.
-   *
-   * MUST be idempotent, because the teardown re-runs it: a 404 from either the
-   * disable or the delete means the tenant is gone, which is the postcondition.
-   * The disable is only the delete's precondition, so its 404 must not skip the
-   * delete — a partially-failed pass leaves resources still to collect.
-   */
-  deleteTenant(tenantId: string, requestOptions?: OrchestratorRequestOptions): Promise<void>;
-
-  /**
-   * Reads the tenant's current live status from this orchestrator's API. Like
-   * the other non-setup methods it is stateless and takes a `tenantId` directly,
-   * issues an orchestrator API call only, and never writes to DDB. Never throws:
-   * transport/server failures are returned as `{ kind: 'error' }` so background
-   * jobs can classify them (see {@link TenantStatusProbe}).
-   */
-  getTenantStatus(
-    tenantId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<TenantStatusProbe>;
-}
-
-/** Bucket lifecycle, and the S3 client context object requests sign with. */
-export interface BucketOrchestrator {
-  createBucket(
-    tenantId: string,
-    args: CreateBucketArgs,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<void>;
-  deleteBucket(
-    tenantId: string,
-    bucketName: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<void>;
-  listBuckets(
-    tenantId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<BucketSummary[]>;
-  getBucket(
-    tenantId: string,
-    bucketName: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<BucketDetails | null>;
-
-  getS3ClientContext(
-    tenantId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<S3ClientContext>;
-}
-
-/** Access keys the tenant's S3 clients sign with. */
-export interface AccessKeyOrchestrator {
-  issueAccessKey(
-    tenantId: string,
-    keyOpts: IssueAccessKeyOpts,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<IssuedAccessKey>;
-  findAccessKeyByName(
-    tenantId: string,
-    keyName: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;
-
-  /**
-   * Revokes an access key. Implementations MUST be idempotent: a missing key
-   * (already deleted upstream) is treated as success, not an error. Any other
-   * failure should propagate so the caller can leave the DDB row intact.
-   */
-  deleteAccessKey(
-    tenantId: string,
-    keyId: string,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<void>;
-}
-
-/** Read-only usage and quota figures. */
-export interface UsageOrchestrator {
-  /**
-   * Returns the tenant's storage and egress usage as normalized time series
-   * over `[from, to)`. Read-only — does not mutate tenant state. Backs both the
-   * usage-reporting worker and read-path handlers (e.g. get-activity).
-   */
-  getTenantUsageMetrics(
-    tenantId: string,
-    metricsOpts: GetTenantUsageMetricsOptions,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<TenantUsageMetrics>;
-
-  /**
-   * Returns the tenant's quota and status snapshot (bucket/key counts and
-   * limits, lifecycle status). Read-only. Backs the usage dashboard.
-   */
-  getTenantInfo(tenantId: string, requestOptions?: OrchestratorRequestOptions): Promise<TenantInfo>;
-
-  /**
-   * Returns a single bucket's storage usage as a normalized time series over
-   * `[from, to)`. Read-only. Backs per-bucket analytics. The ownership check is
-   * performed here (tenant-scoped): throws {@link BucketNotFoundError} when the
-   * bucket is not found or not owned by the tenant. Returns an empty array when
-   * the bucket is owned but has no storage series yet.
-   */
-  getBucketUsageMetrics(
-    tenantId: string,
-    bucketName: string,
-    metricsOpts: GetTenantUsageMetricsOptions,
-    requestOptions?: OrchestratorRequestOptions,
-  ): Promise<StorageUsageSample[]>;
+  readonly id: string;
+  readonly region: S3Region;
 }
 
 /**
@@ -344,14 +64,12 @@ export interface UsageOrchestrator {
  * implements {@link ServiceOrchestrator}.
  */
 export interface LegacyServiceOrchestrator
-  extends TenantOrchestrator, BucketOrchestrator, AccessKeyOrchestrator, UsageOrchestrator {
-  /**
-   * The orchestrator's unique identifier (e.g. `aurora`, `fth`, etc.). It
-   * should have the format `^[a-z][a-zA-Z0-9_]*$`.
-   */
-  readonly id: string;
-  readonly region: S3Region;
-}
+  extends
+    OrchestratorCore,
+    TenantOrchestrator,
+    BucketOrchestrator,
+    AccessKeyOrchestrator,
+    UsageOrchestrator {}
 
 /**
  * Abstraction over a service orchestrator (e.g. Aurora, FTH, etc.) in a single
@@ -378,7 +96,14 @@ export interface LegacyServiceOrchestrator
  * ensure/isReady first.
  */
 export interface ServiceOrchestrator
-  extends LegacyServiceOrchestrator, BucketPolicyOrchestrator, MemberOrchestrator {}
+  extends
+    OrchestratorCore,
+    TenantOrchestrator,
+    BucketOrchestrator,
+    AccessKeyOrchestrator,
+    UsageOrchestrator,
+    BucketPolicyOrchestrator,
+    MemberOrchestrator {}
 
 /** Any region's orchestrator; {@link supportsBucketPolicies} tells the two apart. */
 export type RegionOrchestrator = LegacyServiceOrchestrator | ServiceOrchestrator;
@@ -388,7 +113,7 @@ export type RegionOrchestrator = LegacyServiceOrchestrator | ServiceOrchestrator
  * A caller holding only a region asks the model of the region's network instead.
  */
 export function supportsBucketPolicies(
-  orchestrator: LegacyServiceOrchestrator,
+  orchestrator: RegionOrchestrator,
 ): orchestrator is ServiceOrchestrator {
   return 'putBucketPolicy' in orchestrator;
 }

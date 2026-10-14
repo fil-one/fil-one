@@ -10,11 +10,10 @@ import {
 import type {
   BucketPolicyOrchestrator,
   IfMatchPrecondition,
-  MemberOrchestrator,
-  MemberBucketPolicy,
   PolicyPrecondition,
   StoredBucketPolicy,
-} from '../lib/iam-orchestrator.ts';
+} from '../lib/bucket-policy-orchestrator.ts';
+import type { MemberBucketPolicy, MemberOrchestrator } from '../lib/member-orchestrator.ts';
 
 /**
  * An in-memory bucket-policy and member orchestrator with the storage system's semantics: real ETags and

@@ -18,10 +18,10 @@ import {
 } from '../errors.ts';
 import type {
   IfMatchPrecondition,
-  MemberBucketPolicy,
   PolicyPrecondition,
   StoredBucketPolicy,
-} from '../iam-orchestrator.ts';
+} from '../bucket-policy-orchestrator.ts';
+import type { MemberBucketPolicy } from '../member-orchestrator.ts';
 import type { RegionOrchestrator, ServiceOrchestrator } from '../service-orchestrator.ts';
 import { deleteBucketPolicy, getBucketPolicy, putBucketPolicy } from '../s3-bucket-operations.ts';
 import { createS3Client } from '../s3-client.ts';

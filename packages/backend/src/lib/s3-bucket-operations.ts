@@ -31,7 +31,7 @@ import type {
   IfMatchPrecondition,
   PolicyPrecondition,
   StoredBucketPolicy,
-} from './iam-orchestrator.ts';
+} from './bucket-policy-orchestrator.ts';
 
 /**
  * Per-call options a caller passes to bound one S3 operation. The caller owns
