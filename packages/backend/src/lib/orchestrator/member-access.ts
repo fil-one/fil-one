@@ -1,7 +1,7 @@
 // What the console does on behalf of one member on a region serving the `iam`
 // access model: which buckets the member can access.
 
-import type { MemberOrchestrator } from '../iam-orchestrator.ts';
+import type { MemberOrchestrator } from '../member-orchestrator.ts';
 import type { BucketSummary, ListBucketsOptions } from '../service-orchestrator.ts';
 
 /**
