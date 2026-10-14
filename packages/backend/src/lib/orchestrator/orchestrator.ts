@@ -42,6 +42,7 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
+  ListBucketsOptions,
   OrchestratorRequestOptions,
   ServiceOrchestrator,
   StorageUsageSample,
@@ -317,7 +318,36 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     await s3DeleteBucket(s3, bucketName, requestOptions);
   }
 
+  /**
+   * The tenant's buckets, or one member's when the caller names a member.
+   *
+   * The console filters because the data plane does not: every principal holds
+   * `s3:ListAllMyBuckets`, so the gateway lists the whole tenant (fil-one/RFC#30),
+   * even to a key bound to the member. The accessible set comes from the storage
+   * system's own evaluation, so it agrees with its last policy write.
+   *
+   * A bucket carrying no policy is accessible to unscoped callers alone, who
+   * name no member and so are never filtered here. The console writes a policy
+   * on every bucket it creates; one that arrives without it, or loses it, is
+   * visible to an Owner or an Admin and to nobody else.
+   */
   async listBuckets(
+    tenantId: string,
+    requestOptions?: ListBucketsOptions,
+  ): Promise<BucketSummary[]> {
+    if (!requestOptions?.scopeToMemberId) return this.listTenantBuckets(tenantId, requestOptions);
+    // One promise, so a failed access lookup rejects the whole leg and the
+    // caller's fan-out reports the region as unavailable. Answering unfiltered
+    // would hand the member every bucket name in the tenant.
+    const [buckets, access] = await Promise.all([
+      this.listTenantBuckets(tenantId, requestOptions),
+      this.resolveMemberAccess(tenantId, requestOptions.scopeToMemberId, requestOptions),
+    ]);
+    const accessible = new Set(access.map((entry) => entry.bucketName));
+    return buckets.filter((bucket) => accessible.has(bucket.bucketName));
+  }
+
+  private async listTenantBuckets(
     tenantId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]> {
@@ -518,8 +548,12 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     return listPrincipalPolicies(this.client, this.id, tenantId, userId);
   }
 
-  resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]> {
-    return resolvePrincipalAccess(this.client, this.id, tenantId, userId);
+  resolveMemberAccess(
+    tenantId: string,
+    userId: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<MemberBucketAccess[]> {
+    return resolvePrincipalAccess(this.client, this.id, tenantId, userId, requestOptions);
   }
 
   async getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null> {

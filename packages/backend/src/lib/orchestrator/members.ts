@@ -17,6 +17,7 @@ import {
   PrincipalNotFoundError,
 } from '../errors.ts';
 import type { MemberBucketPolicy } from '../member-orchestrator.ts';
+import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { extractApiMessage } from './api-message.ts';
 import { withWriteRetry } from './policy-writes.ts';
 
@@ -140,11 +141,13 @@ export async function resolvePrincipalAccess(
   orchestratorId: string,
   tenantId: string,
   userId: string,
+  requestOptions?: OrchestratorRequestOptions,
 ): Promise<MemberBucketAccess[]> {
   const result = await getTenantsByTenantIdPrincipalsByPrincipalIdAccess({
     client,
     path: { tenantId, principalId: userId },
     throwOnError: false,
+    signal: requestOptions?.signal,
   });
   if (isUnknownPrincipal(result)) {
     warnUnknownPrincipal(orchestratorId, tenantId, userId);
