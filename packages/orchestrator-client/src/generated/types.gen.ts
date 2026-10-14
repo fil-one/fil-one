@@ -77,7 +77,7 @@ export type UpdateTenantStatusRequest = {
  * * `s3:DeleteBucket` — delete a bucket.
  * * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
  * `s3:DeleteBucketPolicy` — read, write and delete a bucket's
- * policy (`iam` access model). A bucket policy never grants
+ * policy. A bucket policy never grants
  * them; only a service key holds them.
  *
  * **Object-level** — operating on objects within buckets. The
@@ -609,7 +609,9 @@ export type PostTenantsByTenantIdAccessKeysErrors = {
    */
   404: Error;
   /**
-   * An access key with this `name` already exists for the tenant.
+   * An access key with this `name` already exists for the tenant
+   * (service key) or for the principal (principal-bound key).
+   *
    */
   409: Error;
   /**
@@ -619,12 +621,6 @@ export type PostTenantsByTenantIdAccessKeysErrors = {
    *
    */
   422: Error;
-  /**
-   * The body carries `principalId` and the orchestrator does not
-   * serve the `iam` access model.
-   *
-   */
-  501: Error;
 };
 
 export type PostTenantsByTenantIdAccessKeysError =
@@ -732,10 +728,6 @@ export type GetTenantsByTenantIdPrincipalsErrors = {
    * Resource not found.
    */
   404: Error;
-  /**
-   * The orchestrator does not serve the `iam` access model.
-   */
-  501: Error;
 };
 
 export type GetTenantsByTenantIdPrincipalsError =
@@ -777,10 +769,6 @@ export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
    *
    */
   409: Error;
-  /**
-   * The orchestrator does not serve the `iam` access model.
-   */
-  501: Error;
 };
 
 export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdError =
@@ -815,10 +803,6 @@ export type GetTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
    * Resource not found.
    */
   404: Error;
-  /**
-   * The orchestrator does not serve the `iam` access model.
-   */
-  501: Error;
 };
 
 export type GetTenantsByTenantIdPrincipalsByPrincipalIdError =
@@ -864,10 +848,6 @@ export type PutTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
    * The `principalId` path value is not a valid principal id.
    */
   422: Error;
-  /**
-   * The orchestrator does not serve the `iam` access model.
-   */
-  501: Error;
 };
 
 export type PutTenantsByTenantIdPrincipalsByPrincipalIdError =
@@ -906,10 +886,6 @@ export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors = {
    * Resource not found.
    */
   404: Error;
-  /**
-   * The orchestrator does not serve the `iam` access model.
-   */
-  501: Error;
 };
 
 export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesError =
@@ -944,10 +920,6 @@ export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors = {
    * Resource not found.
    */
   404: Error;
-  /**
-   * The orchestrator does not serve the `iam` access model.
-   */
-  501: Error;
 };
 
 export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessError =

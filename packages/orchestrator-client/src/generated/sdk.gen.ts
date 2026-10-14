@@ -225,7 +225,7 @@ export const getTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = fa
  * key**, authorized from the permissions and buckets it was
  * created with.
  * * `{ name, principalId, expiresAt? }` — a **principal-bound
- * key** (`iam` access model), authorized on every request from
+ * key**, authorized on every request from
  * the bucket policies naming that principal. The orchestrator
  * must reject (422) a body carrying `principalId` together with
  * `permissions` or `buckets`, and a `principalId` that is not a
