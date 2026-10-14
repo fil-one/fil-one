@@ -1,4 +1,3 @@
-import type { BucketPolicy } from '@filone/shared';
 import { describe, it, expect } from 'vitest';
 import { PolicyValidationError } from '../lib/errors.ts';
 import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
