@@ -16,7 +16,7 @@ import { OrgRole, replaceRosterStatements } from '@filone/shared';
 import type { AuditActor, BucketPolicy, PolicySyncReport, Roster, S3Region } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit } from './audit.ts';
 import { PolicyPreconditionFailedError } from './errors.ts';
-import type { StoredBucketPolicy } from './iam-orchestrator.ts';
+import type { StoredBucketPolicy } from './bucket-policy-orchestrator.ts';
 import { listMembers } from './org-membership.ts';
 import type { OrgProfileItem } from './org-profile.ts';
 import { removeRegisteredPrincipal } from './org-profile.ts';
