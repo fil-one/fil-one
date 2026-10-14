@@ -66,9 +66,11 @@ export function BucketPropertyCards({ bucket }: { bucket: Bucket }) {
         // green like the other two. Without this the card defaulted to the
         // neutral colour and "None" looked louder than "Disabled" beside it.
         enabled={Boolean(retention)}
-        // Short enough to hold one line under the tooltip's max-w-sm cap; past
-        // that, text-balance splits a hint into two even lines.
-        tooltip="Applied to every object in this bucket."
+        // Says what retention is, like its neighbours, and "new" because a
+        // bucket's default retention locks objects written after it is set,
+        // not the ones already there. Past the tooltip's max-w-sm cap,
+        // text-balance splits a hint into two even lines.
+        tooltip="How long new objects stay protected from deletion or changes."
       />
     </>
   );
