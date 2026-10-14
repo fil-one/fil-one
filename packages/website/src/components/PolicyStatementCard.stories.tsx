@@ -1,7 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
-import { ROSTER_OWNERS_SID } from '@filone/shared';
-
 import { PolicyStatementCard } from './PolicyStatementCard';
 
 const memberNamesById: Record<string, string> = {
@@ -54,10 +52,10 @@ export const EveryoneInOrganization: Story = {
   },
 };
 
-export const RosterStatementWithFoldedMembers: Story = {
+export const StatementWithFoldedMembers: Story = {
   args: {
     statement: {
-      Sid: ROSTER_OWNERS_SID,
+      Sid: 'owners',
       Effect: 'Allow',
       Principal: ['owner', 'admin', 'm1', 'm2', 'm3', 'unknown-id'],
       Action: ['s3:*'],
