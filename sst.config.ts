@@ -1288,7 +1288,6 @@ export default $config({
       // Needs the orchestrator environment to reach those regions at all.
       'remove-member': { extraEnv: orchestratorEnv },
 
-
       // ── RAG ────────────────────────────────────────────────────────
       // RAG query playground (FIL-554): embed the question, vector-search the
       // bucket's index, and ground a Bedrock completion on the retrieved chunks.
