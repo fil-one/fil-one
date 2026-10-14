@@ -4,6 +4,7 @@ import {
   ConditionalCheckFailedException,
   DynamoDBClient,
   GetItemCommand,
+  PutItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -1084,6 +1085,49 @@ describe('stripe-event-worker handler', () => {
   // -----------------------------------------------------------------------
   // Error handling & edge cases
   // -----------------------------------------------------------------------
+  // -----------------------------------------------------------------------
+  // Completion signal: what an integration test polls to know the worker is done
+  // -----------------------------------------------------------------------
+  describe('completion signal', () => {
+    it('records the event as handled once its handler has run', async () => {
+      setupStripeEvent('invoice.finalized', mockInvoice());
+
+      await deliver();
+
+      expect(ddbMock.commandCalls(PutItemCommand).map((call) => call.args[0].input)).toStrictEqual([
+        {
+          TableName: TABLE_NAME,
+          Item: {
+            pk: { S: `WEBHOOK#${MOCK_EVENT_ID}` },
+            sk: { S: 'HANDLED' },
+            eventType: { S: 'invoice.finalized' },
+            handledAt: { S: expect.any(String) },
+            ttl: { N: expect.any(String) },
+          },
+        },
+      ]);
+    });
+
+    it('records nothing when the handler fails', async () => {
+      setupStripeEvent('customer.subscription.created', mockSubscription());
+      ddbMock.on(UpdateItemCommand).rejects(new Error('DynamoDB update failed'));
+
+      await expect(deliver()).rejects.toThrow('DynamoDB update failed');
+
+      expect(ddbMock.commandCalls(PutItemCommand)).toStrictEqual([]);
+    });
+
+    it('acknowledges the event when the signal cannot be written', async () => {
+      // The billing work is done; failing here would only run the handlers again.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      setupStripeEvent('invoice.finalized', mockInvoice());
+      ddbMock.on(PutItemCommand).rejects(new Error('DynamoDB put failed'));
+
+      await expect(deliver()).resolves.toBeUndefined();
+      errorSpy.mockRestore();
+    });
+  });
+
   describe('error handling & edge cases', () => {
     it('fails the delivery when UpdateItemCommand fails during processing', async () => {
       setupStripeEvent('customer.subscription.created', mockSubscription());

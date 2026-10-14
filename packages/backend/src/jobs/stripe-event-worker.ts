@@ -6,10 +6,14 @@
 // consumes the queue one event per invocation. An error fails the delivery,
 // and SQS retries it before parking it in the dead-letter queue. The handlers
 // tolerate running twice (conditional writes, superseded checks, and a status
-// sync that probes before it updates).
+// sync that probes before it updates). Each handled event is recorded beside
+// the webhook's mark, which is how a test knows the worker is done with it.
 
+import { PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import type { SQSEvent } from 'aws-lambda';
 import Stripe from 'stripe';
+import { Resource } from 'sst';
 import {
   PAID_GRACE_DAYS,
   SubscriptionStatus,
@@ -23,6 +27,7 @@ import {
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.ts';
 import { subscriptionSuperseded } from '../lib/billing-identity.ts';
+import { getDynamoClient } from '../lib/ddb-client.ts';
 import { getStripeClient } from '../lib/stripe-client.ts';
 import { updateSubscriptionByUser } from '../lib/subscription-store.ts';
 import {
@@ -37,7 +42,32 @@ export async function handler(event: SQSEvent): Promise<void> {
   // One message per invocation (batch size 1), so an error escaping this
   // handler returns exactly the failed event to the queue.
   for (const record of event.Records) {
-    await processStripeEvent(JSON.parse(record.body) as Stripe.Event);
+    const stripeEvent = JSON.parse(record.body) as Stripe.Event;
+    await processStripeEvent(stripeEvent);
+    await recordEventHandled(stripeEvent);
+  }
+}
+
+// A sibling of the webhook's WEBHOOK#<id>/EVENT mark rather than a stamp on it:
+// the webhook writes the mark after the enqueue, so a fast worker can finish
+// first, and the mark's put would erase a stamp. A failed write is logged, not
+// thrown: the billing work is done, and a retry would only run it again.
+async function recordEventHandled(stripeEvent: Stripe.Event): Promise<void> {
+  try {
+    await getDynamoClient().send(
+      new PutItemCommand({
+        TableName: Resource.BillingTable.name,
+        Item: marshall({
+          pk: `WEBHOOK#${stripeEvent.id}`,
+          sk: 'HANDLED',
+          eventType: stripeEvent.type,
+          handledAt: new Date().toISOString(),
+          ttl: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days, as the mark
+        }),
+      }),
+    );
+  } catch (err) {
+    console.error('[stripe-webhook] Failed to record event handled:', stripeEvent.id, err);
   }
 }
 
