@@ -39,10 +39,3 @@ export const AllActions: Story = {
     initial: { Effect: 'Allow', Principal: '*', Action: ['s3:*'] },
   },
 };
-
-export const RosterStatement: Story = {
-  name: 'Roster statement, name locked',
-  args: {
-    initial: { Sid: 'filone-owners', Effect: 'Allow', Principal: ['user-1'], Action: ['s3:*'] },
-  },
-};

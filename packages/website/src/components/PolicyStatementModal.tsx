@@ -1,11 +1,6 @@
 import { useLayoutEffect, useState } from 'react';
 import type { PolicyStatement } from '@filone/shared';
-import {
-  POLICY_SID_MAX_LENGTH,
-  POLICY_WILDCARD_PRINCIPAL,
-  getRosterSidLabel,
-  isRosterSid,
-} from '@filone/shared';
+import { POLICY_SID_MAX_LENGTH, POLICY_WILDCARD_PRINCIPAL } from '@filone/shared';
 
 import { Alert } from './Alert.js';
 import { Button } from './Button.js';
@@ -25,16 +20,6 @@ export type PolicyStatementModalProps = {
 };
 
 const EMPTY_STATEMENT: PolicyStatement = { Effect: 'Allow', Principal: [], Action: [] };
-
-/**
- * The error for a name reserved for a statement Fil One writes. A roster
- * statement keeps its own Sid; any other statement cannot use one, or the next
- * role change would overwrite it.
- */
-function getReservedNameError(statement: PolicyStatement, rosterLabel: string | undefined) {
-  if (rosterLabel || !isRosterSid(statement.Sid?.trim())) return undefined;
-  return 'This name is reserved for a statement Fil One writes.';
-}
 
 /**
  * Sets the statement's Sid, or removes it when the name is empty or only
@@ -70,13 +55,10 @@ export function PolicyStatementModal({
     if (open) setStatement(initial ?? EMPTY_STATEMENT);
   }, [open, initial]);
 
-  // The roster sync finds the statement by its Sid, so a roster statement's name is fixed.
-  const rosterLabel = getRosterSidLabel(initial?.Sid);
   const hasNoPrincipal =
     statement.Principal !== POLICY_WILDCARD_PRINCIPAL && statement.Principal.length === 0;
   const hasNoAction = statement.Action.length === 0;
-  const nameError = getReservedNameError(statement, rosterLabel);
-  const canSubmit = !hasNoPrincipal && !hasNoAction && !nameError;
+  const canSubmit = !hasNoPrincipal && !hasNoAction;
 
   function submit() {
     onSubmit(replaceSid(statement, statement.Sid?.trim() ?? ''));
@@ -88,11 +70,10 @@ export function PolicyStatementModal({
       <ModalHeader onClose={onClose}>{initial ? 'Edit statement' : 'Add statement'}</ModalHeader>
       <ModalBody>
         <div className="flex flex-col gap-6">
-          <FormField label="Name (optional)" htmlFor="policy-statement-name" error={nameError}>
+          <FormField label="Name (optional)" htmlFor="policy-statement-name">
             <Input
               id="policy-statement-name"
-              value={rosterLabel ?? statement.Sid ?? ''}
-              disabled={Boolean(rosterLabel)}
+              value={statement.Sid ?? ''}
               maxLength={POLICY_SID_MAX_LENGTH}
               placeholder="Analytics team read"
               onChange={(value) => setStatement(replaceSid(statement, value))}

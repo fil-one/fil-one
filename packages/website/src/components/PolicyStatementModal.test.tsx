@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { OrgRole, ROSTER_ADMINS_SID, ROSTER_CREATOR_SID, ROSTER_OWNERS_SID } from '@filone/shared';
+import { OrgRole } from '@filone/shared';
 import type { PolicyStatement } from '@filone/shared';
 
 vi.mock('../lib/api.js', () => ({ getMe: vi.fn(() => new Promise(() => {})) }));
@@ -33,13 +33,6 @@ function pickEveryoneAndReadObjects() {
   fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
   fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
 }
-
-const rosterStatement: PolicyStatement = {
-  Sid: ROSTER_OWNERS_SID,
-  Effect: 'Allow',
-  Principal: ['a'],
-  Action: ['s3:*'],
-};
 
 describe('PolicyStatementModal', () => {
   it('disables Add statement until a principal and an action are picked', () => {
@@ -124,7 +117,7 @@ describe('PolicyStatementModal', () => {
     } satisfies PolicyStatement);
   });
 
-  it('accepts a name with the filone- prefix that is not reserved', () => {
+  it('accepts a name with the filone- prefix', () => {
     renderModal();
     pickEveryoneAndReadObjects();
     fireEvent.change(screen.getByLabelText('Name (optional)'), {
@@ -132,41 +125,6 @@ describe('PolicyStatementModal', () => {
     });
 
     expect(screen.getByRole('button', { name: 'Add statement' })).toBeEnabled();
-  });
-
-  it.each([ROSTER_OWNERS_SID, ROSTER_ADMINS_SID, ROSTER_CREATOR_SID])(
-    'rejects the reserved name %j',
-    (reserved) => {
-      renderModal();
-      pickEveryoneAndReadObjects();
-      fireEvent.change(screen.getByLabelText('Name (optional)'), { target: { value: reserved } });
-
-      expect(screen.getByRole('button', { name: 'Add statement' })).toBeDisabled();
-      expect(
-        screen.getByText('This name is reserved for a statement Fil One writes.'),
-      ).toBeInTheDocument();
-    },
-  );
-
-  it('shows the roster title in place of the Sid', () => {
-    renderModal({ initial: rosterStatement });
-
-    expect(screen.getByLabelText('Name (optional)')).toHaveValue('Owners');
-  });
-
-  it('disables the name field for a roster statement', () => {
-    renderModal({ initial: rosterStatement });
-
-    expect(screen.getByLabelText('Name (optional)')).toBeDisabled();
-  });
-
-  it('keeps the roster Sid on submit', async () => {
-    const { onSubmit } = renderModal({ initial: rosterStatement });
-
-    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Ada' })).toBeChecked());
-    fireEvent.click(screen.getByRole('button', { name: 'Save statement' }));
-
-    expect(onSubmit).toHaveBeenCalledWith(rosterStatement);
   });
 
   it('drops retention writes an Admin cannot see when saving straight away', () => {
