@@ -727,8 +727,7 @@ describe('listBuckets for a member', () => {
   });
 });
 
-describe('getBucket on an iam region', () => {
-  const iamOrchestrator = buildOrchestrator({ accessModel: 'iam' });
+describe('getBucket for a member', () => {
   const respondWithAccessibleBuckets = (...names: string[]) => ({
     data: { buckets: names.map((name) => ({ name, actions: ['s3:ListBucket'] })) },
     error: undefined,
@@ -744,15 +743,15 @@ describe('getBucket on an iam region', () => {
   it("returns details when the Member's access includes the bucket", async () => {
     mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
 
-    await expect(iamOrchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).resolves.toMatchObject(
-      { bucketName: 'bucket-a' },
-    );
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).resolves.toMatchObject({
+      bucketName: 'bucket-a',
+    });
   });
 
   it('looks up access for the named member', async () => {
     mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
 
-    await iamOrchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID);
+    await orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID);
 
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
       expect.objectContaining({ path: { tenantId, principalId: MEMBER_ID } }),
@@ -764,12 +763,12 @@ describe('getBucket on an iam region', () => {
 
     // The tenant's key would answer for the bucket, so the refusal comes from
     // the member's policies, and it reads exactly like a missing bucket.
-    await expect(iamOrchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).resolves.toBeNull();
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).resolves.toBeNull();
     expect(s3Mock.calls()).toHaveLength(0);
   });
 
   it('reads unscoped when no member is named', async () => {
-    await expect(iamOrchestrator.getBucket(tenantId, 'bucket-a')).resolves.toMatchObject({
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a')).resolves.toMatchObject({
       bucketName: 'bucket-a',
     });
     expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
@@ -778,7 +777,7 @@ describe('getBucket on an iam region', () => {
   it('rejects rather than reading when the access lookup fails', async () => {
     mockGetPrincipalAccess.mockReturnValue(fail(503));
 
-    await expect(iamOrchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).rejects.toThrow(
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).rejects.toThrow(
       new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),
     );
     expect(s3Mock.calls()).toHaveLength(0);

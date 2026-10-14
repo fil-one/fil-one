@@ -51,7 +51,7 @@ import type {
 } from '../service-orchestrator.ts';
 import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
-import { filterBucketsByMemberAccess } from './member-access.ts';
+import { canMemberAccessBucket, filterBucketsByMemberAccess } from './member-access.ts';
 import { normalizeStatus } from './metrics-mapping.ts';
 import type { S3ClientContext } from '../s3-client.ts';
 import { createS3Client } from '../s3-client.ts';
@@ -361,11 +361,15 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   }
 
   /**
-   * One bucket's details, or null when the tenant has no such bucket.
+   * One bucket's details, or null when the tenant has no such bucket or the
+   * named member cannot access it.
    *
    * Existence comes from the bucket-addressed reads rather than a tenant-wide
    * listing, which names every bucket in the tenant whether or not the caller
-   * can open it, and costs a call per bucket in the tenant.
+   * can open it, and costs a call per bucket in the tenant. The console signs
+   * with the tenant's key, which every bucket answers, so a member's access is
+   * settled first from the storage system's own evaluation of their policies.
+   * A bucket outside them answers exactly like a bucket that does not exist.
    */
   async getBucket(
     tenantId: string,
@@ -373,6 +377,8 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
+    const userId = memberId;
+    if (userId && !(await canMemberAccessBucket(this, tenantId, userId, bucketName))) return null;
     const ctx = await this.getS3ClientContext(tenantId, requestOptions);
     const s3 = createS3Client(ctx);
 
