@@ -50,7 +50,7 @@ import {
 } from '../errors.ts';
 import { createFilOneOrchestrator } from './filone-orchestrator.ts';
 import { supportsBucketPolicies } from '../service-orchestrator.ts';
-import type { PolicyPrecondition } from '../iam-orchestrator.ts';
+import type { PolicyPrecondition } from '../bucket-policy-orchestrator.ts';
 
 const tenantId = '00000000-0000-0000-0000-000000000001';
 const policy: BucketPolicy = {
