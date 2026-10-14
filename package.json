@@ -24,7 +24,7 @@
     "prepare": "husky",
     "storybook": "pnpm --filter @filone/website storybook",
     "test": "pnpm lint && pnpm test:unit",
-    "test:unit": "pnpm --filter @filone/cloudfront-functions --filter @filone/shared --filter @filone/rag-shared --filter @filone/backend --filter @filone/website --filter @filone/scripts test",
+    "test:unit": "pnpm -r --filter '!filone' --filter '!@filone/integration' test",
     "test:storybook": "pnpm --filter @filone/website test:storybook",
     "test:e2e": "pnpm exec sst shell -- pnpm exec playwright test",
     "test:smoke": "pnpm exec playwright test --project=smoke",
@@ -52,7 +52,8 @@
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs}": "oxlint --disable-nested-config --report-unused-disable-directives",
-    "*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc}": "oxfmt --no-error-on-unmatched-pattern --check"
+    "*.{js,jsx,ts,tsx,mjs,cjs,json,jsonc}": "oxfmt --no-error-on-unmatched-pattern --check",
+    "{package.json,**/package.json,pnpm-workspace.yaml,.github/workflows/packages-ci.yaml}": "node bin/check-ci-unit-tests.ts"
   },
   "engines": {
     "node": ">=24"
