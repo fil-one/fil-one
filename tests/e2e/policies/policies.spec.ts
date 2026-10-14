@@ -6,7 +6,6 @@ import {
 } from '@aws-sdk/client-s3';
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
-import { ROSTER_ADMIN_ACTIONS } from '@filone/shared';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
   ConsoleApi,
@@ -19,9 +18,9 @@ import {
   deny,
   listObjects,
   getS3Outcome,
-  buildOwnersStatement,
+  grantAllToOwner,
   putObject,
-  buildRosterPolicy,
+  buildCreatorPolicy,
   emptyAndDeleteBucket,
   createS3ClientWithNewKey,
   generateBucketName,
@@ -38,7 +37,6 @@ import {
 test.describe.configure({ mode: 'serial' });
 
 const ownerId = getCredentials('owner').userId;
-const adminId = getCredentials('admin').userId;
 const memberId = getCredentials('member').userId;
 const seededBucket = generateBucketName('api1');
 const secondSeededBucket = generateBucketName('api2');
@@ -73,9 +71,9 @@ test.afterAll(async () => {
   await member.dispose();
 });
 
-test('1. a new bucket carries the roster statements', async () => {
+test('1. a new bucket names only its creator', async () => {
   const { policy, etag } = await owner.readPolicy(seededBucket);
-  expect(toCanonicalPolicy(policy)).toEqual(toCanonicalPolicy(buildRosterPolicy(ownerId, adminId)));
+  expect(toCanonicalPolicy(policy)).toEqual(toCanonicalPolicy(buildCreatorPolicy(ownerId)));
   expect(etag).toEqual(expect.any(String));
 });
 
@@ -107,7 +105,7 @@ test('4. S3 lists every bucket to the member, the console only theirs', async ()
 
 test('5. an allow grants exactly its actions on its bucket', async () => {
   await owner.replaceStatements(seededBucket, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket', 's3:GetObject'], 'member-read'),
   ]);
   const s3 = await createS3ClientWithNewKey(member, createdKeys);
@@ -124,7 +122,7 @@ test('5. an allow grants exactly its actions on its bucket', async () => {
 
 test('6. a deny beats an allow', async () => {
   await owner.replaceStatements(seededBucket, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket', 's3:GetObject'], 'member-read'),
     deny([memberId], ['s3:GetObject'], 'no-get'),
   ]);
@@ -139,14 +137,14 @@ test('6. a deny beats an allow', async () => {
 
 test('7. a removed grant applies to a key the gateway has cached', async () => {
   await owner.replaceStatements(seededBucket, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket'], 'member-list'),
   ]);
   // A first call makes the gateway cache the key with the grant.
   const cachedS3 = await createS3ClientWithNewKey(member, createdKeys);
   expect(await getS3Outcome(listObjects(cachedS3, seededBucket))).toBe('ok');
 
-  await owner.replaceStatements(seededBucket, [buildOwnersStatement(ownerId)]);
+  await owner.replaceStatements(seededBucket, [grantAllToOwner(ownerId)]);
   await expect
     .poll(() => getS3Outcome(listObjects(cachedS3, seededBucket)), { timeout: 30_000 })
     .toBe('404 NoSuchBucket');
@@ -155,12 +153,12 @@ test('7. a removed grant applies to a key the gateway has cached', async () => {
 test('8. a write under a stale If-Match is refused with 412 POLICY_CONFLICT', async () => {
   const { etag: stale } = await owner.readPolicy(seededBucket);
   await owner.replaceStatements(seededBucket, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket']),
   ]);
   const before = await owner.readPolicy(seededBucket);
   const res = await owner.putPolicy(seededBucket, {
-    policy: { Statement: [buildOwnersStatement(ownerId)] },
+    policy: { Statement: [grantAllToOwner(ownerId)] },
     etag: stale,
   });
   expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
@@ -169,7 +167,7 @@ test('8. a write under a stale If-Match is refused with 412 POLICY_CONFLICT', as
 
 test('9. creating a policy under If-None-Match: * where one exists is refused with 412 POLICY_CONFLICT', async () => {
   const res = await owner.putPolicy(seededBucket, {
-    policy: { Statement: [buildOwnersStatement(ownerId)] },
+    policy: { Statement: [grantAllToOwner(ownerId)] },
   });
   expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
 });
@@ -186,7 +184,7 @@ for (const [title, statements] of [
   ['10c. a policy with no statements is refused', []],
   [
     '10d. a policy naming a principal id nobody in the tenant holds is refused',
-    [buildOwnersStatement(ownerId), allow([randomUUID()], ['s3:GetObject'])],
+    [grantAllToOwner(ownerId), allow([randomUUID()], ['s3:GetObject'])],
   ],
 ] as const) {
   test(title, async () => {
@@ -201,7 +199,7 @@ for (const [title, statements] of [
   });
 }
 
-test('11. a policy may omit the roster statements and use any Sid', async () => {
+test('11. a statement may take any Sid', async () => {
   const statements = [
     allow([ownerId], ['s3:*'], 'filone-custom'),
     allow([memberId], ['s3:ListBucket'], 'team'),
@@ -210,7 +208,7 @@ test('11. a policy may omit the roster statements and use any Sid', async () => 
   expect(toCanonicalPolicy((await owner.readPolicy(secondSeededBucket)).policy)).toEqual(
     toCanonicalPolicy({ Statement: statements }),
   );
-  await owner.replaceStatements(secondSeededBucket, [buildOwnersStatement(ownerId)]);
+  await owner.replaceStatements(secondSeededBucket, [grantAllToOwner(ownerId)]);
 });
 
 test('12. a member cannot read or write a policy', async () => {
@@ -227,7 +225,7 @@ test('12. a member cannot read or write a policy', async () => {
 
 test('13. a deny naming everyone locks the owner out of S3 but not out of the policy', async () => {
   await owner.replaceStatements(secondSeededBucket, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     deny('*', ['s3:*'], 'lockdown'),
   ]);
   expect(
@@ -235,7 +233,7 @@ test('13. a deny naming everyone locks the owner out of S3 but not out of the po
       listObjects(await createS3ClientWithNewKey(owner, createdKeys), secondSeededBucket),
     ),
   ).toBe('404 NoSuchBucket');
-  await owner.replaceStatements(secondSeededBucket, [buildOwnersStatement(ownerId)]);
+  await owner.replaceStatements(secondSeededBucket, [grantAllToOwner(ownerId)]);
   expect(
     await getS3Outcome(
       listObjects(await createS3ClientWithNewKey(owner, createdKeys), secondSeededBucket),
@@ -257,7 +255,7 @@ test('14a. deleting the policy leaves the bucket to service keys alone', async (
 
 test('14b. a write without a precondition creates a policy where none exists', async () => {
   const created = await owner.putPolicy(secondSeededBucket, {
-    policy: { Statement: [buildOwnersStatement(ownerId)] },
+    policy: { Statement: [grantAllToOwner(ownerId)] },
     unconditional: true,
   });
   expect([created.status(), created.headers().etag]).toEqual([204, expect.any(String)]);
@@ -268,7 +266,7 @@ const presignGet = (bucket: string) =>
 
 test('15a. a member presigned GET works where a statement grants them s3:GetObject', async () => {
   await owner.replaceStatements(seededBucket, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     allow([memberId], ['s3:GetObject']),
   ]);
   const granted = await presignGet(seededBucket);
@@ -299,19 +297,9 @@ test('16. a principal-bound key cannot create or delete buckets', async () => {
   ).toEqual(['403 AccessDenied', '403 AccessDenied']);
 });
 
-test('17. a bucket a member creates also names its creator', async () => {
+test('17. a bucket a member creates names only its creator', async () => {
   await member.createBucket(memberCreatedBucket);
   expect(toCanonicalPolicy((await owner.readPolicy(memberCreatedBucket)).policy)).toEqual(
-    toCanonicalPolicy({
-      Statement: [
-        ...buildRosterPolicy(ownerId, adminId).Statement,
-        {
-          Sid: 'filone-creator',
-          Effect: 'Allow',
-          Principal: [memberId],
-          Action: ROSTER_ADMIN_ACTIONS,
-        },
-      ],
-    }),
+    toCanonicalPolicy(buildCreatorPolicy(memberId)),
   );
 });

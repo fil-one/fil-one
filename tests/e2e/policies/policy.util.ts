@@ -17,7 +17,7 @@ import {
   type APIResponse,
   type Page,
 } from '@playwright/test';
-import { ROSTER_ADMIN_ACTIONS } from '@filone/shared';
+import { CREATOR_ACTIONS } from '@filone/shared';
 import type {
   BucketPolicy,
   CreateAccessKeyResponse,
@@ -255,22 +255,19 @@ export const putObject = (s3: S3Client, bucket: string, key: string) =>
 export const deleteObject = (s3: S3Client, bucket: string, key: string) =>
   s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 
-export function buildOwnersStatement(ownerId: string): PolicyStatement {
-  return { Sid: 'filone-owners', Effect: 'Allow', Principal: [ownerId], Action: ['s3:*'] };
+/** The statement a new bucket carries: its creator, with every action but the retention writes. */
+export function buildCreatorStatement(creatorId: string): PolicyStatement {
+  return { Sid: 'creator', Effect: 'Allow', Principal: [creatorId], Action: CREATOR_ACTIONS };
 }
 
-export function buildAdminsStatement(adminId: string): PolicyStatement {
-  return {
-    Sid: 'filone-admins',
-    Effect: 'Allow',
-    Principal: [adminId],
-    Action: ROSTER_ADMIN_ACTIONS,
-  };
+/** What a new bucket carries, whoever created it. */
+export function buildCreatorPolicy(creatorId: string): BucketPolicy {
+  return { Statement: [buildCreatorStatement(creatorId)] };
 }
 
-/** What a bucket the Owner or the Admin creates carries: the org's roster. */
-export function buildRosterPolicy(ownerId: string, adminId: string): BucketPolicy {
-  return { Statement: [buildOwnersStatement(ownerId), buildAdminsStatement(adminId)] };
+/** Every action for the owner under an ordinary Sid: what most cases start their policy from. */
+export function grantAllToOwner(ownerId: string): PolicyStatement {
+  return allow([ownerId], ['s3:*'], 'owner-all');
 }
 
 export function allow(
@@ -306,7 +303,7 @@ export async function emptyAndDeleteBucket(
   ) {
     return; // Already gone.
   }
-  const policy: BucketPolicy = { Statement: [buildOwnersStatement(ownerId)] };
+  const policy: BucketPolicy = { Statement: [grantAllToOwner(ownerId)] };
   const etag = current.ok() ? current.headers().etag : undefined;
   const put = await owner.putPolicy(bucket, { policy, etag });
   expect(put.status(), await put.text()).toBe(204);

@@ -1,5 +1,4 @@
 import { test, expect, type Page } from '@playwright/test';
-import { ROSTER_ADMIN_ACTIONS } from '@filone/shared';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
   ConsoleApi,
@@ -14,7 +13,8 @@ import {
   getS3Outcome,
   putObject,
   emptyAndDeleteBucket,
-  buildRosterPolicy,
+  buildCreatorPolicy,
+  grantAllToOwner,
   createS3ClientWithNewKey,
   generateBucketName,
   type PolicyUser,
@@ -22,9 +22,9 @@ import {
 } from './policy.util.ts';
 
 // The same bucket as each role sees it: the Owner and the Admin are unscoped
-// and get access through the roster statements, the Member and the ReadOnly
-// user only through a statement naming them. A role still caps what the console lets
-// a user do, whatever the policy grants them.
+// in the console, and anyone's own key reaches a bucket only through a
+// statement naming them. A role still caps what the console lets a user do,
+// whatever the policy grants them.
 
 test.describe.configure({ mode: 'serial' });
 
@@ -115,16 +115,16 @@ test('R2. every role but readonly may create a bucket and mint a key', async () 
   ]);
 });
 
-test('R3. a bucket the admin creates carries the roster and no creator statement', async () => {
+test('R3. a bucket the admin creates names only the admin', async () => {
   const bucket = generateBucketName('r3');
   await apiByRole.admin.createBucket(bucket);
   buckets.push(bucket);
   expect(toCanonicalPolicy((await apiByRole.owner.readPolicy(bucket)).policy)).toEqual(
-    toCanonicalPolicy(buildRosterPolicy(userIdByRole.owner, userIdByRole.admin)),
+    toCanonicalPolicy(buildCreatorPolicy(userIdByRole.admin)),
   );
 });
 
-test('R4. on a new bucket the roster grants the owner and the admin access, and nobody else', async () => {
+test("R4. on a new bucket the creator's key reaches it and nobody else's", async () => {
   const bucket = await createTrackedBucket();
   const results = [];
   for (const role of ['owner', 'admin', 'member'] as const) {
@@ -138,7 +138,7 @@ test('R4. on a new bucket the roster grants the owner and the admin access, and 
   }
   expect(results).toEqual([
     ['owner', 'ok', 'ok', 'ok'],
-    ['admin', 'ok', 'ok', 'ok'],
+    ['admin', '404 NoSuchBucket', '404 NoSuchBucket', '404 NoSuchBucket'],
     ['member', '404 NoSuchBucket', '404 NoSuchBucket', '404 NoSuchBucket'],
   ]);
 });
@@ -146,7 +146,7 @@ test('R4. on a new bucket the roster grants the owner and the admin access, and 
 test('R5. the console lists a bucket to the roles a statement grants access', async () => {
   const bucket = await createTrackedBucket();
   await apiByRole.owner.replaceStatements(bucket, [
-    ...buildRosterPolicy(userIdByRole.owner, userIdByRole.admin).Statement,
+    grantAllToOwner(userIdByRole.owner),
     allow([userIdByRole.member], ['s3:ListBucket']),
   ]);
   const listed = [];
@@ -166,7 +166,7 @@ test('R6. readonly reads what a policy grants and no more than the role allows',
   await putObject(await createS3ClientWithNewKey(apiByRole.owner, createdKeys), bucket, SEEDED_KEY);
   // Even a write grant does not let readonly write: the role caps the console.
   await apiByRole.owner.replaceStatements(bucket, [
-    ...buildRosterPolicy(userIdByRole.owner, userIdByRole.admin).Statement,
+    grantAllToOwner(userIdByRole.owner),
     allow([userIdByRole.readonly], ['s3:ListBucket', 's3:GetObject', 's3:PutObject']),
   ]);
 
@@ -193,7 +193,7 @@ test.describe('the Policy tab', () => {
   test.beforeAll(async () => {
     bucket = await createTrackedBucket();
     await apiByRole.owner.replaceStatements(bucket, [
-      ...buildRosterPolicy(userIdByRole.owner, userIdByRole.admin).Statement,
+      grantAllToOwner(userIdByRole.owner),
       allow([userIdByRole.member, userIdByRole.readonly], ['s3:ListBucket', 's3:GetObject']),
     ]);
   });
@@ -225,9 +225,9 @@ test.describe('the Policy tab', () => {
 });
 
 test("R8. the first policy is the server's own, whatever a creator sends", async () => {
-  // The create request carries no policy; the server builds the roster from the
-  // org's membership and sends it on the create itself, so a creator who asks
-  // for more gets the default and nothing else.
+  // The create request carries no policy; the server names the creator and
+  // sends that on the create itself, so a creator who asks for more gets the
+  // default and nothing else.
   const requestedPolicy = { Statement: [allow('*', ['s3:*'], 'mine')] };
   const results = [];
   for (const role of ['admin', 'member'] as const) {
@@ -245,21 +245,7 @@ test("R8. the first policy is the server's own, whatever a creator sends", async
     ]);
   }
   expect(results).toEqual([
-    ['admin', 201, toCanonicalPolicy(buildRosterPolicy(userIdByRole.owner, userIdByRole.admin))],
-    [
-      'member',
-      201,
-      toCanonicalPolicy({
-        Statement: [
-          ...buildRosterPolicy(userIdByRole.owner, userIdByRole.admin).Statement,
-          {
-            Sid: 'filone-creator',
-            Effect: 'Allow',
-            Principal: [userIdByRole.member],
-            Action: ROSTER_ADMIN_ACTIONS,
-          },
-        ],
-      }),
-    ],
+    ['admin', 201, toCanonicalPolicy(buildCreatorPolicy(userIdByRole.admin))],
+    ['member', 201, toCanonicalPolicy(buildCreatorPolicy(userIdByRole.member))],
   ]);
 });

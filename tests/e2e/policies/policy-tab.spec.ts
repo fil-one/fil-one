@@ -9,8 +9,8 @@ import {
   deny,
   listObjects,
   getS3Outcome,
-  buildAdminsStatement,
-  buildOwnersStatement,
+  buildCreatorStatement,
+  grantAllToOwner,
   putObject,
   emptyAndDeleteBucket,
   createS3ClientWithNewKey,
@@ -26,7 +26,6 @@ import {
 test.use({ storageState: STORAGE_STATE.owner });
 
 const ownerId = getCredentials('owner').userId;
-const adminId = getCredentials('admin').userId;
 const memberId = getCredentials('member').userId;
 
 let owner: ConsoleApi;
@@ -107,25 +106,22 @@ async function savePolicy(page: Page): Promise<void> {
   await expect(saveBar(page)).toBeHidden();
 }
 
-test('U1. the tab lists the roster statements of a new bucket', async ({ page }) => {
+test('U1. the tab lists the creator statement of a new bucket', async ({ page }) => {
   await openPolicyTab(page);
-  await expect(cards(page)).toHaveCount(2);
-  await expect(card(page, 'Owners')).toBeVisible();
-  await expect(card(page, 'Admins')).toBeVisible();
+  await expect(cards(page)).toHaveCount(1);
+  await expect(card(page, 'creator')).toBeVisible();
 });
 
-test('U2. a roster statement keeps its name but can be removed', async ({ page }) => {
+test('U2. the creator statement can be renamed like any other', async ({ page }) => {
   await openPolicyTab(page);
-  await chooseStatementMenuAction(page, 'Owners', 'edit');
-  await expect(nameInput(page)).toBeDisabled();
-  await expect(nameInput(page)).toHaveValue('Owners');
-  await modal(page).locator('#policy-statement-cancel-button').click();
-
-  await chooseStatementMenuAction(page, 'Owners', 'remove');
-  await expect(cards(page)).toHaveCount(1);
+  await chooseStatementMenuAction(page, 'creator', 'edit');
+  await expect(nameInput(page)).toBeEnabled();
+  await expect(nameInput(page)).toHaveValue('creator');
+  await nameInput(page).fill('owner-all');
+  await submitStatement(page);
   await savePolicy(page);
   expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-    toCanonicalPolicy({ Statement: [buildAdminsStatement(adminId)] }),
+    toCanonicalPolicy({ Statement: [{ ...buildCreatorStatement(ownerId), Sid: 'owner-all' }] }),
   );
 });
 
@@ -143,8 +139,7 @@ test('U3. an allow added in the tab grants the member', async ({ page }) => {
   expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
     toCanonicalPolicy({
       Statement: [
-        buildOwnersStatement(ownerId),
-        buildAdminsStatement(adminId),
+        buildCreatorStatement(ownerId),
         allow([memberId], ['s3:ListBucket', 's3:GetObject'], 'member-read'),
       ],
     }),
@@ -156,7 +151,7 @@ test('U3. an allow added in the tab grants the member', async ({ page }) => {
 
 test('U4. editing a statement widens the grant', async ({ page }) => {
   await owner.replaceStatements(bucket, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket'], 'member-read'),
   ]);
   await openPolicyTab(page);
@@ -177,7 +172,7 @@ test('U4. editing a statement widens the grant', async ({ page }) => {
 
 test('U5. removing a statement takes its grant away', async ({ page }) => {
   await owner.replaceStatements(bucket, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket'], 'member-read'),
   ]);
   await openPolicyTab(page);
@@ -186,7 +181,7 @@ test('U5. removing a statement takes its grant away', async ({ page }) => {
   await savePolicy(page);
 
   expect((await owner.readPolicy(bucket)).policy).toEqual({
-    Statement: [buildOwnersStatement(ownerId)],
+    Statement: [grantAllToOwner(ownerId)],
   });
   expect(
     await getS3Outcome(listObjects(await createS3ClientWithNewKey(member, createdKeys), bucket)),
@@ -294,8 +289,8 @@ test("U11. a save after another writer's change shows the conflict, and reload s
   page,
 }) => {
   await openPolicyTab(page);
-  await expect(cards(page)).toHaveCount(2);
-  const theirs = [buildOwnersStatement(ownerId), allow([memberId], ['s3:ListBucket'], 'theirs')];
+  await expect(cards(page)).toHaveCount(1);
+  const theirs = [grantAllToOwner(ownerId), allow([memberId], ['s3:ListBucket'], 'theirs')];
   await owner.replaceStatements(bucket, theirs);
 
   await openAddStatement(page);

@@ -5,12 +5,12 @@ import {
   ConsoleApi,
   REGION,
   STORAGE_STATE,
-  buildAdminsStatement,
+  buildCreatorStatement,
   allow,
   getCredentials,
   deny,
   emptyAndDeleteBucket,
-  buildRosterPolicy,
+  grantAllToOwner,
   generateBucketName,
   toCanonicalPolicy,
   chooseStatementMenuAction,
@@ -54,7 +54,8 @@ test.afterAll(async () => {
   await admin.dispose();
 });
 
-const getRosterStatements = () => buildRosterPolicy(ownerId, adminId).Statement;
+/** The policy a bucket starts with here: the owner created it. */
+const getStoredStatements = () => [buildCreatorStatement(ownerId)];
 
 async function putPolicyAs(api: ConsoleApi, statements: PolicyStatement[], etag?: string) {
   const res = await api.putPolicy(bucket, { policy: { Statement: statements }, etag });
@@ -88,7 +89,7 @@ test.describe('through the API', () => {
   ] as const) {
     test(title, async () => {
       const before = await owner.readPolicy(bucket);
-      expect(await putPolicyAs(admin, [...getRosterStatements(), grant], before.etag)).toEqual({
+      expect(await putPolicyAs(admin, [...getStoredStatements(), grant], before.etag)).toEqual({
         status: 403,
         code: 'RETENTION_GRANT_FORBIDDEN',
       });
@@ -96,9 +97,14 @@ test.describe('through the API', () => {
     });
   }
 
-  test("P2. an admin may save a policy that keeps the owners' s3:* statement", async () => {
+  test("P2. an admin may save a policy that keeps an owner's s3:* statement", async () => {
+    const ownerAll = grantAllToOwner(ownerId);
+    expect(await putPolicyAs(owner, [ownerAll], (await owner.readPolicy(bucket)).etag)).toEqual({
+      status: 204,
+      code: undefined,
+    });
     const { etag } = await admin.readPolicy(bucket);
-    const statement = [...getRosterStatements(), allow([memberId], ['s3:ListBucket'], 'team')];
+    const statement = [ownerAll, allow([memberId], ['s3:ListBucket'], 'team')];
     expect(await putPolicyAs(admin, statement, etag)).toEqual({ status: 204, code: undefined });
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
       toCanonicalPolicy({ Statement: statement }),
@@ -108,27 +114,27 @@ test.describe('through the API', () => {
   test('P3. an owner grants the pair, and an admin may keep or drop it', async () => {
     const granted = allow([memberId], ['s3:PutObjectRetention', 's3:PutObjectLegalHold'], 'hold');
     const { etag } = await owner.readPolicy(bucket);
-    expect(await putPolicyAs(owner, [...getRosterStatements(), granted], etag)).toEqual({
+    expect(await putPolicyAs(owner, [...getStoredStatements(), granted], etag)).toEqual({
       status: 204,
       code: undefined,
     });
 
-    const kept = [...getRosterStatements(), granted, allow([memberId], ['s3:ListBucket'], 'team')];
+    const kept = [...getStoredStatements(), granted, allow([memberId], ['s3:ListBucket'], 'team')];
     expect(await putPolicyAs(admin, kept, (await admin.readPolicy(bucket)).etag)).toEqual({
       status: 204,
       code: undefined,
     });
     expect(
-      await putPolicyAs(admin, getRosterStatements(), (await admin.readPolicy(bucket)).etag),
+      await putPolicyAs(admin, getStoredStatements(), (await admin.readPolicy(bucket)).etag),
     ).toEqual({ status: 204, code: undefined });
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-      toCanonicalPolicy({ Statement: getRosterStatements() }),
+      toCanonicalPolicy({ Statement: getStoredStatements() }),
     );
   });
 
   test('P4. an admin may deny the pair, since withholding is not granting', async () => {
     const statement = [
-      ...getRosterStatements(),
+      ...getStoredStatements(),
       deny('*', ['s3:PutObjectRetention', 's3:PutObjectLegalHold'], 'no-holds'),
     ];
     expect(await putPolicyAs(admin, statement, (await admin.readPolicy(bucket)).etag)).toEqual({
@@ -137,22 +143,22 @@ test.describe('through the API', () => {
     });
   });
 
-  test('P5. an admin writing a first policy may not grant s3:*, even to the owners', async () => {
+  test('P5. an admin writing a first policy may not grant s3:*, even to the owner', async () => {
     const { etag } = await owner.readPolicy(bucket);
     expect((await owner.deletePolicy(bucket, etag)).status()).toBe(204);
 
-    expect(await putPolicyAs(admin, getRosterStatements())).toEqual({
+    expect(await putPolicyAs(admin, [grantAllToOwner(ownerId)])).toEqual({
       status: 403,
       code: 'RETENTION_GRANT_FORBIDDEN',
     });
-    const statement = [buildAdminsStatement(adminId), allow([memberId], ['s3:ListBucket'])];
+    const statement = [allow([adminId], ['s3:ListBucket']), allow([memberId], ['s3:ListBucket'])];
     expect(await putPolicyAs(admin, statement)).toEqual({ status: 204, code: undefined });
   });
 
-  test('P6. an admin may not name a retention write, even for an owner who holds s3:*', async () => {
+  test('P6. an admin may not name a retention write, even for the owner', async () => {
     const { etag } = await admin.readPolicy(bucket);
     const named = [
-      ...getRosterStatements(),
+      ...getStoredStatements(),
       allow([ownerId], ['s3:PutObjectRetention'], 'owner-hold'),
     ];
     expect(await putPolicyAs(admin, named, etag)).toEqual({
@@ -165,7 +171,7 @@ test.describe('through the API', () => {
     const before = await owner.readPolicy(bucket);
     const res = await admin.putPolicy(bucket, {
       policy: {
-        Statement: [...getRosterStatements(), allow([memberId], ['s3:PutObjectRetention'])],
+        Statement: [...getStoredStatements(), allow([memberId], ['s3:PutObjectRetention'])],
       },
       unconditional: true,
     });
@@ -228,7 +234,7 @@ test.describe('in the editor', () => {
 
       expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
         toCanonicalPolicy({
-          Statement: [...getRosterStatements(), allow([memberId], ['s3:PutObjectRetention'])],
+          Statement: [...getStoredStatements(), allow([memberId], ['s3:PutObjectRetention'])],
         }),
       );
     });

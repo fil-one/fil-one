@@ -13,7 +13,7 @@ import {
   getS3Outcome,
   putObject,
   emptyAndDeleteBucket,
-  buildRosterPolicy,
+  grantAllToOwner,
   createS3Client,
   generateBucketName,
   type PolicyUser,
@@ -87,7 +87,7 @@ test('S1. an owner service key accesses its scoped bucket despite a deny-all pol
   const outOfScope = await createTrackedBucket();
   // A deny naming everyone locks every principal out. A service key is not one.
   await apiByRole.owner.replaceStatements(inScope, [
-    ...buildRosterPolicy(userIdByRole.owner, userIdByRole.admin).Statement,
+    grantAllToOwner(userIdByRole.owner),
     deny('*', ['s3:*']),
   ]);
 

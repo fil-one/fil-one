@@ -9,9 +9,9 @@ import {
   allow,
   getCredentials,
   listObjects,
-  buildOwnersStatement,
+  grantAllToOwner,
   emptyAndDeleteBucket,
-  buildRosterPolicy,
+  buildCreatorPolicy,
   createS3ClientWithNewKey,
   generateBucketName,
   toCanonicalPolicy,
@@ -21,7 +21,6 @@ import {
 // bucket forms there. Each case gets its own buckets.
 
 const ownerId = getCredentials('owner').userId;
-const adminId = getCredentials('admin').userId;
 const memberId = getCredentials('member').userId;
 
 let orgId: string;
@@ -56,10 +55,7 @@ async function createBucketGrantingMember(actions: PolicyAction[]): Promise<stri
   await owner.createBucket(bucket);
   buckets.push(bucket);
   if (actions.length > 0) {
-    await owner.replaceStatements(bucket, [
-      buildOwnersStatement(ownerId),
-      allow([memberId], actions),
-    ]);
+    await owner.replaceStatements(bucket, [grantAllToOwner(ownerId), allow([memberId], actions)]);
   }
   return bucket;
 }
@@ -173,7 +169,7 @@ test.describe('as the owner', () => {
     await expect(row.getByTestId('permission-badge-follows-bucket-policy')).toBeVisible();
   });
 
-  test('K2. a bucket created on an iam region carries the roster statements', async ({ page }) => {
+  test('K2. a bucket created on an iam region names its creator', async ({ page }) => {
     const bucket = generateBucketName('form');
     buckets.push(bucket);
     await page.goto('/buckets');
@@ -187,9 +183,9 @@ test.describe('as the owner', () => {
     await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucket}`);
 
     await page.getByTestId('bucket-policy-tab').click();
-    await expect(page.getByTestId('policy-statement')).toHaveCount(2);
+    await expect(page.getByTestId('policy-statement')).toHaveCount(1);
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-      toCanonicalPolicy(buildRosterPolicy(ownerId, adminId)),
+      toCanonicalPolicy(buildCreatorPolicy(ownerId)),
     );
   });
 });

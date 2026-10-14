@@ -27,7 +27,7 @@ import {
   deny,
   listObjects,
   getS3Outcome,
-  buildOwnersStatement,
+  grantAllToOwner,
   putObject,
   emptyAndDeleteBucket,
   createS3ClientWithNewKey,
@@ -63,7 +63,7 @@ async function createBucketWithStatements(
   await owner.createBucket(bucket, { versioning, lock });
   buckets.push(bucket);
   await putObject(ownerS3, bucket, SEEDED_KEY);
-  await owner.replaceStatements(bucket, [buildOwnersStatement(ownerId), ...statements]);
+  await owner.replaceStatements(bucket, [grantAllToOwner(ownerId), ...statements]);
   return bucket;
 }
 
@@ -158,7 +158,7 @@ test('A6. a widened grant applies to a key the gateway has cached', async () => 
   expect(await getS3Outcome(putObject(s3, bucket, 'member.txt'))).toBe('403 AccessDenied');
 
   await owner.replaceStatements(bucket, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket', 's3:PutObject']),
   ]);
   // The one wait here: the widened grant arriving at the gateway's cache is the subject.
@@ -183,7 +183,7 @@ test('A7. a copy needs a read on its source bucket', async () => {
   );
 
   await owner.replaceStatements(source, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     allow([memberId], ['s3:GetObject']),
   ]);
   expect(await getS3Outcome(copy(await createS3ClientWithNewKey(member, createdKeys)))).toBe('ok');
@@ -205,7 +205,7 @@ test('A8. multipart parts listing and abort are granted on their own', async () 
   ]).toEqual(['ok', '403 AccessDenied', '403 AccessDenied']);
 
   await owner.replaceStatements(bucket, [
-    buildOwnersStatement(ownerId),
+    grantAllToOwner(ownerId),
     allow([memberId], ['s3:PutObject', 's3:ListMultipartUploadParts', 's3:AbortMultipartUpload']),
   ]);
   const full = await createS3ClientWithNewKey(member, createdKeys);
@@ -299,7 +299,7 @@ test.describe('C. policy writes', () => {
     const write = (sid: string) =>
       owner.putPolicy(bucket, {
         policy: {
-          Statement: [buildOwnersStatement(ownerId), allow([memberId], ['s3:ListBucket'], sid)],
+          Statement: [grantAllToOwner(ownerId), allow([memberId], ['s3:ListBucket'], sid)],
         },
         etag,
       });
@@ -309,7 +309,7 @@ test.describe('C. policy writes', () => {
 
   test('C2. a delete under a stale If-Match is refused', async () => {
     const { etag: stale } = await owner.readPolicy(bucket);
-    await owner.replaceStatements(bucket, [buildOwnersStatement(ownerId)]);
+    await owner.replaceStatements(bucket, [grantAllToOwner(ownerId)]);
     const before = await owner.readPolicy(bucket);
     const res = await owner.deletePolicy(bucket, stale);
     expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
@@ -334,7 +334,7 @@ test.describe('C. policy writes', () => {
     test(title, async () => {
       const { etag } = await owner.readPolicy(bucket);
       const res = await owner.putPolicy(bucket, {
-        policy: { Statement: [buildOwnersStatement(ownerId), statement] },
+        policy: { Statement: [grantAllToOwner(ownerId), statement] },
         etag,
       });
       const body = await res.text();
@@ -348,13 +348,13 @@ test.describe('C. policy writes', () => {
 
   test('C4. a member named twice in a statement is stored once', async () => {
     await owner.replaceStatements(bucket, [
-      buildOwnersStatement(ownerId),
+      grantAllToOwner(ownerId),
       allow([memberId, ownerId, memberId], ['s3:ListBucket'], 'repeat'),
     ]);
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
       toCanonicalPolicy({
         Statement: [
-          buildOwnersStatement(ownerId),
+          grantAllToOwner(ownerId),
           allow([memberId, ownerId], ['s3:ListBucket'], 'repeat'),
         ],
       }),
