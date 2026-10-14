@@ -1,5 +1,5 @@
 // Forge service orchestrators. Forge ("Hilt" on the Forge side) is backed by
-// the generic Service Orchestrator Management API (createFilOneOrchestrator).
+// the generic Service Orchestrator Management API (FilOneOrchestrator).
 // Forge runs as independent networks, each with its own Hilt serving every
 // region in that network; the region is sent per-tenant in the PUT /tenants
 // body. Non-production talks to two of them, staging and the dev sandbox;
@@ -16,43 +16,39 @@
 // are linked only on non-production stages, so eager construction would crash
 // production at import time.
 
-import { getS3Endpoint, S3Region, type AccessModel } from '@filone/shared';
-import { createFilOneOrchestrator } from '../orchestrator/filone-orchestrator.ts';
-import type { RegionOrchestrator } from '../service-orchestrator.ts';
+import { getS3Endpoint, S3Region } from '@filone/shared';
+import { FilOneOrchestrator } from '../orchestrator/orchestrator.ts';
+import type { ServiceOrchestrator } from '../service-orchestrator.ts';
 
-/** Management API endpoint, bearer credential and access model of one Forge network's Hilt. */
+/** Management API endpoint and bearer credential of one Forge network's Hilt. */
 export interface ForgeManagementApi {
   baseUrl: string;
   accessToken: string;
-  /** Whether this network's Hilt serves bucket policies and members, from deploy config. */
-  accessModel: AccessModel;
 }
 
 /**
  * @param id The unique identifier for the Forge orchestrator. It should have
  *           the format `^[a-z][a-zA-Z0-9_]*$`.
  * @param region The S3 region the orchestrator will manage.
- * @param api The Hilt endpoint, bearer token and access model of the Forge
- *            network hosting the region.
+ * @param api The Hilt endpoint and bearer token of the Forge network hosting
+ *            the region.
  * @param s3 Overrides of the region's S3 endpoint (default getS3Endpoint()) and
  *           of the endpoint presigned URLs carry.
- * @returns The orchestrator for the specified Forge region, with bucket
- *          policies and members when its network serves `iam`.
+ * @returns The orchestrator for the specified Forge region.
  */
 export function createForgeOrchestrator(
   id: string,
   region: S3Region,
   api: ForgeManagementApi,
   s3: { endpointUrl?: string; presignEndpointUrl?: string } = {},
-): RegionOrchestrator {
+): ServiceOrchestrator {
   const stage = process.env.FILONE_STAGE!;
-  return createFilOneOrchestrator({
+  return new FilOneOrchestrator({
     id,
     region,
     stage,
     s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(region, stage),
     s3PresignEndpointUrl: s3.presignEndpointUrl,
     api: { baseUrl: api.baseUrl, accessToken: api.accessToken },
-    accessModel: api.accessModel,
   });
 }

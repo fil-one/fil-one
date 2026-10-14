@@ -48,8 +48,7 @@ import {
   PolicyPublishError,
   PolicyValidationError,
 } from '../errors.ts';
-import { createFilOneOrchestrator } from './filone-orchestrator.ts';
-import { supportsBucketPolicies } from '../service-orchestrator.ts';
+import { FilOneOrchestrator } from './orchestrator.ts';
 import type { PolicyPrecondition } from '../bucket-policy-orchestrator.ts';
 
 const tenantId = '00000000-0000-0000-0000-000000000001';
@@ -71,36 +70,16 @@ const ok = (data: unknown, status = 200, headers?: Record<string, string>) =>
 const fail = (status: number, body: unknown = { message: 'error' }) =>
   buildSdkResult(status, undefined, body);
 
-function buildOrchestrator(accessModel?: 'iam') {
-  return createFilOneOrchestrator({
-    id: 'forge',
-    region: S3Region.UsEast9,
-    stage: 'test',
-    s3EndpointUrl: 'https://s3.example.test',
-    api: { baseUrl: 'https://api.example.test', accessToken: 'partner-key' },
-    accessModel,
-  });
-}
-
-function buildIamOrchestrator() {
-  const orchestrator = buildOrchestrator('iam');
-  if (!supportsBucketPolicies(orchestrator)) throw new Error('expected bucket policies');
-  return orchestrator;
-}
-
-const orchestrator = buildIamOrchestrator();
+const orchestrator = new FilOneOrchestrator({
+  id: 'forge',
+  region: S3Region.UsEast9,
+  stage: 'test',
+  s3EndpointUrl: 'https://s3.example.test',
+  api: { baseUrl: 'https://api.example.test', accessToken: 'partner-key' },
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
-});
-
-describe('createFilOneOrchestrator', () => {
-  it.each([
-    ['iam', true],
-    [undefined, false],
-  ] as const)('serves bucket policies for access model %s: %s', (accessModel, expected) => {
-    expect(supportsBucketPolicies(buildOrchestrator(accessModel))).toBe(expected);
-  });
 });
 
 describe('getBucketPolicy', () => {

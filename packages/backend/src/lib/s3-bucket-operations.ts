@@ -323,7 +323,7 @@ export async function deleteBucket(
 // ---------------------------------------------------------------------------
 // Bucket policies (fil-one/RFC#30). The three S3 operations on
 // `/{bucket}?policy`, signed with the tenant's console key, which holds
-// CONSOLE_KEY_POLICY_PERMISSIONS on an iam region.
+// the bucket-policy permissions.
 // The storage system reads the preconditions from signed headers and answers
 // the policy's ETag in a header, so both travel through command middleware
 // rather than the SDK's typed input and output.

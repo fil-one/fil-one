@@ -1,5 +1,5 @@
 // Tenant setup for Management API backed orchestrators. Owned by
-// createFilOneOrchestrator().ensureTenantReady but kept in a separate
+// FilOneOrchestrator.ensureTenantReady but kept in a separate
 // module, mirroring fth-tenant-setup.ts / aurora-tenant-setup.ts.
 //
 // The Management API contract makes this much simpler than Aurora's state
@@ -14,7 +14,6 @@ import { format } from 'node:util';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
-import type { AccessModel } from '@filone/shared';
 import { getDynamoClient } from '../ddb-client.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
@@ -53,12 +52,7 @@ const CONSOLE_KEY_PERMISSIONS = [
   's3:AbortMultipartUpload',
   's3:DeleteObject',
   's3:DeleteObjectVersion',
-] as const;
-
-// Bucket policies are read and written over S3 with this key (fil-one/RFC#30).
-// Only an iam region's storage system knows these actions; a service-keys
-// region refuses the whole key request over them.
-const CONSOLE_KEY_POLICY_PERMISSIONS = [
+  // Bucket policies are read and written over S3 with this key (fil-one/RFC#30).
   's3:GetBucketPolicy',
   's3:PutBucketPolicy',
   's3:DeleteBucketPolicy',
@@ -74,8 +68,6 @@ export interface TenantSetupDeps {
   stage: string;
   /** Region the tenant is provisioned in, sent on `PUT /tenants/{tenantId}`. */
   region: string;
-  /** The region's access model; `iam` adds the bucket-policy permissions to the console key. Defaults to `service-keys`. */
-  accessModel?: AccessModel;
 }
 
 // Public entry point for synchronous tenant setup from request handlers.
@@ -231,10 +223,7 @@ async function createConsoleAccessKey(
   const { client } = deps;
   const createArgs: CreateAccessKeyRequest = {
     name: CONSOLE_KEY_NAME,
-    permissions:
-      deps.accessModel === 'iam'
-        ? [...CONSOLE_KEY_PERMISSIONS, ...CONSOLE_KEY_POLICY_PERMISSIONS]
-        : [...CONSOLE_KEY_PERMISSIONS],
+    permissions: [...CONSOLE_KEY_PERMISSIONS],
     buckets: [],
     expiresAt: null,
   };
