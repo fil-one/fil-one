@@ -247,6 +247,19 @@ describe('ApiKeysPage — rotating a key', () => {
     expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
   });
 
+  it('hides the action on an expired key', async () => {
+    // The rotate route refuses an expired key; the remedy is a new one.
+    mockApiRequest.mockResolvedValue({
+      keys: [key({ status: 'expired', expiresAt: '2026-06-01' })],
+    });
+
+    renderPage(OrgRole.Owner);
+    await openRowMenu();
+
+    expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+  });
+
   it('offers no rotation to a role that cannot create keys', async () => {
     // A Member may revoke their own key; rotating it mints a new one, and this
     // key carries more than a Member can grant.

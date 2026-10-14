@@ -312,13 +312,8 @@ export function AccessKeysTable({
   // The handlers themselves rather than booleans about them: building the
   // closure is where the optional prop narrows, so nothing has to test
   // `onRotate` twice to satisfy both the permission and the compiler.
-  // An expired key is never offered Rotate: the server refuses to reissue it,
-  // and the remedy is a new key.
   const actionsFor = (key: AccessKey) => ({
-    onRotate:
-      onRotate && key.status !== 'expired' && (canRotate?.(key) ?? true)
-        ? () => onRotate(key.id)
-        : undefined,
+    onRotate: onRotate && (canRotate?.(key) ?? true) ? () => onRotate(key.id) : undefined,
     onDelete: onDelete && (canDelete?.(key) ?? true) ? () => void onDelete(key.id) : undefined,
   });
   const rowHasAction = (key: AccessKey) => {

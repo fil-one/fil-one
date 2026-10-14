@@ -92,11 +92,16 @@ export function useKeyRotation(): {
       setPendingKeyId(null);
     },
     /**
-     * A key is rotatable when its holder could mint it today: the replacement
-     * is a fresh credential, and the server refuses one carrying more than the
-     * caller's role grants. Same function, so the menu hides what would 403.
+     * A key is rotatable when it has not expired and its holder could mint it
+     * today: the replacement is a fresh credential, and the server refuses one
+     * carrying more than the caller's role grants, or one for an expired key.
+     * Same rules, so the menu hides what the server would refuse.
      */
     canRotate: (key: AccessKey) =>
-      mayCreate && mayRevoke(key) && role !== undefined && canRetainAccessKey(role, key).retained,
+      key.status !== 'expired' &&
+      mayCreate &&
+      mayRevoke(key) &&
+      role !== undefined &&
+      canRetainAccessKey(role, key).retained,
   };
 }
