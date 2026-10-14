@@ -21,7 +21,7 @@ import {
   PolicyValidationError,
   PrincipalNotFoundError,
 } from './errors.ts';
-import type { PolicyPrecondition } from './iam-orchestrator.ts';
+import type { PolicyPrecondition } from './bucket-policy-orchestrator.ts';
 import { isOrgDeleting } from './org-profile.ts';
 import { getRequestHeader } from './request-headers.ts';
 import {
