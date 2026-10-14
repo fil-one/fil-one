@@ -20,12 +20,6 @@ import { delegateIamMethods, FakeIamOrchestrator } from '../test/fake-iam-orches
 
 vi.mock('sst', () => sstResourceMock());
 
-// The dev network (us-east-9) serves `iam` here, where the registry mock below
-// serves it, so the shared retention rule and the handler agree.
-vi.hoisted(() => {
-  process.env.FORGE_DEV_ACCESS_MODEL = 'iam';
-});
-
 const mockEnsureTenantReady = vi.fn();
 const mockIssueAccessKey = vi.fn();
 const mockFindAccessKeyByName = vi.fn();
