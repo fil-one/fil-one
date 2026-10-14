@@ -51,6 +51,7 @@ import type {
 } from '../service-orchestrator.ts';
 import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
+import { filterBucketsByMemberAccess } from './member-access.ts';
 import { normalizeStatus } from './metrics-mapping.ts';
 import type { S3ClientContext } from '../s3-client.ts';
 import { createS3Client } from '../s3-client.ts';
@@ -318,34 +319,16 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     await s3DeleteBucket(s3, bucketName, requestOptions);
   }
 
-  /**
-   * The tenant's buckets, or one member's when the caller names a member.
-   *
-   * The console filters because the data plane does not: every principal holds
-   * `s3:ListAllMyBuckets`, so the gateway lists the whole tenant (fil-one/RFC#30),
-   * even to a key bound to the member. The accessible set comes from the storage
-   * system's own evaluation, so it agrees with its last policy write.
-   *
-   * A bucket carrying no policy is accessible to unscoped callers alone, who
-   * name no member and so are never filtered here. The console writes a policy
-   * on every bucket it creates; one that arrives without it, or loses it, is
-   * visible to an Owner or an Admin and to nobody else.
-   */
+  /** The tenant's buckets, or one member's; see {@link filterBucketsByMemberAccess}. */
   async listBuckets(
     tenantId: string,
     memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]> {
-    if (!memberId) return this.listTenantBuckets(tenantId, requestOptions);
-    // One promise, so a failed access lookup rejects the whole leg and the
-    // caller's fan-out reports the region as unavailable. Answering unfiltered
-    // would hand the member every bucket name in the tenant.
-    const [buckets, access] = await Promise.all([
-      this.listTenantBuckets(tenantId, requestOptions),
-      this.resolveMemberAccess(tenantId, memberId, requestOptions),
-    ]);
-    const accessible = new Set(access.map((entry) => entry.bucketName));
-    return buckets.filter((bucket) => accessible.has(bucket.bucketName));
+    const buckets = this.listTenantBuckets(tenantId, requestOptions);
+    return memberId
+      ? filterBucketsByMemberAccess(this, buckets, tenantId, memberId, requestOptions)
+      : buckets;
   }
 
   private async listTenantBuckets(

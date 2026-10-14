@@ -709,7 +709,7 @@ describe('listBuckets for a member', () => {
     });
     mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
 
-    await iamOrchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
+    await orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
 
     expect(accessLookupCallsWhenS3Listed).toBe(1);
   });
