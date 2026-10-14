@@ -50,11 +50,6 @@ vi.mock('../lib/org-profile.ts', async () => ({
   isOrgDeleting: (...args: Parameters<typeof mockIsOrgDeleting>) => mockIsOrgDeleting(...args),
 }));
 
-const mockListMembers = vi.fn(async (_orgId: string) => [] as { userId: string; role: string }[]);
-vi.mock('../lib/org-membership.ts', () => ({
-  listMembers: (orgId: string) => mockListMembers(orgId),
-}));
-
 import { baseHandler } from './create-bucket.ts';
 import {
   BucketAlreadyExistsError,
@@ -63,15 +58,7 @@ import {
   PolicyValidationError,
 } from '../lib/errors.ts';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
-import {
-  OrgRole,
-  ROSTER_ADMIN_ACTIONS,
-  ROSTER_ADMINS_SID,
-  ROSTER_CREATOR_SID,
-  ROSTER_OWNERS_SID,
-  S3_REGION,
-  S3Region,
-} from '@filone/shared';
+import { CREATOR_ACTIONS, S3_REGION, S3Region } from '@filone/shared';
 import { delegateIamMethods, FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
 
 // ---------------------------------------------------------------------------
@@ -301,38 +288,17 @@ describe('create-bucket baseHandler', () => {
 
     beforeEach(() => {
       mockCreateBucket.mockResolvedValue(undefined);
-      mockListMembers.mockResolvedValue([{ userId: 'user-1', role: OrgRole.Owner }]);
     });
 
-    it('passes the roster policy to createBucket, with a Member creator in a statement of their own', async () => {
-      mockListMembers.mockResolvedValue([
-        { userId: 'owner-1', role: OrgRole.Owner },
-        { userId: 'admin-1', role: OrgRole.Admin },
-        { userId: 'user-1', role: OrgRole.Member },
-        { userId: 'reader-1', role: OrgRole.ReadOnly },
-      ]);
-
+    it('passes a policy naming only the creator to createBucket', async () => {
       const result = await baseHandler(
         buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }),
       );
 
       expect(result.statusCode).toBe(201);
-      expect(mockListMembers).toHaveBeenCalledWith('org-1');
       expect(mockCreateBucket.mock.calls[0]![1].policy).toStrictEqual({
         Statement: [
-          { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: ['owner-1'], Action: ['s3:*'] },
-          {
-            Sid: ROSTER_ADMINS_SID,
-            Effect: 'Allow',
-            Principal: ['admin-1'],
-            Action: ROSTER_ADMIN_ACTIONS,
-          },
-          {
-            Sid: ROSTER_CREATOR_SID,
-            Effect: 'Allow',
-            Principal: ['user-1'],
-            Action: ROSTER_ADMIN_ACTIONS,
-          },
+          { Sid: 'creator', Effect: 'Allow', Principal: ['user-1'], Action: CREATOR_ACTIONS },
         ],
       });
     });
@@ -435,14 +401,6 @@ describe('create-bucket baseHandler', () => {
     await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
 
     expect(mockCreateBucket.mock.calls[0]![1]).not.toHaveProperty('policy');
-  });
-
-  it('does not read the org roster on a service-keys region', async () => {
-    mockCreateBucket.mockResolvedValue(undefined);
-
-    await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
-
-    expect(mockListMembers).not.toHaveBeenCalled();
   });
 
   it('writes no audit event on a service-keys region', async () => {
