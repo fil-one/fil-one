@@ -6,16 +6,11 @@ import {
   POLICY_ACTION_GROUPS,
   PutBucketPolicyRequestSchema,
   RETENTION_WRITE_ACTIONS,
-  ROSTER_ADMIN_ACTIONS,
-  ROSTER_ADMINS_SID,
-  ROSTER_CREATOR_SID,
-  ROSTER_OWNERS_SID,
-  getDefaultBucketPolicy,
+  CREATOR_ACTIONS,
+  getCreatorBucketPolicy,
   getEffectiveActions,
   getPolicyActionsInGroup,
   hasNewRetentionGrants,
-  isRosterSid,
-  replaceRosterStatements,
 } from './bucket-policies.ts';
 import type { BucketPolicy, PolicyStatement } from './bucket-policies.ts';
 
@@ -60,8 +55,8 @@ describe('the policy vocabulary', () => {
     ]);
   });
 
-  it('gives the roster Admin statement every action but the two retention writes', () => {
-    expect(ROSTER_ADMIN_ACTIONS).toStrictEqual([
+  it('gives a creator every action but the two retention writes', () => {
+    expect(CREATOR_ACTIONS).toStrictEqual([
       's3:GetObject',
       's3:GetObjectVersion',
       's3:GetObjectRetention',
@@ -287,9 +282,7 @@ describe('getEffectiveActions', () => {
 
 describe('hasNewRetentionGrants', () => {
   const grantAllActionsToOwners: BucketPolicy = {
-    Statement: [
-      { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: [PRINCIPAL_C], Action: ['s3:*'] },
-    ],
+    Statement: [{ Sid: 'owners', Effect: 'Allow', Principal: [PRINCIPAL_C], Action: ['s3:*'] }],
   };
   const grantRetentionToEveryone: BucketPolicy = {
     Statement: [{ Effect: 'Allow', Principal: '*', Action: [...RETENTION_WRITE_ACTIONS] }],
@@ -361,149 +354,18 @@ describe('hasNewRetentionGrants', () => {
   });
 });
 
-describe('isRosterSid', () => {
-  it.each([ROSTER_OWNERS_SID, ROSTER_ADMINS_SID, ROSTER_CREATOR_SID])(
-    'returns true for %j',
-    (sid) => {
-      expect(isRosterSid(sid)).toBe(true);
-    },
-  );
-
-  it.each([undefined, '', 'filone-owner', 'Filone-Owners', 'filone-members'])(
-    'returns false for %j',
-    (sid) => {
-      expect(isRosterSid(sid)).toBe(false);
-    },
-  );
-});
-
-describe('getDefaultBucketPolicy', () => {
-  it('gives Owners every action, Admins the Admin actions, and a Member creator a statement of their own', () => {
-    const creator = getDefaultBucketPolicy({
-      owners: [PRINCIPAL_A],
-      admins: [PRINCIPAL_B],
-      creatorId: PRINCIPAL_C,
-    });
-    expect(creator).toStrictEqual({
+describe('getCreatorBucketPolicy', () => {
+  it('names only the creator, with every action but the retention writes', () => {
+    expect(getCreatorBucketPolicy(PRINCIPAL_C)).toStrictEqual({
       Statement: [
-        { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:*'] },
-        {
-          Sid: ROSTER_ADMINS_SID,
-          Effect: 'Allow',
-          Principal: [PRINCIPAL_B],
-          Action: ROSTER_ADMIN_ACTIONS,
-        },
-        {
-          Sid: ROSTER_CREATOR_SID,
-          Effect: 'Allow',
-          Principal: [PRINCIPAL_C],
-          Action: ROSTER_ADMIN_ACTIONS,
-        },
+        { Sid: 'creator', Effect: 'Allow', Principal: [PRINCIPAL_C], Action: CREATOR_ACTIONS },
       ],
     });
   });
 
   it('returns a policy the schema accepts', () => {
-    const creator = getDefaultBucketPolicy({
-      owners: [PRINCIPAL_A],
-      admins: [PRINCIPAL_B],
-      creatorId: PRINCIPAL_C,
+    expect(BucketPolicySchema.safeParse(getCreatorBucketPolicy(PRINCIPAL_C))).toMatchObject({
+      success: true,
     });
-    expect(BucketPolicySchema.safeParse(creator)).toMatchObject({ success: true });
-  });
-
-  it('gives an Owner creator no second statement', () => {
-    const creator = getDefaultBucketPolicy({
-      owners: [PRINCIPAL_A],
-      admins: [PRINCIPAL_B],
-      creatorId: PRINCIPAL_A,
-    });
-    expect(creator.Statement.map((s) => s.Sid)).toStrictEqual([
-      ROSTER_OWNERS_SID,
-      ROSTER_ADMINS_SID,
-    ]);
-  });
-
-  it('gives an Admin creator no second statement', () => {
-    const creator = getDefaultBucketPolicy({
-      owners: [PRINCIPAL_A],
-      admins: [PRINCIPAL_B],
-      creatorId: PRINCIPAL_B,
-    });
-    expect(creator.Statement.map((s) => s.Sid)).toStrictEqual([
-      ROSTER_OWNERS_SID,
-      ROSTER_ADMINS_SID,
-    ]);
-  });
-
-  it.each([
-    {
-      name: 'the Owners statement when there are no Owners',
-      roster: { owners: [], admins: [PRINCIPAL_B], creatorId: PRINCIPAL_B },
-      sids: [ROSTER_ADMINS_SID],
-    },
-    {
-      name: 'the Admins statement when there are no Admins',
-      roster: { owners: [PRINCIPAL_A], admins: [], creatorId: PRINCIPAL_A },
-      sids: [ROSTER_OWNERS_SID],
-    },
-    {
-      name: 'the Admins statement when every Admin is also an Owner',
-      roster: { owners: [PRINCIPAL_A], admins: [PRINCIPAL_A], creatorId: PRINCIPAL_A },
-      sids: [ROSTER_OWNERS_SID],
-    },
-  ])('drops $name', ({ roster, sids }) => {
-    const creator = getDefaultBucketPolicy(roster);
-    expect(creator.Statement.map((s) => s.Sid)).toStrictEqual(sids);
-  });
-});
-
-describe('replaceRosterStatements', () => {
-  it('keeps the creator statement when the roster is rewritten', () => {
-    const created = getDefaultBucketPolicy({
-      owners: [PRINCIPAL_A],
-      admins: [],
-      creatorId: PRINCIPAL_C,
-    });
-    const next = replaceRosterStatements(created, { owners: [PRINCIPAL_B], admins: [PRINCIPAL_A] });
-    expect(next?.Statement.map((s) => [s.Sid, s.Principal])).toStrictEqual([
-      [ROSTER_OWNERS_SID, [PRINCIPAL_B]],
-      [ROSTER_ADMINS_SID, [PRINCIPAL_A]],
-      [ROSTER_CREATOR_SID, [PRINCIPAL_C]],
-    ]);
-  });
-
-  it('replaces only the roster statements and keeps every other statement', () => {
-    const team: PolicyStatement = {
-      Sid: 'team',
-      Effect: 'Allow',
-      Principal: [PRINCIPAL_C],
-      Action: ['s3:GetObject'],
-    };
-    const existing: BucketPolicy = {
-      Statement: [
-        { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:*'] },
-        team,
-      ],
-    };
-    expect(replaceRosterStatements(existing, { owners: [PRINCIPAL_B], admins: [] })).toStrictEqual({
-      Statement: [
-        { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: [PRINCIPAL_B], Action: ['s3:*'] },
-        team,
-      ],
-    });
-  });
-
-  it('returns null when there is no policy and the roster is empty', () => {
-    expect(replaceRosterStatements(null, { owners: [], admins: [] })).toBeNull();
-  });
-
-  it('returns null when the policy holds only roster statements and the roster is empty', () => {
-    const existing: BucketPolicy = {
-      Statement: [
-        { Sid: ROSTER_OWNERS_SID, Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:*'] },
-      ],
-    };
-    expect(replaceRosterStatements(existing, { owners: [], admins: [] })).toBeNull();
   });
 });

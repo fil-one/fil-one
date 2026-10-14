@@ -264,113 +264,26 @@ export function hasNewRetentionGrants(current: BucketPolicy | null, next: Bucket
 }
 
 /**
- * The statements the console writes by their labels: the roster pair it keeps
- * in step with the org's Owners and Admins, and the creator's, written once
- * on create and left alone afterwards.
+ * Every action but the two retention writes. Those are Owner-only grants
+ * (`privileged.grant`), so the statement the console writes for a bucket's
+ * creator leaves them out; an Owner adds them to a statement by hand.
  */
-export const ROSTER_OWNERS_SID = 'filone-owners';
-export const ROSTER_ADMINS_SID = 'filone-admins';
-export const ROSTER_CREATOR_SID = 'filone-creator';
-
-/**
- * Whether a label is one the console reserves for its own statements. Statements
- * carrying one round-trip through GET and PUT, so the schema accepts them; the
- * editor and the PUT handler refuse a user statement that borrows one.
- */
-export function isRosterSid(sid: string | undefined): boolean {
-  return sid === ROSTER_OWNERS_SID || sid === ROSTER_ADMINS_SID || sid === ROSTER_CREATOR_SID;
-}
-
-/**
- * Every action but the two retention writes: what an Admin, and a Member who
- * created the bucket, receives. An Owner may still grant the pair to an Admin on
- * one bucket, which is why the roster statement lists actions rather than
- * pairing `s3:*` with a `Deny`.
- */
-export const ROSTER_ADMIN_ACTIONS: PolicyAction[] = POLICY_ACTIONS.filter(
+export const CREATOR_ACTIONS: PolicyAction[] = POLICY_ACTIONS.filter(
   (action) => !RETENTION_WRITE_ACTIONS.includes(action),
 );
 
 /**
- * The roster statements for a bucket: Owners hold `s3:*`, Admins hold
- * {@link ROSTER_ADMIN_ACTIONS}. A statement that would name nobody is left
- * out. Written on every bucket the console creates, and rewritten by the
- * role-change fan-out.
+ * The policy a new bucket carries in its create request: one Allow naming the
+ * creator, whatever their role. An ordinary statement, shown under its Sid and
+ * edited or removed like any other. The console writes no other statement and
+ * never rewrites a policy on its own.
  */
-function buildRosterStatements({
-  owners,
-  admins,
-}: {
-  owners: readonly string[];
-  admins: readonly string[];
-}): PolicyStatement[] {
-  const ownerIds = [...new Set(owners)];
-  const adminIds = [...new Set(admins)].filter((id) => !ownerIds.includes(id));
-
-  const statements: PolicyStatement[] = [];
-  if (ownerIds.length > 0) {
-    statements.push({
-      Sid: ROSTER_OWNERS_SID,
-      Effect: 'Allow',
-      Principal: ownerIds,
-      Action: [POLICY_ACTION_WILDCARD],
-    });
-  }
-  if (adminIds.length > 0) {
-    statements.push({
-      Sid: ROSTER_ADMINS_SID,
-      Effect: 'Allow',
-      Principal: adminIds,
-      Action: [...ROSTER_ADMIN_ACTIONS],
-    });
-  }
-  return statements;
-}
-
-/**
- * The policy a new bucket carries in its create request: the roster, and the
- * creator with the Admin actions in a statement of their own. Their own rather
- * than a seat in the Admins statement, because the role-change fan-out
- * rewrites the roster statements from the membership rows and would drop a
- * Member from a statement that is meant to follow the Admins. An Owner or
- * Admin creator is already named and gets no second statement.
- */
-export function getDefaultBucketPolicy({
-  owners,
-  admins,
-  creatorId,
-}: {
-  owners: readonly string[];
-  admins: readonly string[];
-  creatorId: string;
-}): BucketPolicy {
-  const statement = buildRosterStatements({ owners, admins });
-  if (!owners.includes(creatorId) && !admins.includes(creatorId)) {
-    statement.push({
-      Sid: ROSTER_CREATOR_SID,
-      Effect: 'Allow',
-      Principal: [creatorId],
-      Action: [...ROSTER_ADMIN_ACTIONS],
-    });
-  }
-  return { Statement: statement };
-}
-
-/**
- * A policy with its roster statements replaced by fresh ones and every other
- * statement kept in place, the creator's included. What the role-change
- * fan-out writes. Returns null when the result would carry no statement, which
- * means "delete the policy".
- */
-export function replaceRosterStatements(
-  policy: BucketPolicy | null,
-  roster: { owners: readonly string[]; admins: readonly string[] },
-): BucketPolicy | null {
-  const others = (policy?.Statement ?? []).filter(
-    (statement) => statement.Sid !== ROSTER_OWNERS_SID && statement.Sid !== ROSTER_ADMINS_SID,
-  );
-  const statement = [...buildRosterStatements(roster), ...others];
-  return statement.length > 0 ? { Statement: statement } : null;
+export function getCreatorBucketPolicy(creatorId: string): BucketPolicy {
+  return {
+    Statement: [
+      { Sid: 'creator', Effect: 'Allow', Principal: [creatorId], Action: [...CREATOR_ACTIONS] },
+    ],
+  };
 }
 
 // ── Console API shapes ────────────────────────────────────────────────
