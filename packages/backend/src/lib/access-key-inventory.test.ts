@@ -131,7 +131,7 @@ describe('isAccessKeyExpired', () => {
   it.each([
     { expiresAt: null, expired: false, when: 'the key never expires' },
     { expiresAt: '2026-06-16', expired: false, when: 'the expiry date is tomorrow' },
-    { expiresAt: '2026-06-15', expired: true, when: 'the expiry date is today (UTC)' },
+    { expiresAt: '2026-06-15', expired: false, when: 'the expiry date is today (UTC)' },
     { expiresAt: '2026-06-14', expired: true, when: 'the expiry date has passed' },
     // Not a date: only a bad write can store this.
     { expiresAt: 'not-a-date', expired: true, when: 'the stored expiry is unparseable' },
@@ -139,8 +139,12 @@ describe('isAccessKeyExpired', () => {
     expect(isAccessKeyExpired(expiresAt, now)).toBe(expired);
   });
 
-  it('returns true from the first instant of the expiry date (UTC)', () => {
-    expect(isAccessKeyExpired('2026-06-15', new Date('2026-06-15T00:00:00Z'))).toBe(true);
+  it('returns false at the last instant of the expiry date (UTC)', () => {
+    expect(isAccessKeyExpired('2026-06-15', new Date('2026-06-15T23:59:59.999Z'))).toBe(false);
+  });
+
+  it('returns true from the first instant of the day after the expiry date (UTC)', () => {
+    expect(isAccessKeyExpired('2026-06-15', new Date('2026-06-16T00:00:00Z'))).toBe(true);
   });
 });
 

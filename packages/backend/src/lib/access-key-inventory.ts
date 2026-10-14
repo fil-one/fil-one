@@ -131,20 +131,21 @@ async function runQuery(
 }
 
 /**
- * Whether a key's expiry date has arrived. `expiresAt` is a bare `YYYY-MM-DD`
- * date, which parses as midnight UTC, so a key stops being active from the
- * start of its expiry date.
+ * Whether a key's expiry date has passed. `expiresAt` is a bare `YYYY-MM-DD`
+ * date and the key works through the whole of that day (UTC), so it counts as
+ * expired from the start of the next one. The rotate route refuses an expired
+ * key on the same rule, so the table and the Rotate action never disagree.
  */
 export function isAccessKeyExpired(
   expiresAt: string | null | undefined,
   now = new Date(),
 ): boolean {
   if (!expiresAt) return false;
-  const expiry = Date.parse(expiresAt);
   // An unparseable expiry is treated as expired rather than as forever: the only
   // way one gets stored is a bad write, and the safe reading of "we do not know
   // when this stops being valid" is that it already has.
-  return Number.isNaN(expiry) || expiry <= now.getTime();
+  if (Number.isNaN(Date.parse(expiresAt))) return true;
+  return expiresAt < now.toISOString().slice(0, 10);
 }
 
 function toAccessKey(record: Record<string, unknown>): AccessKey {
