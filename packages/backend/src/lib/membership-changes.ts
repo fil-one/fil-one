@@ -11,7 +11,6 @@ import type { OrgMembershipSource, ServiceKeyGrant } from '@filone/shared';
 import { retireInvitationItems } from './invitations.ts';
 import type { InvitationRecord } from './invitations.ts';
 import { OrgKeys } from './org-membership.ts';
-import { getNetworkAccessModels } from './network-access-model.ts';
 
 /**
  * The writes that change who is in an organization and what they may do.
@@ -351,9 +350,7 @@ export function creatorRoleStillMintsCheck({
     ConditionCheck: {
       TableName: Resource.OrgTable.name,
       Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
-      ...roleIsOneOf(
-        (current) => canRetainAccessKey(current, key, getNetworkAccessModels()).retained,
-      ),
+      ...roleIsOneOf((current) => canRetainAccessKey(current, key).retained),
     },
   };
 }
@@ -387,7 +384,7 @@ export function rotatorStillAuthorizedCheck({
         (current) =>
           roleHasPermission(current, 'keys.create') &&
           roleHasPermission(current, 'keys.manage_all') &&
-          canRetainAccessKey(current, key, getNetworkAccessModels()).retained,
+          canRetainAccessKey(current, key).retained,
       ),
     },
   };

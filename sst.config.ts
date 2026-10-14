@@ -788,19 +788,7 @@ export default $config({
     // Presigned URLs use localhost instead, which https pages may fetch over http.
     const useSmelt = isLocal && process.env.SMELT === 'true';
     const smeltHost = process.env.SMELT_HOST ?? 'host.docker.internal';
-    // Each Forge network's access model comes from the console's env file for
-    // this stage, the one its build reads, so the backend and the console agree.
-    // Production and staging build from their own file; every other stage runs
-    // the console from .env.local.
-    const consoleEnvFile = require('path').resolve(
-      `packages/website/.env.${isProduction || isStaging ? stage : 'local'}`,
-    );
-    const consoleEnv: Record<string, string | undefined> = require('fs').existsSync(consoleEnvFile)
-      ? require('util').parseEnv(require('fs').readFileSync(consoleEnvFile, 'utf8'))
-      : {};
     const forgeEnv = {
-      FORGE_ACCESS_MODEL: consoleEnv.VITE_FORGE_ACCESS_MODEL ?? '',
-      FORGE_DEV_ACCESS_MODEL: consoleEnv.VITE_FORGE_DEV_ACCESS_MODEL ?? '',
       FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.staging.fil-forge.com',
       FORGE_DEV_MANAGEMENT_API_URL: isProduction
         ? ''
