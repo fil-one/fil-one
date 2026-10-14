@@ -2,12 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketPolicy, CreateBucketResponse, ErrorResponse, S3Region } from '@filone/shared';
-import {
-  CreateBucketSchema,
-  OrgRole,
-  getDefaultBucketPolicy,
-  isSupportedRegion,
-} from '@filone/shared';
+import { CreateBucketSchema, getCreatorBucketPolicy, isSupportedRegion } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
@@ -17,7 +12,6 @@ import {
   BucketConfigurationError,
   PolicyValidationError,
 } from '../lib/errors.ts';
-import { listMembers } from '../lib/org-membership.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
@@ -71,7 +65,7 @@ export async function baseHandler(
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
-  const policy = await loadDefaultBucketPolicy(orchestrator, orgId, userId);
+  const policy = getFirstBucketPolicy(orchestrator, userId);
   const policyAudit = policy
     ? await auditDefaultBucketPolicy({ event, orgId, userId, region, bucketName })
     : undefined;
@@ -133,23 +127,14 @@ export async function baseHandler(
 }
 
 /**
- * Loads the policy a new bucket starts with:
- * 1. On a `service-keys` orchestrator, returns `undefined`.
- * 2. Otherwise reads the org's members and splits them into Owners and Admins.
- * 3. Builds the policy with `getDefaultBucketPolicy`.
+ * The policy a new bucket starts with: one statement naming its creator on a
+ * region that serves policies, and none on a `service-keys` region.
  */
-async function loadDefaultBucketPolicy(
+function getFirstBucketPolicy(
   orchestrator: RegionOrchestrator,
-  orgId: string,
   creatorId: string,
-): Promise<BucketPolicy | undefined> {
-  if (!supportsBucketPolicies(orchestrator)) return undefined;
-  const members = await listMembers(orgId);
-  return getDefaultBucketPolicy({
-    owners: members.filter((m) => m.role === OrgRole.Owner).map((m) => m.userId),
-    admins: members.filter((m) => m.role === OrgRole.Admin).map((m) => m.userId),
-    creatorId,
-  });
+): BucketPolicy | undefined {
+  return supportsBucketPolicies(orchestrator) ? getCreatorBucketPolicy(creatorId) : undefined;
 }
 
 /**
