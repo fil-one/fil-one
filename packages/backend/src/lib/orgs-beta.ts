@@ -1,14 +1,16 @@
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
+import { isFoundationEmail } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.ts';
 import { OrgKeys } from './org-membership.ts';
 
 /**
  * The organizations beta flag, which gates one thing: creating an invitation.
  *
- * Data-driven, so granting it is a row rather than a redeploy — the mechanism
- * `middleware/rag-access.ts` explicitly invites reusing, with `ORGS_BETA` as the
- * sort key beside that file's `RAG`. Two rows can grant it:
+ * Every verified `@fil.org` address holds it, as it holds RAG access. For
+ * anyone else it is data-driven, so granting it is a row rather than a redeploy —
+ * the mechanism `middleware/rag-access.ts` explicitly invites reusing, with
+ * `ORGS_BETA` as the sort key beside that file's `RAG`. Two rows can grant it:
  *
  * - `ALLOWLIST#{lowercased-email}` / `ORGS_BETA` — one person, the shape the RAG
  *   flag already uses.
@@ -32,8 +34,8 @@ export const ORGS_BETA_SK = 'ORGS_BETA';
 export const ALLOWLIST_PK_PREFIX = 'ALLOWLIST#';
 
 /**
- * Whether the caller may create invitations: their own allowlist row, or their
- * org's.
+ * Whether the caller may create invitations: a verified `@fil.org` address,
+ * their own allowlist row, or their org's.
  *
  * Both reads are issued together because either grants, and the common answer for
  * a flagged beta is that one of them exists — waiting on the first to decide
@@ -53,6 +55,7 @@ export async function hasOrgsBetaAccess({
   verifiedEmail?: string;
   orgId: string;
 }): Promise<boolean> {
+  if (isFoundationEmail(verifiedEmail)) return true;
   const [byEmail, byOrg] = await Promise.all([
     verifiedEmail
       ? rowExists(`${ALLOWLIST_PK_PREFIX}${verifiedEmail.toLowerCase()}`)
