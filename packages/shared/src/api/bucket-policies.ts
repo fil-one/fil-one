@@ -9,7 +9,7 @@ import { z } from 'zod';
  * {
  *   "Version": "2012-10-17",
  *   "Statement": [{
- *     "Sid": "filone-owners",
+ *     "Sid": "creator",
  *     "Effect": "Allow",
  *     "Principal": {"AWS": ["arn:aws:iam:::user/<userId>"]},
  *     "Action": ["s3:GetObject", "s3:ListBucket"],
