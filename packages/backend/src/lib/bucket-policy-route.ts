@@ -178,7 +178,7 @@ export function toPolicyErrorResponse(err: unknown): APIGatewayProxyStructuredRe
     return new ResponseBuilder().status(400).body<ErrorResponse>({ message: err.message }).build();
   }
   // A member the storage system does not know: never synced, or removed since
-  // the roster was read. The console re-reads the roster and asks again.
+  // the member list was read. The console re-reads the members and asks again.
   if (err instanceof PrincipalNotFoundError) {
     return new ResponseBuilder()
       .status(400)

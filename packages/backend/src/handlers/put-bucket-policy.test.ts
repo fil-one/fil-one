@@ -82,8 +82,8 @@ const denyDeleteToEveryone: BucketPolicy = {
   Statement: [{ Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'] }],
 };
 
-const ownersRosterStatement: PolicyStatement = {
-  Sid: 'filone-owners',
+const grantAllToOwner: PolicyStatement = {
+  Sid: 'owners',
   Effect: 'Allow',
   Principal: [USER_ID],
   Action: ['s3:*'],
@@ -225,11 +225,11 @@ describe('put-bucket-policy baseHandler', () => {
   });
 
   it('lets an Admin add a statement beside the Owners’ s3:* statement', async () => {
-    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, { Statement: [ownersRosterStatement] });
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, { Statement: [grantAllToOwner] });
     iam.seedPrincipal(TENANT_ID, MEMBER_ID);
     const edited: BucketPolicy = {
       Statement: [
-        ownersRosterStatement,
+        grantAllToOwner,
         { Effect: 'Allow', Principal: [MEMBER_ID], Action: ['s3:GetObject'] },
       ],
     };
@@ -243,7 +243,7 @@ describe('put-bucket-policy baseHandler', () => {
 
   it('refuses an Admin’s first policy that grants s3:* to Owners', async () => {
     const result = await baseHandler(
-      buildPutEvent({ Statement: [ownersRosterStatement] }, { role: OrgRole.Admin }),
+      buildPutEvent({ Statement: [grantAllToOwner] }, { role: OrgRole.Admin }),
     );
 
     expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
@@ -253,10 +253,10 @@ describe('put-bucket-policy baseHandler', () => {
   });
 
   it('refuses an Admin naming a retention write even for an Owner who holds s3:*', async () => {
-    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, { Statement: [ownersRosterStatement] });
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, { Statement: [grantAllToOwner] });
     const named: BucketPolicy = {
       Statement: [
-        ownersRosterStatement,
+        grantAllToOwner,
         { Effect: 'Allow', Principal: [USER_ID], Action: ['s3:PutObjectLegalHold'] },
       ],
     };
@@ -341,11 +341,11 @@ describe('put-bucket-policy baseHandler', () => {
   });
 
   it('refuses an Admin granting a retention write to a member who does not hold it', async () => {
-    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, { Statement: [ownersRosterStatement] });
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, { Statement: [grantAllToOwner] });
     iam.seedPrincipal(TENANT_ID, MEMBER_ID);
     const widened: BucketPolicy = {
       Statement: [
-        ownersRosterStatement,
+        grantAllToOwner,
         { Effect: 'Allow', Principal: [MEMBER_ID], Action: ['s3:PutObjectRetention'] },
       ],
     };
