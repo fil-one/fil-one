@@ -9,7 +9,7 @@
 // orchestrator registry, and importing it from the orchestrator would close an
 // import cycle.
 
-import type { MemberOrchestrator } from '../iam-orchestrator.ts';
+import type { MemberOrchestrator } from '../member-orchestrator.ts';
 import { listMembers } from '../org-membership.ts';
 import { addRegisteredPrincipals, getOrgProfile, getRegisteredPrincipals } from '../org-profile.ts';
 
