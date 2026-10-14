@@ -105,22 +105,6 @@ function mockInvoice(overrides?: Record<string, unknown>) {
   };
 }
 
-/**
- * An invoice carrying the subscription metadata Stripe snapshots onto it at
- * finalization, which is where an invoice event learns its org.
- */
-function mockInvoiceForOrgSubscription(overrides?: Record<string, unknown>) {
-  return mockInvoice({
-    parent: {
-      subscription_details: {
-        subscription: MOCK_SUBSCRIPTION_ID,
-        metadata: { userId: MOCK_USER_ID, orgId: MOCK_ORG_ID },
-      },
-    },
-    ...overrides,
-  });
-}
-
 function setupStripeEvent(type: string, object: unknown) {
   currentEvent = { id: MOCK_EVENT_ID, type, data: { object } };
 }
@@ -755,60 +739,6 @@ describe('stripe-event-worker handler', () => {
       expect(supersededEmissions()).toHaveLength(0);
     });
 
-    it('does not mark a live subscription past due on a late payment failure', async () => {
-      setupStripeEvent(
-        'invoice.payment_failed',
-        mockInvoice({
-          parent: { subscription_details: { subscription: 'sub_the_old_one' } },
-        }),
-      );
-      setupCustomerRetrieve();
-      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
-
-      await deliver();
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(supersededEmissions()).toHaveLength(1);
-    });
-
-    it('does not reactivate the org on a successful invoice from a replaced subscription', async () => {
-      // The other direction of the same refusal: on the shared org row, a late
-      // success for historical subscription A would mark the org active and
-      // re-enable tenants the authoritative past-due subscription locked.
-      setupStripeEvent(
-        'invoice.payment_succeeded',
-        mockInvoice({
-          parent: { subscription_details: { subscription: 'sub_the_old_one' } },
-        }),
-      );
-      setupCustomerRetrieve();
-      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
-
-      await deliver();
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
-      expect(supersededEmissions()).toHaveLength(1);
-    });
-
-    it('marks past due when the failing invoice names the subscription on the row', async () => {
-      setupStripeEvent(
-        'invoice.payment_failed',
-        mockInvoice({
-          parent: { subscription_details: { subscription: MOCK_SUBSCRIPTION_ID } },
-        }),
-      );
-      setupCustomerRetrieve();
-      setupStoredIdentity({ subscriptionId: MOCK_SUBSCRIPTION_ID });
-
-      await deliver();
-
-      expect(updateInputs()[0].ExpressionAttributeValues![':status']).toEqual({
-        S: SubscriptionStatus.PastDue,
-      });
-      expect(supersededEmissions()).toHaveLength(0);
-    });
-
     it('still applies an update arriving under a new subscription id', async () => {
       // Across subscription ids the upsert keeps last-writer-wins: an upgrade
       // legitimately arrives under an id the row has never seen, and refusing it
@@ -1124,91 +1054,16 @@ describe('stripe-event-worker handler', () => {
   // invoice.payment_succeeded
   // -----------------------------------------------------------------------
   describe('invoice.payment_succeeded', () => {
-    it('sets Active status, REMOVEs gracePeriodEndsAt, lastPaymentFailedAt, and canceledAt', async () => {
+    it('leaves the billing row and the tenants alone when an invoice is paid', async () => {
+      // Stripe bills a metered subscription's last period after it ends the
+      // subscription, so a paid invoice says nothing about whether one is live.
       setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
 
       await deliver();
 
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-
-      expect(updateCalls[0].args[0].input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: ORG_KEY,
-        UpdateExpression:
-          'SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now, orgId = if_not_exists(orgId, :orgId) REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt',
-        ExpressionAttributeValues: {
-          ':active': { S: SubscriptionStatus.Active },
-          ':now': { S: expect.any(String) },
-          ':orgId': { S: MOCK_ORG_ID },
-        },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
-        ReturnValues: 'ALL_OLD',
-      });
-      expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-    });
-
-    it('skips when invoice.customer is null', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ customer: null }));
-
-      await deliver();
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('skips when customer is deleted', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupDeletedCustomerRetrieve();
-
-      await deliver();
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('skips when customer has no userId', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      mockCustomersRetrieve.mockResolvedValue({
-        id: MOCK_CUSTOMER_ID,
-        deleted: false,
-        metadata: {},
-      });
-
-      await deliver();
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('handles invoice with Customer object instead of string', async () => {
-      setupStripeEvent(
-        'invoice.payment_succeeded',
-        mockInvoice({
-          customer: { id: MOCK_CUSTOMER_ID, deleted: false },
-        }),
-      );
-      setupCustomerRetrieve();
-
-      await deliver();
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
-    });
-
-    it('calls updateTenantStatus ACTIVE on payment success', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-
-      await deliver();
-
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'active');
-    });
-
-    it('fails the delivery when Aurora re-activation fails, so SQS retries it', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
-        regionSyncFailure(new Error('Aurora API error')),
-      );
-
-      await expect(deliver()).rejects.toThrow('tenant status sync failed for: aurora');
-
-      expect(updatedKeys()).toEqual([ORG_KEY]);
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toStrictEqual([]);
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockCustomersRetrieve).not.toHaveBeenCalled();
     });
   });
 
@@ -1216,88 +1071,13 @@ describe('stripe-event-worker handler', () => {
   // invoice.payment_failed
   // -----------------------------------------------------------------------
   describe('invoice.payment_failed', () => {
-    it('fails the delivery when the Stripe objects name no org', async () => {
-      // There is no key to write the row under, and no billing-row fallback any
-      // more. The delivery fails, so it is retried and
-      // then parked in the DLQ, where it can be redriven once the metadata is
-      // repaired; reporting success would consume the event and take the status
-      // change with it.
+    it('leaves the billing row alone when an invoice fails', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupCustomerRetrieveWithoutOrg();
-
-      await expect(deliver()).rejects.toThrow(MissingOrgIdError);
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('sets PastDue status with lastPaymentFailedAt (no grace period)', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupCustomerRetrieve();
 
       await deliver();
 
-      const updateCalls = ddbMock.commandCalls(UpdateItemCommand);
-      expect(updateCalls).toHaveLength(1);
-
-      const input = updateCalls[0].args[0].input;
-      expect(input).toStrictEqual({
-        TableName: TABLE_NAME,
-        Key: ORG_KEY,
-        UpdateExpression:
-          'SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
-        ExpressionAttributeValues: {
-          ':status': { S: SubscriptionStatus.PastDue },
-          ':failedAt': { S: expect.any(String) },
-          ':now': { S: expect.any(String) },
-          ':orgId': { S: MOCK_ORG_ID },
-        },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
-      });
-
-      // Must NOT set gracePeriodEndsAt — Stripe Smart Retries handle the retry window
-      expect(input.UpdateExpression).not.toContain('gracePeriodEndsAt');
-      expect(mockCustomersRetrieve).toHaveBeenCalledWith(MOCK_CUSTOMER_ID);
-    });
-
-    it('skips when invoice.customer is null', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice({ customer: null }));
-
-      await deliver();
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('skips when customer is deleted', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupDeletedCustomerRetrieve();
-
-      await deliver();
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('skips when customer has no userId', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      mockCustomersRetrieve.mockResolvedValue({
-        id: MOCK_CUSTOMER_ID,
-        deleted: false,
-        metadata: {},
-      });
-
-      await deliver();
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
-    it('handles invoice with Customer object instead of string', async () => {
-      setupStripeEvent(
-        'invoice.payment_failed',
-        mockInvoice({
-          customer: { id: MOCK_CUSTOMER_ID, deleted: false },
-        }),
-      );
-      setupCustomerRetrieve();
-
-      await deliver();
-
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(1);
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toStrictEqual([]);
+      expect(mockCustomersRetrieve).not.toHaveBeenCalled();
     });
   });
 
@@ -1338,7 +1118,6 @@ describe('stripe-event-worker handler', () => {
           last_finalization_error: { code: 'card_declined' },
         }),
       );
-      setupCustomerRetrieve();
 
       await deliver();
 
@@ -1369,7 +1148,6 @@ describe('stripe-event-worker handler', () => {
           last_finalization_error: { code: 'insufficient_funds' },
         }),
       );
-      setupCustomerRetrieve();
 
       await deliver();
 
@@ -1388,7 +1166,6 @@ describe('stripe-event-worker handler', () => {
           last_finalization_error: { code: 'card_declined' },
         }),
       );
-      setupCustomerRetrieve();
 
       await deliver();
 
@@ -1400,7 +1177,6 @@ describe('stripe-event-worker handler', () => {
 
     it('reports reason="unknown" when last_finalization_error missing', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice({ attempt_count: 1 }));
-      setupCustomerRetrieve();
 
       await deliver();
 
@@ -1475,50 +1251,30 @@ describe('stripe-event-worker handler', () => {
       });
     });
 
-    it('emits stage=recovered when prior status was past_due', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 2 }));
-      setupCustomerRetrieve();
-      ddbMock.on(UpdateItemCommand).resolves({
-        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.PastDue }),
-      });
+    it('emits stage=recovered when Stripe moves the subscription from past_due to active', async () => {
+      currentEvent = {
+        id: MOCK_EVENT_ID,
+        type: 'customer.subscription.updated',
+        data: { object: mockSubscription(), previous_attributes: { status: 'past_due' } },
+      };
 
       await deliver();
 
-      expect(dunningEmissions()[0]).toMatchObject({
-        stage: 'recovered',
-        reason: 'past_due',
-        attemptBucket: '2',
-      });
+      expect(dunningEmissions()).toMatchObject([
+        { stage: 'recovered', reason: 'past_due', attemptBucket: 'unknown' },
+      ]);
     });
 
-    it('emits stage=recovered with reason=grace_period when prior status was grace_period', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 4 }));
-      setupCustomerRetrieve();
-      ddbMock.on(UpdateItemCommand, { TableName: TABLE_NAME }).resolves({
-        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.GracePeriod }),
-      });
+    it('does NOT emit recovered on an update that leaves the status unchanged', async () => {
+      currentEvent = {
+        id: MOCK_EVENT_ID,
+        type: 'customer.subscription.updated',
+        data: { object: mockSubscription(), previous_attributes: { cancel_at_period_end: true } },
+      };
 
       await deliver();
 
-      expect(dunningEmissions()[0]).toMatchObject({
-        stage: 'recovered',
-        reason: 'grace_period',
-        attemptBucket: '4+',
-      });
-      // Aurora re-activation must still run
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(MOCK_ORG_ID, 'active');
-    });
-
-    it('does NOT emit recovered on normal renewal (prior status was active)', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice({ attempt_count: 1 }));
-      setupCustomerRetrieve();
-      ddbMock.on(UpdateItemCommand).resolves({
-        Attributes: marshall({ subscriptionStatus: SubscriptionStatus.Active }),
-      });
-
-      await deliver();
-
-      expect(dunningEmissions()).toHaveLength(0);
+      expect(dunningEmissions()).toStrictEqual([]);
     });
 
     it('does NOT emit on unrelated events (customer.subscription.created)', async () => {
@@ -1560,20 +1316,6 @@ describe('stripe-event-worker handler', () => {
       });
     });
 
-    it('does not emit from a delivery the re-activation fails', async () => {
-      // The failed delivery is retried; emitting here would count the payment
-      // once per attempt.
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
-        regionSyncFailure(new Error('Aurora API error')),
-      );
-
-      await expect(deliver()).rejects.toThrow('tenant status sync failed for: aurora');
-
-      expect(invoicePaidEmissions()).toHaveLength(0);
-    });
-
     it('does not emit even when invoice.customer is null', async () => {
       setupStripeEvent('invoice.payment_succeeded', mockInvoice({ customer: null }));
 
@@ -1585,7 +1327,6 @@ describe('stripe-event-worker handler', () => {
 
     it('does NOT emit on invoice.payment_failed', async () => {
       setupStripeEvent('invoice.payment_failed', mockInvoice({ attempt_count: 1 }));
-      setupCustomerRetrieve();
 
       await deliver();
 
@@ -1800,59 +1541,6 @@ describe('stripe-event-worker handler', () => {
         'customer.subscription.deleted',
         mockSubscription({ metadata: { userId: MOCK_USER_ID } }),
       );
-      setupCustomerRetrieveWithoutOrg();
-
-      await expectRefusedAndRetryable(deliver());
-    });
-
-    it('payment succeeded persists orgId from customer metadata', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieve();
-
-      await deliver();
-
-      expectOrgIdBackfilled();
-    });
-
-    // Stripe snapshots the subscription's metadata onto the invoice, so an
-    // invoice for a customer created before the metadata carried an orgId still
-    // names the org it is paying for.
-    it('payment succeeded persists orgId from the invoice subscription metadata', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoiceForOrgSubscription());
-      setupCustomerRetrieveWithoutOrg();
-
-      await deliver();
-
-      expectOrgIdBackfilled();
-    });
-
-    it('payment succeeded writes nothing when metadata carries no orgId', async () => {
-      setupStripeEvent('invoice.payment_succeeded', mockInvoice());
-      setupCustomerRetrieveWithoutOrg();
-
-      await expectRefusedAndRetryable(deliver());
-    });
-
-    it('payment failed persists orgId from customer metadata', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
-      setupCustomerRetrieve();
-
-      await deliver();
-
-      expectOrgIdBackfilled();
-    });
-
-    it('payment failed persists orgId from the invoice subscription metadata', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoiceForOrgSubscription());
-      setupCustomerRetrieveWithoutOrg();
-
-      await deliver();
-
-      expectOrgIdBackfilled();
-    });
-
-    it('payment failed writes nothing when metadata carries no orgId', async () => {
-      setupStripeEvent('invoice.payment_failed', mockInvoice());
       setupCustomerRetrieveWithoutOrg();
 
       await expectRefusedAndRetryable(deliver());
