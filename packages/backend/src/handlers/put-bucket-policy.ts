@@ -41,7 +41,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
  * The route needs `buckets.policy_manage`. A statement that newly grants one
  * of the `RETENTION_WRITE_ACTIONS`, or `s3:*` which covers them, also needs
  * `privileged.grant`, which only an Owner holds. "Newly" is measured against
- * the stored policy. The Owners' roster statement carries `s3:*`, so an Admin
+ * the stored policy. A statement an Owner wrote may carry `s3:*`, so an Admin
  * who edits another statement is not granting it again. A retention write
  * listed by name is also compared by name with the stored policy. An Admin may
  * keep or narrow one that an Owner wrote, but may not add one, even for an
