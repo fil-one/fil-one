@@ -6,15 +6,13 @@ info:
     Management API that a Service Orchestrator must implement so FilOne
     can integrate it as a new region. Covers tenant lifecycle, S3
     access-key management, usage metering (storage, egress, ingress),
-    and, for orchestrators serving the `iam` access model, principals
-    and bucket policies.
+    principals and bucket policies.
 
-    ## Access models
+    ## Access keys and principals
 
-    Every orchestrator serves the *service-keys* model: an access key
-    carries its own permission set and optional bucket list, fixed at
-    creation. An orchestrator may additionally serve the *iam* model,
-    in which each FilOne member is a **principal**, each bucket holds at
+    Every orchestrator serves both kinds of access key. A **service
+    key** carries its own permission set and optional bucket list, fixed
+    at creation. Each FilOne member is a **principal**, each bucket holds at
     most one **bucket policy** naming principals and the S3 actions they
     may or may not perform, and an access key may be **bound to a
     principal**, in which case it carries no permissions of its own and
@@ -23,9 +21,6 @@ info:
     `PutBucketPolicy`, `DeleteBucketPolicy`) with a service key holding
     the matching permission, as fil-one/RFC#30 specifies; this contract
     carries the principals and the two reads computed from the policies.
-    The principal endpoints below are the `iam` capability set; an
-    orchestrator that serves only service keys answers them with 501 Not
-    Implemented.
 
     The Service Orchestrator must also operate an S3 Gateway for
     bucket and object operations; that surface is outside this
@@ -72,7 +67,7 @@ tags:
   - name: Metrics
     description: Usage metering for storage, egress, and ingress.
   - name: Principals
-    description: FilOne members as the orchestrator knows them (`iam` access model).
+    description: FilOne members as the orchestrator knows them.
 
 paths:
   /tenants/{tenantId}:
@@ -229,7 +224,7 @@ paths:
             key**, authorized from the permissions and buckets it was
             created with.
           * `{ name, principalId, expiresAt? }` — a **principal-bound
-            key** (`iam` access model), authorized on every request from
+            key**, authorized on every request from
             the bucket policies naming that principal. The orchestrator
             must reject (422) a body carrying `principalId` together with
             `permissions` or `buckets`, and a `principalId` that is not a
@@ -257,7 +252,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: An access key with this `name` already exists for the tenant.
+          description: |
+            An access key with this `name` already exists for the tenant
+            (service key) or for the principal (principal-bound key).
           content:
             application/json:
               schema:
@@ -267,14 +264,6 @@ paths:
             The body fails semantic validation, or `principalId` names no
             live principal of the tenant; the latter carries the error
             `code` `UnknownPrincipal` so a client can tell it apart.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '501':
-          description: |
-            The body carries `principalId` and the orchestrator does not
-            serve the `iam` access model.
           content:
             application/json:
               schema:
@@ -363,9 +352,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-
-        '501':
-          $ref: '#/components/responses/NotImplemented'
   /tenants/{tenantId}/principals/{principalId}:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -406,8 +392,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '501':
-          $ref: '#/components/responses/NotImplemented'
     get:
       tags: [Principals]
       summary: Get a principal
@@ -424,8 +408,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-        '501':
-          $ref: '#/components/responses/NotImplemented'
     delete:
       tags: [Principals]
       summary: Remove a principal
@@ -446,9 +428,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/ConcurrentChange'
-
-        '501':
-          $ref: '#/components/responses/NotImplemented'
   /tenants/{tenantId}/principals/{principalId}/policies:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -470,9 +449,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-
-        '501':
-          $ref: '#/components/responses/NotImplemented'
   /tenants/{tenantId}/principals/{principalId}/access:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -500,9 +476,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-
-        '501':
-          $ref: '#/components/responses/NotImplemented'
   /tenants/{tenantId}/metrics:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -670,12 +643,6 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-    NotImplemented:
-      description: The orchestrator does not serve the `iam` access model.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
     Internal:
       description: Unexpected server error.
       content:
@@ -804,7 +771,7 @@ components:
           * `s3:DeleteBucket` — delete a bucket.
           * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
             `s3:DeleteBucketPolicy` — read, write and delete a bucket's
-            policy (`iam` access model). A bucket policy never grants
+            policy. A bucket policy never grants
             them; only a service key holds them.
 
         **Object-level** — operating on objects within buckets. The
