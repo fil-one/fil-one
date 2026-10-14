@@ -146,6 +146,18 @@ describe('isAccessKeyExpired', () => {
   it('returns true from the first instant of the day after the expiry date (UTC)', () => {
     expect(isAccessKeyExpired('2026-06-15', new Date('2026-06-16T00:00:00Z'))).toBe(true);
   });
+
+  // A full timestamp expires at its own instant, read in its own offset.
+  // 10:00+02:00 is 08:00 UTC and 16:00+02:00 is 14:00 UTC, either side of `now`.
+  it.each([
+    { expiresAt: '2026-06-15T10:00:00+02:00', expired: true, when: 'has passed' },
+    { expiresAt: '2026-06-15T16:00:00+02:00', expired: false, when: 'is later today' },
+  ])(
+    'returns $expired when a timestamp expiry in another offset $when',
+    ({ expiresAt, expired }) => {
+      expect(isAccessKeyExpired(expiresAt, now)).toBe(expired);
+    },
+  );
 });
 
 describe('countAccessKeysInScope', () => {

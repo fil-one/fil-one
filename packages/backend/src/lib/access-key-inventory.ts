@@ -130,22 +130,30 @@ async function runQuery(
   }
 }
 
+const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Whether a key's expiry date has passed. `expiresAt` is a bare `YYYY-MM-DD`
- * date and the key works through the whole of that day (UTC), so it counts as
- * expired from the start of the next one. The rotate route refuses an expired
- * key on the same rule, so the table and the Rotate action never disagree.
+ * Whether a key's expiry has passed. The create route stores a bare
+ * `YYYY-MM-DD` date, and the key works through the whole of that day (UTC), so
+ * it counts as expired from the start of the next one. A full timestamp, which
+ * no route writes today, expires at that instant. The rotate route refuses an
+ * expired key on the same rule, so the table and the Rotate action never
+ * disagree.
  */
 export function isAccessKeyExpired(
   expiresAt: string | null | undefined,
   now = new Date(),
 ): boolean {
   if (!expiresAt) return false;
+  const parsed = Date.parse(expiresAt);
   // An unparseable expiry is treated as expired rather than as forever: the only
   // way one gets stored is a bad write, and the safe reading of "we do not know
   // when this stops being valid" is that it already has.
-  if (Number.isNaN(Date.parse(expiresAt))) return true;
-  return expiresAt < now.toISOString().slice(0, 10);
+  if (Number.isNaN(parsed)) return true;
+  // A bare date parses as midnight UTC at its start; the key lasts until the end.
+  const expiresAtMs = BARE_DATE.test(expiresAt) ? parsed + ONE_DAY_MS : parsed;
+  return now.getTime() >= expiresAtMs;
 }
 
 function toAccessKey(record: Record<string, unknown>): AccessKey {
