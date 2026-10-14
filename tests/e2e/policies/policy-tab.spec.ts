@@ -132,7 +132,7 @@ test('U3. an allow added in the tab grants the member', async ({ page }) => {
   await memberBox(page, memberId).click();
   await pickActions(page, ['s3:ListBucket', 's3:GetObject']);
   await submitStatement(page);
-  await expect(cards(page)).toHaveCount(3);
+  await expect(cards(page)).toHaveCount(2);
   await expect(saveBar(page)).toBeVisible();
   await savePolicy(page);
 

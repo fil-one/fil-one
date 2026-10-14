@@ -205,10 +205,13 @@ test.describe('in the editor', () => {
       await expect(actionRow(page, 's3:GetObjectRetention')).toBeVisible();
     });
 
-    test('PU2. the admin cannot save the owners statement back', async ({ page }) => {
+    test('PU2. the admin cannot save an s3:* statement back', async ({ page }) => {
+      expect(
+        await putPolicyAs(owner, [grantAllToOwner(ownerId)], (await owner.readPolicy(bucket)).etag),
+      ).toEqual({ status: 204, code: undefined });
       const { etag } = await owner.readPolicy(bucket);
       await openPolicyTab(page);
-      await chooseStatementMenuAction(page, 'Owners', 'edit');
+      await chooseStatementMenuAction(page, 'owner-all', 'edit');
       // `s3:*` is pruned from what the admin may offer, leaving no action.
       await expect(modal(page).locator('#policy-statement-submit-button')).toBeDisabled();
       await modal(page).locator('#policy-statement-cancel-button').click();
