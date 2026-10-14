@@ -14,7 +14,7 @@ vi.mock('../lib/org-profile.ts', async () => {
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import type { BucketPolicy, PolicyStatement } from '@filone/shared';
 import { PolicyPublishError } from '../lib/errors.ts';
-import type { PolicyPrecondition } from '../lib/iam-orchestrator.ts';
+import type { PolicyPrecondition } from '../lib/bucket-policy-orchestrator.ts';
 import { baseHandler } from './put-bucket-policy.ts';
 import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 import {

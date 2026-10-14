@@ -23,7 +23,7 @@ import type {
   BucketPolicyOrchestrator,
   PolicyPrecondition,
   StoredBucketPolicy,
-} from '../lib/iam-orchestrator.ts';
+} from '../lib/bucket-policy-orchestrator.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
