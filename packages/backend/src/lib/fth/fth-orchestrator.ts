@@ -44,6 +44,7 @@ import type {
   TenantUsageMetrics,
 } from '../service-orchestrator.ts';
 import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
+import { dedupeByTimestamp, splitTimeRange } from '../time-range.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
 
 import type { S3ClientContext } from '../s3-client.ts';
@@ -67,6 +68,10 @@ import {
 } from './fth-management-client.ts';
 import type { FthManagementClient } from './fth-management-client.ts';
 import { instrumentClient } from './fth-api-metrics.ts';
+
+// FTH rejects a 1d timeseries spanning more than 92 days ("range exceeds 92 days
+// for interval 1d"); longer billing periods are fetched in 90-day chunks.
+const FTH_1D_CHUNK_MS = 90 * 24 * 60 * 60 * 1000;
 
 // Versioning / object-lock are applied as separate, idempotent S3 calls after the
 // bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
@@ -402,16 +407,21 @@ class FthOrchestrator implements ServiceOrchestrator {
     metricsOpts: GetTenantUsageMetricsOptions,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<TenantUsageMetrics> {
-    const res = await this.client.getClientMetricsTimeseries(
-      tenantId,
-      {
-        from: metricsOpts.from,
-        to: metricsOpts.to,
-        interval: metricsOpts.interval ?? '1d',
-      },
-      requestOptions,
+    const interval = metricsOpts.interval ?? '1d';
+    const ranges =
+      interval === '1d'
+        ? splitTimeRange(metricsOpts.from, metricsOpts.to, FTH_1D_CHUNK_MS)
+        : [{ from: metricsOpts.from, to: metricsOpts.to }];
+    const responses = await Promise.all(
+      ranges.map((r) =>
+        this.client.getClientMetricsTimeseries(
+          tenantId,
+          { from: r.from, to: r.to, interval },
+          requestOptions,
+        ),
+      ),
     );
-    const points = res.points ?? [];
+    const points = responses.flatMap((res) => res.points ?? []);
     const storage = points
       .filter((p) => p.ts !== undefined)
       .map((p) => ({
@@ -425,7 +435,7 @@ class FthOrchestrator implements ServiceOrchestrator {
         timestamp: new Date(p.ts!).toISOString(),
         bytesUsed: p.egress_bytes ?? 0,
       }));
-    return { storage, egress };
+    return { storage: dedupeByTimestamp(storage), egress: dedupeByTimestamp(egress) };
   }
 
   async getTenantInfo(

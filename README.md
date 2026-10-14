@@ -115,7 +115,7 @@ pnpm run deploy:dev       # Build and deploy personal dev stack (uses OS usernam
 pnpm run deploy:local     # Build and deploy to a local AWS emulator (see Local Stack)
 pnpm run remove           # Remove your personal dev stack
 pnpm run test             # Lint, then run the unit tests
-pnpm run test:unit        # Run the unit tests without linting (CI lints in its own step)
+pnpm run test:unit        # Run every package's unit tests without linting (CI lints in its own job)
 pnpm run storybook        # Start Storybook dev server on port 6006
 pnpm run test:storybook   # Run Storybook tests (browser-based, requires Playwright)
 pnpm run lint             # Lint and typecheck TypeScript code (via oxlint)

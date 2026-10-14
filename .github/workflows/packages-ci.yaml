@@ -5,12 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Name test jobs `test-<kind>[-<scope>]`, mirroring the pnpm scripts
+# (`test:unit` plus a package gives `test-unit-website`).
 jobs:
-  check-packages:
+  lint:
     runs-on: ubuntu-latest
-    env:
-      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -26,13 +25,70 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Build
-        run: pnpm build
+      - name: Check that CI runs every unit test
+        run: node bin/check-ci-unit-tests.ts
+
+  test-unit-website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
 
       - name: Test
-        run: pnpm test:unit
+        run: pnpm --filter @filone/website test
 
-  check-storybook:
+  test-unit-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm --filter @filone/backend test
+
+  # Tests every package that has no job of its own. The filters also leave out
+  # the root, whose test script lints and then runs every unit test, and the
+  # integration tests, which need a deployed stack. The build comes first
+  # because the cloudfront-functions tests check the files in website/dist/.
+  build-and-test-unit-others:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+
+      - name: Test
+        run: pnpm -r --filter '!filone' --filter '!@filone/integration' --filter '!@filone/website' --filter '!@filone/backend' test
+
+  test-storybook:
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.60.0-noble
@@ -57,7 +113,7 @@ jobs:
 
   deploy-hint:
     if: github.event_name == 'pull_request'
-    needs: [check-packages]
+    needs: [lint, test-unit-website, test-unit-backend, build-and-test-unit-others]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -96,7 +152,7 @@ jobs:
 
   deploy-staging:
     if: github.ref == 'refs/heads/main'
-    needs: [check-packages, check-storybook]
+    needs: [lint, test-unit-website, test-unit-backend, build-and-test-unit-others, test-storybook]
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-staging
@@ -312,8 +368,11 @@ jobs:
   dispatch-telemetry:
     needs:
       [
-        check-packages,
-        check-storybook,
+        lint,
+        test-unit-website,
+        test-unit-backend,
+        build-and-test-unit-others,
+        test-storybook,
         deploy-staging,
         test-staging,
         deploy-production,
