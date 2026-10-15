@@ -1,6 +1,6 @@
 # Bucket policy e2e suite
 
-End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run against a local stage whose `us-east-9` region uses the `iam` access model, backed by a smelt network. They never run against staging: the `full-*` projects ignore this directory.
+End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run against a stage whose Forge region serves the `iam` access model: locally `us-east-9`, backed by a smelt network; on a remote stage `eu-central-3`. The `full-*` projects ignore this directory, so the suite runs only as the `policies` project.
 
 ## What they need
 
@@ -20,8 +20,19 @@ End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run agains
 unset AWS_PROFILE
 eval "$(floci env)"
 export AWS_REGION=us-east-1 LOCAL=true BASE_URL=https://localhost:5173
-pnpm exec sst shell --stage local -- pnpm exec playwright test --project=policies-local
+pnpm exec sst shell --stage local -- pnpm exec playwright test --project=policies
 ```
+
+## Remote stage
+
+The same suite runs against staging. Register the five accounts against the stage once (`signup`, `verify`, `finish` with `https://staging.fil.one` as the origin), keep their credentials in `.env.e2e.local` or the `E2E_POLICY_*` secrets, and run the project through `sst shell` so the member and billing seeds reach the stage's tables:
+
+```bash
+export AWS_REGION=us-east-2 BASE_URL=https://staging.fil.one
+pnpm exec sst shell --stage staging -- pnpm exec playwright test --project=policies
+```
+
+`E2E_POLICY_REGION` and `E2E_POLICY_S3_ENDPOINT` override the region and the S3 endpoint; by default a remote stage uses `eu-central-3` and the endpoint `getS3Endpoint` derives for it. The staging Forge network has to run Hilt and Ingot with the policy operations. In CI, `e2e-staging.yaml` runs the project when the `E2E_POLICY_*` secrets are set.
 
 `policies-setup` logs all five accounts in and claims and activates the Owner's subscription. It then seats the other four in the Owner's organization: the Admin, the Member, the ReadOnly user, and the Leaver as a Member.
 

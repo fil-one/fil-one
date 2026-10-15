@@ -17,7 +17,7 @@ import {
   type APIResponse,
   type Page,
 } from '@playwright/test';
-import { CREATOR_ACTIONS } from '@filone/shared';
+import { CREATOR_ACTIONS, S3Region, getS3Endpoint } from '@filone/shared';
 import type {
   BucketPolicy,
   CreateAccessKeyResponse,
@@ -25,12 +25,17 @@ import type {
   PolicyStatement,
 } from '@filone/shared';
 
-// Shared by the bucket policy specs, which run against a local stage whose
-// `us-east-9` region serves the `iam` access model from a smelt network
-// (tests/e2e/policies/README.md).
+// Shared by the bucket policy specs. They run against any stage whose Forge
+// region serves the `iam` access model: locally that is `us-east-9` from a
+// smelt network, on a remote stage `eu-central-3` (tests/e2e/policies/README.md).
 
-export const REGION = 'us-east-9';
-export const S3_ENDPOINT = process.env.E2E_POLICY_S3_ENDPOINT ?? 'http://localhost:15130';
+const STAGE = process.env.SST_STAGE ?? (process.env.LOCAL ? 'local' : 'staging');
+export const REGION =
+  (process.env.E2E_POLICY_REGION as S3Region | undefined) ??
+  (STAGE === 'local' ? S3Region.UsEast9 : S3Region.EuCentral3);
+export const S3_ENDPOINT =
+  process.env.E2E_POLICY_S3_ENDPOINT ??
+  (STAGE === 'local' ? 'http://localhost:15130' : getS3Endpoint(REGION, STAGE));
 export const PAYLOAD = Buffer.from('policy-e2e');
 export const SEEDED_KEY = 'seeded.txt';
 

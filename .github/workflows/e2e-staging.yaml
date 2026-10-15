@@ -45,6 +45,21 @@ jobs:
       E2E_ORG_FRESH_EMAIL: ${{ secrets.E2E_ORG_FRESH_EMAIL }}
       E2E_ORG_FRESH_PASSWORD: ${{ secrets.E2E_ORG_FRESH_PASSWORD }}
       E2E_ORG_FRESH_AUTH0_ID: ${{ secrets.E2E_ORG_FRESH_AUTH0_ID }}
+      E2E_POLICY_OWNER_EMAIL: ${{ secrets.E2E_POLICY_OWNER_EMAIL }}
+      E2E_POLICY_OWNER_PASSWORD: ${{ secrets.E2E_POLICY_OWNER_PASSWORD }}
+      E2E_POLICY_OWNER_USER_ID: ${{ secrets.E2E_POLICY_OWNER_USER_ID }}
+      E2E_POLICY_ADMIN_EMAIL: ${{ secrets.E2E_POLICY_ADMIN_EMAIL }}
+      E2E_POLICY_ADMIN_PASSWORD: ${{ secrets.E2E_POLICY_ADMIN_PASSWORD }}
+      E2E_POLICY_ADMIN_USER_ID: ${{ secrets.E2E_POLICY_ADMIN_USER_ID }}
+      E2E_POLICY_MEMBER_EMAIL: ${{ secrets.E2E_POLICY_MEMBER_EMAIL }}
+      E2E_POLICY_MEMBER_PASSWORD: ${{ secrets.E2E_POLICY_MEMBER_PASSWORD }}
+      E2E_POLICY_MEMBER_USER_ID: ${{ secrets.E2E_POLICY_MEMBER_USER_ID }}
+      E2E_POLICY_READONLY_EMAIL: ${{ secrets.E2E_POLICY_READONLY_EMAIL }}
+      E2E_POLICY_READONLY_PASSWORD: ${{ secrets.E2E_POLICY_READONLY_PASSWORD }}
+      E2E_POLICY_READONLY_USER_ID: ${{ secrets.E2E_POLICY_READONLY_USER_ID }}
+      E2E_POLICY_LEAVER_EMAIL: ${{ secrets.E2E_POLICY_LEAVER_EMAIL }}
+      E2E_POLICY_LEAVER_PASSWORD: ${{ secrets.E2E_POLICY_LEAVER_PASSWORD }}
+      E2E_POLICY_LEAVER_USER_ID: ${{ secrets.E2E_POLICY_LEAVER_USER_ID }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -74,6 +89,12 @@ jobs:
 
       - name: Run E2E tests
         run: pnpm test:e2e
+
+      # The bucket policy suite needs its own five accounts; it runs once the
+      # E2E_POLICY_* secrets are set (tests/e2e/policies/README.md).
+      - name: Run bucket policy E2E tests
+        if: env.E2E_POLICY_OWNER_EMAIL != ''
+        run: pnpm exec sst shell -- pnpm exec playwright test --project=policies
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

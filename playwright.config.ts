@@ -82,10 +82,10 @@ export default defineConfig({
       },
       dependencies: ['multi-org-setup'],
     },
-    // Bucket policies, against a local stage whose us-east-9 region serves the
-    // `iam` access model from smelt (tests/e2e/policies/README.md). Only
-    // offered when the policy users are registered: the specs read their
-    // credentials at load, and staging runs without them.
+    // Bucket policies, against a stage whose Forge region serves the `iam`
+    // access model: us-east-9 from smelt locally, eu-central-3 on a remote stage
+    // (tests/e2e/policies/README.md). Only offered when the policy users are
+    // registered: the specs read their credentials at load.
     ...(process.env.E2E_POLICY_OWNER_EMAIL
       ? [
           {
@@ -96,7 +96,7 @@ export default defineConfig({
             workers: 1,
           },
           {
-            name: 'policies-local',
+            name: 'policies',
             testDir: './tests/e2e/policies',
             use: { ...devices['Desktop Chrome'] },
             // One org and one roster for every spec, and some specs change the roster.
