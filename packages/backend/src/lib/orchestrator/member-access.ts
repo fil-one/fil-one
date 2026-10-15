@@ -2,6 +2,7 @@
 // access model: which buckets the member can access.
 
 import type { MemberBucketAccess } from '@filone/shared';
+import type { MemberOrchestrator } from '../member-orchestrator.ts';
 import type { BucketSummary } from '../service-orchestrator.ts';
 
 /**
