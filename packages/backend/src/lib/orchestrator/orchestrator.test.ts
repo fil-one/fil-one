@@ -70,6 +70,7 @@ const ssmMock = mockClient(SSMClient);
 const s3Mock = mockClient(S3Client);
 
 import {
+  PolicyPublishError,
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
@@ -671,12 +672,21 @@ describe('listBuckets for a member', () => {
 
   it('rejects when the access lookup fails', async () => {
     stubTenantListing();
-    mockGetPrincipalAccess.mockReturnValue(fail(503));
+    mockGetPrincipalAccess.mockReturnValue(fail(400));
 
     // The caller's fan-out turns this into an unavailable region. Returning the
     // tenant listing here would hand the member every bucket name it holds.
     await expect(orchestrator.listBuckets(tenantId, MEMBER_ID)).rejects.toThrow(
       new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),
+    );
+  });
+
+  it('rejects as a transient failure when the storage system answers 503', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(fail(503));
+
+    await expect(orchestrator.listBuckets(tenantId, MEMBER_ID)).rejects.toBeInstanceOf(
+      PolicyPublishError,
     );
   });
 
