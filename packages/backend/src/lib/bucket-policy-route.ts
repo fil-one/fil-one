@@ -22,7 +22,7 @@ import {
   PrincipalNotFoundError,
 } from './errors.ts';
 import type { PolicyPrecondition } from './bucket-policy-orchestrator.ts';
-import { isOrgDeleting } from './org-profile.ts';
+import { getOrgProfile, isOrgDeleting } from './org-profile.ts';
 import { getRequestHeader } from './request-headers.ts';
 import {
   accountDeletedResponse,
@@ -95,10 +95,11 @@ export const POLICIES_UNAVAILABLE_MESSAGE = 'Bucket policies are not available i
 
 /**
  * What a policy write needs before it reaches the vendor: the region's `iam`
- * orchestrator and the org's tenant on it, which it provisions when the org has
- * none yet. The deletion fence runs first, as every write path has it: the
- * write lands upstream, so a fence checked only afterwards would leave it
- * behind.
+ * orchestrator and the org's tenant on it. A policy belongs to a bucket, and a
+ * bucket exists only on a tenant that is ready, so a write never provisions
+ * one; an org with no tenant in the region gets the same 503 as a read. The
+ * deletion fence runs first, as every write path has it: the write lands
+ * upstream, so a fence checked only afterwards would leave it behind.
  */
 export async function resolveIamWriteTarget(
   orgId: string,
@@ -111,7 +112,7 @@ export async function resolveIamWriteTarget(
   if (!supportsBucketPolicies(orchestrator)) return { response: policiesUnavailableResponse() };
   if (await isOrgDeleting(orgId, { consistent: true }))
     return { response: accountDeletedResponse() };
-  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return { response: tenantNotReadyResponse() };
   return { orchestrator, tenantId };
 }

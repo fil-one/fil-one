@@ -8,7 +8,10 @@ vi.mock('../lib/service-orchestrator-registry.ts', async () => {
 });
 vi.mock('../lib/org-profile.ts', async () => {
   const fixture = await import('../test/bucket-policy-fixture.ts');
-  return { isOrgDeleting: fixture.isOrgDeleting };
+  return {
+    getOrgProfile: async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } }),
+    isOrgDeleting: fixture.isOrgDeleting,
+  };
 });
 
 import { ApiErrorCode } from '@filone/shared';
@@ -21,9 +24,11 @@ import {
   SERVICE_KEYS_REGION,
   TENANT_ID,
   USER_ID,
+  ensureTenantReady,
   getAuditEvents,
   iam,
   grantGetObjectToUser,
+  orchestrator,
   resetFixture,
 } from '../test/bucket-policy-fixture.ts';
 
@@ -115,6 +120,16 @@ describe('delete-bucket-policy baseHandler', () => {
 
     expect(result.statusCode).toBe(404);
     expect(parseResponseBody(result).code).toBe(ApiErrorCode.POLICY_NOT_FOUND);
+  });
+
+  it('answers 503 without provisioning a tenant when the org has none in the region', async () => {
+    orchestrator.isTenantReady.mockReturnValueOnce(null);
+
+    const result = await baseHandler(buildDeleteEvent({ 'if-match': '"v1"' }));
+
+    expect(result.statusCode).toBe(503);
+    expect(iam.calls).toHaveLength(0);
+    expect(ensureTenantReady).not.toHaveBeenCalled();
   });
 
   it('answers 501 in a region whose network does not serve the iam access model', async () => {
