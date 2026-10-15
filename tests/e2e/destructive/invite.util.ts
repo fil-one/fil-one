@@ -74,6 +74,18 @@ function tableName(resource: 'OrgTable' | 'UserInfoTable'): string {
 // Organizations
 // ---------------------------------------------------------------------------
 
+/** The app's user id for an Auth0 `sub`, from its identity row; none before the first login. */
+export async function userIdBySub(sub: string): Promise<string | undefined> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: tableName('UserInfoTable'),
+      Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
+      ConsistentRead: true,
+    }),
+  );
+  return Item?.userId?.S;
+}
+
 /**
  * The organization the user's identity says is theirs.
  *

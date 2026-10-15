@@ -8,7 +8,7 @@ export default $config({
     // LOCAL=true deploys to a local AWS emulator (floci); see bin/deploy-local.sh.
     const isLocal = process.env.LOCAL === 'true';
     if (isLocal && !process.env.AWS_ENDPOINT_URL) {
-      throw new Error('LOCAL=true requires AWS_ENDPOINT_URL; run `eval "$(floci env)"` first');
+      throw new Error('LOCAL=true requires AWS_ENDPOINT_URL; run `source bin/floci-env.sh` first');
     }
 
     // Region: us-east-2 for staging/production, AWS_REGION / profile default for personal dev
@@ -784,8 +784,10 @@ export default $config({
     // serving every region in it; the region is sent per-tenant in the PUT
     // /tenants body.
     // SMELT=true points a local deploy's dev sandbox slot (us-east-9) at a smelt
-    // network on this machine. Lambdas reach it through host.docker.internal.
-    // Presigned URLs use localhost instead, which https pages may fetch over http.
+    // network on this machine. Lambdas reach Hilt through host.docker.internal.
+    // Ingot is ingot.localhost for both Lambdas (an /etc/hosts entry that
+    // bin/floci-start.sh adds) and browsers (which resolve *.localhost to
+    // loopback), so presigned URLs carry the host they were signed for.
     const useSmelt = isLocal && process.env.SMELT === 'true';
     const smeltHost = process.env.SMELT_HOST ?? 'host.docker.internal';
     const forgeEnv = {
@@ -796,8 +798,7 @@ export default $config({
           ? `http://${smeltHost}:15110`
           : 'https://auth.latest.dev.fil-forge.com',
       ...(useSmelt && {
-        FORGE_DEV_S3_ENDPOINT_URL: `http://${smeltHost}:15130`,
-        FORGE_DEV_S3_PRESIGN_ENDPOINT_URL: 'http://localhost:15130',
+        FORGE_DEV_S3_ENDPOINT_URL: 'http://ingot.localhost:15130',
       }),
     };
 

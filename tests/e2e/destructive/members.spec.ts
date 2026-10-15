@@ -29,14 +29,17 @@ test.describe('paid owner manages members', () => {
   test.use({ storageState: STORAGE_STATE[OWNER] });
   test.describe.configure({ mode: 'serial' });
 
-  const ownerUserId = requireUserId(OWNER);
-  const memberUserId = requireUserId(MEMBER);
+  // Read after the setup project, which records the ids on a fresh stack.
+  let ownerUserId: string;
+  let memberUserId: string;
 
   let orgId: string;
   let orgName: string;
   let memberOwnOrgName: string;
 
   test.beforeAll(async () => {
+    ownerUserId = requireUserId(OWNER);
+    memberUserId = requireUserId(MEMBER);
     orgId = await resolvePersonalOrgId(ownerUserId);
     orgName = await readOrgName(orgId);
     memberOwnOrgName = await readOrgName(await resolvePersonalOrgId(memberUserId));

@@ -1,14 +1,13 @@
 import {
   DeleteItemCommand,
   DynamoDBClient,
-  GetItemCommand,
   PutItemCommand,
   QueryCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
-import { deleteMembership, resolvePersonalOrgId } from '../destructive/invite.util.ts';
+import { deleteMembership, resolvePersonalOrgId, userIdBySub } from '../destructive/invite.util.ts';
 import { credential, type OrgUser } from './users.util.ts';
 
 // Seeding and repairs for the multi-org suite's own accounts. Row shapes follow
@@ -29,14 +28,7 @@ export function imageHost(): string {
 
 /** The app's user id for a test account, from its identity row. */
 export async function userIdOf(user: OrgUser): Promise<string> {
-  const { Item } = await client.send(
-    new GetItemCommand({
-      TableName: table('UserInfoTable'),
-      Key: { pk: { S: `SUB#${credential(user, 'AUTH0_ID')}` }, sk: { S: 'IDENTITY' } },
-      ConsistentRead: true,
-    }),
-  );
-  const userId = Item?.userId?.S;
+  const userId = await userIdBySub(credential(user, 'AUTH0_ID'));
   if (!userId) throw new Error(`No account for the ${user} user yet; run multi-org-setup first.`);
   return userId;
 }

@@ -11,6 +11,7 @@
     "build": "pnpm -r --if-present run build",
     "deploy:dev": "pnpm run build && sst deploy",
     "deploy:local": "bin/deploy-local.sh",
+    "floci:start": "bin/floci-start.sh",
     "deploy:staging": "pnpm run build && sst deploy --stage staging",
     "deploy:production": "pnpm run build && sst deploy --stage production",
     "deploy:infra:staging": "cd infra && sst deploy --stage staging",

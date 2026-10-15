@@ -1,0 +1,118 @@
+name: E2E (local stack)
+
+# Deploys the PR into floci, a local AWS emulator, and runs the E2E suite against
+# it. The stack starts empty on every run; storage regions stay on their hosted
+# services. See README.md "Local Stack".
+
+on:
+  pull_request:
+
+concurrency:
+  group: e2e-local-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    # Fork and Dependabot PRs get no secrets.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SST_STAGE: local
+      LOCAL: 'true'
+      FLOCI_DATA: ''
+      BASE_URL: https://localhost:5173
+      E2E_PAID_EMAIL: ${{ secrets.E2E_PAID_EMAIL }}
+      E2E_PAID_PASSWORD: ${{ secrets.E2E_PAID_PASSWORD }}
+      E2E_PAID_AUTH0_ID: ${{ secrets.E2E_PAID_AUTH0_ID }}
+      E2E_UNPAID_EMAIL: ${{ secrets.E2E_UNPAID_EMAIL }}
+      E2E_UNPAID_PASSWORD: ${{ secrets.E2E_UNPAID_PASSWORD }}
+      E2E_UNPAID_AUTH0_ID: ${{ secrets.E2E_UNPAID_AUTH0_ID }}
+      E2E_TRIAL_EMAIL: ${{ secrets.E2E_TRIAL_EMAIL }}
+      E2E_TRIAL_PASSWORD: ${{ secrets.E2E_TRIAL_PASSWORD }}
+      E2E_TRIAL_AUTH0_ID: ${{ secrets.E2E_TRIAL_AUTH0_ID }}
+      E2E_ORG_OWNER_EMAIL: ${{ secrets.E2E_ORG_OWNER_EMAIL }}
+      E2E_ORG_OWNER_PASSWORD: ${{ secrets.E2E_ORG_OWNER_PASSWORD }}
+      E2E_ORG_OWNER_AUTH0_ID: ${{ secrets.E2E_ORG_OWNER_AUTH0_ID }}
+      E2E_ORG_MEMBER_EMAIL: ${{ secrets.E2E_ORG_MEMBER_EMAIL }}
+      E2E_ORG_MEMBER_PASSWORD: ${{ secrets.E2E_ORG_MEMBER_PASSWORD }}
+      E2E_ORG_MEMBER_AUTH0_ID: ${{ secrets.E2E_ORG_MEMBER_AUTH0_ID }}
+      E2E_ORG_FRESH_EMAIL: ${{ secrets.E2E_ORG_FRESH_EMAIL }}
+      E2E_ORG_FRESH_PASSWORD: ${{ secrets.E2E_ORG_FRESH_PASSWORD }}
+      E2E_ORG_FRESH_AUTH0_ID: ${{ secrets.E2E_ORG_FRESH_AUTH0_ID }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Start floci
+        run: |
+          pnpm floci:start
+          (source bin/floci-env.sh && env | grep -E '^AWS_') >> "$GITHUB_ENV"
+
+      # The rest stay placeholders: this stack sends no logs, metrics or CRM updates.
+      - name: Set SST secrets
+        # Each env var carries its SST secret's name.
+        run: |
+          for s in Auth0ClientId Auth0ClientSecret Auth0MgmtClientId Auth0MgmtClientSecret Auth0MgmtRuntimeClientId Auth0MgmtRuntimeClientSecret StripeSecretKey StripePriceId StripePublishableKey AuroraBackofficeToken FthManagementApiToken ForgeManagementApiToken ForgeDevManagementApiToken SendGridApiKey; do
+            pnpm exec sst secret set "$s" "${!s}"
+          done
+          pnpm exec sst secret set DeletionCodeHmacKey "$(openssl rand -hex 32)"
+        env:
+          Auth0ClientId: ${{ secrets.CI_AUTH0_CLIENT_ID }}
+          Auth0ClientSecret: ${{ secrets.CI_AUTH0_CLIENT_SECRET }}
+          Auth0MgmtClientId: ${{ secrets.CI_AUTH0_MGMT_CLIENT_ID }}
+          Auth0MgmtClientSecret: ${{ secrets.CI_AUTH0_MGMT_CLIENT_SECRET }}
+          Auth0MgmtRuntimeClientId: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_ID }}
+          Auth0MgmtRuntimeClientSecret: ${{ secrets.CI_AUTH0_MGMT_RUNTIME_CLIENT_SECRET }}
+          StripeSecretKey: ${{ secrets.CI_STRIPE_SECRET_KEY }}
+          StripePriceId: ${{ secrets.CI_STRIPE_PRICE_ID }}
+          StripePublishableKey: ${{ secrets.CI_STRIPE_PUBLISHABLE_KEY }}
+          AuroraBackofficeToken: ${{ secrets.CI_AURORA_BACKOFFICE_TOKEN }}
+          FthManagementApiToken: ${{ secrets.CI_FTH_MANAGEMENT_API_TOKEN }}
+          ForgeManagementApiToken: ${{ secrets.CI_FORGE_MANAGEMENT_API_TOKEN }}
+          ForgeDevManagementApiToken: ${{ secrets.CI_FORGE_DEV_MANAGEMENT_API_TOKEN }}
+          SendGridApiKey: ${{ secrets.CI_SENDGRID_API_KEY }}
+
+      - name: Deploy to floci
+        run: pnpm deploy:local | tee deploy.log
+
+      - name: Start the console
+        run: |
+          grep -oE 'DEV_PROXY_TARGET=[^"]+' deploy.log | head -1 > packages/website/.env.local
+          nohup pnpm --filter @filone/website dev > vite.log 2>&1 &
+          timeout 120 bash -c 'until curl -ksf -o /dev/null https://localhost:5173; do sleep 2; done'
+
+      - name: Run E2E tests
+        run: pnpm test:e2e --project=full-chromium --project=multi-org
+
+      - name: Dump logs
+        if: failure()
+        run: |
+          cat vite.log || true
+          for c in $(docker ps -a --format '{{.Names}}' | grep '^floci'); do
+            echo "::group::$c"; docker logs --tail 500 "$c" 2>&1; echo "::endgroup::"
+          done
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report-local-${{ github.run_id }}
+          path: playwright-report/
+          retention-days: 14
