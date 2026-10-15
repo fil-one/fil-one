@@ -87,8 +87,7 @@ export async function baseHandler(
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(region);
-  const denied =
-    'permissions' in parsed.data && checkServiceKeyAuthority(event, parsed.data, orchestrator);
+  const denied = checkServiceKeyAuthority(event, parsed.data, orchestrator);
   if (denied) return denied;
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
@@ -136,7 +135,7 @@ export async function baseHandler(
       attribution,
       mint,
       creator,
-      principalId: 'principalId' in keyOpts ? keyOpts.principalId : undefined,
+      principalId: getPrincipalId(keyOpts),
     });
   }
 
@@ -216,6 +215,11 @@ function getKeyRoleRequirement(data: CreateKeyRequest): KeyMinter['key'] {
   return { type: 'service', grant: { permissions, granularPermissions, region } };
 }
 
+/** The principal a key is bound to, or undefined for a service key. */
+function getPrincipalId(keyOpts: IssueAccessKeyOpts): string | undefined {
+  return 'principalId' in keyOpts ? keyOpts.principalId : undefined;
+}
+
 /** What the `key.created` intent records about the key's kind. */
 function getKeyAuditDetails(keyOpts: IssueAccessKeyOpts): { isPrincipalKey?: true } {
   return 'principalId' in keyOpts ? { isPrincipalKey: true } : {};
@@ -245,9 +249,11 @@ function buildKeyRowFields(data: CreateKeyRequest, issued: IssuedAccessKey, user
  */
 function checkServiceKeyAuthority(
   event: AuthenticatedEvent,
-  request: CreateAccessKeyRequest,
+  request: CreateKeyRequest,
   orchestrator: RegionOrchestrator,
 ): APIGatewayProxyStructuredResultV2 | undefined {
+  // A principal-bound key carries no authority to check.
+  if (!('permissions' in request)) return undefined;
   const denied = checkCreatorAuthority(event, request);
   if (denied || !supportsIamMethods(orchestrator.region)) return denied;
   return requirePermission(
