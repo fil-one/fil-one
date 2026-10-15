@@ -147,6 +147,16 @@ describe('isAccessKeyExpired', () => {
     expect(isAccessKeyExpired('2026-06-15', new Date('2026-06-16T00:00:00Z'))).toBe(true);
   });
 
+  it.each([
+    { now: '2026-06-30T23:59:59.999Z', expired: false },
+    { now: '2026-07-01T00:00:00Z', expired: true },
+  ])(
+    'returns $expired at $now for an expiry date on the last day of a month',
+    ({ now, expired }) => {
+      expect(isAccessKeyExpired('2026-06-30', new Date(now))).toBe(expired);
+    },
+  );
+
   // A full timestamp expires at its own instant, read in its own offset.
   // 10:00+02:00 is 08:00 UTC and 16:00+02:00 is 14:00 UTC, either side of `now`.
   it.each([

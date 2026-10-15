@@ -131,7 +131,6 @@ async function runQuery(
 }
 
 const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Whether a key's expiry has passed. The create route stores a bare
@@ -146,14 +145,14 @@ export function isAccessKeyExpired(
   now = new Date(),
 ): boolean {
   if (!expiresAt) return false;
-  const parsed = Date.parse(expiresAt);
+  const expiry = new Date(expiresAt);
   // An unparseable expiry is treated as expired rather than as forever: the only
   // way one gets stored is a bad write, and the safe reading of "we do not know
   // when this stops being valid" is that it already has.
-  if (Number.isNaN(parsed)) return true;
-  // A bare date parses as midnight UTC at its start; the key lasts until the end.
-  const expiresAtMs = BARE_DATE.test(expiresAt) ? parsed + ONE_DAY_MS : parsed;
-  return now.getTime() >= expiresAtMs;
+  if (Number.isNaN(expiry.getTime())) return true;
+  // A bare date parses as midnight UTC at its start; the key lasts until the next day starts.
+  if (BARE_DATE.test(expiresAt)) expiry.setUTCDate(expiry.getUTCDate() + 1);
+  return now >= expiry;
 }
 
 function toAccessKey(record: Record<string, unknown>): AccessKey {
