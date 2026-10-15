@@ -250,7 +250,7 @@ describe('ensureTenantReady', () => {
     stubHappyPath();
     mockListMembers.mockResolvedValueOnce([{ userId: ANY_USER }, { userId: OTHER_USER }]);
     const order: string[] = [];
-    mockSyncPrincipal.mockImplementation(async (_client, _orchestratorId, _tenantId, userId) => {
+    mockSyncPrincipal.mockImplementation(async (_backend, _tenantId, userId) => {
       order.push(`sync:${String(userId)}`);
     });
     ddbMock.on(UpdateItemCommand).callsFake(() => {
@@ -261,8 +261,8 @@ describe('ensureTenantReady', () => {
     await ensureTenantReady(deps, orgId);
 
     expect(mockSyncPrincipal.mock.calls).toStrictEqual([
-      [client, 'forge', orgId, ANY_USER],
-      [client, 'forge', orgId, OTHER_USER],
+      [{ client, orchestratorId: 'forge' }, orgId, ANY_USER],
+      [{ client, orchestratorId: 'forge' }, orgId, OTHER_USER],
     ]);
     expect(order).toStrictEqual([`sync:${ANY_USER}`, `sync:${OTHER_USER}`, 'pointer']);
   });

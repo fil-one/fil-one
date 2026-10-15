@@ -170,9 +170,13 @@ async function processTenantSetup(
   }
   // Ten at a time: a few hundred members would otherwise run for the whole
   // request, one principal after another (FIL-1504 asks for a batch route).
-  await pMap(members, ({ userId }) => syncPrincipal(client, id, orgId, userId), {
-    concurrency: 10,
-  });
+  await pMap(
+    members,
+    ({ userId }) => syncPrincipal({ client, orchestratorId: id }, orgId, userId),
+    {
+      concurrency: 10,
+    },
+  );
 
   try {
     await dynamo.send(
