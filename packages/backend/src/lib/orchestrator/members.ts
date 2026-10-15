@@ -18,6 +18,12 @@ import {
 } from '../errors.ts';
 import type { MemberBucketPolicy } from '../member-orchestrator.ts';
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
+
+/** The Management API client the principal routes go to, and the orchestrator its errors name. */
+export interface OrchestratorBackend {
+  client: Client;
+  orchestratorId: string;
+}
 import { extractApiMessage } from './api-message.ts';
 import { withWriteRetry } from './policy-writes.ts';
 
@@ -59,14 +65,13 @@ function formatFailureMessage(orchestratorId: string, what: string, tenantId: st
 }
 
 export async function syncPrincipal(
-  client: Client,
-  orchestratorId: string,
+  backend: OrchestratorBackend,
   tenantId: string,
   userId: string,
 ): Promise<void> {
   await withWriteRetry(async () => {
     const result = await putTenantsByTenantIdPrincipalsByPrincipalId({
-      client,
+      client: backend.client,
       path: { tenantId, principalId: userId },
       throwOnError: false,
     });
@@ -74,27 +79,26 @@ export async function syncPrincipal(
       throw toPrincipalError(
         result,
         userId,
-        formatFailureMessage(orchestratorId, `create principal "${userId}"`, tenantId),
+        formatFailureMessage(backend.orchestratorId, `create principal "${userId}"`, tenantId),
       );
     }
   });
 }
 
 export async function removePrincipal(
-  client: Client,
-  orchestratorId: string,
+  backend: OrchestratorBackend,
   tenantId: string,
   userId: string,
 ): Promise<void> {
   await withWriteRetry(async () => {
     const result = await deleteTenantsByTenantIdPrincipalsByPrincipalId({
-      client,
+      client: backend.client,
       path: { tenantId, principalId: userId },
       throwOnError: false,
     });
     if (result.error) {
       const message = formatFailureMessage(
-        orchestratorId,
+        backend.orchestratorId,
         `remove principal "${userId}"`,
         tenantId,
       );
@@ -109,25 +113,28 @@ export async function removePrincipal(
 }
 
 export async function listPrincipalPolicies(
-  client: Client,
-  orchestratorId: string,
+  backend: OrchestratorBackend,
   tenantId: string,
   userId: string,
 ): Promise<MemberBucketPolicy[]> {
   const result = await getTenantsByTenantIdPrincipalsByPrincipalIdPolicies({
-    client,
+    client: backend.client,
     path: { tenantId, principalId: userId },
     throwOnError: false,
   });
   if (isUnknownPrincipal(result)) {
-    warnUnknownPrincipal(orchestratorId, tenantId, userId);
+    warnUnknownPrincipal(backend.orchestratorId, tenantId, userId);
     return [];
   }
   if (result.error || !result.data) {
     throw toPrincipalError(
       result,
       userId,
-      formatFailureMessage(orchestratorId, `list the policies naming "${userId}"`, tenantId),
+      formatFailureMessage(
+        backend.orchestratorId,
+        `list the policies naming "${userId}"`,
+        tenantId,
+      ),
     );
   }
   return result.data.items.map((item) => ({
@@ -137,27 +144,26 @@ export async function listPrincipalPolicies(
 }
 
 export async function resolvePrincipalAccess(
-  client: Client,
-  orchestratorId: string,
+  backend: OrchestratorBackend,
   tenantId: string,
   userId: string,
   requestOptions?: OrchestratorRequestOptions,
 ): Promise<MemberBucketAccess[]> {
   const result = await getTenantsByTenantIdPrincipalsByPrincipalIdAccess({
-    client,
+    client: backend.client,
     path: { tenantId, principalId: userId },
     throwOnError: false,
     signal: requestOptions?.signal,
   });
   if (isUnknownPrincipal(result)) {
-    warnUnknownPrincipal(orchestratorId, tenantId, userId);
+    warnUnknownPrincipal(backend.orchestratorId, tenantId, userId);
     return [];
   }
   if (result.error || !result.data) {
     throw toPrincipalError(
       result,
       userId,
-      formatFailureMessage(orchestratorId, `resolve the access of "${userId}"`, tenantId),
+      formatFailureMessage(backend.orchestratorId, `resolve the access of "${userId}"`, tenantId),
     );
   }
   return result.data.buckets.map((bucket) => ({

@@ -162,7 +162,7 @@ async function processTenantSetup(
   // registers themselves (`registerNewMember`); one who joins in between is not
   // a principal until their first key mint.
   for (const { userId } of await listMembers(orgId)) {
-    await syncPrincipal(client, id, orgId, userId);
+    await syncPrincipal({ client, orchestratorId: id }, orgId, userId);
   }
 
   try {
