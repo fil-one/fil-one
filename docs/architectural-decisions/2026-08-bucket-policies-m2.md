@@ -162,13 +162,17 @@ ability the day it ships. Reading a policy takes the same
 permission; a scoped member learns their reach from the bucket list and the key
 form's preview.
 
-A statement may carry thirteen of an access key's fifteen actions: read, write,
-list, delete, the two bucket-configuration reads, and the seven granular
-data-protection permissions. `CreateBucket`, `DeleteBucket`, and the three
-bucket-policy actions are excluded, because a key holding `CreateBucket` creates
-buckets outside the policy that granted it and one holding `PutBucketPolicy`
-rewrites that policy. Bucket creation stays where M1 puts it, as the org-level
-`buckets.create`.
+A statement may carry eleven of an access key's fifteen permissions: read,
+write, list, delete, and the seven granular data-protection permissions. On the
+wire those are fourteen actions, because the storage system names the three
+multipart-upload actions separately from the read, write and list they belong
+to. `CreateBucket` and `DeleteBucket` are excluded because a key holding
+`CreateBucket` creates buckets outside the policy that granted it. The two
+bucket-configuration reads are excluded because the storage system has no such
+actions; it authorizes those reads from `ListBucket`. The three bucket-policy
+actions are excluded because a key holding `PutBucketPolicy` rewrites the policy
+that granted it; only the console's own key holds them. Bucket creation stays
+where M1 puts it, as the org-level `buckets.create`.
 
 **Retention and legal hold are grantable through a policy.** M1 makes
 `PutObjectRetention` and `PutObjectLegalHold` Owner-only, and says M2's
