@@ -226,10 +226,12 @@ export const getTenantsByTenantIdAccessKeys = <ThrowOnError extends boolean = fa
  * created with.
  * * `{ name, principalId, expiresAt? }` — a **principal-bound
  * key**, authorized on every request from
- * the bucket policies naming that principal. The orchestrator
- * must reject (422) a body carrying `principalId` together with
- * `permissions` or `buckets`, and a `principalId` that is not a
- * live principal of the tenant.
+ * the bucket policies naming that principal. It always holds
+ * `s3:ListAllMyBuckets`: no statement grants that action and no
+ * Deny removes it, and the per-bucket access read leaves it
+ * out. The orchestrator must reject (422) a body carrying
+ * `principalId` together with `permissions` or `buckets`, and a
+ * `principalId` that is not a live principal of the tenant.
  *
  * A service key's name is unique within the tenant; a
  * principal-bound key's name is unique within its principal.
@@ -401,8 +403,9 @@ export const getTenantsByTenantIdPrincipalsByPrincipalIdPolicies = <
  * action, the sorted effective set: the union of the `Allow`
  * statements naming them or `*`, minus the union of the `Deny`
  * statements naming them or `*`. Buckets with an empty set are
- * omitted. The orchestrator must ensure the answer is consistent with
- * the last writes.
+ * omitted. `s3:ListAllMyBuckets` never appears: every principal holds
+ * it outside the policies. The orchestrator must ensure the answer is
+ * consistent with the last writes.
  *
  */
 export const getTenantsByTenantIdPrincipalsByPrincipalIdAccess = <
