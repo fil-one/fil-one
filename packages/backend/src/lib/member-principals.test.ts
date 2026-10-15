@@ -60,6 +60,7 @@ describe('removeMemberPrincipal', () => {
       name: 'IamRegionRefusedError',
       action: 'remove',
       regions: [S3Region.UsEast9],
+      succeeded: [],
     });
   });
 
@@ -92,6 +93,7 @@ describe('registerMemberPrincipal', () => {
       name: 'IamRegionRefusedError',
       action: 'register',
       regions: [S3Region.UsEast9],
+      succeeded: [],
     });
   });
 

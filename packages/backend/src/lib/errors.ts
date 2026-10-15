@@ -159,11 +159,20 @@ export class PrincipalNotFoundError extends Error {
 // request again.
 export class IamRegionRefusedError extends Error {
   readonly action: 'register' | 'remove';
+  /** The regions that refused. */
   readonly regions: S3Region[];
-  constructor(action: 'register' | 'remove', regions: S3Region[], options?: ErrorOptions) {
+  /** The regions that had already applied the change when the others refused. */
+  readonly succeeded: S3Region[];
+  constructor(
+    action: 'register' | 'remove',
+    regions: S3Region[],
+    succeeded: S3Region[] = [],
+    options?: ErrorOptions,
+  ) {
     super(`${regions.join(', ')} refused to ${action} the member's principal`, options);
     this.name = 'IamRegionRefusedError';
     this.action = action;
     this.regions = regions;
+    this.succeeded = succeeded;
   }
 }

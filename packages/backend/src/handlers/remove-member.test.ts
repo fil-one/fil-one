@@ -1182,8 +1182,19 @@ describe('the principal on iam regions', () => {
 
     expect(result).toMatchObject({ statusCode: 502 });
     expect(body(result)).toStrictEqual({
-      message: `The member could not be removed from ${S3Region.UsEast9}, so they are still in this organization. Try again.`,
+      message: 'We could not remove the member from this organization. Please try again.',
     });
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('answers 500 with the member still in the org when the commit fails after the principal is gone', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('dynamo down'));
+
+    const result = await handler(removeEvent(), buildContext());
+
+    // The principal is gone at the storage system and the rows stay; the same
+    // DELETE again succeeds, since a principal already removed answers 204.
+    expect(result).toMatchObject({ statusCode: 500 });
+    expect(mockRemoveMemberPrincipal).toHaveBeenCalledTimes(1);
   });
 });

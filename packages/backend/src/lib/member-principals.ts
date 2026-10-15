@@ -35,11 +35,15 @@ async function onEveryReadyIamRegion(
     regions.map(({ orchestrator, tenantId }) => call(orchestrator, tenantId)),
   );
   const failed: S3Region[] = [];
+  const succeeded: S3Region[] = [];
   outcomes.forEach((outcome, index) => {
-    if (outcome.status === 'fulfilled') return;
     // SAFETY: regions and outcomes have the same size. An index of an item
     // inside outcomes always points to an item inside regions.
     const { region } = regions[index]!.orchestrator;
+    if (outcome.status === 'fulfilled') {
+      succeeded.push(region);
+      return;
+    }
     console.error(`[member-principals] Could not ${action} a member's principal`, {
       region,
       userId,
@@ -47,7 +51,7 @@ async function onEveryReadyIamRegion(
     });
     failed.push(region);
   });
-  if (failed.length > 0) throw new IamRegionRefusedError(action, failed);
+  if (failed.length > 0) throw new IamRegionRefusedError(action, failed, succeeded);
 }
 
 /**

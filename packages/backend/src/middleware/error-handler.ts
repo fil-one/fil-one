@@ -31,14 +31,15 @@ export function errorHandlerMiddleware(): MiddlewareObj<
     // A storage region would not register or remove the member's principal, so
     // the membership write was refused and the same request tries again.
     if (request.error instanceof IamRegionRefusedError) {
-      const { action, regions } = request.error;
+      const { action, regions, succeeded } = request.error;
       console.warn('[error-handler] membership write refused by an iam region', {
         action,
         regions,
+        succeeded,
       });
       request.response = new ResponseBuilder()
         .status(502)
-        .body<ErrorResponse>({ message: getIamRegionRefusedMessage(action, regions.join(', ')) })
+        .body<ErrorResponse>({ message: getIamRegionRefusedMessage(action, regions, succeeded) })
         .build();
       return;
     }
@@ -64,8 +65,24 @@ export function errorHandlerMiddleware(): MiddlewareObj<
   return { onError };
 }
 
-function getIamRegionRefusedMessage(action: 'register' | 'remove', regions: string): string {
-  return action === 'remove'
-    ? `The member could not be removed from ${regions}, so they are still in this organization. Try again.`
-    : `The invitation could not be accepted on ${regions}. Try again.`;
+/**
+ * What the user is told. The state is partial when some regions applied the
+ * change, so the message says which did and which did not; when none did, the
+ * region names add nothing. Either way the remedy is the same request again.
+ */
+function getIamRegionRefusedMessage(
+  action: 'register' | 'remove',
+  regions: string[],
+  succeeded: string[],
+): string {
+  const failed = regions.join(', ');
+  const done = succeeded.join(', ');
+  if (action === 'remove') {
+    return succeeded.length > 0
+      ? `The member was removed from ${done} but could not be removed from ${failed}. They are still in this organization, please try again.`
+      : 'We could not remove the member from this organization. Please try again.';
+  }
+  return succeeded.length > 0
+    ? `The member joined, and was registered on ${done} but not on ${failed}. Please try again.`
+    : 'The member joined, but could not be registered on the storage regions. Please try again.';
 }

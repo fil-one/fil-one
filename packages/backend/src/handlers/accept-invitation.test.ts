@@ -848,7 +848,8 @@ describe('POST /api/invitations/accept handler', () => {
 
     expect(result).toMatchObject({ statusCode: 502 });
     expect(body(result)).toStrictEqual({
-      message: `The invitation could not be accepted on ${S3Region.UsEast9}. Try again.`,
+      message:
+        'The member joined, but could not be registered on the storage regions. Please try again.',
     });
     // The join landed: the same request from the member is a no-op, and their
     // first key mint registers the principal.
