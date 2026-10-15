@@ -119,14 +119,14 @@ async function confirmRemovePolicy() {
   );
 }
 
-describe('BucketPolicyTab', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockGetBucketPolicy.mockResolvedValue({ policy: grantReadAndListToBen, etag: '"v1"' });
-    mockPutBucketPolicy.mockResolvedValue({ etag: '"v2"', created: false });
-    mockDeleteBucketPolicy.mockResolvedValue(undefined);
-  });
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockGetBucketPolicy.mockResolvedValue({ policy: grantReadAndListToBen, etag: '"v1"' });
+  mockPutBucketPolicy.mockResolvedValue({ etag: '"v2"', created: false });
+  mockDeleteBucketPolicy.mockResolvedValue(undefined);
+});
 
+describe('BucketPolicyTab', () => {
   it('titles each statement by its Sid', async () => {
     renderTab();
 
@@ -272,7 +272,9 @@ describe('BucketPolicyTab', () => {
       ],
     ]);
   });
+});
 
+describe('BucketPolicyTab conflicts and removal', () => {
   it('keeps the edited draft when the save is refused as a conflict', async () => {
     renderTab();
     await saveAndLoseToAnotherWriter();
