@@ -48,11 +48,13 @@ import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'dev@fil.org', emailVerified: true };
+const USER_INFO = { userId: USER_1, orgId: 'org-1', email: 'dev@fil.org', emailVerified: true };
 
 const BUCKET = {
   bucketName: 'my-bucket',
@@ -251,9 +253,9 @@ describe('get-bucket-rag-enablement member scope on an iam region', () => {
     vi.clearAllMocks();
     mockGetEnablement.mockResolvedValue(enablementRecord());
     const iam = new FakeIamOrchestrator();
-    iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
+    iam.seedPrincipal(tenantFor('forge', 'org-1'), USER_1);
     iam.seedPolicy(tenantFor('forge', 'org-1'), 'other-bucket', {
-      Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
+      Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: ['s3:GetObject'] }],
     });
     orch = fakeOrchestrator('forge', { bucket: BUCKET, iam });
     stubMemberScopedGetBucket(orch, iam, BUCKET);
@@ -262,7 +264,7 @@ describe('get-bucket-rag-enablement member scope on an iam region', () => {
 
   function eventAs(role: OrgRole): AuthenticatedEvent {
     const e = event();
-    e.requestContext.userInfo.membership = membershipFor('org-1', 'user-1', role);
+    e.requestContext.userInfo.membership = membershipFor('org-1', USER_1, role);
     return e;
   }
 

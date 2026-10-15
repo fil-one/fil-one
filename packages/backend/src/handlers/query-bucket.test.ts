@@ -101,11 +101,13 @@ import {
 import { OrgRole, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'dev@fil.org', emailVerified: true };
+const USER_INFO = { userId: USER_1, orgId: 'org-1', email: 'dev@fil.org', emailVerified: true };
 
 const BUCKET = {
   bucketName: 'my-bucket',
@@ -558,7 +560,7 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
     keyPrefix: TOKEN.slice(0, 12),
     tokenHash: TOKEN_HASH,
     bucketScope: 'all',
-    createdBy: 'user-1',
+    createdBy: USER_1,
     creatorEmail: 'dev@fil.org',
     createdAt: '2026-07-01T00:00:00Z',
   };
@@ -578,7 +580,7 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
       .resolves({ Item: marshall({ ...KEY_RECORD, ...overrides }) });
     // The key's authority is its creator's membership, which the bearer path
     // reads before it lets the request through.
-    stubMembershipRead(ddbMock, { orgId: 'org-1', userId: 'user-1', role: OrgRole.Member });
+    stubMembershipRead(ddbMock, { orgId: 'org-1', userId: USER_1, role: OrgRole.Member });
     ddbMock.on(UpdateItemCommand).resolves({});
   }
 
@@ -673,9 +675,9 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
 /** An iam-region orchestrator whose policies grant user-1 only `bucketName`. */
 function buildIamOrchestratorGrantingOnly(bucketName: string): FakeOrchestrator {
   const iam = new FakeIamOrchestrator();
-  iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
+  iam.seedPrincipal(tenantFor('forge', 'org-1'), USER_1);
   iam.seedPolicy(tenantFor('forge', 'org-1'), bucketName, {
-    Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
+    Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: ['s3:GetObject'] }],
   });
   const orchestrator = fakeOrchestrator('forge', { bucket: BUCKET, iam });
   stubMemberScopedGetBucket(orchestrator, iam, BUCKET);
@@ -695,7 +697,7 @@ describe('query-bucket member scope on an iam region', () => {
 
   function cookieEvent(role: OrgRole): AuthenticatedEvent {
     const event = queryEvent({ query: 'what is in here?' });
-    event.requestContext.userInfo.membership = membershipFor('org-1', 'user-1', role);
+    event.requestContext.userInfo.membership = membershipFor('org-1', USER_1, role);
     return event;
   }
 

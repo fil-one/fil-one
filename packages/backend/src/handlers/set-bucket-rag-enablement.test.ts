@@ -59,11 +59,13 @@ import { ApiErrorCode, OrgRole, S3Region, type PolicyAction } from '@filone/shar
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'dev@fil.org', emailVerified: true };
+const USER_INFO = { userId: USER_1, orgId: 'org-1', email: 'dev@fil.org', emailVerified: true };
 
 const BUCKET = {
   bucketName: 'my-bucket',
@@ -301,9 +303,9 @@ describe('set-bucket-rag-enablement member scope on an iam region', () => {
   /** An iam orchestrator whose policy on my-bucket grants user-1 `actions`. */
   function buildIamOrchestratorGrantingOnMyBucket(actions: PolicyAction[]): FakeOrchestrator {
     const iam = new FakeIamOrchestrator();
-    iam.seedPrincipal(tenantFor('forge', 'org-1'), 'user-1');
+    iam.seedPrincipal(tenantFor('forge', 'org-1'), USER_1);
     iam.seedPolicy(tenantFor('forge', 'org-1'), 'my-bucket', {
-      Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: actions }],
+      Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: actions }],
     });
     const orchestrator = fakeOrchestrator('forge', { bucket: BUCKET, iam });
     stubMemberScopedGetBucket(orchestrator, iam, BUCKET);

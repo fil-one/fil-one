@@ -29,11 +29,13 @@ import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
 import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -156,7 +158,7 @@ describe('get-bucket baseHandler', () => {
 
   function eventAs(role: OrgRole) {
     const event = buildEvent({
-      userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', role) },
+      userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, role) },
     });
     event.pathParameters = { name: 'my-bucket' };
     return event;
@@ -172,7 +174,7 @@ describe('get-bucket baseHandler', () => {
       expect(orch.getBucket).toHaveBeenCalledWith(
         tenantFor('aurora', 'org-1'),
         'my-bucket',
-        'user-1',
+        USER_1,
       );
     },
   );
