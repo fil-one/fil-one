@@ -126,6 +126,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "CreateOrg": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "CreatePortalSession": {
       "name": string
       "type": "sst.aws.Function"
@@ -143,6 +147,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "DeleteBucket": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "DeleteBucketPolicy": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -206,6 +214,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "GetBucketPolicy": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "GetBucketRagEnablement": {
       "name": string
       "type": "sst.aws.Function"
@@ -219,6 +231,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "GetPreferences": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetRoleChangePreview": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -298,6 +314,18 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "PresignAvatar": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "PresignOrgLogo": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "PutBucketPolicy": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "QueryBucket": {
       "name": string
       "type": "sst.aws.Function"
@@ -336,6 +364,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "RevokeInvitation": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "RotateAccessKey": {
       "name": string
       "type": "sst.aws.Function"
     }
