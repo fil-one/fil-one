@@ -61,11 +61,13 @@ import { buildEvent } from '../test/lambda-test-utilities.ts';
 import { CREATOR_ACTIONS, S3_REGION, S3Region } from '@filone/shared';
 import { delegateIamMethods, FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
 const parseResponseBody = (result: { body?: string }) => JSON.parse(result.body ?? '{}');
 
@@ -298,7 +300,7 @@ describe('create-bucket baseHandler', () => {
       expect(result.statusCode).toBe(201);
       expect(mockCreateBucket.mock.calls[0]![1].policy).toStrictEqual({
         Statement: [
-          { Sid: 'creator', Effect: 'Allow', Principal: ['user-1'], Action: CREATOR_ACTIONS },
+          { Sid: 'creator', Effect: 'Allow', Principal: [USER_1], Action: CREATOR_ACTIONS },
         ],
       });
     });
