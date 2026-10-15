@@ -71,6 +71,8 @@ import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
 import { FilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
 
+const ALICE = '00000000-0000-0000-0000-00000000000a';
+
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).
 const tenantId = orgId;
@@ -574,7 +576,7 @@ describe('issueAccessKey bound to a principal', () => {
     accessKeyId: 'did:key:z6Mk',
     name: 'laptop',
     type: 'principal',
-    principalId: 'alice',
+    principalId: ALICE,
     secretAccessKey: 'sk-secret',
     createdAt: '2026-09-16T12:00:00Z',
     expiresAt: null,
@@ -583,23 +585,23 @@ describe('issueAccessKey bound to a principal', () => {
   it('sends only name, principalId and expiresAt for a principal-bound key', async () => {
     mockCreateAccessKey.mockResolvedValue(ok(principalKeyCreated, 201));
 
-    await orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' });
+    await orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE });
 
     const { body } = mockCreateAccessKey.mock.calls[0]![0] as { body: Record<string, unknown> };
-    expect(body).toStrictEqual({ name: 'laptop', principalId: 'alice', expiresAt: null });
+    expect(body).toStrictEqual({ name: 'laptop', principalId: ALICE, expiresAt: null });
   });
 
   it('returns the issued key with its principalId', async () => {
     mockCreateAccessKey.mockResolvedValue(ok(principalKeyCreated, 201));
 
     await expect(
-      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
     ).resolves.toStrictEqual({
       id: 'did:key:z6Mk',
       accessKeyId: 'did:key:z6Mk',
       accessKeySecret: 'sk-secret',
       createdAt: '2026-09-16T12:00:00Z',
-      principalId: 'alice',
+      principalId: ALICE,
     });
   });
 
@@ -619,7 +621,7 @@ describe('issueAccessKey bound to a principal', () => {
   it('throws AccessKeyAlreadyExistsError when the API answers 409', async () => {
     mockCreateAccessKey.mockResolvedValueOnce(fail(409, 'name conflict'));
     await expect(
-      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
     ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
   });
 });
@@ -632,7 +634,7 @@ describe('issueAccessKey 422 classification', () => {
   it('throws PrincipalNotFoundError on a 422 with code UnknownPrincipal, whatever the message', async () => {
     mockCreateAccessKey.mockResolvedValueOnce(failWith422('no such member', 'UnknownPrincipal'));
     await expect(
-      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
     ).rejects.toBeInstanceOf(PrincipalNotFoundError);
   });
 
@@ -644,7 +646,7 @@ describe('issueAccessKey 422 classification', () => {
       ),
     );
     await expect(
-      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: 'alice' }),
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
     ).rejects.toBeInstanceOf(AccessKeyValidationError);
   });
 });
@@ -664,7 +666,7 @@ describe('issueAccessKey with a mixed shape', () => {
             accessKeyId: 'k',
             name: 'laptop',
             type: 'principal',
-            principal: 'alice',
+            principal: ALICE,
             secretAccessKey: 's',
             createdAt: 'now',
           },
@@ -673,7 +675,7 @@ describe('issueAccessKey with a mixed shape', () => {
       );
       const principalKeyWithServiceFields = {
         keyName: 'laptop',
-        principalId: 'alice',
+        principalId: ALICE,
         [field]: value,
       };
       await expect(
@@ -685,7 +687,7 @@ describe('issueAccessKey with a mixed shape', () => {
 
   it('IssueAccessKeyOpts rejects permissions on a principal-bound key at compile time', () => {
     // @ts-expect-error a principal-bound key carries no permissions of its own
-    const opts: IssueAccessKeyOpts = { keyName: 'k', principalId: 'alice', permissions: ['read'] };
+    const opts: IssueAccessKeyOpts = { keyName: 'k', principalId: ALICE, permissions: ['read'] };
     expect(opts).toBeDefined();
   });
 });
