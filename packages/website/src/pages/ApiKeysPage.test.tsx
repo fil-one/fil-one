@@ -22,6 +22,9 @@ import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -37,7 +40,7 @@ function key(over: Partial<ServiceAccessKey> = {}): ServiceAccessKey {
     permissions: ['read', 'list'],
     bucketScope: 'all',
     region: S3Region.UsEast1,
-    createdBy: 'user-1',
+    createdBy: USER_1,
     ...over,
   };
 }
@@ -128,7 +131,7 @@ describe('ApiKeysPage — who may revoke', () => {
 
   it('gives a Member the action on their own key and not a colleague’s', async () => {
     mockApiRequest.mockResolvedValue({
-      keys: [key(), key({ id: 'key-2', keyName: 'theirs', createdBy: 'user-2' })],
+      keys: [key(), key({ id: 'key-2', keyName: 'theirs', createdBy: USER_2 })],
     });
 
     renderPage(OrgRole.Member);

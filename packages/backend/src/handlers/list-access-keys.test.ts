@@ -21,11 +21,14 @@ process.env.FILONE_STAGE = 'test';
 import { baseHandler } from './list-access-keys.ts';
 import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
 function ddbItem(overrides: {
   id: string;
@@ -532,7 +535,7 @@ describe('who sees which keys', () => {
     keyName: 'Theirs',
     accessKeyId: 'AKIAOTHER',
     createdAt: '2026-01-02T00:00:00Z',
-    createdBy: 'user-2',
+    createdBy: USER_2,
   });
   // Minted before attribution shipped: it names no creator, so nobody can claim
   // it as their own.
@@ -587,7 +590,7 @@ describe('who sees which keys', () => {
           accessKeyId: 'AKIAROTATED',
           createdAt: '2026-09-11T10:00:00.000Z',
           createdBy: USER_INFO.userId,
-          rotatedBy: 'user-2',
+          rotatedBy: USER_2,
           rotatedAt: '2026-09-11T10:00:00.000Z',
         }),
       ],
@@ -598,7 +601,7 @@ describe('who sees which keys', () => {
 
     expect(key).toMatchObject({
       createdBy: USER_INFO.userId,
-      rotatedBy: 'user-2',
+      rotatedBy: USER_2,
       rotatedAt: '2026-09-11T10:00:00.000Z',
     });
   });
@@ -609,7 +612,7 @@ describe('who sees which keys', () => {
 
     expect(keys.map((key) => key.createdBy)).toStrictEqual([
       USER_INFO.userId,
-      'user-2',
+      USER_2,
       // An unattributed row carries no creator rather than a made-up one.
       undefined,
       USER_INFO.userId,
