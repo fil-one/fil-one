@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { S3Region, Stage, getRegionAccessModel } from '@filone/shared';
+import { S3Region, Stage } from '@filone/shared';
 
 // The registry builds every non-Aurora orchestrator lazily, on the first lookup
 // for its region. The FTH client reads its baseUrl from the environment and its
@@ -23,7 +23,6 @@ import {
   getAvailableOrchestrators,
 } from './service-orchestrator-registry.ts';
 import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
-import { supportsBucketPolicies } from './service-orchestrator.ts';
 
 afterEach(() => {
   delete process.env.FILONE_STAGE;
@@ -79,36 +78,5 @@ describe('getAvailableOrchestrators', () => {
     // Order follows `getAvailableRegions`, which groups by continent
     // (eu-west-1, eu-central-3, us-east-1, us-east-9) rather than by service.
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'forge', 'fth', 'forgeDev']);
-  });
-});
-
-describe('bucket policies by region', () => {
-  it('are served by the Forge orchestrators and not by Aurora or FTH', () => {
-    process.env.FILONE_STAGE = Stage.Staging;
-
-    const served = getAvailableOrchestrators().map((orchestrator) => [
-      orchestrator.region,
-      supportsBucketPolicies(orchestrator),
-    ]);
-
-    expect(served).toStrictEqual([
-      [S3Region.EuWest1, false],
-      [S3Region.EuCentral3, true],
-      [S3Region.UsEast1, false],
-      [S3Region.UsEast9, true],
-    ]);
-  });
-
-  // `supportsBucketPolicies` asks the orchestrator object; `getRegionAccessModel`
-  // answers from the region table. A caller holding only a region relies on
-  // the two agreeing.
-  it('agrees with getRegionAccessModel for every region', () => {
-    process.env.FILONE_STAGE = Stage.Staging;
-
-    for (const orchestrator of getAvailableOrchestrators()) {
-      expect(supportsBucketPolicies(orchestrator)).toBe(
-        getRegionAccessModel(orchestrator.region) === 'iam',
-      );
-    }
   });
 });

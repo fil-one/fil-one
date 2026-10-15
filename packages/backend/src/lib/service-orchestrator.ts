@@ -105,15 +105,9 @@ export interface ServiceOrchestrator
     BucketPolicyOrchestrator,
     MemberOrchestrator {}
 
-/** Any region's orchestrator; {@link supportsBucketPolicies} tells the two apart. */
-export type RegionOrchestrator = LegacyServiceOrchestrator | ServiceOrchestrator;
-
 /**
- * Whether the orchestrator serves bucket policies and members (fil-one/RFC#30).
- * A caller holding only a region asks `getRegionAccessModel` instead.
+ * Any region's orchestrator. `supportsIamMethods(orchestrator.region)` says which
+ * of the two it is: the region table decides, and the registry builds the
+ * orchestrator to match.
  */
-export function supportsBucketPolicies(
-  orchestrator: RegionOrchestrator,
-): orchestrator is ServiceOrchestrator {
-  return 'putBucketPolicy' in orchestrator;
-}
+export type RegionOrchestrator = LegacyServiceOrchestrator | ServiceOrchestrator;
