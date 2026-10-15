@@ -88,10 +88,21 @@ describe('PolicyPrincipalFields', () => {
     expect(screen.getByRole('checkbox', { name: 'Unknown member' })).toBeChecked();
   });
 
-  it('shows the error when members fail to load', async () => {
+  it('says what to do when members fail to load, and shows no rows', async () => {
     mockListMembers.mockRejectedValue(new Error('members unavailable'));
+    renderFields([adaId]);
+
+    await waitFor(() =>
+      expect(screen.getByText('The member list could not be loaded.')).toBeInTheDocument(),
+    );
+    expect(screen.queryByText('Unknown member')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+
+  it('shows the empty state when the organization has no members', async () => {
+    mockListMembers.mockResolvedValue({ members: [] });
     renderFields([]);
 
-    await waitFor(() => expect(screen.getByText('members unavailable')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('No members yet')).toBeInTheDocument());
   });
 });

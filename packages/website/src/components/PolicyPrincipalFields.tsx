@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { SpinnerIcon } from '@phosphor-icons/react/dist/ssr';
+import { SpinnerIcon, UsersThreeIcon } from '@phosphor-icons/react/dist/ssr';
 import type { PolicyStatement } from '@filone/shared';
 import { POLICY_WILDCARD_PRINCIPAL } from '@filone/shared';
 
@@ -7,6 +7,8 @@ import { listMembers } from '../lib/members-api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { memberName, roleLabel } from '../lib/use-member-scope.js';
 import { Checkbox } from './Checkbox.js';
+import { EmptyStateCard } from './EmptyStateCard.js';
+import { StateCard } from './StateCard.js';
 import { Icon } from './Icon.js';
 import { RadioOption } from './RadioOption.js';
 
@@ -25,7 +27,7 @@ export type PolicyPrincipalFieldsProps = {
 export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFieldsProps) {
   const isEveryoneSelected = value === POLICY_WILDCARD_PRINCIPAL;
   const selectedIds = isEveryoneSelected ? [] : value;
-  const { data, isPending, isError, error } = useQuery({
+  const { data, isPending, isError } = useQuery({
     queryKey: queryKeys.members,
     queryFn: listMembers,
     enabled: !isEveryoneSelected,
@@ -74,16 +76,24 @@ export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFields
             </div>
           )}
           {isError && (
-            <p className="text-sm text-red-600">{error?.message ?? 'Failed to load members'}</p>
+            <StateCard border="dashed">
+              <p className="text-sm text-zinc-700">The member list could not be loaded.</p>
+              <p className="text-meta text-zinc-500">Reload the page and try again.</p>
+            </StateCard>
           )}
           {!isLoadingMembers &&
             !isError &&
             members.length === 0 &&
             unknownMemberIds.length === 0 && (
-              <p className="text-sm text-zinc-500">No members found.</p>
+              <EmptyStateCard
+                icon={UsersThreeIcon}
+                title="No members yet"
+                description="Invite people to the organization to name them in a statement."
+                bordered={false}
+              />
             )}
-          {!isLoadingMembers && (members.length > 0 || unknownMemberIds.length > 0) && (
-            <div className="flex flex-col gap-1.5">
+          {!isLoadingMembers && !isError && (members.length > 0 || unknownMemberIds.length > 0) && (
+            <div className="flex max-h-72 flex-col gap-1.5 overflow-y-auto">
               {members.map((member) => (
                 <MemberRow
                   key={member.userId}
