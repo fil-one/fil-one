@@ -6,6 +6,7 @@ import {
   PresignRequestSchema,
   SubscriptionStatus,
   isSupportedRegion,
+  supportsIamMethods,
 } from '@filone/shared';
 import type {
   ErrorResponse,
@@ -16,7 +17,7 @@ import type {
   PresignResponseItem,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import { supportsBucketPolicies, type RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import type { RegionOrchestrator, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import type { S3ClientContext } from '../lib/s3-client.ts';
 import {
@@ -131,8 +132,8 @@ async function checkMemberBucketAccess(
   userId: string | undefined,
   ops: PresignOp[],
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  if (!userId || !supportsBucketPolicies(orchestrator)) return undefined;
-  const access = await orchestrator.resolveMemberAccess(tenantId, userId);
+  if (!userId || !supportsIamMethods(orchestrator.region)) return undefined;
+  const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(tenantId, userId);
   const grantedBucketActions = new Map<string, Set<PolicyAction>>(
     access.map((entry) => [entry.bucketName, new Set(entry.actions)]),
   );

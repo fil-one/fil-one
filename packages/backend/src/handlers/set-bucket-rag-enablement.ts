@@ -2,9 +2,14 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
-import { S3_REGION, SetBucketRagEnabledSchema, isSupportedRegion } from '@filone/shared';
+import {
+  S3_REGION,
+  SetBucketRagEnabledSchema,
+  isSupportedRegion,
+  supportsIamMethods,
+} from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import { supportsBucketPolicies, type RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import type { RegionOrchestrator, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
@@ -66,8 +71,11 @@ async function checkIndexingAccess(
   bucketName: string,
   memberId: string | undefined,
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  if (!memberId || !supportsBucketPolicies(orchestrator)) return undefined;
-  const access = await orchestrator.resolveMemberAccess(tenantId, memberId);
+  if (!memberId || !supportsIamMethods(orchestrator.region)) return undefined;
+  const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(
+    tenantId,
+    memberId,
+  );
   const actions = access.find((entry) => entry.bucketName === bucketName)?.actions ?? [];
   if (actions.includes('s3:ListBucket') && actions.includes('s3:GetObject')) return undefined;
   return new ResponseBuilder()
