@@ -69,6 +69,16 @@ export const UnknownMember: Story = {
   },
 };
 
+export const UnknownMembers: Story = {
+  args: {
+    statement: {
+      Effect: 'Allow',
+      Principal: ['m1', 'removed-id', 'another-unknown-id'],
+      Action: ['s3:GetObject'],
+    },
+  },
+};
+
 export const ProtectGroup: Story = {
   args: {
     statement: {

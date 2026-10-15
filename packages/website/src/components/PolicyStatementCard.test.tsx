@@ -95,6 +95,14 @@ describe('PolicyStatementCard', () => {
     expect(screen.getByText('Unknown member')).toBeInTheDocument();
   });
 
+  it('sets each unknown member apart with a dashed badge', () => {
+    renderCard({ ...allowTeam, Principal: ['a', 'gone', 'also-gone'] });
+
+    expect(screen.getAllByText('Unknown member')).toHaveLength(2);
+    expect(screen.getAllByTestId('policy-unknown-member')).toHaveLength(2);
+    expect(screen.getByText('Ada')).not.toHaveClass('border-dashed');
+  });
+
   it('shows a single "All actions" badge for s3:*', () => {
     renderCard({ ...allowTeam, Action: ['s3:*'] });
 

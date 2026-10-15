@@ -98,6 +98,31 @@ function StatementField({ label, children }: { label: string; children: React.Re
   );
 }
 
+/**
+ * A member the org no longer lists: removed while a policy still named them,
+ * or an id from another org. The dashed outline sets them apart from members,
+ * and the tooltip carries the id so an admin can tell which statement to clean.
+ */
+function UnknownMemberBadge({ userId }: { userId: string }) {
+  return (
+    <Badge
+      color="grey"
+      size="sm"
+      className="border border-dashed border-zinc-400"
+      data-testid="policy-unknown-member"
+      description={
+        <span className="text-xs text-zinc-700">
+          No longer a member of this organization
+          <br />
+          <span className="font-mono">{userId}</span>
+        </span>
+      }
+    >
+      Unknown member
+    </Badge>
+  );
+}
+
 function PrincipalBadges({
   principal,
   getMemberName,
@@ -112,32 +137,36 @@ function PrincipalBadges({
       </Badge>
     );
   }
-  const memberNames = principal.map((userId) => getMemberName(userId) ?? 'Unknown member');
-  const visibleNames = memberNames.slice(0, MAX_MEMBER_BADGES);
-  const foldedNames = memberNames.slice(MAX_MEMBER_BADGES);
+  const members = principal.map((userId) => ({ userId, name: getMemberName(userId) }));
+  const visible = members.slice(0, MAX_MEMBER_BADGES);
+  const folded = members.slice(MAX_MEMBER_BADGES);
   return (
     <>
-      {visibleNames.map((name, i) => (
-        <Badge key={principal[i]} color="grey" size="sm">
-          {name}
-        </Badge>
-      ))}
-      {foldedNames.length > 0 && (
+      {visible.map(({ userId, name }) =>
+        name === undefined ? (
+          <UnknownMemberBadge key={userId} userId={userId} />
+        ) : (
+          <Badge key={userId} color="grey" size="sm">
+            {name}
+          </Badge>
+        ),
+      )}
+      {folded.length > 0 && (
         <Badge
           color="grey"
           size="sm"
           data-testid="policy-more-members"
           description={
             <ul className="flex flex-col gap-0.5">
-              {foldedNames.map((name, i) => (
-                <li key={principal[MAX_MEMBER_BADGES + i]} className="text-xs text-zinc-700">
-                  {name}
+              {folded.map(({ userId, name }) => (
+                <li key={userId} className="text-xs text-zinc-700">
+                  {name ?? `Unknown member (${userId})`}
                 </li>
               ))}
             </ul>
           }
         >
-          +{foldedNames.length} more
+          +{folded.length} more
         </Badge>
       )}
     </>
