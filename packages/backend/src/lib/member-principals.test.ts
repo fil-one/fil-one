@@ -19,7 +19,7 @@ vi.mock('./service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => regions,
 }));
 
-import { registerNewMember, removeMemberPrincipal } from './member-principals.ts';
+import { registerMemberPrincipal, removeMemberPrincipal } from './member-principals.ts';
 
 const ANY_USER = '00000000-0000-0000-0000-000000000011';
 
@@ -70,13 +70,13 @@ describe('removeMemberPrincipal', () => {
   });
 });
 
-describe('registerNewMember', () => {
+describe('registerMemberPrincipal', () => {
   it('creates the principal in each ready iam region, from a consistent read of the org profile', async () => {
     ddbMock
       .on(GetItemCommand, { TableName: 'UserInfoTable', Key: profileKey, ConsistentRead: true })
       .resolves({ Item: orgProfile });
 
-    await registerNewMember({ orgId: ORG_ID, userId: ANY_USER });
+    await registerMemberPrincipal({ orgId: ORG_ID, userId: ANY_USER });
 
     expect(iam.calls).toStrictEqual([{ method: 'syncMember', tenantId: TENANT, target: ANY_USER }]);
     expect(iam.principals.get(TENANT)!.has(ANY_USER)).toBe(true);
@@ -86,7 +86,9 @@ describe('registerNewMember', () => {
     ddbMock.on(GetItemCommand).resolves({ Item: orgProfile });
     iam.failNext('syncMember', new Error('vendor down'));
 
-    await expect(registerNewMember({ orgId: ORG_ID, userId: ANY_USER })).rejects.toMatchObject({
+    await expect(
+      registerMemberPrincipal({ orgId: ORG_ID, userId: ANY_USER }),
+    ).rejects.toMatchObject({
       name: 'IamRegionRefusedError',
       action: 'register',
       regions: [S3Region.UsEast9],
@@ -96,7 +98,7 @@ describe('registerNewMember', () => {
   it('reads nothing when no region serves the iam access model', async () => {
     regions.splice(0, regions.length, scopedRegion);
 
-    await registerNewMember({ orgId: ORG_ID, userId: ANY_USER });
+    await registerMemberPrincipal({ orgId: ORG_ID, userId: ANY_USER });
 
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(0);
   });

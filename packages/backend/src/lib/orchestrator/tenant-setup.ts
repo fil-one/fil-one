@@ -159,8 +159,8 @@ async function processTenantSetup(
 
   // Every current member becomes a principal, so a policy can name them and a
   // key can bind to them. A member who joins once the pointer below is visible
-  // registers themselves (`registerNewMember`); one who joins in between is not
-  // a principal until their first key mint.
+  // registers themselves (`registerMemberPrincipal`); one who joins in between is
+  // not a principal until their first key mint or the first policy naming them.
   for (const { userId } of await listMembers(orgId)) {
     await syncPrincipal(client, id, orgId, userId);
   }

@@ -154,8 +154,9 @@ export class PrincipalNotFoundError extends Error {
 }
 
 // A region serving the `iam` access model would not register or remove a
-// member's principal. The membership write that needed it is refused, and the
-// same request tries again; the error middleware answers it with a 502.
+// member's principal. The membership write that needed it is refused and the
+// error middleware answers with a 502 Bad Gateway; the user sends the same
+// request again.
 export class IamRegionRefusedError extends Error {
   readonly action: 'register' | 'remove';
   readonly regions: S3Region[];

@@ -18,7 +18,7 @@ import {
   membershipRows,
   ownerCountItem,
 } from '../lib/membership-changes.ts';
-import { registerNewMember } from '../lib/member-principals.ts';
+import { registerMemberPrincipal } from '../lib/member-principals.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
 import {
   OrgDeletingError,
@@ -96,11 +96,6 @@ export async function baseHandler(
   const items = existing ? [] : joinItems(invitation, userId);
   const labels = existing ? [] : joinLabels(invitation);
 
-  // A new member becomes a principal on each region serving the `iam` access
-  // model before the membership is written, so a region that refuses leaves
-  // them out of the org and the same request tries again.
-  if (!existing) await registerNewMember({ orgId: invitation.orgId, userId });
-
   try {
     await commitAudited({
       // The fence is item 0, where `isGuardRejection` reads it, and it rides
@@ -127,6 +122,12 @@ export async function baseHandler(
       { invitation, userId, verifiedEmail, accepterOrgId },
     );
   }
+
+  // The member is in the org before they become a principal on each region
+  // serving the `iam` access model, so a refusal leaves no unaudited principal
+  // behind: the join stands, the answer is a 502, and the first key mint or
+  // policy write naming them registers the principal if the retry never comes.
+  if (!existing) await registerMemberPrincipal({ orgId: invitation.orgId, userId });
 
   await rememberVerifiedEmail(userId, verifiedEmail);
 

@@ -39,9 +39,9 @@ process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 // The principal registration on `iam` regions, stubbed so the suite can assert
 // its place in the order and what its refusal does; its own suite covers the call.
-const mockRegisterNewMember = vi.fn(async (_args: unknown) => {});
+const mockRegisterMemberPrincipal = vi.fn(async (_args: unknown) => {});
 vi.mock('../lib/member-principals.ts', () => ({
-  registerNewMember: (args: unknown) => mockRegisterNewMember(args),
+  registerMemberPrincipal: (args: unknown) => mockRegisterMemberPrincipal(args),
 }));
 
 import { handler } from './accept-invitation.ts';
@@ -804,10 +804,10 @@ describe('POST /api/invitations/accept handler', () => {
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
-  it('registers the new member on the iam regions before the join transaction', async () => {
+  it('registers the new member on the iam regions after the join transaction', async () => {
     stubInvitation();
     const order: string[] = [];
-    mockRegisterNewMember.mockImplementation(async () => {
+    mockRegisterMemberPrincipal.mockImplementation(async () => {
       order.push('register');
     });
     ddbMock.on(TransactWriteItemsCommand).callsFake(() => {
@@ -818,16 +818,29 @@ describe('POST /api/invitations/accept handler', () => {
     const result = await handler(acceptEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200 });
-    expect(order).toStrictEqual(['register', 'transaction']);
-    expect(mockRegisterNewMember.mock.calls).toStrictEqual([
+    expect(order).toStrictEqual(['transaction', 'register']);
+    expect(mockRegisterMemberPrincipal.mock.calls).toStrictEqual([
       [{ orgId: INVITING_ORG_ID, userId: USER_ID }],
     ]);
   });
 
-  it('refuses the invitation and writes nothing when an iam region refuses the member', async () => {
+  it('registers no principal when the join transaction fails', async () => {
+    stubInvitation();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('dynamo down'));
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 500 });
+
+    expect(mockRegisterMemberPrincipal).not.toHaveBeenCalled();
+  });
+
+  it('answers 502 with the member already in the org when an iam region refuses them', async () => {
     stubInvitation();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    mockRegisterNewMember.mockRejectedValue(
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    mockRegisterMemberPrincipal.mockRejectedValue(
       new IamRegionRefusedError('register', [S3Region.UsEast9]),
     );
 
@@ -837,7 +850,9 @@ describe('POST /api/invitations/accept handler', () => {
     expect(body(result)).toStrictEqual({
       message: `The invitation could not be accepted on ${S3Region.UsEast9}. Try again.`,
     });
-    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    // The join landed: the same request from the member is a no-op, and their
+    // first key mint registers the principal.
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
   });
 
   it('registers nothing for somebody who is already a member', async () => {
@@ -846,6 +861,6 @@ describe('POST /api/invitations/accept handler', () => {
 
     await handler(acceptEvent(), buildContext());
 
-    expect(mockRegisterNewMember).not.toHaveBeenCalled();
+    expect(mockRegisterMemberPrincipal).not.toHaveBeenCalled();
   });
 });
