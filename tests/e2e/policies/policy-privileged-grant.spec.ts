@@ -205,18 +205,21 @@ test.describe('in the editor', () => {
       await expect(actionRow(page, 's3:GetObjectRetention')).toBeVisible();
     });
 
-    test('PU2. the admin cannot save an s3:* statement back', async ({ page }) => {
+    test("PU2. the admin's edit keeps the owner's s3:* statement", async ({ page }) => {
       expect(
         await putPolicyAs(owner, [grantAllToOwner(ownerId)], (await owner.readPolicy(bucket)).etag),
       ).toEqual({ status: 204, code: undefined });
-      const { etag } = await owner.readPolicy(bucket);
+      const before = toCanonicalPolicy((await owner.readPolicy(bucket)).policy);
       await openPolicyTab(page);
       await chooseStatementMenuAction(page, 'owner-all', 'edit');
-      // `s3:*` is pruned from what the admin may offer, leaving no action.
-      await expect(modal(page).locator('#policy-statement-submit-button')).toBeDisabled();
-      await modal(page).locator('#policy-statement-cancel-button').click();
+      // The editor keeps the `s3:*` the statement already carries, so the admin
+      // may save it back unchanged; the save refuses only a grant that is new.
+      await expect(actionRow(page, 'all').locator('[role="checkbox"]')).toBeChecked();
+      await expect(actionRow(page, 's3:PutObjectRetention')).toHaveCount(0);
+      await modal(page).locator('#policy-statement-submit-button').click();
+      await page.locator('#policy-save-button').click();
       await expect(page.getByTestId('policy-save-bar')).toBeHidden();
-      expect((await owner.readPolicy(bucket)).etag).toBe(etag);
+      expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(before);
     });
   });
 
