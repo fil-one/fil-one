@@ -128,7 +128,7 @@ describe('PolicyStatementCard', () => {
     expect(screen.queryByTestId(/^policy-actions-/)).not.toBeInTheDocument();
   });
 
-  it('shows no actions menu without onEdit and onRemove', () => {
+  it('shows no actions menu without actions', () => {
     renderCard(allowTeam);
 
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
@@ -136,7 +136,7 @@ describe('PolicyStatementCard', () => {
 
   it('calls onEdit when Edit statement is chosen from the actions menu', () => {
     const onEdit = vi.fn();
-    renderCard(allowTeam, { onEdit });
+    renderCard(allowTeam, { actions: { onEdit, onRemove: () => {} } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Edit statement' }));
@@ -146,21 +146,11 @@ describe('PolicyStatementCard', () => {
 
   it('calls onRemove when Remove statement is chosen from the actions menu', () => {
     const onRemove = vi.fn();
-    renderCard(allowTeam, { onRemove });
+    renderCard(allowTeam, { actions: { onEdit: () => {}, onRemove } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
 
     expect(onRemove).toHaveBeenCalledTimes(1);
-  });
-
-  it('offers only Edit statement when only onEdit is given', () => {
-    renderCard(allowTeam, { onEdit: () => {} });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
-
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toStrictEqual([
-      'Edit statement',
-    ]);
   });
 });

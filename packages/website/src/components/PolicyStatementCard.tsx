@@ -40,8 +40,8 @@ export type PolicyStatementCardProps = {
   index: number;
   /** A member's display name; `undefined` shows as "Unknown member". */
   getMemberName: (userId: string) => string | undefined;
-  onEdit?: () => void;
-  onRemove?: () => void;
+  /** The Edit and Remove items of the card's menu; absent on a read-only card. */
+  actions?: { onEdit: () => void; onRemove: () => void };
 };
 
 /**
@@ -53,8 +53,7 @@ export function PolicyStatementCard({
   statement,
   index,
   getMemberName,
-  onEdit,
-  onRemove,
+  actions,
 }: PolicyStatementCardProps) {
   const title = getStatementTitle(statement, index);
   return (
@@ -65,24 +64,18 @@ export function PolicyStatementCard({
             {statement.Effect}
           </Badge>
           <span className="text-ui font-medium text-zinc-900">{title}</span>
-          {(onEdit || onRemove) && (
+          {actions && (
             <div className="ml-auto">
               <RowActionsMenu
                 aria-label={`Actions for ${title}`}
                 actions={[
-                  ...(onEdit
-                    ? [{ label: 'Edit statement', icon: PencilSimpleIcon, onSelect: onEdit }]
-                    : []),
-                  ...(onRemove
-                    ? [
-                        {
-                          label: 'Remove statement',
-                          icon: TrashIcon,
-                          destructive: true,
-                          onSelect: onRemove,
-                        },
-                      ]
-                    : []),
+                  { label: 'Edit statement', icon: PencilSimpleIcon, onSelect: actions.onEdit },
+                  {
+                    label: 'Remove statement',
+                    icon: TrashIcon,
+                    destructive: true,
+                    onSelect: actions.onRemove,
+                  },
                 ]}
               />
             </div>

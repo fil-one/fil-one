@@ -16,8 +16,7 @@ const meta: Meta<typeof PolicyStatementCard> = {
   args: {
     index: 0,
     getMemberName: (id: string) => memberNamesById[id],
-    onEdit: () => {},
-    onRemove: () => {},
+    actions: { onEdit: () => {}, onRemove: () => {} },
   },
 };
 
@@ -98,7 +97,6 @@ export const ReadOnly: Story = {
   name: 'Without edit and remove',
   args: {
     statement: { Effect: 'Allow', Principal: ['m1'], Action: ['s3:GetObject'] },
-    onEdit: undefined,
-    onRemove: undefined,
+    actions: undefined,
   },
 };
