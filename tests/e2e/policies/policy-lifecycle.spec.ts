@@ -71,6 +71,16 @@ test.afterAll(async () => {
       label: 'leaver seat',
       run: () => seedMembership({ orgId, userId: leaverId, role: 'member', invitedBy: ownerId }),
     },
+    // The seat is a row in the console's table; the storage system learns the
+    // principal again on the Leaver's first key mint, so the next run can name
+    // them in a policy before minting anything.
+    {
+      label: 'leaver principal',
+      run: async () => {
+        const key = await leaver.createAccessKey();
+        await leaver.deleteKey(key.id);
+      },
+    },
     ...createdKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
   ]);
   await Promise.all([owner.dispose(), member.dispose(), leaver.dispose()]);
