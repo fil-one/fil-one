@@ -1334,7 +1334,7 @@ describe('create-access-key baseHandler', () => {
         keyKind: 's3',
         keyName: 'laptop',
         region: S3Region.UsEast9,
-        boundToPrincipal: true,
+        isPrincipalKey: true,
       });
     });
 

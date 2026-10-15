@@ -218,7 +218,7 @@ async function issueReplacement({
       keyName: stored.keyName,
       region: stored.region,
       replacedKeyIdSuffix: auditKeyIdSuffix('s3', stored.accessKeyId ?? keyId),
-      ...(stored.principalId ? { boundToPrincipal: true } : {}),
+      ...(stored.principalId ? { isPrincipalKey: true } : {}),
     },
   });
 

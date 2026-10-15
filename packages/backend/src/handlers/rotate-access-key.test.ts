@@ -593,7 +593,7 @@ describe('rotate-access-key baseHandler', () => {
         keyName: 'My Key',
         region: 'eu-west-1',
         replacedKeyIdSuffix: expect.any(String),
-        boundToPrincipal: true,
+        isPrincipalKey: true,
       });
     });
 

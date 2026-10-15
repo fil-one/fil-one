@@ -32,6 +32,7 @@ import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
 import type {
+  IssueAccessKeyOpts,
   IssuedAccessKey,
   RegionOrchestrator,
   ServiceOrchestrator,
@@ -68,11 +69,11 @@ export async function baseHandler(
 
   const { keyName, region } = parsed.data;
   const { orgId, userId } = getUserInfo(event);
-  const plan = buildKeyMintPlan(parsed.data, userId);
+  const keyOpts = buildIssueAccessKeyOpts(parsed.data, userId);
   // The key row's write asserts the role on file can still hold this key
   // (`creatorRoleStillMintsCheck`), and the read after that write asks again
   // (`keyExceedsCurrentRole`).
-  const creator: KeyMinter = { orgId, userId, key: plan };
+  const creator: KeyMinter = { orgId, userId, key: getKeyRoleRequirement(parsed.data) };
   const creatorEmail = getVerifiedEmail(event);
   const attribution = keyAttribution({ userId, creatorEmail });
   const actor = userActor({ userId, email: creatorEmail });
@@ -87,7 +88,7 @@ export async function baseHandler(
 
   const orchestrator = getOrchestratorForRegion(region);
   const denied =
-    plan.type === 'service' && checkServiceKeyAuthority(event, plan.request, orchestrator);
+    'permissions' in parsed.data && checkServiceKeyAuthority(event, parsed.data, orchestrator);
   if (denied) return denied;
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
@@ -103,7 +104,7 @@ export async function baseHandler(
   // the intent, because it mints nothing: a failure here leaves no credential
   // anywhere, and an intent left dangling by it would read to an operator as a
   // possible orphan key.
-  if (plan.type === 'principal' && supportsIamMethods(region)) {
+  if ('principalId' in keyOpts && supportsIamMethods(region)) {
     await (orchestrator as ServiceOrchestrator).syncMember(tenantId, userId);
   }
 
@@ -119,12 +120,12 @@ export async function baseHandler(
     actor,
     orgId,
     subject: AuditSubjects.org(orgId),
-    details: { keyKind: 's3', keyName, region, ...plan.auditDetails },
+    details: { keyKind: 's3', keyName, region, ...getKeyAuditDetails(keyOpts) },
   });
 
   let accessKey: IssuedAccessKey;
   try {
-    accessKey = await orchestrator.issueAccessKey(tenantId, plan.opts);
+    accessKey = await orchestrator.issueAccessKey(tenantId, keyOpts);
   } catch (err) {
     return await handleMintRefusal(err, {
       orgId,
@@ -135,7 +136,7 @@ export async function baseHandler(
       attribution,
       mint,
       creator,
-      principalId: plan.principalId,
+      principalId: 'principalId' in keyOpts ? keyOpts.principalId : undefined,
     });
   }
 
@@ -157,7 +158,7 @@ export async function baseHandler(
       createdAt: accessKey.createdAt,
       status: 'active',
       region,
-      ...plan.buildRowFields(accessKey),
+      ...buildKeyRowFields(parsed.data, accessKey, userId),
       ...attribution,
     },
     mint,
@@ -189,41 +190,51 @@ export async function baseHandler(
 type CreateKeyRequest = CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest;
 
 /**
- * What one request mints, by its shape. A key bound to the caller's principal
- * carries no authority of its own and takes no creator-authority cap: bucket
- * policies decide what it may do. A service key carries its own grant, capped
- * at the creator's role.
+ * The key the orchestrator is asked to mint, by the request's shape. A key bound
+ * to the caller's principal sends its name, the principal and an expiry; a
+ * service key sends its permissions and bucket list.
  */
-function buildKeyMintPlan(data: CreateKeyRequest, userId: string) {
+function buildIssueAccessKeyOpts(data: CreateKeyRequest, userId: string): IssueAccessKeyOpts {
+  const expiresAt = data.expiresAt ?? null;
+  if (!('permissions' in data)) return { keyName: data.keyName, principalId: userId, expiresAt };
+  const { keyName, permissions, granularPermissions, bucketScope } = data;
+  const buckets = bucketScope === 'specific' ? (data.buckets ?? []) : undefined;
+  return { keyName, permissions, granularPermissions, buckets, expiresAt };
+}
+
+/**
+ * What the minter's role must be able to hold, read by the key row's
+ * conditional write and by the check after it. A key bound to a principal
+ * carries no authority of its own, so any role holding `keys.create` may hold
+ * it. A service key carries its own grant, and the role must cover it; the
+ * region rides along because on one serving the `iam` access model only a role
+ * holding `keys.create_service` keeps a service key.
+ */
+function getKeyRoleRequirement(data: CreateKeyRequest): KeyMinter['key'] {
+  if (!('permissions' in data)) return { type: 'principal' };
+  const { permissions, granularPermissions, region } = data;
+  return { type: 'service', grant: { permissions, granularPermissions, region } };
+}
+
+/** What the `key.created` intent records about the key's kind. */
+function getKeyAuditDetails(keyOpts: IssueAccessKeyOpts): { isPrincipalKey?: true } {
+  return 'principalId' in keyOpts ? { isPrincipalKey: true } : {};
+}
+
+/** The row attributes that depend on the key's kind. */
+function buildKeyRowFields(data: CreateKeyRequest, issued: IssuedAccessKey, userId: string) {
   const expiresAt = data.expiresAt ?? null;
   if (!('permissions' in data)) {
     return {
-      type: 'principal' as const,
-      principalId: userId,
-      opts: { keyName: data.keyName, principalId: userId, expiresAt },
-      auditDetails: { boundToPrincipal: true },
-      buildRowFields: (issued: IssuedAccessKey) => ({
-        principalId: issued.type === 'principal' ? issued.principalId : userId,
-        ...optionalKeyAttributes({ expiresAt }),
-      }),
+      principalId: issued.type === 'principal' ? issued.principalId : userId,
+      ...optionalKeyAttributes({ expiresAt }),
     };
   }
-  const { keyName, permissions, granularPermissions, bucketScope, region } = data;
+  const { permissions, granularPermissions, bucketScope } = data;
   const buckets = bucketScope === 'specific' ? (data.buckets ?? []) : undefined;
   return {
-    type: 'service' as const,
-    principalId: undefined,
-    request: data,
-    // With the region: on one serving the `iam` access model only a role
-    // holding `keys.create_service` keeps a service key, and the role fences
-    // after the mint ask the same question the pre-check did.
-    grant: { permissions, granularPermissions, region },
-    opts: { keyName, permissions, granularPermissions, buckets, expiresAt },
-    auditDetails: {},
-    buildRowFields: () => ({
-      permissions,
-      ...optionalKeyAttributes({ granularPermissions, bucketScope, buckets, expiresAt }),
-    }),
+    permissions,
+    ...optionalKeyAttributes({ granularPermissions, bucketScope, buckets, expiresAt }),
   };
 }
 

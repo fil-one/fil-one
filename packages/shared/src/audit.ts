@@ -313,7 +313,7 @@ export interface AuditEventDetails {
      * The key is bound to its creator's principal and carries no authority of
      * its own; bucket policies decide. Absent on a service key.
      */
-    boundToPrincipal?: boolean;
+    isPrincipalKey?: boolean;
     /**
      * The abandoned mint's credential could not be taken back, so it is live at
      * the vendor with no local row — this event is its only trace.
@@ -352,7 +352,7 @@ export interface AuditEventDetails {
     /** The key being replaced, by the same characters. Set on the intent. */
     replacedKeyIdSuffix: string;
     /** As on `key.created`: the key, and so its replacement, is bound to a principal. */
-    boundToPrincipal?: boolean;
+    isPrincipalKey?: boolean;
     /** As on `key.created`: the abandoned replacement could not be taken back. */
     cleanupFailed?: boolean;
   };
