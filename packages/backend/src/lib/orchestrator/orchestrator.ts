@@ -428,13 +428,13 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   async findAccessKeyByName(
     tenantId: string,
     keyName: string,
-    lookup?: { principalId?: string },
+    principalId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ) {
     const { data, error } = await getTenantsByTenantIdAccessKeys({
       client: this.client,
       path: { tenantId },
-      ...(lookup?.principalId ? { query: { principalId: lookup.principalId } } : {}),
+      ...(principalId ? { query: { principalId } } : {}),
       throwOnError: false,
       ...requestOptions,
     });
@@ -443,7 +443,11 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
         cause: error,
       });
     }
-    const match = (data?.items ?? []).find((k) => k.name === keyName);
+    // Names are unique per kind, and the list carries both kinds when no
+    // principal narrows it, so a service-key lookup skips principal-bound keys.
+    const match = (data?.items ?? []).find(
+      (k) => k.name === keyName && (principalId ? true : k.type === 'service'),
+    );
     if (!match) return undefined;
     return {
       id: match.accessKeyId,

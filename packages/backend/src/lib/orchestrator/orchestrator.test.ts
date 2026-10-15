@@ -83,6 +83,8 @@ import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
 import { FilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
 
+// Distinct from the tenant id below, which is the same UUID as the org.
+const USER_1 = '00000000-0000-0000-0000-000000000101';
 const ALICE = '00000000-0000-0000-0000-00000000000a';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
@@ -960,13 +962,44 @@ describe('findAccessKeyByName', () => {
     await expect(orchestrator.findAccessKeyByName(tenantId, 'target')).resolves.toBeUndefined();
   });
 
+  it('passes over a principal-bound key of the same name when no principal is given', async () => {
+    // The Management API scopes names per kind and leaves list order unspecified,
+    // so a service-key lookup must not pick up a principal-bound key of that name.
+    mockListAccessKeys.mockResolvedValue(
+      ok({
+        items: [
+          {
+            accessKeyId: 'AK1',
+            name: 'target',
+            type: 'principal',
+            principalId: USER_1,
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+          {
+            accessKeyId: 'AK2',
+            name: 'target',
+            type: 'service',
+            createdAt: '2026-01-02T00:00:00Z',
+            permissions: [],
+          },
+        ],
+      }),
+    );
+
+    await expect(orchestrator.findAccessKeyByName(tenantId, 'target')).resolves.toEqual({
+      id: 'AK2',
+      accessKeyId: 'AK2',
+      createdAt: '2026-01-02T00:00:00Z',
+    });
+  });
+
   it("looks only among a principal's keys when given one", async () => {
     mockListAccessKeys.mockResolvedValue(ok({ items: [] }));
 
-    await orchestrator.findAccessKeyByName(tenantId, 'target', { principalId: 'user-1' });
+    await orchestrator.findAccessKeyByName(tenantId, 'target', USER_1);
 
     expect(mockListAccessKeys).toHaveBeenCalledWith(
-      expect.objectContaining({ path: { tenantId }, query: { principalId: 'user-1' } }),
+      expect.objectContaining({ path: { tenantId }, query: { principalId: USER_1 } }),
     );
   });
 });

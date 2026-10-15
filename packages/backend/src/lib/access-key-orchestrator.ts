@@ -57,11 +57,12 @@ export interface AccessKeyOrchestrator {
   /**
    * A principal-bound key's name is unique only within its principal, so a
    * lookup for one names the principal; only an `iam` region mints such keys.
+   * Without a principal, only service keys are considered.
    */
   findAccessKeyByName(
     tenantId: string,
     keyName: string,
-    lookup?: { principalId?: string },
+    principalId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;
 
