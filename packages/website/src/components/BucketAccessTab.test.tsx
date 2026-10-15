@@ -13,6 +13,9 @@ import { BucketAccessTab } from './BucketAccessTab.js';
 import { ToastProvider } from './Toast/ToastProvider.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -29,8 +32,8 @@ function key(over: Partial<ServiceAccessKey> = {}): ServiceAccessKey {
     bucketScope: 'specific',
     buckets: ['my-bucket'],
     region: S3Region.UsEast1,
-    // `seedPermissions` writes userId 'user-1'.
-    createdBy: 'user-1',
+    // `seedPermissions` writes userId USER_1.
+    createdBy: USER_1,
     ...over,
   };
 }
@@ -103,13 +106,13 @@ describe('BucketAccessTab — who may revoke', () => {
   });
 
   it('withholds it on a key somebody else minted', () => {
-    renderTab({ accessKeys: [key({ createdBy: 'user-2' })] }, OrgRole.Member);
+    renderTab({ accessKeys: [key({ createdBy: USER_2 })] }, OrgRole.Member);
 
     expect(screen.queryByRole('button', { name: 'Key actions' })).not.toBeInTheDocument();
   });
 
   it('gives an Admin the action on every key', () => {
-    renderTab({ accessKeys: [key(), key({ id: 'key-2', createdBy: 'user-2' })] }, OrgRole.Admin);
+    renderTab({ accessKeys: [key(), key({ id: 'key-2', createdBy: USER_2 })] }, OrgRole.Admin);
 
     expect(screen.getAllByRole('button', { name: 'Key actions' })).toHaveLength(2);
   });

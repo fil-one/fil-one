@@ -37,6 +37,8 @@ import {
   userActor,
 } from './audit.ts';
 
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const KEY_ID = 'key-1';
@@ -53,7 +55,7 @@ const DETAILS: { [T in AuditEventType]: AuditEventDetails[T] } = {
   'invite.accepted': { inviteId: 'inv-1', email: 'invitee@example.com', role: OrgRole.Member },
   'member.role_changed': { role: OrgRole.Admin, previousRole: OrgRole.Member },
   'member.removed': { role: OrgRole.Member },
-  'ownership.transferred': { fromUserId: USER_ID, toUserId: 'user-2' },
+  'ownership.transferred': { fromUserId: USER_ID, toUserId: USER_2 },
   'key.created': { keyKind: 's3', keyName: 'ci', region: 'eu-west-1', keyIdSuffix: 'AMPL' },
   'key.deleted': { keyKind: 's3', keyName: 'ci', region: 'eu-west-1' },
   'key.rotated': {
