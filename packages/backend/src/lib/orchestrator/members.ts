@@ -45,7 +45,13 @@ function toPrincipalError(
         extractApiMessage(cause) ?? 'The storage system refused the principal id.',
         { cause },
       );
+    // The storage system committed nothing, and the same request may be sent
+    // again: a 5xx, or no answer at all (the request never reached it).
     case 500:
+    case 502:
+    case 503:
+    case 504:
+    case undefined:
       return new PolicyPublishError({ cause });
     default:
       return new Error(fallback, { cause });
