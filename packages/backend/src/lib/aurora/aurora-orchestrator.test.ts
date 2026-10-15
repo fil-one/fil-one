@@ -1012,7 +1012,7 @@ describe('auroraOrchestrator signal forwarding', () => {
       name: 'listBuckets',
       run: () => {
         mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
-        return auroraOrchestrator.listBuckets('t', { signal });
+        return auroraOrchestrator.listBuckets('t', undefined, { signal });
       },
       mocks: [mockPortalListBuckets],
     },
@@ -1125,7 +1125,7 @@ describe('auroraOrchestrator signal forwarding', () => {
   const portalClientCases: Record<string, () => Promise<unknown>> = {
     listBuckets: () => {
       mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
-      return auroraOrchestrator.listBuckets('t', { signal });
+      return auroraOrchestrator.listBuckets('t', undefined, { signal });
     },
     getBucket: () => {
       mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);

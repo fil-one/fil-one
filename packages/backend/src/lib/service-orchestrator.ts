@@ -50,16 +50,6 @@ export interface OrchestratorRequestOptions {
   signal?: AbortSignal;
 }
 
-export interface ListBucketsOptions extends OrchestratorRequestOptions {
-  /**
-   * Return only the buckets this member can access. Tenant-wide callers omit
-   * it. Honoured by a region serving the `iam` access model and ignored
-   * elsewhere, so a region that flips models cannot break its callers in
-   * either direction.
-   */
-  scopeToMemberId?: string;
-}
-
 /** Which orchestrator this is, and the region it serves. */
 export interface OrchestratorCore {
   /**

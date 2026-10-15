@@ -643,7 +643,7 @@ describe('listBuckets for a member', () => {
     stubTenantListing();
     mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
 
-    const result = await orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
+    const result = await orchestrator.listBuckets(tenantId, MEMBER_ID);
 
     expect(result.map((b) => b.bucketName)).toStrictEqual(['photos']);
   });
@@ -652,7 +652,7 @@ describe('listBuckets for a member', () => {
     stubTenantListing();
     mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
 
-    await orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID });
+    await orchestrator.listBuckets(tenantId, MEMBER_ID);
 
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
       expect.objectContaining({ path: { tenantId, principalId: MEMBER_ID } }),
@@ -675,9 +675,7 @@ describe('listBuckets for a member', () => {
 
     // The caller's fan-out turns this into an unavailable region. Returning the
     // tenant listing here would hand the member every bucket name it holds.
-    await expect(
-      orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID }),
-    ).rejects.toThrow(
+    await expect(orchestrator.listBuckets(tenantId, MEMBER_ID)).rejects.toThrow(
       new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),
     );
   });
@@ -686,9 +684,7 @@ describe('listBuckets for a member', () => {
     stubTenantListing();
     mockGetPrincipalAccess.mockReturnValue(buildAccessResponse());
 
-    await expect(
-      orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID }),
-    ).resolves.toStrictEqual([]);
+    await expect(orchestrator.listBuckets(tenantId, MEMBER_ID)).resolves.toStrictEqual([]);
   });
 
   it('forwards the signal to the access lookup as well as S3', async () => {
@@ -696,7 +692,7 @@ describe('listBuckets for a member', () => {
     mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
     const signal = new AbortController().signal;
 
-    await orchestrator.listBuckets(tenantId, { scopeToMemberId: MEMBER_ID, signal });
+    await orchestrator.listBuckets(tenantId, MEMBER_ID, { signal });
 
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
     // aws-sdk-client-mock types `args` as `[command]`, but the call carries the send options too.
@@ -1401,7 +1397,7 @@ describe('signal forwarding', () => {
   it('listBuckets forwards the signal to S3 ListBuckets', async () => {
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
 
-    await orchestrator.listBuckets(tenantId, { signal });
+    await orchestrator.listBuckets(tenantId, undefined, { signal });
 
     expect(sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand))).toEqual({
       abortSignal: signal,
