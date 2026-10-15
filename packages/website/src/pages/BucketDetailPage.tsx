@@ -329,7 +329,7 @@ function ObjectsPanel({
 // Component
 // ---------------------------------------------------------------------------
 
-export /**
+/**
  * The action bar beside the bucket heading. Both actions are hidden while the
  * bucket is empty: the empty state carries the sole upload CTA then, so two
  * identical primary actions never compete, and there is nothing to empty. Each
@@ -338,7 +338,7 @@ export /**
  * gets no action bar at all. The cloud glyph leads the label, echoing that
  * empty state's icon.
  */
-function BucketHeaderActions({
+export function BucketHeaderActions({
   bucketName,
   region,
   hasObjects,
@@ -385,7 +385,7 @@ function BucketHeaderActions({
   );
 }
 
-type BucketDetailPageProps = {
+export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
   region: S3Region;
