@@ -1387,7 +1387,7 @@ describe('fthOrchestrator signal forwarding', () => {
       fthOrchestrator.createBucket(fthClientId, { bucketName: 'b' }, { signal }),
     deleteBucket: (signal: AbortSignal) =>
       fthOrchestrator.deleteBucket(fthClientId, 'b', { signal }),
-    listBuckets: (signal: AbortSignal) => fthOrchestrator.listBuckets(fthClientId, { signal }),
+    listBuckets: (signal: AbortSignal) => fthOrchestrator.listBuckets(fthClientId, undefined, { signal }),
     getBucket: (signal: AbortSignal) => fthOrchestrator.getBucket(fthClientId, 'b', { signal }),
   };
 
@@ -1423,7 +1423,7 @@ describe('fthOrchestrator signal forwarding', () => {
   it('listBuckets forwards the signal to S3 ListBuckets', async () => {
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
 
-    await fthOrchestrator.listBuckets(fthClientId, { signal });
+    await fthOrchestrator.listBuckets(fthClientId, undefined, { signal });
 
     expect(sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand))).toEqual({
       abortSignal: signal,

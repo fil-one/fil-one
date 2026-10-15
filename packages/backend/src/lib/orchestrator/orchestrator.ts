@@ -42,7 +42,6 @@ import type {
   GetTenantUsageMetricsOptions,
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  ListBucketsOptions,
   OrchestratorRequestOptions,
   ServiceOrchestrator,
   StorageUsageSample,
@@ -333,15 +332,16 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
    */
   async listBuckets(
     tenantId: string,
-    requestOptions?: ListBucketsOptions,
+    memberId?: string,
+    requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]> {
-    if (!requestOptions?.scopeToMemberId) return this.listTenantBuckets(tenantId, requestOptions);
+    if (!memberId) return this.listTenantBuckets(tenantId, requestOptions);
     // One promise, so a failed access lookup rejects the whole leg and the
     // caller's fan-out reports the region as unavailable. Answering unfiltered
     // would hand the member every bucket name in the tenant.
     const [buckets, access] = await Promise.all([
       this.listTenantBuckets(tenantId, requestOptions),
-      this.resolveMemberAccess(tenantId, requestOptions.scopeToMemberId, requestOptions),
+      this.resolveMemberAccess(tenantId, memberId, requestOptions),
     ]);
     const accessible = new Set(access.map((entry) => entry.bucketName));
     return buckets.filter((bucket) => accessible.has(bucket.bucketName));

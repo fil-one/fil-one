@@ -1,6 +1,6 @@
 import type { BucketPolicy, RetentionDurationType, RetentionMode, S3Region } from '@filone/shared';
 import type { S3ClientContext } from './s3-client.ts';
-import type { OrchestratorRequestOptions, ListBucketsOptions } from './service-orchestrator.ts';
+import type { OrchestratorRequestOptions } from './service-orchestrator.ts';
 
 /**
  * Object-lock and retention state. Neither orchestrator's bucket *list* carries
@@ -67,7 +67,17 @@ export interface BucketOrchestrator {
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
-  listBuckets(tenantId: string, requestOptions?: ListBucketsOptions): Promise<BucketSummary[]>;
+  /**
+   * The tenant's buckets, or with `memberId` only the ones that member can
+   * access. Tenant-wide callers omit it. A region serving the `iam` access
+   * model honours it and every other region ignores it, so a region that
+   * flips models cannot break its callers in either direction.
+   */
+  listBuckets(
+    tenantId: string,
+    memberId?: string,
+    requestOptions?: OrchestratorRequestOptions,
+  ): Promise<BucketSummary[]>;
   getBucket(
     tenantId: string,
     bucketName: string,
