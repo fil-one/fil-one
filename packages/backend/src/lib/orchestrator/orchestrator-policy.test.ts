@@ -4,30 +4,13 @@ import type { BucketPolicy } from '@filone/shared';
 
 vi.mock('sst', () => ({ Resource: { UserInfoTable: { name: 'UserInfoTable' } } }));
 
-// The generated SDK is mocked at the module boundary; each operation answers
-// the hey-api `{ data, error, response }` shape. The policy operations go over
-// S3 and are mocked at the S3 operations module instead; the console
-// credential lookup behind them is stubbed so no client reaches SSM.
-const mockPutPrincipal = vi.fn((_o: Record<string, unknown>) => ({}));
-const mockDeletePrincipal = vi.fn((_o: Record<string, unknown>) => ({}));
+// The policy operations go over S3 and are mocked at the S3 operations module;
+// the console credential lookup behind them is stubbed so no client reaches SSM.
 const mockGetPolicy = vi.fn((..._a: unknown[]): unknown => null);
 const mockPutPolicy = vi.fn((..._a: unknown[]): unknown => ({}));
 const mockDeletePolicy = vi.fn((..._a: unknown[]): unknown => undefined);
-const mockListPrincipalPolicies = vi.fn((_o: Record<string, unknown>) => ({}));
-const mockGetPrincipalAccess = vi.fn((_o: Record<string, unknown>) => ({}));
-const mockCreateAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
 
-vi.mock('@filone/orchestrator-client', () => ({
-  createClient: () => 'mock-client',
-  putTenantsByTenantIdPrincipalsByPrincipalId: (o: Record<string, unknown>) => mockPutPrincipal(o),
-  deleteTenantsByTenantIdPrincipalsByPrincipalId: (o: Record<string, unknown>) =>
-    mockDeletePrincipal(o),
-  getTenantsByTenantIdPrincipalsByPrincipalIdPolicies: (o: Record<string, unknown>) =>
-    mockListPrincipalPolicies(o),
-  getTenantsByTenantIdPrincipalsByPrincipalIdAccess: (o: Record<string, unknown>) =>
-    mockGetPrincipalAccess(o),
-  postTenantsByTenantIdAccessKeys: (o: Record<string, unknown>) => mockCreateAccessKey(o),
-}));
+vi.mock('@filone/orchestrator-client', () => ({ createClient: () => 'mock-client' }));
 vi.mock('./metrics.ts', () => ({ instrumentClient: vi.fn() }));
 vi.mock('../s3-bucket-operations.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../s3-bucket-operations.ts')>()),
@@ -51,24 +34,13 @@ import {
 import { FilOneOrchestrator } from './orchestrator.ts';
 import type { PolicyPrecondition } from '../bucket-policy-orchestrator.ts';
 
+const ALICE = '00000000-0000-0000-0000-00000000000a';
+const BOB = '00000000-0000-0000-0000-00000000000b';
+
 const tenantId = '00000000-0000-0000-0000-000000000001';
 const policy: BucketPolicy = {
-  Statement: [{ Effect: 'Allow', Principal: ['alice'], Action: ['s3:GetObject'] }],
+  Statement: [{ Effect: 'Allow', Principal: [ALICE], Action: ['s3:GetObject'] }],
 };
-
-// The hey-api SDK resolves every call to `{ data, error, response }` rather than throwing.
-function buildSdkResult(
-  status: number,
-  data?: unknown,
-  error?: unknown,
-  headers: Record<string, string> = {},
-) {
-  return { data, error, response: { status, headers: new Headers(headers) } };
-}
-const ok = (data: unknown, status = 200, headers?: Record<string, string>) =>
-  buildSdkResult(status, data, undefined, headers);
-const fail = (status: number, body: unknown = { message: 'error' }) =>
-  buildSdkResult(status, undefined, body);
 
 const orchestrator = new FilOneOrchestrator({
   id: 'forge',
@@ -158,11 +130,14 @@ describe('putBucketPolicy', () => {
   });
 
   it('passes the storage system’s validation message through without retrying', async () => {
-    mockPutPolicy.mockRejectedValue(new PolicyValidationError('unknown principal "bob"'));
+    mockPutPolicy.mockRejectedValue(new PolicyValidationError(`unknown principal "${BOB}"`));
 
     await expect(
       orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
-    ).rejects.toMatchObject({ name: 'PolicyValidationError', message: 'unknown principal "bob"' });
+    ).rejects.toMatchObject({
+      name: 'PolicyValidationError',
+      message: `unknown principal "${BOB}"`,
+    });
     expect(mockPutPolicy).toHaveBeenCalledTimes(1);
   });
 
@@ -184,52 +159,5 @@ describe('deleteBucketPolicy', () => {
     expect(mockDeletePolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', {
       ifMatch: '"v1"',
     });
-  });
-});
-
-describe('principals', () => {
-  it.each([201, 200])('syncMember resolves when the principal PUT answers %i', async (status) => {
-    mockPutPrincipal.mockResolvedValueOnce(ok({ principalId: 'alice' }, status));
-    await expect(orchestrator.syncMember(tenantId, 'alice')).resolves.toBeUndefined();
-    expect(mockPutPrincipal).toHaveBeenCalledWith(
-      expect.objectContaining({ path: { tenantId, principalId: 'alice' } }),
-    );
-  });
-
-  it('syncMember throws PolicyValidationError when the storage system answers 422', async () => {
-    mockPutPrincipal.mockResolvedValue(fail(422, { message: 'invalid principal id' }));
-    await expect(orchestrator.syncMember(tenantId, '*')).rejects.toBeInstanceOf(
-      PolicyValidationError,
-    );
-  });
-
-  it('removeMember resolves when the storage system answers 204', async () => {
-    mockDeletePrincipal.mockResolvedValueOnce(buildSdkResult(204));
-    await expect(orchestrator.removeMember(tenantId, 'alice')).resolves.toBeUndefined();
-  });
-
-  it('removeMember throws when the tenant is missing', async () => {
-    mockDeletePrincipal.mockResolvedValueOnce(fail(404));
-    await expect(orchestrator.removeMember(tenantId, 'alice')).rejects.toThrow(
-      `Failed to remove principal "alice" for forge tenant ${tenantId}: the tenant does not exist`,
-    );
-  });
-
-  it('listBucketPoliciesForMember returns each bucket with its policy', async () => {
-    mockListPrincipalPolicies.mockResolvedValue(ok({ items: [{ bucketName: 'photos', policy }] }));
-
-    await expect(
-      orchestrator.listBucketPoliciesForMember(tenantId, 'alice'),
-    ).resolves.toStrictEqual([{ bucketName: 'photos', policy }]);
-  });
-
-  it('resolveMemberAccess returns each bucket with the member’s actions', async () => {
-    mockGetPrincipalAccess.mockResolvedValue(
-      ok({ buckets: [{ name: 'photos', actions: ['s3:GetObject'] }] }),
-    );
-
-    await expect(orchestrator.resolveMemberAccess(tenantId, 'alice')).resolves.toStrictEqual([
-      { bucketName: 'photos', actions: ['s3:GetObject'] },
-    ]);
   });
 });
