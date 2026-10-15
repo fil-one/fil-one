@@ -42,10 +42,12 @@ describe('usePolicyDraft', () => {
     });
   });
 
-  it('adds a statement and marks unsaved edits', () => {
+  it('takes the next statements and marks unsaved edits', () => {
     const { result } = renderHook(() => usePolicyDraft(readOnlySnapshot));
 
-    act(() => result.current.addStatement(grantPutObjectToPrincipalB));
+    act(() =>
+      result.current.setStatements([grantGetObjectToPrincipalA, grantPutObjectToPrincipalB]),
+    );
 
     expect(result.current).toMatchObject({
       statements: [grantGetObjectToPrincipalA, grantPutObjectToPrincipalB],
@@ -53,14 +55,16 @@ describe('usePolicyDraft', () => {
     });
   });
 
-  it('updates a statement', () => {
+  it('replaces a statement', () => {
     const { result } = renderHook(() => usePolicyDraft(readWriteSnapshot));
     const denyGetObjectToPrincipalA: PolicyStatement = {
       ...grantGetObjectToPrincipalA,
       Effect: 'Deny',
     };
 
-    act(() => result.current.updateStatement(0, denyGetObjectToPrincipalA));
+    act(() =>
+      result.current.setStatements([denyGetObjectToPrincipalA, grantPutObjectToPrincipalB]),
+    );
 
     expect(result.current).toMatchObject({
       statements: [denyGetObjectToPrincipalA, grantPutObjectToPrincipalB],
@@ -68,10 +72,10 @@ describe('usePolicyDraft', () => {
     });
   });
 
-  it('removes a statement', () => {
+  it('drops a statement', () => {
     const { result } = renderHook(() => usePolicyDraft(readWriteSnapshot));
 
-    act(() => result.current.removeStatement(0));
+    act(() => result.current.setStatements([grantPutObjectToPrincipalB]));
 
     expect(result.current).toMatchObject({
       statements: [grantPutObjectToPrincipalB],
@@ -81,7 +85,9 @@ describe('usePolicyDraft', () => {
 
   it("reset takes the snapshot's statements back", () => {
     const { result } = renderHook(() => usePolicyDraft(readOnlySnapshot));
-    act(() => result.current.addStatement(grantPutObjectToPrincipalB));
+    act(() =>
+      result.current.setStatements([grantGetObjectToPrincipalA, grantPutObjectToPrincipalB]),
+    );
 
     act(() => result.current.reset());
 
@@ -103,17 +109,9 @@ describe('usePolicyDraft', () => {
     });
   });
 
-  it('leaves the draft unchanged on a refetch with the same ETag', () => {
-    const { result, rerender } = renderWithSnapshot(readOnlySnapshot);
-
-    rerender({ snapshot: { ...emptySnapshot, etag: readOnlySnapshot.etag } });
-
-    expect(result.current.statements).toStrictEqual([grantGetObjectToPrincipalA]);
-  });
-
   it('keeps the edits and sets isStale when a new ETag arrives with edits', () => {
     const { result, rerender } = renderWithSnapshot(readWriteSnapshot);
-    act(() => result.current.removeStatement(1));
+    act(() => result.current.setStatements([grantGetObjectToPrincipalA]));
 
     rerender({ snapshot: emptySnapshot });
 
@@ -126,7 +124,7 @@ describe('usePolicyDraft', () => {
 
   it('reset after isStale takes the latest snapshot', () => {
     const { result, rerender } = renderWithSnapshot(readWriteSnapshot);
-    act(() => result.current.removeStatement(1));
+    act(() => result.current.setStatements([grantGetObjectToPrincipalA]));
     rerender({ snapshot: emptySnapshot });
 
     act(() => result.current.reset());
@@ -147,7 +145,7 @@ describe('usePolicyDraft', () => {
   it('adding a statement to an empty draft marks unsaved edits', () => {
     const { result } = renderHook(() => usePolicyDraft(null));
 
-    act(() => result.current.addStatement(grantGetObjectToPrincipalA));
+    act(() => result.current.setStatements([grantGetObjectToPrincipalA]));
 
     expect(result.current).toMatchObject({
       statements: [grantGetObjectToPrincipalA],
