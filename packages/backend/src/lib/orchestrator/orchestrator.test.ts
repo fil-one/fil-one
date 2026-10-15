@@ -827,17 +827,9 @@ describe('getBucket', () => {
   it("returns null for another tenant's bucket, which the gateway answers AccessDenied", async () => {
     s3Mock.on(GetBucketVersioningCommand).rejects(buildAccessDeniedError());
     s3Mock.on(GetObjectLockConfigurationCommand).rejects(buildAccessDeniedError());
-    s3Mock.on(ListBucketsCommand).resolves({ Buckets: [{ Name: 'bucket-a' }] });
 
     await expect(orchestrator.getBucket(tenantId, 'someone-elses')).resolves.toBeNull();
-  });
-
-  it('rethrows AccessDenied for a bucket the tenant listing includes', async () => {
-    s3Mock.on(GetBucketVersioningCommand).rejects(buildAccessDeniedError());
-    s3Mock.on(GetObjectLockConfigurationCommand).rejects(buildAccessDeniedError());
-    s3Mock.on(ListBucketsCommand).resolves({ Buckets: [{ Name: 'bucket-a' }] });
-
-    await expect(orchestrator.getBucket(tenantId, 'bucket-a')).rejects.toThrow('Access Denied');
+    expect(s3Mock.commandCalls(ListBucketsCommand)).toHaveLength(0);
   });
 
   it('keeps object lock off for a bucket that simply has no configuration', async () => {

@@ -391,13 +391,9 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
       ]);
     } catch (err) {
       if (isNoSuchBucketError(err)) return null;
-      // The gateway answers AccessDenied both for another tenant's bucket and
-      // for the tenant's own bucket when the key lacks these reads. The tenant
-      // listing tells them apart: a bucket it does not include is absent.
-      if (isAccessDeniedError(err)) {
-        const { buckets } = await s3ListBuckets(s3, requestOptions);
-        if (!buckets.some((b) => b.name === bucketName)) return null;
-      }
+      // The console signs with the tenant credential, which holds every action
+      // on the tenant's own buckets, so a denial means another tenant's bucket.
+      if (isAccessDeniedError(err)) return null;
       throw err;
     }
 
