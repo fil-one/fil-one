@@ -10,12 +10,13 @@
 // the `${id}TenantId` PROFILE attribute (written last) is sufficient to mean
 // "fully provisioned, console credentials stashed in SSM".
 
+import pMap from 'p-map';
 import { format } from 'node:util';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.ts';
-import { listMembers } from '../org-membership.ts';
+import { MAX_MEMBERS, listMembers } from '../org-membership.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { syncPrincipal } from './members.ts';
 import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
@@ -161,9 +162,17 @@ async function processTenantSetup(
   // key can bind to them. A member who joins once the pointer below is visible
   // registers themselves (`registerMemberPrincipal`); one who joins in between is
   // not a principal until their first key mint or the first policy naming them.
-  for (const { userId } of await listMembers(orgId)) {
-    await syncPrincipal(client, id, orgId, userId);
+  const members = await listMembers(orgId);
+  // A scan stopped at the cap would publish a tenant whose unregistered
+  // members no policy can name; refuse instead, and the request tries again.
+  if (members.length >= MAX_MEMBERS) {
+    throw new Error(`The member scan of org ${orgId} stopped at ${MAX_MEMBERS} members`);
   }
+  // Ten at a time: a few hundred members would otherwise run for the whole
+  // request, one principal after another (FIL-1504 asks for a batch route).
+  await pMap(members, ({ userId }) => syncPrincipal(client, id, orgId, userId), {
+    concurrency: 10,
+  });
 
   try {
     await dynamo.send(

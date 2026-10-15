@@ -29,7 +29,10 @@ vi.mock('@filone/orchestrator-client', () => ({
 }));
 
 const mockListMembers = vi.fn(async (_orgId: string) => [] as { userId: string }[]);
-vi.mock('../org-membership.ts', () => ({ listMembers: (orgId: string) => mockListMembers(orgId) }));
+vi.mock('../org-membership.ts', () => ({
+  listMembers: (orgId: string) => mockListMembers(orgId),
+  MAX_MEMBERS: 500,
+}));
 const mockSyncPrincipal = vi.fn(async (..._args: unknown[]) => {});
 vi.mock('./members.ts', () => ({
   syncPrincipal: (...args: unknown[]) => mockSyncPrincipal(...args),
@@ -262,6 +265,19 @@ describe('ensureTenantReady', () => {
       [client, 'forge', orgId, OTHER_USER],
     ]);
     expect(order).toStrictEqual([`sync:${ANY_USER}`, `sync:${OTHER_USER}`, 'pointer']);
+  });
+
+  it('returns null and writes no pointer when the member scan stopped at the cap', async () => {
+    stubHappyPath();
+    mockListMembers.mockResolvedValueOnce(
+      Array.from({ length: 500 }, (_, i) => ({
+        userId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      })),
+    );
+
+    await expect(ensureTenantReady(deps, orgId)).resolves.toBeNull();
+    expect(mockSyncPrincipal).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('returns null and writes no pointer when a member cannot be registered', async () => {
