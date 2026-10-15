@@ -28,8 +28,8 @@ vi.mock('../lib/members-api.js', () => ({
   listMembers: () =>
     Promise.resolve({
       members: [
-        { userId: 'user-1', role: OrgRole.Owner, name: 'Ada' },
-        { userId: 'user-2', role: OrgRole.Member, name: 'Ben' },
+        { userId: USER_1, role: OrgRole.Owner, name: 'Ada' },
+        { userId: USER_2, role: OrgRole.Member, name: 'Ben' },
       ],
     }),
 }));
@@ -37,12 +37,15 @@ vi.mock('../lib/members-api.js', () => ({
 import { BucketPolicyTab } from './BucketPolicyTab.js';
 import { ToastProvider } from './Toast/ToastProvider.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 const grantReadAndListToBen: BucketPolicy = {
   Statement: [
     {
       Sid: 'team',
       Effect: 'Allow',
-      Principal: ['user-2'],
+      Principal: [USER_2],
       Action: ['s3:GetObject', 's3:ListBucket'],
     },
   ],
@@ -345,7 +348,7 @@ describe('BucketPolicyTab', () => {
   it('does not warn for a Deny that names members', async () => {
     mockGetBucketPolicy.mockResolvedValue({
       policy: {
-        Statement: [{ Effect: 'Deny', Principal: ['user-2'], Action: ['s3:DeleteObject'] }],
+        Statement: [{ Effect: 'Deny', Principal: [USER_2], Action: ['s3:DeleteObject'] }],
       },
       etag: '"v1"',
     });
