@@ -1,11 +1,7 @@
-// The retry rule fil-one/RFC#30 sets for policy and principal writes, and a new
-// bucket's first policy write.
+// The retry rule fil-one/RFC#30 sets for policy and principal writes.
 
 import pRetry from 'p-retry';
-import type { S3Client } from '@aws-sdk/client-s3';
-import type { BucketPolicy } from '@filone/shared';
 import { PolicyConflictError, PolicyPublishError } from '../errors.ts';
-import { putBucketPolicy } from '../s3-bucket-operations.ts';
 
 const IAM_WRITE_RETRY = { retries: 2, minTimeout: 200, maxTimeout: 1000 } as const;
 
@@ -23,16 +19,4 @@ export function withWriteRetry<T>(run: () => Promise<T>): Promise<T> {
     ...IAM_WRITE_RETRY,
     shouldRetry: ({ error }) => isRetryableWriteError(error),
   });
-}
-
-/**
- * A new bucket's first policy, written once the bucket exists (fil-one/RFC#30,
- * "Bucket creation") and refused if one is already stored.
- */
-export async function putFirstBucketPolicy(
-  s3: S3Client,
-  bucketName: string,
-  policy: BucketPolicy,
-): Promise<void> {
-  await withWriteRetry(() => putBucketPolicy(s3, bucketName, policy, { ifNoneMatch: '*' }));
 }

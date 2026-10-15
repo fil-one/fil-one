@@ -32,7 +32,7 @@ import {
   unsupportedRegionResponse,
 } from './response-builder.ts';
 import { getOrchestratorForRegion } from './service-orchestrator-registry.ts';
-import { supportsBucketPolicies, type ServiceOrchestrator } from './service-orchestrator.ts';
+import type { ServiceOrchestrator } from './service-orchestrator.ts';
 import type { AuthenticatedEvent } from './user-context.ts';
 
 /** The bucket and region a policy route is about. */

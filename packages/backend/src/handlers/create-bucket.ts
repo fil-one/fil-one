@@ -1,12 +1,16 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { BucketPolicy, CreateBucketResponse, ErrorResponse, S3Region } from '@filone/shared';
-import { CreateBucketSchema, getCreatorBucketPolicy, isSupportedRegion } from '@filone/shared';
+import type { CreateBucketResponse, ErrorResponse, S3Region } from '@filone/shared';
+import {
+  CreateBucketSchema,
+  getCreatorBucketPolicy,
+  isSupportedRegion,
+  supportsIamMethods,
+} from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import { supportsBucketPolicies, type RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import {
   BucketAlreadyExistsError,
   BucketConfigurationError,
@@ -65,7 +69,9 @@ export async function baseHandler(
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
-  const policy = getFirstBucketPolicy(orchestrator, userId);
+  // A new bucket starts with one statement naming its creator on a region that
+  // serves policies, and with none on a `service-keys` region.
+  const policy = supportsIamMethods(region) ? getCreatorBucketPolicy(userId) : undefined;
   const policyAudit = policy
     ? await auditDefaultBucketPolicy({ event, orgId, userId, region, bucketName })
     : undefined;
@@ -93,21 +99,9 @@ export async function baseHandler(
         .build();
     }
     await policyAudit?.complete({ outcome: 'failed' });
-    if (err instanceof BucketAlreadyExistsError) {
-      return new ResponseBuilder()
-        .status(409)
-        .body<ErrorResponse>({ message: `Bucket "${bucketName}" already exists` })
-        .build();
-    }
-    // The storage system refused the policy; the bucket exists without one.
-    // Other policy write errors go to errorHandlerMiddleware.
-    if (err instanceof PolicyValidationError) {
-      return new ResponseBuilder()
-        .status(400)
-        .body<ErrorResponse>({ message: err.message })
-        .build();
-    }
-    throw err;
+    const refusal = toCreateRefusalResponse(err, bucketName);
+    if (!refusal) throw err;
+    return refusal;
   }
   await policyAudit?.complete({ outcome: 'succeeded', details: completionDetails });
 
@@ -124,17 +118,6 @@ export async function baseHandler(
       },
     })
     .build();
-}
-
-/**
- * The policy a new bucket starts with: one statement naming its creator on a
- * region that serves policies, and none on a `service-keys` region.
- */
-function getFirstBucketPolicy(
-  orchestrator: RegionOrchestrator,
-  creatorId: string,
-): BucketPolicy | undefined {
-  return supportsBucketPolicies(orchestrator) ? getCreatorBucketPolicy(creatorId) : undefined;
 }
 
 /**
@@ -174,3 +157,25 @@ export const handler = middy(baseHandler)
   .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Write))
   .use(errorHandlerMiddleware());
+
+/**
+ * The console's answer to a refusal the create can raise, or undefined for an
+ * error that is not one, which the caller rethrows into the generic 500.
+ */
+function toCreateRefusalResponse(
+  err: unknown,
+  bucketName: string,
+): APIGatewayProxyStructuredResultV2 | undefined {
+  if (err instanceof BucketAlreadyExistsError) {
+    return new ResponseBuilder()
+      .status(409)
+      .body<ErrorResponse>({ message: `Bucket "${bucketName}" already exists` })
+      .build();
+  }
+  // The storage system refused the policy; the bucket exists without one.
+  // Other policy write errors go to errorHandlerMiddleware.
+  if (err instanceof PolicyValidationError) {
+    return new ResponseBuilder().status(400).body<ErrorResponse>({ message: err.message }).build();
+  }
+  return undefined;
+}
