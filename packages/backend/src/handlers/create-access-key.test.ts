@@ -81,11 +81,13 @@ import {
   stubMembershipRead,
 } from '../test/lambda-test-utilities.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
 function validBody({
   keyName,
@@ -291,7 +293,7 @@ describe('create-access-key baseHandler', () => {
     await baseHandler(event);
 
     const item = keyRow();
-    expect(item.createdBy.S).toBe('user-1');
+    expect(item.createdBy.S).toBe(USER_1);
     expect(item.creatorEmail.S).toBe('alice@example.com');
     expect(item.policyVersion.S).toBe('pre-member-scope');
   });
@@ -307,7 +309,7 @@ describe('create-access-key baseHandler', () => {
     await baseHandler(event);
 
     const item = keyRow();
-    expect(item.createdBy.S).toBe('user-1');
+    expect(item.createdBy.S).toBe(USER_1);
     expect(item.creatorEmail).toBeUndefined();
     expect(item.policyVersion.S).toBe('pre-member-scope');
   });
@@ -535,7 +537,7 @@ describe('create-access-key baseHandler', () => {
       type: 'key.created',
       phase: 'intent',
       subject: 'org:org-1',
-      actor: { kind: 'user', id: 'user-1', email: 'alice@example.com' },
+      actor: { kind: 'user', id: USER_1, email: 'alice@example.com' },
       details: { keyKind: 's3', keyName: 'My Key', region: 'eu-west-1' },
     });
     // One subject for both halves, or the viewer cannot pair them: the mint has
@@ -650,7 +652,7 @@ describe('create-access-key baseHandler', () => {
       status: { S: 'active' },
       // Attributed to the caller who retried, and flagged as such: a key with
       // no owner at all is the worse record.
-      createdBy: { S: 'user-1' },
+      createdBy: { S: USER_1 },
       policyVersion: { S: 'pre-member-scope' },
       recovered: { BOOL: true },
     });
@@ -1027,7 +1029,7 @@ describe('create-access-key baseHandler', () => {
 
       expect(
         ddbMock.commandCalls(GetItemCommand).map((call) => call.args[0].input.Key),
-      ).toContainEqual({ pk: { S: 'ORG#org-1' }, sk: { S: 'MEMBER#user-1' } });
+      ).toContainEqual({ pk: { S: 'ORG#org-1' }, sk: { S: `MEMBER#${USER_1}` } });
     });
 
     it('advances the mint sequence in the transaction that writes the row', async () => {
@@ -1115,7 +1117,7 @@ describe('create-access-key baseHandler', () => {
       const revocation = standaloneEvents().find((event) => event.type === 'key.deleted');
       expect(revocation).toMatchObject({
         phase: 'intent',
-        actor: { kind: 'user', id: 'user-1' },
+        actor: { kind: 'user', id: USER_1 },
         details: { keyKind: 's3', reason: 'stale_role_at_mint', keyName: 'My Key' },
       });
     });
@@ -1287,7 +1289,7 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(201);
       expect(mockIssueAccessKey).toHaveBeenCalledWith('tenant-9', {
         keyName: 'laptop',
-        principalId: 'user-1',
+        principalId: USER_1,
         expiresAt: null,
       });
     });
@@ -1305,7 +1307,7 @@ describe('create-access-key baseHandler', () => {
 
       await baseHandler(buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }));
 
-      expect(syncedBeforeMint).toStrictEqual(['syncMember:user-1']);
+      expect(syncedBeforeMint).toStrictEqual([`syncMember:${USER_1}`]);
     });
 
     it('records a principal-bound row with no permission set or bucket scope', async () => {
@@ -1319,8 +1321,8 @@ describe('create-access-key baseHandler', () => {
         createdAt: '2026-03-10T13:36:07.752371Z',
         status: 'active',
         region: S3Region.UsEast9,
-        principalId: 'user-1',
-        createdBy: 'user-1',
+        principalId: USER_1,
+        createdBy: USER_1,
         policyVersion: 'pre-member-scope',
       });
     });
@@ -1342,7 +1344,7 @@ describe('create-access-key baseHandler', () => {
       const result = await baseHandler(
         buildEvent({
           body: buildPrincipalKeyBody(),
-          userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', OrgRole.Member) },
+          userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, OrgRole.Member) },
         }),
       );
 
@@ -1353,7 +1355,7 @@ describe('create-access-key baseHandler', () => {
         accessKeyId: 'AKIA1234567890',
         secretAccessKey: 'secret-abc-123',
         createdAt: '2026-03-10T13:36:07.752371Z',
-        principalId: 'user-1',
+        principalId: USER_1,
       });
     });
 
@@ -1363,7 +1365,7 @@ describe('create-access-key baseHandler', () => {
       const result = await baseHandler(
         buildEvent({
           body: buildPrincipalKeyBody(),
-          userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', OrgRole.Admin) },
+          userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, OrgRole.Admin) },
         }),
       );
 
@@ -1378,7 +1380,7 @@ describe('create-access-key baseHandler', () => {
       const result = await baseHandler(
         buildEvent({
           body: buildPrincipalKeyBody(),
-          userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', OrgRole.Member) },
+          userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, OrgRole.Member) },
         }),
       );
 
@@ -1412,9 +1414,7 @@ describe('create-access-key baseHandler', () => {
       it("looks the existing key up under the caller's principal", async () => {
         await baseHandler(buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }));
 
-        expect(mockFindAccessKeyByName).toHaveBeenCalledWith('tenant-9', 'laptop', {
-          principalId: 'user-1',
-        });
+        expect(mockFindAccessKeyByName).toHaveBeenCalledWith('tenant-9', 'laptop', USER_1);
       });
 
       it("records the recovered row bound to the caller's principal", async () => {
@@ -1428,9 +1428,9 @@ describe('create-access-key baseHandler', () => {
           createdAt: '2026-03-10T00:00:00Z',
           status: 'active',
           region: S3Region.UsEast9,
-          createdBy: 'user-1',
+          createdBy: USER_1,
           policyVersion: 'pre-member-scope',
-          principalId: 'user-1',
+          principalId: USER_1,
           recovered: true,
         });
       });
@@ -1478,7 +1478,7 @@ describe('create-access-key baseHandler', () => {
           permissions: ['read', 'list'],
           bucketScope: 'specific',
           buckets: ['photos'],
-          createdBy: 'user-1',
+          createdBy: USER_1,
           policyVersion: 'pre-member-scope',
         });
       });
@@ -1491,7 +1491,7 @@ describe('create-access-key baseHandler', () => {
             body: buildServiceKeyBody(),
             userInfo: {
               ...USER_INFO,
-              membership: membershipFor('org-1', 'user-1', OrgRole.Member),
+              membership: membershipFor('org-1', USER_1, OrgRole.Member),
             },
           }),
         );
@@ -1515,7 +1515,7 @@ describe('create-access-key baseHandler', () => {
         const result = await baseHandler(
           buildEvent({
             body: buildServiceKeyBody(),
-            userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', OrgRole.Admin) },
+            userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, OrgRole.Admin) },
           }),
         );
 
@@ -1536,7 +1536,7 @@ describe('create-access-key baseHandler', () => {
               permissions: ['read', 'write', 'list'],
               granularPermissions: ['PutObjectRetention'],
             }),
-            userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', OrgRole.Admin) },
+            userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, OrgRole.Admin) },
           }),
         );
 
