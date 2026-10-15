@@ -142,6 +142,14 @@ export function getRegionAccessModel(region: S3Region): AccessModel {
 }
 
 /**
+ * Whether the orchestrator behind a region serves the `iam` access model:
+ * buckets carry policies, and each member is a principal a policy can name.
+ */
+export function supportsIamMethods(region: S3Region): boolean {
+  return getRegionAccessModel(region) === 'iam';
+}
+
+/**
  * Domain dedicated to user data (FIL-627). Reputation systems act on the
  * registrable domain, so one abusive upload under `fil.one` could flag the
  * console, website, docs and email with it. Nothing else is served from here.

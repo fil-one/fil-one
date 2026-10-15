@@ -15,6 +15,7 @@ export {
   isSupportedRegion,
   supportsBucketManagement,
   getRegionAccessModel,
+  supportsIamMethods,
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,

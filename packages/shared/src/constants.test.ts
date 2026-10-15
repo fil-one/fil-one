@@ -16,6 +16,7 @@ import {
   getAvailableRegions,
   supportsBucketManagement,
   getRegionAccessModel,
+  supportsIamMethods,
   isFoundationEmail,
   isSupportedRegion,
   formatRegion,
@@ -317,6 +318,9 @@ describe('getRegionAccessModel', () => {
       [S3Region.EuCentral3]: 'iam',
       [S3Region.UsEast9]: 'iam',
     });
+    for (const region of Object.values(S3Region)) {
+      expect(supportsIamMethods(region), `${region} supports IAM`).toBe(models[region] === 'iam');
+    }
   });
 });
 
