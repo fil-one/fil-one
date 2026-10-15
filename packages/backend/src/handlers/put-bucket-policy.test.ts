@@ -8,7 +8,10 @@ vi.mock('../lib/service-orchestrator-registry.ts', async () => {
 });
 vi.mock('../lib/org-profile.ts', async () => {
   const fixture = await import('../test/bucket-policy-fixture.ts');
-  return { isOrgDeleting: fixture.isOrgDeleting };
+  return {
+    getOrgProfile: async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } }),
+    isOrgDeleting: fixture.isOrgDeleting,
+  };
 });
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
@@ -29,6 +32,7 @@ import {
   grantGetObjectToUser,
   iam,
   isOrgDeleting,
+  orchestrator,
   resetFixture,
 } from '../test/bucket-policy-fixture.ts';
 
@@ -417,6 +421,16 @@ describe('put-bucket-policy baseHandler', () => {
       statusCode: 501,
       body: { message: 'Bucket policies are not available in this region' },
     });
+    expect(ensureTenantReady).not.toHaveBeenCalled();
+  });
+
+  it('answers 503 without provisioning a tenant when the org has none in the region', async () => {
+    orchestrator.isTenantReady.mockReturnValueOnce(null);
+
+    const result = await baseHandler(buildPutEvent(grantGetObjectToUser));
+
+    expect(result.statusCode).toBe(503);
+    expect(iam.calls).toHaveLength(0);
     expect(ensureTenantReady).not.toHaveBeenCalled();
   });
 
