@@ -234,12 +234,10 @@ describe('put-bucket-policy baseHandler', () => {
   it('registers the current members a document names before writing it', async () => {
     mockListMembers.mockResolvedValue([{ userId: USER_ID }, { userId: MEMBER_ID }]);
     // MEMBER_ID is a member the storage system has not met.
-    const policy: BucketPolicy = {
-      Statement: [
-        grantGetObjectToUser.Statement[0]!,
-        { Effect: 'Allow', Principal: [MEMBER_ID], Action: ['s3:GetObject'] },
-      ],
-    };
+    const policy = policyOf(
+      grantGetObjectToUser.Statement[0]!,
+      allow([MEMBER_ID], ['s3:GetObject']),
+    );
 
     const result = await baseHandler(buildPutEvent(policy));
 
@@ -251,9 +249,7 @@ describe('put-bucket-policy baseHandler', () => {
 
   it('registers nobody for a removed member a document still names', async () => {
     mockListMembers.mockResolvedValue([{ userId: USER_ID }]);
-    const policy: BucketPolicy = {
-      Statement: [{ Effect: 'Allow', Principal: [MEMBER_ID], Action: ['s3:GetObject'] }],
-    };
+    const policy = policyOf(allow([MEMBER_ID], ['s3:GetObject']));
 
     const result = await baseHandler(buildPutEvent(policy));
 
@@ -265,9 +261,7 @@ describe('put-bucket-policy baseHandler', () => {
 
   it('registers nobody for a document naming everyone', async () => {
     mockListMembers.mockResolvedValue([{ userId: USER_ID }]);
-    const policy: BucketPolicy = {
-      Statement: [{ Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] }],
-    };
+    const policy = policyOf(allow('*', ['s3:GetObject']));
 
     const result = await baseHandler(buildPutEvent(policy));
 
