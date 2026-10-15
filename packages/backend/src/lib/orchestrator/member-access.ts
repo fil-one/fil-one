@@ -2,7 +2,7 @@
 // access model: which buckets the member can access.
 
 import type { MemberOrchestrator } from '../member-orchestrator.ts';
-import type { BucketSummary, ListBucketsOptions } from '../service-orchestrator.ts';
+import type { BucketSummary, OrchestratorRequestOptions } from '../service-orchestrator.ts';
 
 /**
  * The buckets in a tenant listing that one member can actually access. The
@@ -24,13 +24,12 @@ export async function filterBucketsByMemberAccess(
   members: MemberOrchestrator,
   buckets: Promise<BucketSummary[]>,
   tenantId: string,
-  requestOptions: ListBucketsOptions & { scopeToMemberId: string },
+  memberId: string,
+  requestOptions?: OrchestratorRequestOptions,
 ): Promise<BucketSummary[]> {
   const [listedBuckets, access] = await Promise.all([
     buckets,
-    members.resolveMemberAccess(tenantId, requestOptions.scopeToMemberId, {
-      signal: requestOptions.signal,
-    }),
+    members.resolveMemberAccess(tenantId, memberId, requestOptions),
   ]);
   const accessibleBucketNames = new Set(access.map((entry) => entry.bucketName));
   return listedBuckets.filter((bucket) => accessibleBucketNames.has(bucket.bucketName));
