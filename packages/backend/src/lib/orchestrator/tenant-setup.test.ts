@@ -45,6 +45,9 @@ import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 
+const ANY_USER = '00000000-0000-0000-0000-000000000011';
+const OTHER_USER = '00000000-0000-0000-0000-000000000012';
+
 const orgId = '00000000-0000-0000-0000-000000000001';
 const deps = { client, id: 'forge', stage: 'test', region: 'us-east-1' };
 const ssmPath = `/filone/test/forge-s3/access-key/${orgId}`;
@@ -242,9 +245,9 @@ describe('ensureTenantReady', () => {
 
   it('registers every current member as a principal before the pointer write', async () => {
     stubHappyPath();
-    mockListMembers.mockResolvedValueOnce([{ userId: 'any-user' }, { userId: 'other-user' }]);
+    mockListMembers.mockResolvedValueOnce([{ userId: ANY_USER }, { userId: OTHER_USER }]);
     const order: string[] = [];
-    mockSyncPrincipal.mockImplementation(async (_routes, _tenantId, userId) => {
+    mockSyncPrincipal.mockImplementation(async (_client, _orchestratorId, _tenantId, userId) => {
       order.push(`sync:${String(userId)}`);
     });
     ddbMock.on(UpdateItemCommand).callsFake(() => {
@@ -255,15 +258,15 @@ describe('ensureTenantReady', () => {
     await ensureTenantReady(deps, orgId);
 
     expect(mockSyncPrincipal.mock.calls).toStrictEqual([
-      [{ client, orchestratorId: 'forge' }, orgId, 'any-user'],
-      [{ client, orchestratorId: 'forge' }, orgId, 'other-user'],
+      [client, 'forge', orgId, ANY_USER],
+      [client, 'forge', orgId, OTHER_USER],
     ]);
-    expect(order).toStrictEqual(['sync:any-user', 'sync:other-user', 'pointer']);
+    expect(order).toStrictEqual([`sync:${ANY_USER}`, `sync:${OTHER_USER}`, 'pointer']);
   });
 
   it('returns null and writes no pointer when a member cannot be registered', async () => {
     stubHappyPath();
-    mockListMembers.mockResolvedValueOnce([{ userId: 'any-user' }]);
+    mockListMembers.mockResolvedValueOnce([{ userId: ANY_USER }]);
     mockSyncPrincipal.mockRejectedValueOnce(new Error('region down'));
 
     await expect(ensureTenantReady(deps, orgId)).resolves.toBeNull();

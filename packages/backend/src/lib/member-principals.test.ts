@@ -21,6 +21,8 @@ vi.mock('./service-orchestrator-registry.ts', () => ({
 
 import { registerNewMember, removeMemberPrincipal } from './member-principals.ts';
 
+const ANY_USER = '00000000-0000-0000-0000-000000000011';
+
 const ddbMock = mockClient(DynamoDBClient);
 const orgProfile = { pk: { S: `ORG#${ORG_ID}` } };
 const profileKey = { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } };
@@ -41,20 +43,20 @@ afterEach(() => {
 
 describe('removeMemberPrincipal', () => {
   it('removes the principal in each ready iam region', async () => {
-    iam.seedPrincipal(TENANT, 'any-user');
+    iam.seedPrincipal(TENANT, ANY_USER);
 
-    await removeMemberPrincipal({ orgProfile, userId: 'any-user' });
+    await removeMemberPrincipal({ orgProfile, userId: ANY_USER });
 
     expect(iam.calls).toStrictEqual([
-      { method: 'removeMember', tenantId: TENANT, target: 'any-user' },
+      { method: 'removeMember', tenantId: TENANT, target: ANY_USER },
     ]);
-    expect(iam.principals.get(TENANT)!.has('any-user')).toBe(false);
+    expect(iam.principals.get(TENANT)!.has(ANY_USER)).toBe(false);
   });
 
   it('throws naming the region whose removal failed', async () => {
     iam.failNext('removeMember', new Error('vendor down'));
 
-    await expect(removeMemberPrincipal({ orgProfile, userId: 'any-user' })).rejects.toMatchObject({
+    await expect(removeMemberPrincipal({ orgProfile, userId: ANY_USER })).rejects.toMatchObject({
       name: 'IamRegionRefusedError',
       action: 'remove',
       regions: [S3Region.UsEast9],
@@ -62,7 +64,7 @@ describe('removeMemberPrincipal', () => {
   });
 
   it('skips a region whose tenant is not provisioned', async () => {
-    await removeMemberPrincipal({ orgProfile: undefined, userId: 'any-user' });
+    await removeMemberPrincipal({ orgProfile: undefined, userId: ANY_USER });
 
     expect(iam.calls).toStrictEqual([]);
   });
@@ -74,19 +76,17 @@ describe('registerNewMember', () => {
       .on(GetItemCommand, { TableName: 'UserInfoTable', Key: profileKey, ConsistentRead: true })
       .resolves({ Item: orgProfile });
 
-    await registerNewMember({ orgId: ORG_ID, userId: 'any-user' });
+    await registerNewMember({ orgId: ORG_ID, userId: ANY_USER });
 
-    expect(iam.calls).toStrictEqual([
-      { method: 'syncMember', tenantId: TENANT, target: 'any-user' },
-    ]);
-    expect(iam.principals.get(TENANT)!.has('any-user')).toBe(true);
+    expect(iam.calls).toStrictEqual([{ method: 'syncMember', tenantId: TENANT, target: ANY_USER }]);
+    expect(iam.principals.get(TENANT)!.has(ANY_USER)).toBe(true);
   });
 
   it('throws naming the region that refused the member', async () => {
     ddbMock.on(GetItemCommand).resolves({ Item: orgProfile });
     iam.failNext('syncMember', new Error('vendor down'));
 
-    await expect(registerNewMember({ orgId: ORG_ID, userId: 'any-user' })).rejects.toMatchObject({
+    await expect(registerNewMember({ orgId: ORG_ID, userId: ANY_USER })).rejects.toMatchObject({
       name: 'IamRegionRefusedError',
       action: 'register',
       regions: [S3Region.UsEast9],
@@ -96,7 +96,7 @@ describe('registerNewMember', () => {
   it('reads nothing when no region serves the iam access model', async () => {
     regions.splice(0, regions.length, scopedRegion);
 
-    await registerNewMember({ orgId: ORG_ID, userId: 'any-user' });
+    await registerNewMember({ orgId: ORG_ID, userId: ANY_USER });
 
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(0);
   });

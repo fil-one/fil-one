@@ -7,6 +7,8 @@ import { OrgDeletingError } from '../lib/org-profile.ts';
 import { IamRegionRefusedError } from '../lib/errors.ts';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 type ErrorRequest = Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
 
 function buildErrorRequest(error: Error): ErrorRequest {
@@ -107,14 +109,14 @@ describe('errorHandlerMiddleware', () => {
     const error = new Error('something broke');
     const request = buildErrorRequest(error);
     request.event = buildEvent({
-      userInfo: { userId: 'user-1', orgId: 'org-1' },
+      userInfo: { userId: USER_1, orgId: 'org-1' },
     });
 
     await onError!(request);
 
     expect(spy).toHaveBeenCalledWith(
       'Unhandled handler error:',
-      { orgId: 'org-1', userId: 'user-1', apiRequestId: 'req-1' },
+      { orgId: 'org-1', userId: USER_1, apiRequestId: 'req-1' },
       error,
     );
     spy.mockRestore();
