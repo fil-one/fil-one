@@ -332,7 +332,10 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   ): Promise<BucketSummary[]> {
     const buckets = this.listTenantBuckets(tenantId, requestOptions);
     return memberId
-      ? filterBucketsByMemberAccess(this, buckets, tenantId, memberId, requestOptions)
+      ? filterBucketsByMemberAccess(
+          buckets,
+          this.resolveMemberAccess(tenantId, memberId, requestOptions),
+        )
       : buckets;
   }
 

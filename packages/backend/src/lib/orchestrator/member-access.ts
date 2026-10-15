@@ -1,8 +1,8 @@
 // What the console does on behalf of one member on a region serving the `iam`
 // access model: which buckets the member can access.
 
-import type { MemberOrchestrator } from '../member-orchestrator.ts';
-import type { BucketSummary, OrchestratorRequestOptions } from '../service-orchestrator.ts';
+import type { MemberBucketAccess } from '@filone/shared';
+import type { BucketSummary } from '../service-orchestrator.ts';
 
 /**
  * The buckets in a tenant listing that one member can actually access. The
@@ -21,16 +21,10 @@ import type { BucketSummary, OrchestratorRequestOptions } from '../service-orche
  * Owner or an Admin is unscoped and never gets to this filter.
  */
 export async function filterBucketsByMemberAccess(
-  members: MemberOrchestrator,
   buckets: Promise<BucketSummary[]>,
-  tenantId: string,
-  memberId: string,
-  requestOptions?: OrchestratorRequestOptions,
+  memberAccess: Promise<MemberBucketAccess[]>,
 ): Promise<BucketSummary[]> {
-  const [listedBuckets, access] = await Promise.all([
-    buckets,
-    members.resolveMemberAccess(tenantId, memberId, requestOptions),
-  ]);
+  const [listedBuckets, access] = await Promise.all([buckets, memberAccess]);
   const accessibleBucketNames = new Set(access.map((entry) => entry.bucketName));
   return listedBuckets.filter((bucket) => accessibleBucketNames.has(bucket.bucketName));
 }
