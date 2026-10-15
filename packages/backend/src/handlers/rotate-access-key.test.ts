@@ -57,11 +57,14 @@ import { buildEvent, membershipFor, stubMembershipRead } from '../test/lambda-te
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { OrgKeys } from '../lib/org-membership.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 const KEY_ID = 'key-1';
 const TENANT_ID = 'aurora-t-1';
 
@@ -124,7 +127,7 @@ function eventFor(role: OrgRole = OrgRole.Owner, keyId: string | typeof NO_KEY_I
 }
 
 /** The key's owner when that is not the caller, as the post-write recheck reads them. */
-const OWNER = { orgId: USER_INFO.orgId, userId: 'user-2' };
+const OWNER = { orgId: USER_INFO.orgId, userId: USER_2 };
 
 /** The items of the mint transaction, so a test can say what rode alongside the row. */
 function mintItems() {
@@ -288,7 +291,7 @@ describe('rotate-access-key baseHandler', () => {
   });
 
   it('refuses a key the caller did not create', async () => {
-    stubStoredKey({ createdBy: 'user-2' });
+    stubStoredKey({ createdBy: USER_2 });
 
     const result = await baseHandler(eventFor(OrgRole.Member));
 
@@ -481,7 +484,7 @@ describe('rotate-access-key baseHandler', () => {
     await baseHandler(eventFor(OrgRole.Admin));
 
     expect(replacementRow()).toMatchObject({
-      createdBy: 'user-2',
+      createdBy: USER_2,
       creatorEmail: 'them@example.com',
       // The Admin who reissued it is recorded beside the owner, not instead.
       rotatedBy: USER_INFO.userId,
