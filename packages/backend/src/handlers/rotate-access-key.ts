@@ -142,7 +142,7 @@ async function prepareRotation(
   // not. The replacement is the key to use; this one is only left to delete.
   if (stored.replacedBy) return alreadyReplacedResponse();
 
-  const retention = getRotatorRetention(membership?.role ?? NO_ROLE, stored);
+  const retention = canRoleRotateKey(membership?.role ?? NO_ROLE, stored);
   if (!retention.retained) return refusedRotation(retention);
 
   if (hasExpired(stored.expiresAt)) {
@@ -426,7 +426,7 @@ function carriedAttribution(
  * separately: a principal-bound key carries no authority of its own, so
  * `keys.create` is enough; a service key must fit inside the role.
  */
-function getRotatorRetention(role: string, stored: StoredKey): KeyRetentionResult {
+function canRoleRotateKey(role: string, stored: StoredKey): KeyRetentionResult {
   if (stored.principalId) {
     return roleHasPermission(role, 'keys.create')
       ? { retained: true }
