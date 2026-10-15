@@ -208,6 +208,36 @@ describe('BucketPolicyTab', () => {
     expect(mockPutBucketPolicy).not.toHaveBeenCalled();
   });
 
+  it('replaces an edited statement in place', async () => {
+    renderTab();
+    await screen.findByText('team');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit statement' }));
+    const modal = await screen.findByTestId('policy-statement-modal');
+    fireEvent.change(within(modal).getByLabelText('Name (optional)'), {
+      target: { value: 'crew' },
+    });
+    fireEvent.click(within(modal).getByRole('button', { name: 'Save statement' }));
+
+    await screen.findByText('crew');
+    expect(screen.queryByText('team')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('policy-statement')).toHaveLength(1);
+    expect(screen.getByTestId('policy-save-bar')).toBeInTheDocument();
+  });
+
+  it('shows an error when the stored policy carries no ETag to remove it under', async () => {
+    mockGetBucketPolicy.mockResolvedValue({ policy: grantReadAndListToBen, etag: '' });
+    renderTab();
+
+    await confirmRemovePolicy();
+
+    expect(
+      await screen.findByText('The policy has no ETag to remove it under'),
+    ).toBeInTheDocument();
+    expect(mockDeleteBucketPolicy).not.toHaveBeenCalled();
+  });
+
   it('adds the new statement as a card', async () => {
     renderTab();
     await screen.findByText('team');

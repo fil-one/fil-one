@@ -152,7 +152,9 @@ function useBucketPolicyEditor(bucketName: string, region: S3Region) {
   }
 
   async function deleteStoredPolicy() {
-    if (!draft.etag) return;
+    // Unreachable from the UI, which offers the removal only over a stored
+    // policy; a thrown error reaches the toast rather than failing silently.
+    if (!draft.etag) throw new Error('The policy has no ETag to remove it under');
     await policy.remove.mutateAsync({ etag: draft.etag });
     draft.acceptSaved(null);
     toast.success('Policy removed');
@@ -189,14 +191,25 @@ function useBucketPolicyEditor(bucketName: string, region: S3Region) {
 
 type BucketPolicyEditor = ReturnType<typeof useBucketPolicyEditor>;
 
+/** The slice of the editor the loaded view reads, so a story can stub it. */
+export type LoadedPolicyEditor = {
+  policy: Pick<BucketPolicyEditor['policy'], 'snapshot' | 'hasConflict' | 'isWriting'>;
+  draft: Pick<
+    BucketPolicyEditor['draft'],
+    'statements' | 'hasUnsavedEdits' | 'isStale' | 'reset' | 'setStatements'
+  >;
+  savePolicy: () => Promise<void>;
+  reloadPolicy: () => Promise<void>;
+};
+
 /** Everything shown once the policy has loaded. */
-function LoadedPolicyView({
+export function LoadedPolicyView({
   editor: { policy, draft, savePolicy, reloadPolicy },
   getMemberName,
   onAdd,
   onEdit,
 }: {
-  editor: BucketPolicyEditor;
+  editor: LoadedPolicyEditor;
   getMemberName: (userId: string) => string | undefined;
   onAdd: () => void;
   onEdit: (index: number) => void;
@@ -239,8 +252,10 @@ function LoadedPolicyView({
               statement={statement}
               index={index}
               getMemberName={getMemberName}
-              onEdit={() => onEdit(index)}
-              onRemove={() => draft.setStatements(draft.statements.filter((_, i) => i !== index))}
+              actions={{
+                onEdit: () => onEdit(index),
+                onRemove: () => draft.setStatements(draft.statements.filter((_, i) => i !== index)),
+              }}
             />
           ))}
         </div>
