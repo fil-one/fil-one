@@ -367,7 +367,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
   async findAccessKeyByName(
     tenantId: string,
     keyName: string,
-    _lookup?: { principalId?: string },
+    _principalId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ) {
     const keys = await this.client.listAccessKeys(tenantId, requestOptions);
