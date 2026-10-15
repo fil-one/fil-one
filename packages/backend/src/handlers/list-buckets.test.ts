@@ -47,11 +47,13 @@ import { baseHandler } from './list-buckets.ts';
 import { buildEvent, membershipFor, NO_MEMBERSHIP } from '../test/lambda-test-utilities.ts';
 import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
 // A degraded region answers with `unavailableRegions` (partial 200) or, when no live region
 // answers at all, a 503 carrying this sentence. Mirrors listBucketsUnavailableMessage.
@@ -166,18 +168,18 @@ describe('list-buckets baseHandler (single-region)', () => {
   it.each([
     [OrgRole.Owner, undefined],
     [OrgRole.Admin, undefined],
-    [OrgRole.Member, 'user-1'],
-    [OrgRole.ReadOnly, 'user-1'],
+    [OrgRole.Member, USER_1],
+    [OrgRole.ReadOnly, USER_1],
   ])('lists buckets for %s scoped to %s', async (role, scopeToMemberId) => {
     aurora.listBuckets.mockResolvedValue([]);
 
     await baseHandler(
       buildEvent({
-        userInfo: { ...USER_INFO, membership: membershipFor('org-1', 'user-1', role) },
+        userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, role) },
       }),
     );
 
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', { scopeToMemberId });
+    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', scopeToMemberId);
   });
 
   it('scopes the listing to the caller when the membership is missing', async () => {
@@ -185,7 +187,7 @@ describe('list-buckets baseHandler (single-region)', () => {
 
     await baseHandler(buildEvent({ userInfo: { ...USER_INFO, membership: NO_MEMBERSHIP } }));
 
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', { scopeToMemberId: 'user-1' });
+    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', USER_1);
   });
 
   it('consults the orchestrator registry to fan out across available regions', async () => {
@@ -310,7 +312,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(body.buckets.map((b: { bucketName: string }) => b.bucketName)).toStrictEqual([
       'fth-bucket',
     ]);
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', { scopeToMemberId: undefined });
+    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', undefined);
     expect(aurora.isTenantReady).not.toHaveBeenCalled();
     expect(aurora.listBuckets).not.toHaveBeenCalled();
   });
@@ -362,8 +364,8 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
         },
       ],
     });
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', { scopeToMemberId: undefined });
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', { scopeToMemberId: undefined });
+    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', undefined);
+    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', undefined);
   });
 
   it('sorts buckets alphabetically by name across regions', async () => {
