@@ -11,6 +11,9 @@ import {
   PolicyValidationError,
 } from './errors.ts';
 
+const ALICE = '00000000-0000-0000-0000-00000000000a';
+const BOB = '00000000-0000-0000-0000-00000000000b';
+
 /**
  * The bucket policy operations put their preconditions in signed headers and
  * read the ETag off the response, both through command middleware, so these
@@ -61,7 +64,7 @@ const buildS3ErrorXml = (code: string, message = code) =>
   `<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code><Message>${message}</Message></Error>`;
 
 const policy: BucketPolicy = {
-  Statement: [{ Effect: 'Allow', Principal: ['alice'], Action: ['s3:GetObject'] }],
+  Statement: [{ Effect: 'Allow', Principal: [ALICE], Action: ['s3:GetObject'] }],
 };
 
 const readRequestBody = (request: CapturedRequest) =>
@@ -161,11 +164,11 @@ describe('PutBucketPolicy', () => {
   it('uses the MalformedPolicy message as the PolicyValidationError message', async () => {
     const s3 = createS3ClientAnswering(
       [],
-      [{ statusCode: 400, body: buildS3ErrorXml('MalformedPolicy', 'unknown principal "bob"') }],
+      [{ statusCode: 400, body: buildS3ErrorXml('MalformedPolicy', `unknown principal "${BOB}"`) }],
     );
     await expect(putBucketPolicy(s3, 'photos', policy, { ifMatch: '"v1"' })).rejects.toMatchObject({
       name: 'PolicyValidationError',
-      message: 'unknown principal "bob"',
+      message: `unknown principal "${BOB}"`,
     });
   });
 });
