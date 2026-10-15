@@ -73,7 +73,9 @@ export type UpdateTenantStatusRequest = {
  * **Bucket-level** — operating on buckets via the S3 Gateway:
  *
  * * `s3:CreateBucket` — create a bucket.
- * * `s3:ListAllMyBuckets` — list the tenant's buckets.
+ * * `s3:ListAllMyBuckets` — list the tenant's buckets. Every
+ * principal-bound key holds it; a bucket policy never grants
+ * or denies it.
  * * `s3:DeleteBucket` — delete a bucket.
  * * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
  * `s3:DeleteBucketPolicy` — read, write and delete a bucket's
