@@ -1,7 +1,8 @@
 import middy from '@middy/core';
-import { supportsBucketPolicies } from '../lib/service-orchestrator.ts';
+import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { supportsIamMethods } from '@filone/shared';
 import type { GetBucketPolicyResponse } from '@filone/shared';
 import {
   policiesUnavailableResponse,
@@ -36,8 +37,8 @@ export async function baseHandler(
   if ('response' in routeTarget) return routeTarget.response;
   const { bucketName, region } = routeTarget.target;
 
-  const orchestrator = getOrchestratorForRegion(region);
-  if (!supportsBucketPolicies(orchestrator)) return policiesUnavailableResponse();
+  if (!supportsIamMethods(region)) return policiesUnavailableResponse();
+  const orchestrator = getOrchestratorForRegion(region) as ServiceOrchestrator;
 
   const { orgId } = getUserInfo(event);
   // isTenantReady rather than ensureTenantReady: a read must not create a tenant.

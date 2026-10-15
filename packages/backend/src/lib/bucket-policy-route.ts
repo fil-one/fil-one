@@ -2,13 +2,13 @@
 // the request names, deciding whether the region serves policies at all, and
 // turning the orchestrator's refusals into the console's answers.
 
-import { supportsBucketPolicies } from './service-orchestrator.ts';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import {
   ApiErrorCode,
   S3_REGION,
   getNamedPrincipals,
   isSupportedRegion,
+  supportsIamMethods,
   type S3Region,
 } from '@filone/shared';
 import type { BucketPolicy, ErrorResponse } from '@filone/shared';
@@ -108,8 +108,9 @@ export async function resolveIamWriteTarget(
   | { orchestrator: ServiceOrchestrator; tenantId: string }
   | { response: APIGatewayProxyStructuredResultV2 }
 > {
-  const orchestrator = getOrchestratorForRegion(region);
-  if (!supportsBucketPolicies(orchestrator)) return { response: policiesUnavailableResponse() };
+  if (!supportsIamMethods(region)) return { response: policiesUnavailableResponse() };
+  // The region table says this orchestrator serves policies; the registry builds it as one.
+  const orchestrator = getOrchestratorForRegion(region) as ServiceOrchestrator;
   if (await isOrgDeleting(orgId, { consistent: true }))
     return { response: accountDeletedResponse() };
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
