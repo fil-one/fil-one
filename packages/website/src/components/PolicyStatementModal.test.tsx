@@ -45,13 +45,25 @@ function renderModalWithRerender(
   seedPermissions(client, role);
   const view = render(
     <QueryClientProvider client={client}>
-      <PolicyStatementModal open onClose={onClose} onSubmit={onSubmit} {...props} />
+      <PolicyStatementModal
+        open
+        bucketName="photos"
+        onClose={onClose}
+        onSubmit={onSubmit}
+        {...props}
+      />
     </QueryClientProvider>,
   );
   const rerender = (next: Partial<React.ComponentProps<typeof PolicyStatementModal>>) =>
     view.rerender(
       <QueryClientProvider client={client}>
-        <PolicyStatementModal open onClose={onClose} onSubmit={onSubmit} {...next} />
+        <PolicyStatementModal
+          open
+          bucketName="photos"
+          onClose={onClose}
+          onSubmit={onSubmit}
+          {...next}
+        />
       </QueryClientProvider>,
     );
   return { onSubmit, onClose, rerender };
