@@ -172,7 +172,7 @@ async function processTenantSetup(
   // request, one principal after another (FIL-1504 asks for a batch route).
   await pMap(
     members,
-    ({ userId }) => syncPrincipal({ client, orchestratorId: id }, orgId, userId),
+    ({ userId }) => syncPrincipal({ client, orchestratorId: id, tenantId: orgId, userId }),
     {
       concurrency: 10,
     },

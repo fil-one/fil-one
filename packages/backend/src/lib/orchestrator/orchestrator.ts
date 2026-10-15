@@ -80,7 +80,6 @@ import { resolveClient } from './client.ts';
 import {
   listPrincipalPolicies,
   removePrincipal,
-  type OrchestratorBackend,
   resolvePrincipalAccess,
   syncPrincipal,
 } from './members.ts';
@@ -544,15 +543,20 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   }
 
   syncMember(tenantId: string, userId: string): Promise<void> {
-    return syncPrincipal(this.backend, tenantId, userId);
+    return syncPrincipal({ client: this.client, orchestratorId: this.id, tenantId, userId });
   }
 
   removeMember(tenantId: string, userId: string): Promise<void> {
-    return removePrincipal(this.backend, tenantId, userId);
+    return removePrincipal({ client: this.client, orchestratorId: this.id, tenantId, userId });
   }
 
   listBucketPoliciesForMember(tenantId: string, userId: string): Promise<MemberBucketPolicy[]> {
-    return listPrincipalPolicies(this.backend, tenantId, userId);
+    return listPrincipalPolicies({
+      client: this.client,
+      orchestratorId: this.id,
+      tenantId,
+      userId,
+    });
   }
 
   resolveMemberAccess(
@@ -560,7 +564,13 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     userId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<MemberBucketAccess[]> {
-    return resolvePrincipalAccess(this.backend, tenantId, userId, requestOptions);
+    return resolvePrincipalAccess({
+      client: this.client,
+      orchestratorId: this.id,
+      tenantId,
+      userId,
+      opts: requestOptions,
+    });
   }
 
   async getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null> {
@@ -585,10 +595,6 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   ): Promise<void> {
     const s3 = await this.getTenantS3Client(tenantId);
     await withWriteRetry(() => s3DeleteBucketPolicy(s3, bucketName, precondition));
-  }
-
-  private get backend(): OrchestratorBackend {
-    return { client: this.client, orchestratorId: this.id };
   }
 
   /** An S3 client signing as the tenant's console key on this region. */

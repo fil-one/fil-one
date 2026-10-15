@@ -19,10 +19,12 @@ import {
 import type { MemberBucketPolicy } from '../member-orchestrator.ts';
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 
-/** The Management API client the principal routes go to, and the orchestrator its errors name. */
-export interface OrchestratorBackend {
+/** A principal route's arguments: the Management API client, the orchestrator its errors name, the tenant and the member. */
+export interface PrincipalRouteArgs {
   client: Client;
   orchestratorId: string;
+  tenantId: string;
+  userId: string;
 }
 import { extractApiMessage } from './api-message.ts';
 import { withWriteRetry } from './policy-writes.ts';
@@ -70,14 +72,15 @@ function formatFailureMessage(orchestratorId: string, what: string, tenantId: st
   return `Failed to ${what} for ${orchestratorId} tenant ${tenantId}`;
 }
 
-export async function syncPrincipal(
-  backend: OrchestratorBackend,
-  tenantId: string,
-  userId: string,
-): Promise<void> {
+export async function syncPrincipal({
+  client,
+  orchestratorId,
+  tenantId,
+  userId,
+}: PrincipalRouteArgs): Promise<void> {
   await withWriteRetry(async () => {
     const result = await putTenantsByTenantIdPrincipalsByPrincipalId({
-      client: backend.client,
+      client: client,
       path: { tenantId, principalId: userId },
       throwOnError: false,
     });
@@ -85,26 +88,27 @@ export async function syncPrincipal(
       throw toPrincipalError(
         result,
         userId,
-        formatFailureMessage(backend.orchestratorId, `create principal "${userId}"`, tenantId),
+        formatFailureMessage(orchestratorId, `create principal "${userId}"`, tenantId),
       );
     }
   });
 }
 
-export async function removePrincipal(
-  backend: OrchestratorBackend,
-  tenantId: string,
-  userId: string,
-): Promise<void> {
+export async function removePrincipal({
+  client,
+  orchestratorId,
+  tenantId,
+  userId,
+}: PrincipalRouteArgs): Promise<void> {
   await withWriteRetry(async () => {
     const result = await deleteTenantsByTenantIdPrincipalsByPrincipalId({
-      client: backend.client,
+      client: client,
       path: { tenantId, principalId: userId },
       throwOnError: false,
     });
     if (result.error) {
       const message = formatFailureMessage(
-        backend.orchestratorId,
+        orchestratorId,
         `remove principal "${userId}"`,
         tenantId,
       );
@@ -118,29 +122,26 @@ export async function removePrincipal(
   });
 }
 
-export async function listPrincipalPolicies(
-  backend: OrchestratorBackend,
-  tenantId: string,
-  userId: string,
-): Promise<MemberBucketPolicy[]> {
+export async function listPrincipalPolicies({
+  client,
+  orchestratorId,
+  tenantId,
+  userId,
+}: PrincipalRouteArgs): Promise<MemberBucketPolicy[]> {
   const result = await getTenantsByTenantIdPrincipalsByPrincipalIdPolicies({
-    client: backend.client,
+    client: client,
     path: { tenantId, principalId: userId },
     throwOnError: false,
   });
   if (isUnknownPrincipal(result)) {
-    warnUnknownPrincipal(backend.orchestratorId, tenantId, userId);
+    warnUnknownPrincipal(orchestratorId, tenantId, userId);
     return [];
   }
   if (result.error || !result.data) {
     throw toPrincipalError(
       result,
       userId,
-      formatFailureMessage(
-        backend.orchestratorId,
-        `list the policies naming "${userId}"`,
-        tenantId,
-      ),
+      formatFailureMessage(orchestratorId, `list the policies naming "${userId}"`, tenantId),
     );
   }
   return result.data.items.map((item) => ({
@@ -149,27 +150,28 @@ export async function listPrincipalPolicies(
   }));
 }
 
-export async function resolvePrincipalAccess(
-  backend: OrchestratorBackend,
-  tenantId: string,
-  userId: string,
-  requestOptions?: OrchestratorRequestOptions,
-): Promise<MemberBucketAccess[]> {
+export async function resolvePrincipalAccess({
+  client,
+  orchestratorId,
+  tenantId,
+  userId,
+  opts,
+}: PrincipalRouteArgs & { opts?: OrchestratorRequestOptions }): Promise<MemberBucketAccess[]> {
   const result = await getTenantsByTenantIdPrincipalsByPrincipalIdAccess({
-    client: backend.client,
+    client: client,
     path: { tenantId, principalId: userId },
     throwOnError: false,
-    signal: requestOptions?.signal,
+    signal: opts?.signal,
   });
   if (isUnknownPrincipal(result)) {
-    warnUnknownPrincipal(backend.orchestratorId, tenantId, userId);
+    warnUnknownPrincipal(orchestratorId, tenantId, userId);
     return [];
   }
   if (result.error || !result.data) {
     throw toPrincipalError(
       result,
       userId,
-      formatFailureMessage(backend.orchestratorId, `resolve the access of "${userId}"`, tenantId),
+      formatFailureMessage(orchestratorId, `resolve the access of "${userId}"`, tenantId),
     );
   }
   return result.data.buckets.map((bucket) => ({
