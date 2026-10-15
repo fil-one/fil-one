@@ -329,7 +329,63 @@ function ObjectsPanel({
 // Component
 // ---------------------------------------------------------------------------
 
-export type BucketDetailPageProps = {
+export /**
+ * The action bar beside the bucket heading. Both actions are hidden while the
+ * bucket is empty: the empty state carries the sole upload CTA then, so two
+ * identical primary actions never compete, and there is nothing to empty. Each
+ * also goes with its permission: emptying the bucket is a bulk
+ * `objects.delete`, uploading is `objects.write`, and a role holding neither
+ * gets no action bar at all. The cloud glyph leads the label, echoing that
+ * empty state's icon.
+ */
+function BucketHeaderActions({
+  bucketName,
+  region,
+  hasObjects,
+  mayDelete,
+  mayUpload,
+  totalObjectCount,
+  onEmptied,
+  onUpload,
+}: {
+  bucketName: string;
+  region: S3Region;
+  hasObjects: boolean;
+  mayDelete: boolean;
+  mayUpload: boolean;
+  totalObjectCount: number | undefined;
+  onEmptied: () => void;
+  onUpload: () => void;
+}) {
+  if (!hasObjects || !(mayDelete || mayUpload)) return null;
+  return (
+    <div className="flex items-center gap-2">
+      {mayDelete && (
+        <EmptyBucketAction
+          bucketName={bucketName}
+          region={region}
+          totalObjectCount={totalObjectCount}
+          onFinished={onEmptied}
+        />
+      )}
+      {mayUpload && (
+        <Button
+          id="upload-object-button"
+          variant="primary"
+          size="sm"
+          icon={CloudArrowUpIcon}
+          iconSize={18}
+          iconPosition="left"
+          onClick={onUpload}
+        >
+          Upload object
+        </Button>
+      )}
+    </div>
+  );
+}
+
+type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
   region: S3Region;
@@ -439,44 +495,22 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         <Heading tag="h1" size="xl">
           {bucketName}
         </Heading>
-        {/* Both hidden while the bucket is empty: the empty state carries the
-            sole upload CTA then, so two identical primary actions never compete,
-            and there is nothing to empty. Each also goes with its permission:
-            emptying the bucket is a bulk `objects.delete`, uploading is
-            `objects.write`, and a role holding neither gets no action bar at
-            all. The cloud glyph leads the label, echoing that empty state's
-            icon. */}
-        {versions.length > 0 && (mayDelete || mayUpload) && (
-          <div className="flex items-center gap-2">
-            {mayDelete && (
-              <EmptyBucketAction
-                bucketName={bucketName}
-                region={region}
-                totalObjectCount={analyticsData?.objectCount}
-                onFinished={refreshAfterBulkDelete}
-              />
-            )}
-            {mayUpload && (
-              <Button
-                id="upload-object-button"
-                variant="primary"
-                size="sm"
-                icon={CloudArrowUpIcon}
-                iconSize={18}
-                iconPosition="left"
-                onClick={() =>
-                  void navigate({
-                    to: '/buckets/$bucketName/upload',
-                    params: { bucketName },
-                    search: { region },
-                  })
-                }
-              >
-                Upload object
-              </Button>
-            )}
-          </div>
-        )}
+        <BucketHeaderActions
+          bucketName={bucketName}
+          region={region}
+          hasObjects={versions.length > 0}
+          mayDelete={mayDelete}
+          mayUpload={mayUpload}
+          totalObjectCount={analyticsData?.objectCount}
+          onEmptied={refreshAfterBulkDelete}
+          onUpload={() =>
+            void navigate({
+              to: '/buckets/$bucketName/upload',
+              params: { bucketName },
+              search: { region },
+            })
+          }
+        />
       </div>
 
       {bucketQuery.isPending ? (
