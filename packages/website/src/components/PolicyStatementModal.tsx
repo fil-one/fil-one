@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PolicyStatement } from '@filone/shared';
 import { POLICY_SID_MAX_LENGTH, POLICY_WILDCARD_PRINCIPAL } from '@filone/shared';
 
@@ -38,6 +38,37 @@ export function isDenyForEveryone(
   return statement.Effect === 'Deny' && statement.Principal === POLICY_WILDCARD_PRINCIPAL;
 }
 
+const UNTOUCHED = { principal: false, action: false };
+
+/**
+ * The statement being edited, reset each time the modal opens, and which of
+ * its two required fields the user has touched: an empty field is an error
+ * only once they have been there, so a fresh Add form opens without complaints.
+ */
+function useOpenedStatement(open: boolean, initial: PolicyStatement | undefined) {
+  const [statement, setStatement] = useState<PolicyStatement>(initial ?? EMPTY_STATEMENT);
+  const [touched, setTouched] = useState(UNTOUCHED);
+  useEffect(() => {
+    if (open) {
+      setStatement(initial ?? EMPTY_STATEMENT);
+      setTouched(UNTOUCHED);
+    }
+  }, [open, initial]);
+  return {
+    statement,
+    setStatement,
+    touched,
+    setPrincipal: (principal: PolicyStatement['Principal']) => {
+      setTouched((t) => ({ ...t, principal: true }));
+      setStatement((s) => ({ ...s, Principal: principal }));
+    },
+    setAction: (action: PolicyStatement['Action']) => {
+      setTouched((t) => ({ ...t, action: true }));
+      setStatement((s) => ({ ...s, Action: action }));
+    },
+  };
+}
+
 /**
  * Add or edit one statement. The result goes to the tab's draft; nothing is
  * written until the policy is saved as a whole.
@@ -48,12 +79,10 @@ export function PolicyStatementModal({
   initial,
   onSubmit,
 }: PolicyStatementModalProps) {
-  const [statement, setStatement] = useState<PolicyStatement>(initial ?? EMPTY_STATEMENT);
-  // Reset the draft each time the modal opens, in a layout effect so it runs
-  // before the action fields' effect removes actions the caller cannot grant.
-  useLayoutEffect(() => {
-    if (open) setStatement(initial ?? EMPTY_STATEMENT);
-  }, [open, initial]);
+  const { statement, setStatement, touched, setPrincipal, setAction } = useOpenedStatement(
+    open,
+    initial,
+  );
 
   const hasNoPrincipal =
     statement.Principal !== POLICY_WILDCARD_PRINCIPAL && statement.Principal.length === 0;
@@ -105,12 +134,13 @@ export function PolicyStatementModal({
 
           <FormField
             label="Who does this apply to?"
-            error={hasNoPrincipal ? 'Pick at least one member, or everyone.' : undefined}
+            error={
+              touched.principal && hasNoPrincipal
+                ? 'Pick at least one member, or everyone.'
+                : undefined
+            }
           >
-            <PolicyPrincipalFields
-              value={statement.Principal}
-              onChange={(principal) => setStatement({ ...statement, Principal: principal })}
-            />
+            <PolicyPrincipalFields value={statement.Principal} onChange={setPrincipal} />
           </FormField>
 
           {isDenyForEveryone(statement) && (
@@ -124,12 +154,9 @@ export function PolicyStatementModal({
 
           <FormField
             label="What can they do?"
-            error={hasNoAction ? 'Pick at least one action.' : undefined}
+            error={touched.action && hasNoAction ? 'Pick at least one action.' : undefined}
           >
-            <PolicyActionFields
-              value={statement.Action}
-              onChange={(action) => setStatement({ ...statement, Action: action })}
-            />
+            <PolicyActionFields value={statement.Action} onChange={setAction} />
           </FormField>
         </div>
       </ModalBody>

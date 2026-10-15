@@ -29,6 +29,28 @@ function renderModal(
   return { onSubmit, onClose };
 }
 
+function renderModalWithRerender(
+  props: Partial<React.ComponentProps<typeof PolicyStatementModal>> = {},
+  role: OrgRole = OrgRole.Owner,
+) {
+  const onSubmit = vi.fn();
+  const onClose = vi.fn();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  seedPermissions(client, role);
+  const view = render(
+    <QueryClientProvider client={client}>
+      <PolicyStatementModal open onClose={onClose} onSubmit={onSubmit} {...props} />
+    </QueryClientProvider>,
+  );
+  const rerender = (next: Partial<React.ComponentProps<typeof PolicyStatementModal>>) =>
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <PolicyStatementModal open onClose={onClose} onSubmit={onSubmit} {...next} />
+      </QueryClientProvider>,
+    );
+  return { onSubmit, onClose, rerender };
+}
+
 function pickEveryoneAndReadObjects() {
   fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
   fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
@@ -47,16 +69,62 @@ describe('PolicyStatementModal', () => {
     expect(submit).toBeEnabled();
   });
 
-  it('shows the missing principal error', () => {
+  it('shows no error before the user touches a field', () => {
     renderModal();
+
+    expect(screen.queryByText('Pick at least one member, or everyone.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pick at least one action.')).not.toBeInTheDocument();
+  });
+
+  it('shows the missing principal error once the principal field was touched', () => {
+    renderModal();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Everyone in this organization' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Specific members' }));
 
     expect(screen.getByText('Pick at least one member, or everyone.')).toBeInTheDocument();
   });
 
-  it('shows the missing action error', () => {
+  it('shows the missing action error once an action was picked and dropped', () => {
     renderModal();
 
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Read objects' }));
+
     expect(screen.getByText('Pick at least one action.')).toBeInTheDocument();
+  });
+
+  it('forgets the edits when the modal closes and reopens', () => {
+    const initial: PolicyStatement = {
+      Sid: 'team',
+      Effect: 'Allow',
+      Principal: '*',
+      Action: ['s3:GetObject'],
+    };
+    const { rerender } = renderModalWithRerender({ initial });
+    fireEvent.change(screen.getByLabelText('Name (optional)'), { target: { value: 'edited' } });
+    expect(screen.getByLabelText('Name (optional)')).toHaveValue('edited');
+
+    rerender({ initial, open: false });
+    rerender({ initial, open: true });
+
+    expect(screen.getByLabelText('Name (optional)')).toHaveValue('team');
+  });
+
+  it('opens an empty Add form after an edit', () => {
+    const initial: PolicyStatement = {
+      Sid: 'team',
+      Effect: 'Allow',
+      Principal: '*',
+      Action: ['s3:GetObject'],
+    };
+    const { rerender } = renderModalWithRerender({ initial });
+
+    rerender({ initial, open: false });
+    rerender({ initial: undefined, open: true });
+
+    expect(screen.getByLabelText('Name (optional)')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Add statement' })).toBeDisabled();
   });
 
   it('submits the statement and closes', () => {
@@ -127,7 +195,7 @@ describe('PolicyStatementModal', () => {
     expect(screen.getByRole('button', { name: 'Add statement' })).toBeEnabled();
   });
 
-  it('drops retention writes an Admin cannot see when saving straight away', () => {
+  it('keeps the retention writes an Owner granted when an Admin saves', () => {
     const initial: PolicyStatement = {
       Effect: 'Allow',
       Principal: ['a'],
@@ -135,10 +203,20 @@ describe('PolicyStatementModal', () => {
     };
     const { onSubmit } = renderModal({ initial }, OrgRole.Admin);
 
-    expect(screen.queryByTestId('policy-action-s3:PutObjectRetention')).not.toBeInTheDocument();
+    expect(screen.getByTestId('policy-action-s3:PutObjectRetention')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Save statement' }));
 
-    expect(onSubmit).toHaveBeenCalledWith({ ...initial, Action: ['s3:GetObject'] });
+    expect(onSubmit).toHaveBeenCalledWith(initial);
+  });
+
+  it('offers an Admin no retention write to add', () => {
+    renderModal(
+      { initial: { Effect: 'Allow', Principal: ['a'], Action: ['s3:GetObject'] } },
+      OrgRole.Admin,
+    );
+
+    expect(screen.queryByTestId('policy-action-s3:PutObjectRetention')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('policy-action-s3:PutObjectLegalHold')).not.toBeInTheDocument();
   });
 
   it('warns as soon as a deny names everyone', () => {
