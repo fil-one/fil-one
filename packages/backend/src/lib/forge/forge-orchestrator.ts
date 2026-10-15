@@ -49,6 +49,6 @@ export function createForgeOrchestrator(
     stage,
     s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(region, stage),
     s3PresignEndpointUrl: s3.presignEndpointUrl,
-    api: { baseUrl: api.baseUrl, accessToken: api.accessToken },
+    api,
   });
 }
