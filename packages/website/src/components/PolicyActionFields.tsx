@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import type { PolicyAction, PolicyActionOrWildcard } from '@filone/shared';
 import {
   POLICY_ACTIONS,
@@ -22,21 +21,20 @@ export type PolicyActionFieldsProps = {
  * The actions a statement carries, grouped the way the card shows them, with
  * an "all actions" row that selects `s3:*`.
  *
- * Only callers with `privileged.grant` can add the retention writes or `s3:*`.
- * They are removed from a selection the caller cannot grant.
+ * Only a caller with `privileged.grant` can add the retention writes or
+ * `s3:*`. Anyone else keeps the ones the statement already carries and may
+ * remove them, which is the rule the save enforces: an Admin's edit keeps the
+ * grants an Owner wrote and adds none.
  */
 export function PolicyActionFields({ value, onChange }: PolicyActionFieldsProps) {
-  const { has, isPending, isError } = usePermissions();
+  const { has } = usePermissions();
   const canGrantRetention = has('privileged.grant');
+  const isPrivileged = (action: PolicyActionOrWildcard) =>
+    action === POLICY_ACTION_WILDCARD || RETENTION_WRITE_ACTIONS.includes(action);
+  // Offered to this caller: every unprivileged action, plus the privileged ones
+  // they may grant or the statement already carries.
   const canPickAction = (action: PolicyActionOrWildcard) =>
-    canGrantRetention ||
-    (action !== POLICY_ACTION_WILDCARD && !RETENTION_WRITE_ACTIONS.includes(action));
-
-  const arePermissionsLoaded = !isPending && !isError;
-  const allowedActions = value.filter(canPickAction);
-  useEffect(() => {
-    if (arePermissionsLoaded && allowedActions.length !== value.length) onChange(allowedActions);
-  });
+    canGrantRetention || !isPrivileged(action) || value.includes(action);
 
   const isWildcardSelected = value.includes(POLICY_ACTION_WILDCARD);
   const selectedActions = new Set(value);
@@ -58,7 +56,7 @@ export function PolicyActionFields({ value, onChange }: PolicyActionFieldsProps)
 
   return (
     <div className="flex flex-col gap-4" data-testid="policy-actions">
-      {canGrantRetention && (
+      {canPickAction(POLICY_ACTION_WILDCARD) && (
         <CheckboxRow
           testId="policy-action-all"
           label="All actions"

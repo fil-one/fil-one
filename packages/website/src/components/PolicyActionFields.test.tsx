@@ -52,13 +52,56 @@ describe('PolicyActionFields', () => {
     expect(screen.getByRole('checkbox', { name: 'Read retention settings' })).toBeInTheDocument();
   });
 
-  it("removes retention writes from an Admin's selection", () => {
+  it("keeps the retention writes an Admin's selection already carries and offers removing them", () => {
+    const onChange = renderFields(['s3:GetObject', 's3:PutObjectRetention'], OrgRole.Admin);
+
+    expect(onChange).not.toHaveBeenCalled();
+    const retention = screen.getByTestId('policy-action-s3:PutObjectRetention');
+    expect(within(retention).getByRole('checkbox')).toBeChecked();
+
+    fireEvent.click(retention);
+    expect(onChange).toHaveBeenCalledWith(['s3:GetObject']);
+  });
+
+  it('offers an Admin no retention write their selection lacks', () => {
+    renderFields(['s3:GetObject'], OrgRole.Admin);
+
+    expect(screen.queryByTestId('policy-action-s3:PutObjectRetention')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('policy-action-s3:PutObjectLegalHold')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('policy-action-all')).not.toBeInTheDocument();
+  });
+
+  it("keeps s3:* an Admin's selection already carries", () => {
+    const onChange = renderFields(['s3:*'], OrgRole.Admin);
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(within(screen.getByTestId('policy-action-all')).getByRole('checkbox')).toBeChecked();
+  });
+
+  it('gives an Admin who picks every offered action the list, never s3:*', () => {
+    const offered = POLICY_ACTIONS.filter(
+      (action) => action !== 's3:PutObjectRetention' && action !== 's3:PutObjectLegalHold',
+    );
+    const lastAction = offered[offered.length - 1]!;
     const onChange = renderFields(
-      ['s3:GetObject', 's3:PutObjectRetention', 's3:PutObjectLegalHold'],
+      offered.filter((action) => action !== lastAction),
       OrgRole.Admin,
     );
 
-    expect(onChange).toHaveBeenCalledWith(['s3:GetObject']);
+    fireEvent.click(screen.getByTestId(`policy-action-${lastAction}`));
+    expect(onChange).toHaveBeenCalledWith(offered);
+  });
+
+  it('changes nothing while the permissions are still loading', () => {
+    const onChange = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <PolicyActionFields value={['s3:GetObject', 's3:PutObjectRetention']} onChange={onChange} />
+      </QueryClientProvider>,
+    );
+
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('selects s3:* when all actions is clicked', () => {
