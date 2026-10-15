@@ -6,6 +6,8 @@ vi.mock('../lib/service-orchestrator-registry.ts', async () => {
   const fixture = await import('../test/bucket-policy-fixture.ts');
   return { getOrchestratorForRegion: fixture.getOrchestratorForRegion };
 });
+const mockListMembers = vi.fn(async (): Promise<Array<{ userId: string }>> => []);
+vi.mock('../lib/org-membership.ts', () => ({ listMembers: () => mockListMembers() }));
 vi.mock('../lib/org-profile.ts', async () => {
   const fixture = await import('../test/bucket-policy-fixture.ts');
   return {
@@ -226,6 +228,50 @@ describe('put-bucket-policy baseHandler', () => {
     const result = await baseHandler(buildPutEvent(grantRetentionToUser, { role: OrgRole.Owner }));
 
     expect(result.statusCode).toBe(204);
+  });
+
+  it('registers the current members a document names before writing it', async () => {
+    mockListMembers.mockResolvedValue([{ userId: USER_ID }, { userId: MEMBER_ID }]);
+    // MEMBER_ID is a member the storage system has not met.
+    const policy: BucketPolicy = {
+      Statement: [
+        grantGetObjectToUser.Statement[0]!,
+        { Effect: 'Allow', Principal: [MEMBER_ID], Action: ['s3:GetObject'] },
+      ],
+    };
+
+    const result = await baseHandler(buildPutEvent(policy));
+
+    expect(result.statusCode).toBe(204);
+    expect(
+      iam.calls.filter((call) => call.method === 'syncMember').map((call) => call.target),
+    ).toStrictEqual([USER_ID, MEMBER_ID]);
+  });
+
+  it('registers nobody for a removed member a document still names', async () => {
+    mockListMembers.mockResolvedValue([{ userId: USER_ID }]);
+    const policy: BucketPolicy = {
+      Statement: [{ Effect: 'Allow', Principal: [MEMBER_ID], Action: ['s3:GetObject'] }],
+    };
+
+    const result = await baseHandler(buildPutEvent(policy));
+
+    expect(result.statusCode).toBe(400);
+    expect(
+      iam.calls.some((call) => call.method === 'syncMember' && call.target === MEMBER_ID),
+    ).toBe(false);
+  });
+
+  it('registers nobody for a document naming everyone', async () => {
+    mockListMembers.mockResolvedValue([{ userId: USER_ID }]);
+    const policy: BucketPolicy = {
+      Statement: [{ Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] }],
+    };
+
+    const result = await baseHandler(buildPutEvent(policy));
+
+    expect(result.statusCode).toBe(204);
+    expect(iam.calls.some((call) => call.method === 'syncMember')).toBe(false);
   });
 
   it('lets an Admin add a statement beside the Owners’ s3:* statement', async () => {

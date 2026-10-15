@@ -16,6 +16,7 @@ import {
   countNamedPrincipals,
   parsePreconditionHeaders,
   resolveIamWriteTarget,
+  syncNamedMembers,
   resolvePolicyRouteTarget,
   toPolicyErrorResponse,
 } from '../lib/bucket-policy-route.ts';
@@ -97,6 +98,8 @@ export async function baseHandler(
     if ('response' in retentionCheck) return retentionCheck.response;
     precondition ??= retentionCheck.pinnedPrecondition;
   }
+
+  await syncNamedMembers(orchestrator, tenantId, orgId, policy);
 
   // The intent names the kind of write the caller asked for, so the two halves
   // agree whatever the vendor answers.
