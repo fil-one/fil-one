@@ -26,8 +26,10 @@ vi.mock('./api.js', async () => ({
 
 import { useBucketPolicy } from './use-bucket-policy.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 const policy: BucketPolicy = {
-  Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
+  Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: ['s3:GetObject'] }],
 };
 
 function renderUseBucketPolicy(region: S3Region = S3Region.UsEast9, role: OrgRole = OrgRole.Owner) {

@@ -15,8 +15,10 @@ import {
   putBucketPolicy,
 } from './bucket-policy-api.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 const policy: BucketPolicy = {
-  Statement: [{ Effect: 'Allow', Principal: ['user-1'], Action: ['s3:GetObject'] }],
+  Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: ['s3:GetObject'] }],
 };
 const createApiError = (status: number, code?: string) =>
   Object.assign(new Error('refused'), { status, ...(code ? { code } : {}) });
