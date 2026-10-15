@@ -12,7 +12,9 @@ import { buildPermissions } from './permissions.ts';
  * A principal-bound key sends only its name, `principalId` and expiry; a
  * service key sends its permissions and bucket list.
  */
-export function buildAccessKeyBody(keyOpts: IssueAccessKeyOpts): CreateAccessKeyRequest {
+export function buildIssueAccessKeyRequestBody(
+  keyOpts: IssueAccessKeyOpts,
+): CreateAccessKeyRequest {
   const expiresAt = keyOpts.expiresAt ?? null;
   if ('principalId' in keyOpts) {
     // The type forbids these; a non-literal object can still carry them, and

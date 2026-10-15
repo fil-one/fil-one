@@ -20,12 +20,6 @@ import type { MemberBucketPolicy } from '../member-orchestrator.ts';
 import { extractApiMessage } from './api-message.ts';
 import { withWriteRetry } from './policy-writes.ts';
 
-/** The Management API the principal routes go to, and the orchestrator its errors name. */
-export interface PrincipalRoutes {
-  client: Client;
-  orchestratorId: string;
-}
-
 /** What the generated SDK hands back; only the fields read here. */
 interface SdkResult<T> {
   data?: T;
@@ -64,7 +58,8 @@ function formatFailureMessage(orchestratorId: string, what: string, tenantId: st
 }
 
 export async function syncPrincipal(
-  { client, orchestratorId }: PrincipalRoutes,
+  client: Client,
+  orchestratorId: string,
   tenantId: string,
   userId: string,
 ): Promise<void> {
@@ -85,7 +80,8 @@ export async function syncPrincipal(
 }
 
 export async function removePrincipal(
-  { client, orchestratorId }: PrincipalRoutes,
+  client: Client,
+  orchestratorId: string,
   tenantId: string,
   userId: string,
 ): Promise<void> {
@@ -112,7 +108,8 @@ export async function removePrincipal(
 }
 
 export async function listPrincipalPolicies(
-  { client, orchestratorId }: PrincipalRoutes,
+  client: Client,
+  orchestratorId: string,
   tenantId: string,
   userId: string,
 ): Promise<MemberBucketPolicy[]> {
@@ -135,7 +132,8 @@ export async function listPrincipalPolicies(
 }
 
 export async function resolvePrincipalAccess(
-  { client, orchestratorId }: PrincipalRoutes,
+  client: Client,
+  orchestratorId: string,
   tenantId: string,
   userId: string,
 ): Promise<MemberBucketAccess[]> {

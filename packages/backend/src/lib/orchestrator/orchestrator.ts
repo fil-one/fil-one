@@ -20,7 +20,7 @@ import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
 } from './tenant-setup.ts';
-import { buildAccessKeyBody, describeAccessKeyBody } from './access-key-body.ts';
+import { buildIssueAccessKeyRequestBody, describeAccessKeyBody } from './access-key-body.ts';
 import { extractApiCode, extractApiMessage } from './api-message.ts';
 import {
   AccessKeyAlreadyExistsError,
@@ -78,7 +78,6 @@ import {
 import { resolveClient } from './client.ts';
 import {
   listPrincipalPolicies,
-  type PrincipalRoutes,
   removePrincipal,
   resolvePrincipalAccess,
   syncPrincipal,
@@ -371,7 +370,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     keyOpts: IssueAccessKeyOpts,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
-    const body = buildAccessKeyBody(keyOpts);
+    const body = buildIssueAccessKeyRequestBody(keyOpts);
     console.log(
       `Creating ${this.id} access key "${body.name}" for tenant ${tenantId} ${describeAccessKeyBody(body)}`,
     );
@@ -499,19 +498,19 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   }
 
   syncMember(tenantId: string, userId: string): Promise<void> {
-    return syncPrincipal(this.principalRoutes, tenantId, userId);
+    return syncPrincipal(this.client, this.id, tenantId, userId);
   }
 
   removeMember(tenantId: string, userId: string): Promise<void> {
-    return removePrincipal(this.principalRoutes, tenantId, userId);
+    return removePrincipal(this.client, this.id, tenantId, userId);
   }
 
   listBucketPoliciesForMember(tenantId: string, userId: string): Promise<MemberBucketPolicy[]> {
-    return listPrincipalPolicies(this.principalRoutes, tenantId, userId);
+    return listPrincipalPolicies(this.client, this.id, tenantId, userId);
   }
 
   resolveMemberAccess(tenantId: string, userId: string): Promise<MemberBucketAccess[]> {
-    return resolvePrincipalAccess(this.principalRoutes, tenantId, userId);
+    return resolvePrincipalAccess(this.client, this.id, tenantId, userId);
   }
 
   async getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null> {
@@ -536,10 +535,6 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   ): Promise<void> {
     const s3 = await this.getTenantS3Client(tenantId);
     await withWriteRetry(() => s3DeleteBucketPolicy(s3, bucketName, precondition));
-  }
-
-  private get principalRoutes(): PrincipalRoutes {
-    return { client: this.client, orchestratorId: this.id };
   }
 
   /** An S3 client signing as the tenant's console key on this region. */
