@@ -307,7 +307,11 @@ describe('set-bucket-rag-enablement member scope on an iam region', () => {
     iam.seedPolicy(tenantFor('forge', 'org-1'), 'my-bucket', {
       Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: actions }],
     });
-    const orchestrator = fakeOrchestrator('forge', { bucket: BUCKET, iam });
+    const orchestrator = fakeOrchestrator('forge', {
+      bucket: BUCKET,
+      iam,
+      region: S3Region.UsEast9,
+    });
     stubMemberScopedGetBucket(orchestrator, iam, BUCKET);
     return orchestrator;
   }

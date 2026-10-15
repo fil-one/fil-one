@@ -775,7 +775,7 @@ describe('getBucket for a member', () => {
   });
 
   it('rejects rather than reading when the access lookup fails', async () => {
-    mockGetPrincipalAccess.mockReturnValue(fail(503));
+    mockGetPrincipalAccess.mockReturnValue(fail(400));
 
     await expect(orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).rejects.toThrow(
       new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),

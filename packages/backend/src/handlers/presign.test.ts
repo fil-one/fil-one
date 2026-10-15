@@ -557,6 +557,8 @@ describe('presign baseHandler', () => {
     const mockResolveMemberAccess = vi.fn();
     const iamOrchestrator = {
       ...mockOrchestrator,
+      // The region table says us-east-9 serves the `iam` access model.
+      region: 'us-east-9',
       ...delegateIamMethods(new FakeIamOrchestrator()),
       resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args),
     };
