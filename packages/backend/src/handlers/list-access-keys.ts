@@ -2,13 +2,13 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
-import { getEffectiveActions, isSupportedRegion } from '@filone/shared';
+import { getEffectiveActions, isSupportedRegion, supportsIamMethods } from '@filone/shared';
 import { getAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import { supportsBucketPolicies } from '../lib/service-orchestrator.ts';
+import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -63,12 +63,13 @@ async function filterKeysWithBucketAccess(
       ? getOrchestratorForRegion(region)
       : undefined;
   // No `iam` region to ask, so no bucket policy can give a principal-bound key access.
-  if (!orchestrator || !supportsBucketPolicies(orchestrator))
+  if (!orchestrator || !supportsIamMethods(orchestrator.region))
     return keys.filter((key) => key.type !== 'principal');
+  const iam = orchestrator as ServiceOrchestrator;
   // Uses `isTenantReady`: a list must not create a tenant.
-  const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
+  const tenantId = iam.isTenantReady(await getOrgProfile(orgId));
   // No tenant or no policy on the bucket: no principal-bound key has access.
-  const stored = tenantId ? await orchestrator.getBucketPolicy(tenantId, bucketName) : null;
+  const stored = tenantId ? await iam.getBucketPolicy(tenantId, bucketName) : null;
   return keys.filter(
     (key) =>
       key.type !== 'principal' ||

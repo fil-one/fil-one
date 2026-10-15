@@ -7,6 +7,7 @@ import {
   S3Region,
   excessKeyPermissions,
   isSupportedRegion,
+  supportsIamMethods,
 } from '@filone/shared';
 import type {
   CreateAccessKeyRequest,
@@ -29,12 +30,11 @@ import type { KeyMinter, MintedKey } from '../lib/key-mint.ts';
 import { listOrgAccessKeys } from '../lib/member-keys.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import { supportsIamMethods } from '../lib/network-access-model.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
-import {
-  supportsBucketPolicies,
-  type IssuedAccessKey,
-  type RegionOrchestrator,
+import type {
+  IssuedAccessKey,
+  RegionOrchestrator,
+  ServiceOrchestrator,
 } from '../lib/service-orchestrator.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
@@ -103,8 +103,8 @@ export async function baseHandler(
   // the intent, because it mints nothing: a failure here leaves no credential
   // anywhere, and an intent left dangling by it would read to an operator as a
   // possible orphan key.
-  if (plan.type === 'principal' && supportsBucketPolicies(orchestrator)) {
-    await orchestrator.syncMember(tenantId, userId);
+  if (plan.type === 'principal' && supportsIamMethods(region)) {
+    await (orchestrator as ServiceOrchestrator).syncMember(tenantId, userId);
   }
 
   // Fail-closed, and before the vendor: the credential is created at the storage
@@ -238,7 +238,7 @@ function checkServiceKeyAuthority(
   orchestrator: RegionOrchestrator,
 ): APIGatewayProxyStructuredResultV2 | undefined {
   const denied = checkCreatorAuthority(event, request);
-  if (denied || !supportsBucketPolicies(orchestrator)) return denied;
+  if (denied || !supportsIamMethods(orchestrator.region)) return denied;
   return requirePermission(
     event,
     'keys.create_service',
