@@ -1387,7 +1387,8 @@ describe('fthOrchestrator signal forwarding', () => {
       fthOrchestrator.createBucket(fthClientId, { bucketName: 'b' }, { signal }),
     deleteBucket: (signal: AbortSignal) =>
       fthOrchestrator.deleteBucket(fthClientId, 'b', { signal }),
-    listBuckets: (signal: AbortSignal) => fthOrchestrator.listBuckets(fthClientId, undefined, { signal }),
+    listBuckets: (signal: AbortSignal) =>
+      fthOrchestrator.listBuckets(fthClientId, undefined, { signal }),
     getBucket: (signal: AbortSignal) => fthOrchestrator.getBucket(fthClientId, 'b', { signal }),
   };
 
