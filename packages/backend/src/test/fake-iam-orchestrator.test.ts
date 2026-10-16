@@ -32,6 +32,22 @@ describe('FakeIamOrchestrator policy writes', () => {
     await expect(fake.getBucketPolicy('t1', 'photos')).resolves.toStrictEqual({ policy, etag });
   });
 
+  it('removeMember keeps an everyone statement and drops the member from a named one', async () => {
+    const fake = new FakeIamOrchestrator();
+    await fake.syncMember('t1', 'u1');
+    await fake.syncMember('t1', 'u2');
+    const readByEveryone = statement('photos', 'Allow', '*', ['s3:GetObject']);
+    fake.seedPolicy(
+      't1',
+      'photos',
+      policyOf(readByEveryone, statement('photos', 'Allow', ['u1', 'u2'], ['s3:PutObject'])),
+    );
+    await fake.removeMember('t1', 'u1');
+    await expect(fake.getBucketPolicy('t1', 'photos')).resolves.toMatchObject({
+      policy: policyOf(readByEveryone, statement('photos', 'Allow', ['u2'], ['s3:PutObject'])),
+    });
+  });
+
   it('putBucketPolicy throws PolicyValidationError when a statement names an unknown principal', async () => {
     const fake = new FakeIamOrchestrator();
     const policy = policyOf(statement('photos', 'Allow', ['ghost'], ['s3:GetObject']));
