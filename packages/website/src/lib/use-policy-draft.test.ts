@@ -1,29 +1,36 @@
 import { describe, it, expect } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
+import { POLICY_VERSION, buildStatement } from '@filone/shared';
 import type { PolicyStatement } from '@filone/shared';
 
 import { usePolicyDraft } from './use-policy-draft.js';
 import type { BucketPolicySnapshot } from './bucket-policy-api.js';
 
-const grantGetObjectToPrincipalA: PolicyStatement = {
-  Effect: 'Allow',
-  Principal: ['a'],
-  Action: ['s3:GetObject'],
-};
-const grantPutObjectToPrincipalB: PolicyStatement = {
-  Effect: 'Allow',
-  Principal: ['b'],
-  Action: ['s3:PutObject'],
-};
+const grantGetObjectToPrincipalA = buildStatement({
+  bucketName: 'photos',
+  principal: ['a'],
+  actions: ['s3:GetObject'],
+});
+const grantPutObjectToPrincipalB = buildStatement({
+  bucketName: 'photos',
+  principal: ['b'],
+  actions: ['s3:PutObject'],
+});
 const readOnlySnapshot: BucketPolicySnapshot = {
-  policy: { Statement: [grantGetObjectToPrincipalA] },
+  policy: { Version: POLICY_VERSION, Statement: [grantGetObjectToPrincipalA] },
   etag: '"v1"',
 };
 const readWriteSnapshot: BucketPolicySnapshot = {
-  policy: { Statement: [grantGetObjectToPrincipalA, grantPutObjectToPrincipalB] },
+  policy: {
+    Version: POLICY_VERSION,
+    Statement: [grantGetObjectToPrincipalA, grantPutObjectToPrincipalB],
+  },
   etag: '"v2"',
 };
-const emptySnapshot: BucketPolicySnapshot = { policy: { Statement: [] }, etag: '"v3"' };
+const emptySnapshot: BucketPolicySnapshot = {
+  policy: { Version: POLICY_VERSION, Statement: [] },
+  etag: '"v3"',
+};
 
 function renderWithSnapshot(snapshot: BucketPolicySnapshot | null) {
   return renderHook(

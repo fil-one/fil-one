@@ -1,19 +1,20 @@
 import { test, expect, type Page } from '@playwright/test';
-import type { PolicyStatement } from '@filone/shared';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
+  allow,
+  buildBucketPolicy,
+  buildCreatorStatement,
+  grantAllToOwner,
+  chooseStatementMenuAction,
+  deny,
+  emptyAndDeleteBucket,
+  generateBucketName,
+  getCredentials,
+  toCanonicalPolicy,
   ConsoleApi,
   REGION,
   STORAGE_STATE,
-  buildCreatorStatement,
-  allow,
-  getCredentials,
-  deny,
-  emptyAndDeleteBucket,
-  grantAllToOwner,
-  generateBucketName,
-  toCanonicalPolicy,
-  chooseStatementMenuAction,
+  type UnboundStatement,
 } from './policy.util.ts';
 
 // Granting a retention or legal-hold write is `privileged.grant`, which only an
@@ -57,8 +58,8 @@ test.afterAll(async () => {
 /** The policy a bucket starts with here: the owner created it. */
 const getStoredStatements = () => [buildCreatorStatement(ownerId)];
 
-async function putPolicyAs(api: ConsoleApi, statements: PolicyStatement[], etag?: string) {
-  const res = await api.putPolicy(bucket, { policy: { Statement: statements }, etag });
+async function putPolicyAs(api: ConsoleApi, statements: UnboundStatement[], etag?: string) {
+  const res = await api.putPolicy(bucket, { policy: buildBucketPolicy(bucket, statements), etag });
   // A write that succeeds answers 204 with no body.
   const text = await res.text();
   return {
@@ -107,7 +108,7 @@ test.describe('through the API', () => {
     const statement = [ownerAll, allow([memberId], ['s3:ListBucket'], 'team')];
     expect(await putPolicyAs(admin, statement, etag)).toEqual({ status: 204, code: undefined });
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-      toCanonicalPolicy({ Statement: statement }),
+      toCanonicalPolicy(buildBucketPolicy(bucket, statement)),
     );
   });
 
@@ -128,7 +129,7 @@ test.describe('through the API', () => {
       await putPolicyAs(admin, getStoredStatements(), (await admin.readPolicy(bucket)).etag),
     ).toEqual({ status: 204, code: undefined });
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-      toCanonicalPolicy({ Statement: getStoredStatements() }),
+      toCanonicalPolicy(buildBucketPolicy(bucket, getStoredStatements())),
     );
   });
 
@@ -170,9 +171,10 @@ test.describe('through the API', () => {
   test('P7. an admin writing without a precondition meets the same cap', async () => {
     const before = await owner.readPolicy(bucket);
     const res = await admin.putPolicy(bucket, {
-      policy: {
-        Statement: [...getStoredStatements(), allow([memberId], ['s3:PutObjectRetention'])],
-      },
+      policy: buildBucketPolicy(bucket, [
+        ...getStoredStatements(),
+        allow([memberId], ['s3:PutObjectRetention']),
+      ]),
       unconditional: true,
     });
     expect({ status: res.status(), code: (await res.json()).code }).toEqual({
@@ -239,9 +241,12 @@ test.describe('in the editor', () => {
       await expect(page.getByTestId('policy-save-bar')).toBeHidden();
 
       expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-        toCanonicalPolicy({
-          Statement: [...getStoredStatements(), allow([memberId], ['s3:PutObjectRetention'])],
-        }),
+        toCanonicalPolicy(
+          buildBucketPolicy(bucket, [
+            ...getStoredStatements(),
+            allow([memberId], ['s3:PutObjectRetention']),
+          ]),
+        ),
       );
     });
   });

@@ -7,6 +7,7 @@ import {
   ddbMock,
   getAuditEvents,
 } from '../test/bucket-policy-fixture.ts';
+import { policyOf, statement } from '../test/policy-statements.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -298,11 +299,12 @@ describe('create-bucket baseHandler', () => {
       );
 
       expect(result.statusCode).toBe(201);
-      expect(mockCreateBucket.mock.calls[0]![1].policy).toStrictEqual({
-        Statement: [
-          { Sid: 'creator', Effect: 'Allow', Principal: [USER_1], Action: CREATOR_ACTIONS },
-        ],
-      });
+      expect(mockCreateBucket.mock.calls[0]![1].policy).toStrictEqual(
+        policyOf({
+          Sid: 'creator',
+          ...statement('my-bucket', 'Allow', [USER_1], CREATOR_ACTIONS),
+        }),
+      );
     });
 
     it('records a bucket_policy.created intent with trigger bucket_created, region and bucket name', async () => {

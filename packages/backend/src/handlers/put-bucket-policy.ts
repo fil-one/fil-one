@@ -7,6 +7,7 @@ import {
   POLICY_WILDCARD_PRINCIPAL,
   PutBucketPolicyRequestSchema,
   RETENTION_WRITE_ACTIONS,
+  getPrincipalIds,
   hasNewRetentionGrants,
   roleHasPermission,
 } from '@filone/shared';
@@ -209,7 +210,7 @@ function getNamedRetentionGrants(policy: BucketPolicy | null): Map<string, Set<P
     const principals =
       statement.Principal === POLICY_WILDCARD_PRINCIPAL
         ? [POLICY_WILDCARD_PRINCIPAL]
-        : statement.Principal;
+        : getPrincipalIds(statement.Principal);
     for (const principal of principals) {
       const held = grants.get(principal) ?? new Set<PolicyAction>();
       for (const action of actions) held.add(action);

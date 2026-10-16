@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
+import { ApiErrorCode, OrgRole, POLICY_VERSION, S3Region, buildStatement } from '@filone/shared';
 import type { BucketPolicy } from '@filone/shared';
 
 import { seedPermissions } from './test-permissions.js';
@@ -29,7 +29,10 @@ import { useBucketPolicy } from './use-bucket-policy.js';
 const USER_1 = '00000000-0000-0000-0000-000000000001';
 
 const policy: BucketPolicy = {
-  Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: ['s3:GetObject'] }],
+  Version: POLICY_VERSION,
+  Statement: [
+    buildStatement({ bucketName: 'photos', principal: [USER_1], actions: ['s3:GetObject'] }),
+  ],
 };
 
 function renderUseBucketPolicy(region: S3Region = S3Region.UsEast9, role: OrgRole = OrgRole.Owner) {

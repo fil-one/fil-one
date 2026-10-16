@@ -234,11 +234,18 @@ export {
   BucketPolicySchema,
   PolicyStatementSchema,
   PutBucketPolicyRequestSchema,
-  hasNewRetentionGrants,
+  POLICY_VERSION,
+  buildStatement,
+  fromPrincipalArn,
   getCreatorBucketPolicy,
   getEffectiveActions,
   getNamedPrincipals,
   getPolicyActionsInGroup,
+  getPrincipalIds,
+  getStatementResources,
+  hasNewRetentionGrants,
+  toPolicyPrincipal,
+  toPrincipalArn,
 } from './api/bucket-policies.ts';
 export type {
   BucketPolicy,
@@ -248,6 +255,7 @@ export type {
   PolicyActionGroup,
   PolicyActionOrWildcard,
   PolicyEffect,
+  PolicyPrincipal,
   PolicyStatement,
   PutBucketPolicyRequest,
 } from './api/bucket-policies.ts';

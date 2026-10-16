@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { S3Client } from '@aws-sdk/client-s3';
-import type { BucketPolicy } from '@filone/shared';
+import { policyOf, statement } from '../test/policy-statements.ts';
 import { deleteBucketPolicy, getBucketPolicy, putBucketPolicy } from './s3-bucket-operations.ts';
 import {
   BucketNotFoundError,
@@ -63,9 +63,7 @@ function createS3ClientAnswering(captured: CapturedRequest[], answers: CannedRes
 const buildS3ErrorXml = (code: string, message = code) =>
   `<?xml version="1.0" encoding="UTF-8"?><Error><Code>${code}</Code><Message>${message}</Message></Error>`;
 
-const policy: BucketPolicy = {
-  Statement: [{ Effect: 'Allow', Principal: [ALICE], Action: ['s3:GetObject'] }],
-};
+const policy = policyOf(statement('photos', 'Allow', [ALICE], ['s3:GetObject']));
 
 const readRequestBody = (request: CapturedRequest) =>
   typeof request.body === 'string'

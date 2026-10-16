@@ -6,25 +6,28 @@ import {
 } from '@aws-sdk/client-s3';
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '@playwright/test';
+import type { PolicyAction } from '@filone/shared';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
+  allow,
+  buildBucketPolicy,
+  buildCreatorPolicy,
+  grantAllToOwner,
+  createS3ClientWithNewKey,
+  deleteObject,
+  deny,
+  emptyAndDeleteBucket,
+  generateBucketName,
+  getCredentials,
+  getS3Outcome,
+  listObjects,
+  putObject,
+  toCanonicalPolicy,
   ConsoleApi,
   PAYLOAD,
   REGION,
   SEEDED_KEY,
-  allow,
-  getCredentials,
-  deleteObject,
-  deny,
-  listObjects,
-  getS3Outcome,
-  grantAllToOwner,
-  putObject,
-  buildCreatorPolicy,
-  emptyAndDeleteBucket,
-  createS3ClientWithNewKey,
-  generateBucketName,
-  toCanonicalPolicy,
+  type UnboundStatement,
 } from './policy.util.ts';
 
 // What a bucket policy grants and withholds, read where it is enforced: S3
@@ -73,7 +76,9 @@ test.afterAll(async () => {
 
 test('1. a new bucket names only its creator', async () => {
   const { policy, etag } = await owner.readPolicy(seededBucket);
-  expect(toCanonicalPolicy(policy)).toEqual(toCanonicalPolicy(buildCreatorPolicy(ownerId)));
+  expect(toCanonicalPolicy(policy)).toEqual(
+    toCanonicalPolicy(buildCreatorPolicy(seededBucket, ownerId)),
+  );
   expect(etag).toEqual(expect.any(String));
 });
 
@@ -158,7 +163,7 @@ test('8. a write under a stale If-Match is refused with 412 POLICY_CONFLICT', as
   ]);
   const before = await owner.readPolicy(seededBucket);
   const res = await owner.putPolicy(seededBucket, {
-    policy: { Statement: [grantAllToOwner(ownerId)] },
+    policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
     etag: stale,
   });
   expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
@@ -167,29 +172,33 @@ test('8. a write under a stale If-Match is refused with 412 POLICY_CONFLICT', as
 
 test('9. creating a policy under If-None-Match: * where one exists is refused with 412 POLICY_CONFLICT', async () => {
   const res = await owner.putPolicy(seededBucket, {
-    policy: { Statement: [grantAllToOwner(ownerId)] },
+    policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
   });
   expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
 });
 
-for (const [title, statements] of [
+const refusedPolicies: [string, UnboundStatement[]][] = [
   [
     '10a. a policy with an unknown action is refused',
-    [{ Effect: 'Allow', Principal: [memberId], Action: ['s3:Unknown'] }],
+    [{ ...allow([memberId], ['s3:GetObject']), Action: ['s3:Unknown' as PolicyAction] }],
   ],
   [
     '10b. a policy with * inside a Principal list is refused',
-    [{ Effect: 'Allow', Principal: ['*'], Action: ['s3:GetObject'] }],
+    [{ ...allow([memberId], ['s3:GetObject']), Principal: { AWS: ['*'] } }],
   ],
   ['10c. a policy with no statements is refused', []],
   [
     '10d. a policy naming a principal id nobody in the tenant holds is refused',
     [grantAllToOwner(ownerId), allow([randomUUID()], ['s3:GetObject'])],
   ],
-] as const) {
+];
+for (const [title, statements] of refusedPolicies) {
   test(title, async () => {
     const { etag } = await owner.readPolicy(seededBucket);
-    const res = await owner.putPolicy(seededBucket, { policy: { Statement: statements }, etag });
+    const res = await owner.putPolicy(seededBucket, {
+      policy: buildBucketPolicy(seededBucket, statements),
+      etag,
+    });
     const body = await res.text();
     // A validation refusal carries a message and no code.
     expect({ status: res.status(), code: JSON.parse(body).code }, body).toEqual({
@@ -206,7 +215,7 @@ test('11. a statement may take any Sid', async () => {
   ];
   await owner.replaceStatements(secondSeededBucket, statements);
   expect(toCanonicalPolicy((await owner.readPolicy(secondSeededBucket)).policy)).toEqual(
-    toCanonicalPolicy({ Statement: statements }),
+    toCanonicalPolicy(buildBucketPolicy(secondSeededBucket, statements)),
   );
   await owner.replaceStatements(secondSeededBucket, [grantAllToOwner(ownerId)]);
 });
@@ -216,7 +225,7 @@ test('12. a member cannot read or write a policy', async () => {
     (await member.fetchPolicyResponse(seededBucket)).status(),
     (
       await member.putPolicy(seededBucket, {
-        policy: { Statement: [allow([memberId], ['s3:*'])] },
+        policy: buildBucketPolicy(seededBucket, [allow([memberId], ['s3:*'])]),
       })
     ).status(),
   ];
@@ -255,7 +264,7 @@ test('14a. deleting the policy leaves the bucket to service keys alone', async (
 
 test('14b. a write without a precondition creates a policy where none exists', async () => {
   const created = await owner.putPolicy(secondSeededBucket, {
-    policy: { Statement: [grantAllToOwner(ownerId)] },
+    policy: buildBucketPolicy(secondSeededBucket, [grantAllToOwner(ownerId)]),
     unconditional: true,
   });
   expect([created.status(), created.headers().etag]).toEqual([204, expect.any(String)]);
@@ -300,6 +309,6 @@ test('16. a principal-bound key cannot create or delete buckets', async () => {
 test('17. a bucket a member creates names only its creator', async () => {
   await member.createBucket(memberCreatedBucket);
   expect(toCanonicalPolicy((await owner.readPolicy(memberCreatedBucket)).policy)).toEqual(
-    toCanonicalPolicy(buildCreatorPolicy(memberId)),
+    toCanonicalPolicy(buildCreatorPolicy(memberCreatedBucket, memberId)),
   );
 });

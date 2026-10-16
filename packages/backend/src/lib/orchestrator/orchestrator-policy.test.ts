@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { S3Region } from '@filone/shared';
-import type { BucketPolicy } from '@filone/shared';
+import { policyOf, statement } from '../../test/policy-statements.ts';
 
 vi.mock('sst', () => ({ Resource: { UserInfoTable: { name: 'UserInfoTable' } } }));
 
@@ -38,9 +38,7 @@ const ALICE = '00000000-0000-0000-0000-00000000000a';
 const BOB = '00000000-0000-0000-0000-00000000000b';
 
 const tenantId = '00000000-0000-0000-0000-000000000001';
-const policy: BucketPolicy = {
-  Statement: [{ Effect: 'Allow', Principal: [ALICE], Action: ['s3:GetObject'] }],
-};
+const policy = policyOf(statement('photos', 'Allow', [ALICE], ['s3:GetObject']));
 
 const orchestrator = new FilOneOrchestrator({
   id: 'forge',

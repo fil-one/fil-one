@@ -62,9 +62,9 @@ A **principal** is a member as the storage system knows them, `(tenantId,
 userId)` and nothing more. It carries no permissions of its own: the storage
 system computes what a principal may do from the bucket policies naming it, and
 never learns the FilOne role name. A **scoped member** is a Member or ReadOnly,
-who reaches a bucket only when a statement names them. Owners and Admins are
-**unscoped**: on an IAM region the console writes them onto every bucket's
-policy.
+whom the console serves only what the policies grant them. Owners and Admins
+are **unscoped**: the console serves them every bucket without reading a
+policy. Anyone's own key reaches a bucket only through a statement naming them.
 
 ### Service keys (Aurora and FTH)
 
@@ -100,30 +100,42 @@ would then stop matching the invoice.
 ## Bucket policies
 
 A bucket policy is the bucket's own policy document, held by the storage system
-and addressed by the bucket it belongs to:
+and addressed by the bucket it belongs to. It is an AWS bucket policy, so
+`aws s3api put-bucket-policy` and IAM policy linters work on it:
 
 ```ts
-// Addressed {region}/{bucketName}. AWS's field names.
+// Addressed {region}/{bucketName}.
 type BucketPolicy = {
+  Version: '2012-10-17';
   Statement: {
     Sid?: string; // a label; stored and returned, never evaluated
     Effect: 'Allow' | 'Deny';
-    Principal: string[] | '*'; // console user ids, or '*' for every member
+    // Console user ids as user ARNs, arn:aws:iam:::user/<userId> (the bucket
+    // fixes the tenant, so the account field is empty), or '*' for every member
+    Principal: { AWS: string[] } | '*';
     Action: string[]; // the s3 vocabulary below, or ['s3:*'] for all of it
+    // The bucket itself: arn:aws:s3:::<bucket> for the three bucket actions
+    // (s3:ListBucket*), arn:aws:s3:::<bucket>/* for object actions, both for s3:*
+    Resource: string[];
   }[];
 };
 ```
 
 This is S3's shape: one policy per bucket, statements naming individual members,
-and both effects, written and read with the S3 bucket-policy operations. A
-policy has no id or name of its own and dies with its bucket.
+and both effects, written and read with the S3 bucket-policy operations. The
+storage system refuses a `Resource` that names a key prefix or another bucket,
+and returns the document in canonical form (lists sorted and deduplicated,
+statements reordered). The console converts between user ids and user ARNs at
+the document boundary and derives each statement's `Resource` from its actions,
+so the editor shows member names and nothing else. A policy has no id or name
+of its own and dies with its bucket.
 
 The console keeps no copy of any policy, so there is no table to add and nothing
 to backfill. It stores orgs, memberships, roles, key attribution, and the audit
 log. The enforcing system owns the rule it enforces, so there is no second copy
-of a policy to drift. The one thing the console pushes into the storage system
-is role membership, as the statements it writes for Owners and Admins. Those
-need reconciling.
+of a policy to drift. The one statement the console writes of its own names a
+new bucket's creator, and it never rewrites a policy afterwards, so there is
+nothing to reconcile.
 
 A member's effective permission on a bucket is what the statements say, and
 nothing else:
@@ -150,13 +162,17 @@ ability the day it ships. Reading a policy takes the same
 permission; a scoped member learns their reach from the bucket list and the key
 form's preview.
 
-A statement may carry thirteen of an access key's fifteen actions: read, write,
-list, delete, the two bucket-configuration reads, and the seven granular
-data-protection permissions. `CreateBucket`, `DeleteBucket`, and the three
-bucket-policy actions are excluded, because a key holding `CreateBucket` creates
-buckets outside the policy that granted it and one holding `PutBucketPolicy`
-rewrites that policy. Bucket creation stays where M1 puts it, as the org-level
-`buckets.create`.
+A statement may carry eleven of an access key's fifteen permissions: read,
+write, list, delete, and the seven granular data-protection permissions. On the
+wire those are fourteen actions, because the storage system names the three
+multipart-upload actions separately from the read, write and list they belong
+to. `CreateBucket` and `DeleteBucket` are excluded because a key holding
+`CreateBucket` creates buckets outside the policy that granted it. The two
+bucket-configuration reads are excluded because the storage system has no such
+actions; it authorizes those reads from `ListBucket`. The three bucket-policy
+actions are excluded because a key holding `PutBucketPolicy` rewrites the policy
+that granted it; only the console's own key holds them. Bucket creation stays
+where M1 puts it, as the org-level `buckets.create`.
 
 **Retention and legal hold are grantable through a policy.** M1 makes
 `PutObjectRetention` and `PutObjectLegalHold` Owner-only, and says M2's
@@ -173,31 +189,17 @@ there.
 all-buckets policy, so widening a Member on an IAM region means granting the
 buckets they need or promoting them.
 
-**The console grants Owners and Admins every bucket explicitly.** The storage
-system knows only statements, so an Owner or Admin reaches every bucket only
-because the console put them on every bucket's policy. Every new bucket's policy
-names the org's current Owners and Admins, and a promotion or demotion rewrites
-the statements on every bucket in the region. The statement the console writes
-for an Owner carries every action; the one it writes for an Admin leaves out the
-two mutating data-protection actions, which an Owner can still grant them
-deliberately on a given bucket.
+**Owners and Admins are unscoped in the console, not at the data plane.** The
+console signs their traffic with the tenant credential and serves them every
+bucket without reading a policy. Their own keys are ordinary principal-bound
+keys, which reach a bucket only through a statement naming them, or service
+keys, which answer to no policy. A role change therefore touches no policy, and
+the console never rewrites a policy on its own.
 
-The console labels the statements it writes `filone-owners` and `filone-admins`,
-plus `filone-creator` for a Member who creates a bucket, and the fan-out finds
-them again by those labels and rewrites them. The storage system reserves no
-label. It stores a `Sid` and never evaluates it. The console reserves the three
-labels for its own allow statements so that the fan-out never rewrites a
-statement a person wrote. Two checks enforce this. The policy write accepts each
-reserved label at most once per policy, and only on an Allow statement. The
-statement editor refuses a reserved label as the name of a statement a person
-adds or edits.
-
-The fan-out is the price of keeping roles out of the storage system, and it
-cannot be atomic. A promotion that fails halfway leaves the member unscoped on
-some buckets and not others, so each write is idempotent, the role change
-reports which buckets it reached, and a reconciliation job compares each
-region's policies against the org's roster and repairs the difference. That job
-also carries a change to the role matrix, which no membership event would.
+**A new bucket's first policy names its creator.** One Allow under an ordinary
+`Sid`, with every action but the two retention writes; an Owner who wants those
+on their own key edits them in. The console reserves no label: the creator's
+statement is renamed, edited and removed like any other.
 
 **Editing happens on the bucket.** The policy is a tab on the bucket detail
 page, beside Objects and API Keys, and absent for a role that cannot read it.
@@ -287,7 +289,7 @@ against while Forge implements the real thing.
 Policy changes take M1's intent-and-completion pair around the interface call:
 `bucket_policy.created`, `bucket_policy.updated`, and `bucket_policy.deleted`,
 keyed by region and bucket name. A policy is one bucket's document, so every
-roster change is an update to it and there is no separate members-changed event.
+edit is an update to it and there is no separate members-changed event.
 One event per action rather than per member, since an edit touching twenty
 members would otherwise write twenty events.
 
@@ -331,17 +333,14 @@ log.
    first vendor call.
 3. On service-key regions the excess keys are revoked at the vendor, each through
    the existing per-key deletion flow, before the role is written.
-4. On IAM regions a demotion out of an unscoped role rewrites the statements
-   naming that member on every bucket in the region, before the console row, and
-   the response reports the buckets it reached. Demotion to a role that cannot
-   hold a key deletes the member's keys in both models; every other narrowing
-   follows live, since a key carries only what the policies give its member.
+4. On IAM regions no policy changes, since a role grants nothing at the data
+   plane. The keys the new role could not mint are revoked as on a service-key
+   region, a service key included; a principal-bound key follows live, since it
+   carries only what the policies give its member.
 5. The role is written, the member is emailed, and the completion event carries
-   the revoked key ids and the regions synced.
+   the revoked key ids.
 
-A widening runs in the other order. The console row commits first and the sync
-follows, so a principal is never wider at the gateway than the role that
-authorized it.
+A widening writes the console row and nothing else.
 
 **A scoped member creates a bucket.**
 
@@ -351,10 +350,8 @@ authorized it.
    after both complete. A failure between the two leaves a bucket that only
    service keys reach and that the console lists with no policy; the console
    finishes the policy write from a durable job.
-2. The policy names the org's current Owners in one Allow with every action,
-   and its Admins and the creator each in their own with every action but the
-   two retention writes. An Owner who creates the bucket is already in the
-   first statement.
+2. The policy names the creator in one Allow with every action but the two
+   retention writes, whatever their role.
 3. A bucket created by a generic S3 client holding a service key starts with no
    policy, so only service keys reach it until one is written, from that client
    or from the policy tab.
@@ -376,7 +373,9 @@ names the buckets and actions they start with, on the invitation row M1 already
 writes. Acceptance is a widening: the membership row commits, then each named
 bucket's policy gains a statement. A bucket deleted inside the 14-day window is
 skipped and named in the acceptance event. An Owner or Admin invitation names no
-buckets, and acceptance adds them to every policy in the region.
+buckets; the console serves them every bucket by role. Before the membership
+row is written, the new member becomes a principal on every provisioned IAM
+region, and a region that refuses refuses the acceptance.
 
 **RAG API keys already follow their creator.** A RAG key resolves its creator's
 membership at query time and refuses when it is gone, and on an IAM region its
@@ -480,10 +479,11 @@ depends on it.
    for a scoped member.
 5. Each Forge network runs the Hilt release with the contract before the
    console that needs it deploys. Every existing key keeps working as a service
-   key, the console's own credential included. The console writes principals
-   for existing members through the provisioning sweep and writes a policy per
-   bucket naming the org's Owners and Admins. Hilt availability gates
-   membership writes for orgs with a Forge tenant.
+   key, the console's own credential included. The console writes a principal
+   for every current member when it creates a tenant and for each member who
+   joins afterwards, and deletes it when they are removed. Existing buckets
+   keep whatever policy they have. Hilt availability gates membership writes
+   for orgs with a Forge tenant.
 
 ## Options considered
 
@@ -513,8 +513,17 @@ own check.
 reaches every bucket" makes a promotion a single write instead of one per
 bucket, and it is not a permission ceiling, so statements would still decide the
 permission set. It is a second input to an access decision, held outside the
-policy and needing to be kept in step with the role. Holding the storage system
-to exactly one input is worth the fan-out.
+policy and needing to be kept in step with the role. The console does not need
+it: Owners and Admins are served by role at the console, and a service key gives
+them the data plane.
+
+**Owners and Admins named on every bucket policy.** An earlier revision had the
+console write a statement for the org's Owners and Admins onto every bucket and
+rewrite it on every role change and removal. That fan-out could not be atomic,
+raced with concurrent membership changes, needed reserved statement labels and a
+reconciler, and gave an Owner's own principal-bound key only what a service key
+already gives them. Without it the storage system holds exactly what people
+wrote.
 
 **Per-member FTH storage users.** FTH is the one vendor with a user object, and
 keys already hang off one. Those keys would still carry their own permissions
@@ -538,10 +547,6 @@ second name.
    Hilt PR is the prior attempt at it.
 5. Does a partially failed multi-region revocation need an operator view, or is
    the retry on the same request enough?
-6. How large does the unscoped-role fan-out get in practice? A promotion
-   rewrites one policy per bucket in the region, and we have no figure for
-   buckets per org on Forge. If it turns out large, the management API taking a
-   batch of policy writes would fix it.
 
 ## Future work
 

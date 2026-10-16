@@ -92,6 +92,7 @@ import {
   stubMembershipRead,
 } from '../test/lambda-test-utilities.ts';
 import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
+import { policyOf, statement } from '../test/policy-statements.ts';
 import {
   fakeOrchestrator,
   stubMemberScopedGetBucket,
@@ -676,9 +677,11 @@ describe('query-bucket handler (RAG API key bearer auth)', () => {
 function buildIamOrchestratorGrantingOnly(bucketName: string): FakeOrchestrator {
   const iam = new FakeIamOrchestrator();
   iam.seedPrincipal(tenantFor('forge', 'org-1'), USER_1);
-  iam.seedPolicy(tenantFor('forge', 'org-1'), bucketName, {
-    Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: ['s3:GetObject'] }],
-  });
+  iam.seedPolicy(
+    tenantFor('forge', 'org-1'),
+    bucketName,
+    policyOf(statement(bucketName, 'Allow', [USER_1], ['s3:GetObject'])),
+  );
   const orchestrator = fakeOrchestrator('forge', { bucket: BUCKET, iam });
   stubMemberScopedGetBucket(orchestrator, iam, BUCKET);
   return orchestrator;

@@ -7,6 +7,7 @@ import {
   POLICY_ACTION_WILDCARD,
   POLICY_WILDCARD_PRINCIPAL,
   getPolicyActionsInGroup,
+  getPrincipalIds,
 } from '@filone/shared';
 
 import { Badge, type BadgeColor } from './Badge.js';
@@ -150,7 +151,10 @@ function PrincipalBadges({
       </Badge>
     );
   }
-  const members = principal.map((userId) => ({ userId, name: getMemberName(userId) }));
+  const members = getPrincipalIds(principal).map((userId) => ({
+    userId,
+    name: getMemberName(userId),
+  }));
   const visible = members.slice(0, MAX_MEMBER_BADGES);
   const folded = members.slice(MAX_MEMBER_BADGES);
   return (

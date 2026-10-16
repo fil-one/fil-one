@@ -17,7 +17,14 @@ import {
   type APIResponse,
   type Page,
 } from '@playwright/test';
-import { CREATOR_ACTIONS, S3Region, getS3Endpoint } from '@filone/shared';
+import {
+  POLICY_VERSION,
+  CREATOR_ACTIONS,
+  S3Region,
+  getS3Endpoint,
+  getStatementResources,
+  toPolicyPrincipal,
+} from '@filone/shared';
 import type {
   BucketPolicy,
   CreateAccessKeyResponse,
@@ -151,9 +158,15 @@ export class ConsoleApi {
   }
 
   /** Replace the policy with `statements`, reading the ETag first. Returns the new ETag. */
-  async replaceStatements(bucket: string, statements: PolicyStatement[]): Promise<string> {
+  async replaceStatements(
+    bucket: string,
+    statements: readonly UnboundStatement[],
+  ): Promise<string> {
     const { etag } = await this.readPolicy(bucket);
-    const res = await this.putPolicy(bucket, { policy: { Statement: statements }, etag });
+    const res = await this.putPolicy(bucket, {
+      policy: buildBucketPolicy(bucket, statements),
+      etag,
+    });
     expect(res.status(), await res.text()).toBe(204);
     return res.headers().etag!;
   }
@@ -260,35 +273,66 @@ export const putObject = (s3: S3Client, bucket: string, key: string) =>
 export const deleteObject = (s3: S3Client, bucket: string, key: string) =>
   s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 
+/**
+ * A statement before it names the bucket it is written to. The builders below
+ * make these from member ids; {@link buildBucketPolicy} fills in Resource once the
+ * bucket is known.
+ */
+export type UnboundStatement = Omit<PolicyStatement, 'Resource'>;
+
+/** The statement with the Resource its actions need on `bucket`. */
+export function bindStatementToBucket(
+  bucket: string,
+  statement: UnboundStatement,
+): PolicyStatement {
+  return { ...statement, Resource: getStatementResources(bucket, statement.Action) };
+}
+
+/** The document the statements make on `bucket`. */
+export function buildBucketPolicy(
+  bucket: string,
+  statements: readonly UnboundStatement[],
+): BucketPolicy {
+  return {
+    Version: POLICY_VERSION,
+    Statement: statements.map((st) => bindStatementToBucket(bucket, st)),
+  };
+}
+
 /** The statement a new bucket carries: its creator, with every action but the retention writes. */
-export function buildCreatorStatement(creatorId: string): PolicyStatement {
-  return { Sid: 'creator', Effect: 'Allow', Principal: [creatorId], Action: CREATOR_ACTIONS };
+export function buildCreatorStatement(creatorId: string): UnboundStatement {
+  return allow([creatorId], CREATOR_ACTIONS, 'creator');
 }
 
 /** What a new bucket carries, whoever created it. */
-export function buildCreatorPolicy(creatorId: string): BucketPolicy {
-  return { Statement: [buildCreatorStatement(creatorId)] };
+export function buildCreatorPolicy(bucket: string, creatorId: string): BucketPolicy {
+  return buildBucketPolicy(bucket, [buildCreatorStatement(creatorId)]);
 }
 
 /** Every action for the owner under an ordinary Sid: what most cases start their policy from. */
-export function grantAllToOwner(ownerId: string): PolicyStatement {
+export function grantAllToOwner(ownerId: string): UnboundStatement {
   return allow([ownerId], ['s3:*'], 'owner-all');
 }
 
 export function allow(
-  principal: PolicyStatement['Principal'],
+  principal: '*' | string[],
   action: PolicyStatement['Action'],
   sid?: string,
-): PolicyStatement {
-  return { ...(sid ? { Sid: sid } : {}), Effect: 'Allow', Principal: principal, Action: action };
+): UnboundStatement {
+  return {
+    ...(sid ? { Sid: sid } : {}),
+    Effect: 'Allow',
+    Principal: toPolicyPrincipal(principal),
+    Action: action,
+  };
 }
 
 export function deny(
-  principal: PolicyStatement['Principal'],
+  principal: '*' | string[],
   action: PolicyStatement['Action'],
   sid?: string,
-): PolicyStatement {
-  return { ...(sid ? { Sid: sid } : {}), Effect: 'Deny', Principal: principal, Action: action };
+): UnboundStatement {
+  return { ...allow(principal, action, sid), Effect: 'Deny' };
 }
 
 /**
@@ -308,7 +352,7 @@ export async function emptyAndDeleteBucket(
   ) {
     return; // Already gone.
   }
-  const policy: BucketPolicy = { Statement: [grantAllToOwner(ownerId)] };
+  const policy = buildBucketPolicy(bucket, [grantAllToOwner(ownerId)]);
   const etag = current.ok() ? current.headers().etag : undefined;
   const put = await owner.putPolicy(bucket, { policy, etag });
   expect(put.status(), await put.text()).toBe(204);
@@ -341,20 +385,21 @@ export async function emptyAndDeleteBucket(
 }
 
 /**
- * A policy in the form the storage system stores it: the statement, principal
- * and action lists are sets, so each is sorted and deduplicated and the
- * statements are ordered by their encoding. Compare policies through this,
+ * A policy in the form the storage system stores it: the statement, principal,
+ * action and resource lists are sets, so each is sorted and deduplicated and
+ * the statements are ordered by their encoding. Compare policies through this,
  * since a read comes back canonical whatever order a write sent.
  */
 export function toCanonicalPolicy(policy: BucketPolicy): BucketPolicy {
   const set = (values: readonly string[]) => [...new Set(values)].sort();
   const statement = policy.Statement.map((st) => ({
     ...st,
-    Principal: Array.isArray(st.Principal) ? set(st.Principal) : st.Principal,
+    Principal: st.Principal === '*' ? st.Principal : { AWS: set(st.Principal.AWS) },
     Action: set(st.Action),
+    Resource: set(st.Resource),
   }));
   statement.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-  return { Statement: statement } as BucketPolicy;
+  return { ...policy, Statement: statement } as BucketPolicy;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { OrgRole } from '@filone/shared';
+import { OrgRole, buildStatement, toPolicyPrincipal } from '@filone/shared';
 import type { PolicyStatement } from '@filone/shared';
 
 vi.mock('../lib/api.js', () => ({ getMe: vi.fn(() => new Promise(() => {})) }));
@@ -23,7 +23,13 @@ function renderModal(
   seedPermissions(client, role);
   render(
     <QueryClientProvider client={client}>
-      <PolicyStatementModal open onClose={onClose} onSubmit={onSubmit} {...props} />
+      <PolicyStatementModal
+        open
+        bucketName="photos"
+        onClose={onClose}
+        onSubmit={onSubmit}
+        {...props}
+      />
     </QueryClientProvider>,
   );
   return { onSubmit, onClose };
@@ -39,13 +45,25 @@ function renderModalWithRerender(
   seedPermissions(client, role);
   const view = render(
     <QueryClientProvider client={client}>
-      <PolicyStatementModal open onClose={onClose} onSubmit={onSubmit} {...props} />
+      <PolicyStatementModal
+        open
+        bucketName="photos"
+        onClose={onClose}
+        onSubmit={onSubmit}
+        {...props}
+      />
     </QueryClientProvider>,
   );
   const rerender = (next: Partial<React.ComponentProps<typeof PolicyStatementModal>>) =>
     view.rerender(
       <QueryClientProvider client={client}>
-        <PolicyStatementModal open onClose={onClose} onSubmit={onSubmit} {...next} />
+        <PolicyStatementModal
+          open
+          bucketName="photos"
+          onClose={onClose}
+          onSubmit={onSubmit}
+          {...next}
+        />
       </QueryClientProvider>,
     );
   return { onSubmit, onClose, rerender };
@@ -95,12 +113,12 @@ describe('PolicyStatementModal', () => {
   });
 
   it('forgets the edits when the modal closes and reopens', () => {
-    const initial: PolicyStatement = {
-      Sid: 'team',
-      Effect: 'Allow',
-      Principal: '*',
-      Action: ['s3:GetObject'],
-    };
+    const initial = buildStatement({
+      bucketName: 'photos',
+      principal: '*',
+      actions: ['s3:GetObject'],
+      sid: 'team',
+    });
     const { rerender } = renderModalWithRerender({ initial });
     fireEvent.change(screen.getByLabelText('Name (optional)'), { target: { value: 'edited' } });
     expect(screen.getByLabelText('Name (optional)')).toHaveValue('edited');
@@ -112,12 +130,12 @@ describe('PolicyStatementModal', () => {
   });
 
   it('opens an empty Add form after an edit', () => {
-    const initial: PolicyStatement = {
-      Sid: 'team',
-      Effect: 'Allow',
-      Principal: '*',
-      Action: ['s3:GetObject'],
-    };
+    const initial = buildStatement({
+      bucketName: 'photos',
+      principal: '*',
+      actions: ['s3:GetObject'],
+      sid: 'team',
+    });
     const { rerender } = renderModalWithRerender({ initial });
 
     rerender({ initial, open: false });
@@ -136,17 +154,19 @@ describe('PolicyStatementModal', () => {
       Effect: 'Allow',
       Principal: '*',
       Action: ['s3:GetObject'],
+      Resource: ['arn:aws:s3:::photos/*'],
     } satisfies PolicyStatement);
     expect(onClose).toHaveBeenCalled();
   });
 
   it('submits an unchanged edited statement as it was', async () => {
-    const initial: PolicyStatement = {
-      Sid: 'team',
-      Effect: 'Deny',
-      Principal: ['a'],
-      Action: ['s3:DeleteObject'],
-    };
+    const initial = buildStatement({
+      bucketName: 'photos',
+      effect: 'Deny',
+      principal: ['a'],
+      actions: ['s3:DeleteObject'],
+      sid: 'team',
+    });
     const { onSubmit } = renderModal({ initial });
 
     expect(screen.getByText('Edit statement')).toBeInTheDocument();
@@ -169,6 +189,7 @@ describe('PolicyStatementModal', () => {
       Effect: 'Allow',
       Principal: '*',
       Action: ['s3:GetObject'],
+      Resource: ['arn:aws:s3:::photos/*'],
     } satisfies PolicyStatement);
   });
 
@@ -182,6 +203,7 @@ describe('PolicyStatementModal', () => {
       Effect: 'Allow',
       Principal: '*',
       Action: ['s3:GetObject'],
+      Resource: ['arn:aws:s3:::photos/*'],
     } satisfies PolicyStatement);
   });
 
@@ -196,11 +218,11 @@ describe('PolicyStatementModal', () => {
   });
 
   it('keeps the retention writes an Owner granted when an Admin saves', () => {
-    const initial: PolicyStatement = {
-      Effect: 'Allow',
-      Principal: ['a'],
-      Action: ['s3:GetObject', 's3:PutObjectRetention'],
-    };
+    const initial = buildStatement({
+      bucketName: 'photos',
+      principal: ['a'],
+      actions: ['s3:GetObject', 's3:PutObjectRetention'],
+    });
     const { onSubmit } = renderModal({ initial }, OrgRole.Admin);
 
     expect(screen.getByTestId('policy-action-s3:PutObjectRetention')).toBeInTheDocument();
@@ -211,7 +233,13 @@ describe('PolicyStatementModal', () => {
 
   it('offers an Admin no retention write to add', () => {
     renderModal(
-      { initial: { Effect: 'Allow', Principal: ['a'], Action: ['s3:GetObject'] } },
+      {
+        initial: buildStatement({
+          bucketName: 'photos',
+          principal: ['a'],
+          actions: ['s3:GetObject'],
+        }),
+      },
       OrgRole.Admin,
     );
 
@@ -237,7 +265,7 @@ describe('PolicyStatementModal', () => {
   it.each([
     [true, 'a Deny to everyone', { Effect: 'Deny', Principal: '*' }],
     [false, 'an Allow to everyone', { Effect: 'Allow', Principal: '*' }],
-    [false, 'a Deny to one member', { Effect: 'Deny', Principal: ['a'] }],
+    [false, 'a Deny to one member', { Effect: 'Deny', Principal: toPolicyPrincipal(['a']) }],
   ] satisfies [boolean, string, Pick<PolicyStatement, 'Effect' | 'Principal'>][])(
     'isDenyForEveryone returns %s for %s',
     (expected, _description, statement) => {

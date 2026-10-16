@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import type { PolicyStatement, RotateAccessKeyResponse } from '@filone/shared';
+import type { RotateAccessKeyResponse } from '@filone/shared';
 import {
   resolvePersonalOrgId,
   runCleanup,
@@ -7,18 +7,20 @@ import {
   setMembershipRole,
 } from '../destructive/invite.util.ts';
 import {
-  ConsoleApi,
   allow,
-  getCredentials,
-  listObjects,
-  getS3Outcome,
-  grantAllToOwner,
-  emptyAndDeleteBucket,
+  buildBucketPolicy,
   buildCreatorPolicy,
+  grantAllToOwner,
   createS3Client,
   createS3ClientWithNewKey,
+  emptyAndDeleteBucket,
   generateBucketName,
+  getCredentials,
+  getS3Outcome,
+  listObjects,
   toCanonicalPolicy,
+  ConsoleApi,
+  type UnboundStatement,
 } from './policy.util.ts';
 
 // What membership changes and key and bucket deletion do to policies and keys.
@@ -40,7 +42,7 @@ let leaver: ConsoleApi;
 const buckets: string[] = [];
 const createdKeys: { api: ConsoleApi; id: string }[] = [];
 
-async function createTrackedBucket(statements: PolicyStatement[] = []): Promise<string> {
+async function createTrackedBucket(statements: UnboundStatement[] = []): Promise<string> {
   const bucket = generateBucketName('life');
   await owner.createBucket(bucket);
   buckets.push(bucket);
@@ -118,7 +120,7 @@ test('B2a. removing a member takes their keys and every statement naming them', 
   expect(keysRevoked.map((k: { id: string }) => k.id).sort(byId)).toEqual(leaverKeyIds);
 
   expect(toCanonicalPolicy((await owner.readPolicy(leaverBucket)).policy)).toEqual(
-    toCanonicalPolicy({ Statement: [grantAllToOwner(ownerId)] }),
+    toCanonicalPolicy(buildBucketPolicy(leaverBucket, [grantAllToOwner(ownerId)])),
   );
   expect(await getS3Outcome(listObjects(createS3Client(key), leaverBucket))).toBe(
     '403 InvalidAccessKeyId',
@@ -128,9 +130,10 @@ test('B2a. removing a member takes their keys and every statement naming them', 
 test('B2b. a policy naming a removed member is refused', async () => {
   const { etag } = await owner.readPolicy(leaverBucket);
   const writeNamingRemovedMember = await owner.putPolicy(leaverBucket, {
-    policy: {
-      Statement: [grantAllToOwner(ownerId), allow([leaverId], ['s3:ListBucket'])],
-    },
+    policy: buildBucketPolicy(leaverBucket, [
+      grantAllToOwner(ownerId),
+      allow([leaverId], ['s3:ListBucket']),
+    ]),
     etag,
   });
   const body = await writeNamingRemovedMember.text();
@@ -146,7 +149,7 @@ test('B3. a bucket deleted and created again under its name starts from a creato
   expect([200, 204]).toContain((await owner.deleteBucket(bucket)).status());
   await owner.createBucket(bucket);
   expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-    toCanonicalPolicy(buildCreatorPolicy(ownerId)),
+    toCanonicalPolicy(buildCreatorPolicy(bucket, ownerId)),
   );
 });
 

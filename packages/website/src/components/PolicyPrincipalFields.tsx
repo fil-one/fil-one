@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 import { SpinnerIcon, UsersThreeIcon } from '@phosphor-icons/react/dist/ssr';
-import type { PolicyStatement } from '@filone/shared';
 import { POLICY_WILDCARD_PRINCIPAL } from '@filone/shared';
 
 import { listMembers } from '../lib/members-api.js';
@@ -12,9 +11,12 @@ import { StateCard } from './StateCard.js';
 import { Icon } from './Icon.js';
 import { RadioOption } from './RadioOption.js';
 
+/** Who a statement applies to, as the editor holds it: everyone, or member ids. */
+export type PrincipalSelection = '*' | string[];
+
 export type PolicyPrincipalFieldsProps = {
-  value: PolicyStatement['Principal'];
-  onChange: (value: PolicyStatement['Principal']) => void;
+  value: PrincipalSelection;
+  onChange: (value: PrincipalSelection) => void;
 };
 
 /**

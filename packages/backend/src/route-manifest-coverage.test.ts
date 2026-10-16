@@ -17,6 +17,8 @@ import {
   SubscriptionStatus,
 } from '@filone/shared';
 import type { Permission, RouteManifestEntry } from '@filone/shared';
+import type { PolicyAction } from '@filone/shared';
+import { policyOf, statement } from './test/policy-statements.ts';
 import type { OrgMembership } from './lib/org-membership.ts';
 import { sstResourceMock } from './test/sst-resource-mock.ts';
 import { authPartialMock } from './test/auth-partial-mock.ts';
@@ -745,7 +747,7 @@ describe('the caps routes apply on top of their declared permission', () => {
   describe('granting a retention write through a policy needs privileged.grant', () => {
     const buildPolicyGrantRequest = (action: string): RouteRequest => ({
       body: JSON.stringify({
-        policy: { Statement: [{ Effect: 'Allow', Principal: [USER_ID], Action: [action] }] },
+        policy: policyOf(statement('photos', 'Allow', [USER_ID], [action as PolicyAction])),
       }),
       headers: { 'if-none-match': '*' },
       pathParameters: { name: 'photos' },

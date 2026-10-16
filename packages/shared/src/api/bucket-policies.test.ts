@@ -4,13 +4,20 @@ import {
   POLICY_ACTIONS,
   POLICY_ACTION_LABELS,
   POLICY_ACTION_GROUPS,
+  POLICY_VERSION,
   PutBucketPolicyRequestSchema,
   RETENTION_WRITE_ACTIONS,
   CREATOR_ACTIONS,
+  fromPrincipalArn,
   getCreatorBucketPolicy,
   getEffectiveActions,
+  getNamedPrincipals,
   getPolicyActionsInGroup,
+  getPrincipalIds,
+  getStatementResources,
   hasNewRetentionGrants,
+  toPolicyPrincipal,
+  toPrincipalArn,
 } from './bucket-policies.ts';
 import type { BucketPolicy, PolicyStatement } from './bucket-policies.ts';
 
@@ -18,12 +25,24 @@ import type { BucketPolicy, PolicyStatement } from './bucket-policies.ts';
 const PRINCIPAL_A = '00000000-0000-4000-8000-00000000000a';
 const PRINCIPAL_B = '00000000-0000-4000-8000-00000000000b';
 const PRINCIPAL_C = '00000000-0000-4000-8000-00000000000c';
+const BUCKET = 'photos';
+const BUCKET_ARN = 'arn:aws:s3:::photos';
+const OBJECTS_ARN = 'arn:aws:s3:::photos/*';
+const BOTH_ARNS = [BUCKET_ARN, OBJECTS_ARN];
+/** The AWS principal naming the given members. */
+const members = (...ids: string[]) => ({ AWS: ids.map(toPrincipalArn) });
+/** A policy document over `statements`. */
+const policy = (...statements: PolicyStatement[]): BucketPolicy => ({
+  Version: POLICY_VERSION,
+  Statement: statements,
+});
 
-const grantReadToPrincipalA: BucketPolicy = {
-  Statement: [
-    { Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:GetObject', 's3:ListBucket'] },
-  ],
-};
+const grantReadToPrincipalA = policy({
+  Effect: 'Allow',
+  Principal: members(PRINCIPAL_A),
+  Action: ['s3:GetObject', 's3:ListBucket'],
+  Resource: BOTH_ARNS,
+});
 
 describe('the policy vocabulary', () => {
   it.each(['s3:CreateBucket', 's3:DeleteBucket', 's3:ListAllMyBuckets'])(
@@ -73,50 +92,110 @@ describe('the policy vocabulary', () => {
   });
 });
 
+describe('principal ARNs', () => {
+  it('names a member by the user ARN with an empty account field', () => {
+    expect(toPrincipalArn(PRINCIPAL_A)).toBe(`arn:aws:iam:::user/${PRINCIPAL_A}`);
+  });
+
+  it('reads the member id back from the ARN', () => {
+    expect(fromPrincipalArn(toPrincipalArn(PRINCIPAL_A))).toBe(PRINCIPAL_A);
+  });
+
+  it('lists the ids a principal names, and none for everyone', () => {
+    expect(getPrincipalIds(members(PRINCIPAL_A, PRINCIPAL_B))).toStrictEqual([
+      PRINCIPAL_A,
+      PRINCIPAL_B,
+    ]);
+    expect(getPrincipalIds('*')).toStrictEqual([]);
+  });
+
+  it('builds the principal from member ids', () => {
+    expect(toPolicyPrincipal([PRINCIPAL_A])).toStrictEqual(members(PRINCIPAL_A));
+  });
+});
+
+describe('getStatementResources', () => {
+  it('names the bucket for a bucket action', () => {
+    expect(getStatementResources(BUCKET, ['s3:ListBucket'])).toStrictEqual([BUCKET_ARN]);
+  });
+
+  it('names the objects for an object action', () => {
+    expect(getStatementResources(BUCKET, ['s3:GetObject'])).toStrictEqual([OBJECTS_ARN]);
+  });
+
+  it.each([
+    { name: 's3:*', actions: ['s3:*'] as const },
+    {
+      name: 'a bucket action beside an object action',
+      actions: ['s3:GetObject', 's3:ListBucketVersions'] as const,
+    },
+  ])('names both for $name', ({ actions }) => {
+    expect(getStatementResources(BUCKET, actions)).toStrictEqual(BOTH_ARNS);
+  });
+});
+
 describe('BucketPolicySchema', () => {
   const validStatement = {
     Effect: 'Allow',
-    Principal: [PRINCIPAL_A],
+    Principal: members(PRINCIPAL_A),
     Action: ['s3:GetObject'],
+    Resource: [OBJECTS_ARN],
   };
   const withStatement = (changes: Record<string, unknown>) => ({
+    Version: POLICY_VERSION,
     Statement: [{ ...validStatement, ...changes }],
+  });
+  // zod reports the object branch's issue on its own once the input is an object.
+  const principalIssue = (code: string) => ({
+    code,
+    path: ['Statement', 0, 'Principal', 'AWS', 0],
   });
 
   it.each([
     {
       name: 'the shape the storage system stores',
       input: {
+        Version: POLICY_VERSION,
         Statement: [
           {
             Sid: 'owners',
             Effect: 'Allow',
-            Principal: [PRINCIPAL_A, PRINCIPAL_B],
+            Principal: members(PRINCIPAL_A, PRINCIPAL_B),
             Action: ['s3:*'],
+            Resource: BOTH_ARNS,
           },
-          { Effect: 'Deny', Principal: '*', Action: ['s3:PutObjectRetention'] },
+          {
+            Effect: 'Deny',
+            Principal: '*',
+            Action: ['s3:PutObjectRetention'],
+            Resource: [OBJECTS_ARN],
+          },
         ],
       },
     },
-    { name: 'a principal named by UUID', input: withStatement({}) },
+    { name: 'a principal named by user ARN', input: withStatement({}) },
     { name: 'the wildcard principal as the bare string', input: withStatement({ Principal: '*' }) },
+    {
+      name: 'the 2008 policy language version',
+      input: { ...withStatement({}), Version: '2008-10-17' },
+    },
   ])('accepts $name', ({ input }) => {
     expect(BucketPolicySchema.safeParse(input)).toMatchObject({ success: true });
   });
 
   it('keeps each principal once, in the order first given', () => {
     const parsed = BucketPolicySchema.parse(
-      withStatement({ Principal: [PRINCIPAL_B, PRINCIPAL_A, PRINCIPAL_B] }),
+      withStatement({ Principal: members(PRINCIPAL_B, PRINCIPAL_A, PRINCIPAL_B) }),
     );
-    expect(parsed).toStrictEqual(withStatement({ Principal: [PRINCIPAL_B, PRINCIPAL_A] }));
+    expect(parsed).toStrictEqual(withStatement({ Principal: members(PRINCIPAL_B, PRINCIPAL_A) }));
   });
 
   it.each([
     {
       name: 'a statement field it does not define',
-      // not part of the statement shape
-      input: withStatement({ resource: 'photos' }),
-      issue: { code: 'unrecognized_keys', keys: ['resource'], path: ['Statement', 0] },
+      // AWS's conditions, which the storage system refuses
+      input: withStatement({ Condition: {} }),
+      issue: { code: 'unrecognized_keys', keys: ['Condition'], path: ['Statement', 0] },
     },
     {
       name: 'a document field it does not define',
@@ -125,47 +204,44 @@ describe('BucketPolicySchema', () => {
       issue: { code: 'unrecognized_keys', keys: ['version'], path: [] },
     },
     {
-      name: 'the wildcard principal inside a list',
-      input: withStatement({ Principal: ['*'] }),
-      issue: {
-        code: 'invalid_union',
-        path: ['Statement', 0, 'Principal'],
-        errors: expect.arrayContaining([
-          expect.arrayContaining([
-            expect.objectContaining({
-              code: 'custom',
-              message: 'Name every member with the bare "*" string, never inside a list',
-            }),
-          ]),
-        ]),
-      },
+      name: 'a missing Version',
+      input: { Statement: withStatement({}).Statement },
+      issue: { code: 'invalid_value', path: ['Version'] },
     },
     {
-      name: 'a principal id that is not a UUID',
-      input: withStatement({ Principal: ['alice'] }),
-      issue: {
-        code: 'invalid_union',
-        path: ['Statement', 0, 'Principal'],
-        errors: expect.arrayContaining([
-          [expect.objectContaining({ code: 'invalid_format', format: 'uuid', path: [0] })],
-        ]),
-      },
+      name: 'a Version the storage system does not know',
+      input: { ...withStatement({}), Version: '2026-01-01' },
+      issue: { code: 'invalid_value', path: ['Version'] },
+    },
+    {
+      name: 'the wildcard principal inside a list',
+      input: withStatement({ Principal: { AWS: ['*'] } }),
+      issue: principalIssue('custom'),
+    },
+    {
+      name: 'a principal that is not a user ARN',
+      input: withStatement({ Principal: { AWS: [PRINCIPAL_A] } }),
+      issue: principalIssue('custom'),
+    },
+    {
+      name: 'a user ARN whose id is not a UUID',
+      input: withStatement({ Principal: { AWS: ['arn:aws:iam:::user/alice'] } }),
+      issue: principalIssue('custom'),
+    },
+    {
+      name: 'a principal key other than AWS',
+      input: withStatement({ Principal: { Service: 's3.amazonaws.com' } }),
+      issue: { code: 'invalid_union', path: ['Statement', 0, 'Principal'] },
     },
     {
       name: 'an empty statement list',
-      input: { Statement: [] },
+      input: { Version: POLICY_VERSION, Statement: [] },
       issue: { code: 'too_small', minimum: 1, path: ['Statement'] },
     },
     {
       name: 'an empty principal list',
-      input: withStatement({ Principal: [] }),
-      issue: {
-        code: 'invalid_union',
-        path: ['Statement', 0, 'Principal'],
-        errors: expect.arrayContaining([
-          [expect.objectContaining({ code: 'too_small', minimum: 1 })],
-        ]),
-      },
+      input: withStatement({ Principal: { AWS: [] } }),
+      issue: { code: 'too_small', minimum: 1, path: ['Statement', 0, 'Principal', 'AWS'] },
     },
     {
       name: 'an empty action list',
@@ -176,6 +252,16 @@ describe('BucketPolicySchema', () => {
       name: 'an action outside the vocabulary',
       input: withStatement({ Action: ['s3:CreateBucket'] }),
       issue: { code: 'invalid_value', path: ['Statement', 0, 'Action', 0] },
+    },
+    {
+      name: 'an empty resource list',
+      input: withStatement({ Resource: [] }),
+      issue: { code: 'too_small', minimum: 1, path: ['Statement', 0, 'Resource'] },
+    },
+    {
+      name: 'a resource that is a key prefix',
+      input: withStatement({ Resource: ['arn:aws:s3:::photos/2026/*'] }),
+      issue: { code: 'invalid_format', path: ['Statement', 0, 'Resource', 0] },
     },
     {
       name: 'an effect other than Allow or Deny',
@@ -208,51 +294,60 @@ describe('PutBucketPolicyRequestSchema', () => {
   });
 });
 
+describe('getNamedPrincipals', () => {
+  it('lists the member ids the document names, and skips everyone', () => {
+    const doc = policy(
+      ...grantReadToPrincipalA.Statement,
+      { Effect: 'Deny', Principal: '*', Action: ['s3:DeleteObject'], Resource: [OBJECTS_ARN] },
+      {
+        Effect: 'Allow',
+        Principal: members(PRINCIPAL_B),
+        Action: ['s3:GetObject'],
+        Resource: [OBJECTS_ARN],
+      },
+    );
+    expect(getNamedPrincipals(doc)).toStrictEqual([PRINCIPAL_A, PRINCIPAL_B]);
+  });
+});
+
 describe('getEffectiveActions', () => {
+  const grant = (
+    principal: PolicyStatement['Principal'],
+    actions: PolicyStatement['Action'],
+    effect: PolicyStatement['Effect'] = 'Allow',
+  ): PolicyStatement => ({
+    Effect: effect,
+    Principal: principal,
+    Action: actions,
+    Resource: getStatementResources(BUCKET, actions),
+  });
+
   it('returns the actions of Allow statements that list the principal, sorted', () => {
-    const policy: BucketPolicy = {
-      Statement: [
-        { Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:PutObject', 's3:GetObject'] },
-      ],
-    };
-    expect(getEffectiveActions(policy, PRINCIPAL_A)).toStrictEqual([
-      's3:GetObject',
-      's3:PutObject',
-    ]);
+    const doc = policy(grant(members(PRINCIPAL_A), ['s3:PutObject', 's3:GetObject']));
+    expect(getEffectiveActions(doc, PRINCIPAL_A)).toStrictEqual(['s3:GetObject', 's3:PutObject']);
   });
 
   it('expands the s3:* action to every action', () => {
-    const policy: BucketPolicy = {
-      Statement: [{ Effect: 'Allow', Principal: [PRINCIPAL_A], Action: ['s3:*'] }],
-    };
-    expect(getEffectiveActions(policy, PRINCIPAL_A)).toStrictEqual([...POLICY_ACTIONS].sort());
+    const doc = policy(grant(members(PRINCIPAL_A), ['s3:*']));
+    expect(getEffectiveActions(doc, PRINCIPAL_A)).toStrictEqual([...POLICY_ACTIONS].sort());
   });
 
   it('removes the actions a Deny statement covers', () => {
-    const policy: BucketPolicy = {
-      Statement: [
-        ...grantReadToPrincipalA.Statement,
-        { Effect: 'Deny', Principal: [PRINCIPAL_A], Action: ['s3:ListBucket'] },
-      ],
-    };
-    expect(getEffectiveActions(policy, PRINCIPAL_A)).toStrictEqual(['s3:GetObject']);
+    const doc = policy(
+      ...grantReadToPrincipalA.Statement,
+      grant(members(PRINCIPAL_A), ['s3:ListBucket'], 'Deny'),
+    );
+    expect(getEffectiveActions(doc, PRINCIPAL_A)).toStrictEqual(['s3:GetObject']);
   });
 
   it('applies an Allow statement with Principal "*" to a principal it does not list', () => {
-    const policy: BucketPolicy = {
-      Statement: [{ Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] }],
-    };
-    expect(getEffectiveActions(policy, PRINCIPAL_A)).toStrictEqual(['s3:GetObject']);
+    const doc = policy(grant('*', ['s3:GetObject']));
+    expect(getEffectiveActions(doc, PRINCIPAL_A)).toStrictEqual(['s3:GetObject']);
   });
 
   it('applies a Deny statement with Principal "*" to a principal it does not list', () => {
-    const policy: BucketPolicy = {
-      Statement: [
-        ...grantReadToPrincipalA.Statement,
-        { Effect: 'Deny', Principal: '*', Action: ['s3:ListBucket'] },
-      ],
-    };
-    expect(getEffectiveActions(policy, PRINCIPAL_A)).toStrictEqual(['s3:GetObject']);
+    const doc = policy(...grantReadToPrincipalA.Statement, grant('*', ['s3:ListBucket'], 'Deny'));
+    expect(getEffectiveActions(doc, PRINCIPAL_A)).toStrictEqual(['s3:GetObject']);
   });
 
   it('returns no effective actions for a principal not mentioned by the policy', () => {
@@ -260,10 +355,8 @@ describe('getEffectiveActions', () => {
   });
 
   it('returns no effective actions when the policy has only Deny statements for the principal', () => {
-    const policy: BucketPolicy = {
-      Statement: [{ Effect: 'Deny', Principal: [PRINCIPAL_A], Action: ['s3:GetObject'] }],
-    };
-    expect(getEffectiveActions(policy, PRINCIPAL_A)).toStrictEqual([]);
+    const doc = policy(grant(members(PRINCIPAL_A), ['s3:GetObject'], 'Deny'));
+    expect(getEffectiveActions(doc, PRINCIPAL_A)).toStrictEqual([]);
   });
 
   it('does not read a "*" argument as matching every listed principal', () => {
@@ -273,31 +366,39 @@ describe('getEffectiveActions', () => {
 
   it('applies an Allow statement with Principal "*" to a "*" argument', () => {
     // "*" stands for a member the policy does not list; hasNewRetentionGrants relies on it.
-    const policy: BucketPolicy = {
-      Statement: [{ Effect: 'Allow', Principal: '*', Action: ['s3:GetObject'] }],
-    };
-    expect(getEffectiveActions(policy, '*')).toStrictEqual(['s3:GetObject']);
+    const doc = policy(grant('*', ['s3:GetObject']));
+    expect(getEffectiveActions(doc, '*')).toStrictEqual(['s3:GetObject']);
   });
 });
 
 describe('hasNewRetentionGrants', () => {
-  const grantAllActionsToOwners: BucketPolicy = {
-    Statement: [{ Sid: 'owners', Effect: 'Allow', Principal: [PRINCIPAL_C], Action: ['s3:*'] }],
-  };
-  const grantRetentionToEveryone: BucketPolicy = {
-    Statement: [{ Effect: 'Allow', Principal: '*', Action: [...RETENTION_WRITE_ACTIONS] }],
-  };
-  const grantRetentionToOwnersAndPrincipalB: BucketPolicy = {
-    Statement: [
-      ...grantAllActionsToOwners.Statement,
-      { Effect: 'Allow', Principal: [PRINCIPAL_B], Action: ['s3:PutObjectRetention'] },
-    ],
-  };
+  const grantAllActionsToOwners = policy({
+    Sid: 'owners',
+    Effect: 'Allow',
+    Principal: members(PRINCIPAL_C),
+    Action: ['s3:*'],
+    Resource: BOTH_ARNS,
+  });
+  const grantRetentionToEveryone = policy({
+    Effect: 'Allow',
+    Principal: '*',
+    Action: [...RETENTION_WRITE_ACTIONS],
+    Resource: [OBJECTS_ARN],
+  });
+  const grantRetentionToOwnersAndPrincipalB = policy(...grantAllActionsToOwners.Statement, {
+    Effect: 'Allow',
+    Principal: members(PRINCIPAL_B),
+    Action: ['s3:PutObjectRetention'],
+    Resource: [OBJECTS_ARN],
+  });
 
   it.each(RETENTION_WRITE_ACTIONS)('returns true when a new policy allows %s', (action) => {
-    const next: BucketPolicy = {
-      Statement: [{ Effect: 'Allow', Principal: [PRINCIPAL_A], Action: [action] }],
-    };
+    const next = policy({
+      Effect: 'Allow',
+      Principal: members(PRINCIPAL_A),
+      Action: [action],
+      Resource: [OBJECTS_ARN],
+    });
     expect(hasNewRetentionGrants(null, next)).toBe(true);
   });
 
@@ -306,9 +407,12 @@ describe('hasNewRetentionGrants', () => {
   });
 
   it('ignores Deny statements', () => {
-    const next: BucketPolicy = {
-      Statement: [{ Effect: 'Deny', Principal: '*', Action: [...RETENTION_WRITE_ACTIONS] }],
-    };
+    const next = policy({
+      Effect: 'Deny',
+      Principal: '*',
+      Action: [...RETENTION_WRITE_ACTIONS],
+      Resource: [OBJECTS_ARN],
+    });
     expect(hasNewRetentionGrants(null, next)).toBe(false);
   });
 
@@ -317,9 +421,7 @@ describe('hasNewRetentionGrants', () => {
   });
 
   it('returns false when the stored policy already grants the retention writes', () => {
-    const next: BucketPolicy = {
-      Statement: [...grantAllActionsToOwners.Statement, ...grantReadToPrincipalA.Statement],
-    };
+    const next = policy(...grantAllActionsToOwners.Statement, ...grantReadToPrincipalA.Statement);
     expect(hasNewRetentionGrants(grantAllActionsToOwners, next)).toBe(false);
   });
 
@@ -342,30 +444,40 @@ describe('hasNewRetentionGrants', () => {
   it('returns true when the new policy removed the deny statement that was overriding an allow statement', () => {
     const allow: PolicyStatement = {
       Effect: 'Allow',
-      Principal: [PRINCIPAL_A],
+      Principal: members(PRINCIPAL_A),
       Action: ['s3:PutObjectRetention'],
+      Resource: [OBJECTS_ARN],
     };
     const deny: PolicyStatement = { ...allow, Effect: 'Deny' };
     // Deny wins at the storage system, so the policy grants nothing until the
     // deny goes; removing it is the grant.
-    const masked: BucketPolicy = { Statement: [allow, deny] };
+    const masked = policy(allow, deny);
 
-    expect(hasNewRetentionGrants(masked, { Statement: [allow] })).toBe(true);
+    expect(hasNewRetentionGrants(masked, policy(allow))).toBe(true);
   });
 });
 
 describe('getCreatorBucketPolicy', () => {
   it('names only the creator, with every action but the retention writes', () => {
-    expect(getCreatorBucketPolicy(PRINCIPAL_C)).toStrictEqual({
+    expect(getCreatorBucketPolicy({ creatorId: PRINCIPAL_C, bucketName: BUCKET })).toStrictEqual({
+      Version: POLICY_VERSION,
       Statement: [
-        { Sid: 'creator', Effect: 'Allow', Principal: [PRINCIPAL_C], Action: CREATOR_ACTIONS },
+        {
+          Sid: 'creator',
+          Effect: 'Allow',
+          Principal: members(PRINCIPAL_C),
+          Action: CREATOR_ACTIONS,
+          Resource: BOTH_ARNS,
+        },
       ],
     });
   });
 
   it('returns a policy the schema accepts', () => {
-    expect(BucketPolicySchema.safeParse(getCreatorBucketPolicy(PRINCIPAL_C))).toMatchObject({
-      success: true,
-    });
+    expect(
+      BucketPolicySchema.safeParse(
+        getCreatorBucketPolicy({ creatorId: PRINCIPAL_C, bucketName: BUCKET }),
+      ),
+    ).toMatchObject({ success: true });
   });
 });
