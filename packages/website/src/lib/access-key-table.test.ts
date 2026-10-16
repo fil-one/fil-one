@@ -7,6 +7,7 @@ import {
   ACCESS_KEY_TABLE_CONTROLS_MIN,
   EMPTY_ACCESS_KEY_FILTERS,
   accessKeyRegions,
+  clearHiddenAccessKeyFilters,
   filterAccessKeys,
   hasActiveAccessKeyFilters,
   shouldShowAccessKeyControls,
@@ -131,5 +132,33 @@ describe('accessKeyRegions', () => {
       serviceKey({ region: S3Region.UsEast1 }),
     ];
     expect(accessKeyRegions(keys)).toStrictEqual([S3Region.EuWest1, S3Region.UsEast1]);
+  });
+});
+
+describe('clearHiddenAccessKeyFilters', () => {
+  // One active service key in one region: every filter but the search is hidden.
+  const plainKeys = [serviceKey({ keyName: 'only' })];
+
+  it.each([
+    ['region', { region: S3Region.UsEast1 }],
+    ['status', { status: 'expired' }],
+    ['type', { type: 'principal' }],
+  ] as const)('resets the %s filter once its control is hidden', (_name, change) => {
+    expect(
+      clearHiddenAccessKeyFilters(plainKeys, { ...EMPTY_ACCESS_KEY_FILTERS, ...change }),
+    ).toStrictEqual(EMPTY_ACCESS_KEY_FILTERS);
+  });
+
+  it('keeps a filter whose control still shows', () => {
+    const keys = [serviceKey({ status: 'active' }), serviceKey({ status: 'expired' })];
+    const filters = { ...EMPTY_ACCESS_KEY_FILTERS, status: 'expired' as const };
+
+    expect(clearHiddenAccessKeyFilters(keys, filters)).toStrictEqual(filters);
+  });
+
+  it('keeps the search, which always shows', () => {
+    const filters = { ...EMPTY_ACCESS_KEY_FILTERS, query: 'any-query' };
+
+    expect(clearHiddenAccessKeyFilters(plainKeys, filters)).toStrictEqual(filters);
   });
 });

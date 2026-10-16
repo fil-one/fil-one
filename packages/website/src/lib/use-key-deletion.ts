@@ -36,7 +36,7 @@ export function useKeyDeletion(): {
   requestBulk: (ids: string[]) => void;
   /** Close it without deleting. */
   cancel: () => void;
-  /** Delete the pending ids. Refusals are reported through a toast. */
+  /** Delete the pending ids, each on its own; any refusal is reported through a toast. */
   confirm: () => Promise<void>;
   /** Copy for the confirmation dialog, sized to the pending ids. */
   dialogCopy: ReturnType<typeof deleteDialogCopy>;
@@ -45,21 +45,47 @@ export function useKeyDeletion(): {
   const [pendingIds, setPendingIds] = useState<string[] | null>(null);
 
   const deleteKeys = useMutation({
-    mutationFn: (ids: string[]) =>
-      Promise.all(ids.map((id) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' }))),
-    onSuccess: (_, ids) => {
-      const removed = new Set(ids);
+    // Settled, not all-or-nothing: the deletes run together, so when one fails
+    // the others have already happened on the server, and the list has to say
+    // so rather than keep showing keys that no longer work.
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(
+        ids.map((id) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' })),
+      );
+      return {
+        deleted: ids.filter((_, index) => results[index].status === 'fulfilled'),
+        failures: results.flatMap((result) =>
+          result.status === 'rejected' ? [result.reason] : [],
+        ),
+      };
+    },
+    onSuccess: ({ deleted, failures }) => {
+      const removed = new Set(deleted);
       queryClient.setQueryData<ListAccessKeysResponse>(queryKeys.accessKeys, (old) =>
         old ? { keys: old.keys.filter((k) => !removed.has(k.id)) } : old,
       );
+      reportOutcome(deleted.length, failures);
+    },
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-      toast.success(ids.length === 1 ? 'Access key deleted' : `${ids.length} access keys deleted`);
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete keys');
     },
   });
+
+  function reportOutcome(deletedCount: number, failures: unknown[]) {
+    if (failures.length === 0) {
+      toast.success(
+        deletedCount === 1 ? 'Access key deleted' : `${deletedCount} access keys deleted`,
+      );
+      return;
+    }
+    const reason = failures[0] instanceof Error ? failures[0].message : 'Failed to delete keys';
+    if (deletedCount === 0) {
+      toast.error(reason);
+      return;
+    }
+    toast.error(`${deletedCount} deleted. ${failures.length} couldn't be deleted: ${reason}`);
+  }
 
   return {
     pendingIds,
@@ -68,12 +94,10 @@ export function useKeyDeletion(): {
     cancel: () => setPendingIds(null),
     confirm: async () => {
       if (!pendingIds || deleteKeys.isPending) return;
-      try {
-        await deleteKeys.mutateAsync(pendingIds);
-        setPendingIds(null);
-      } catch {
-        // reported by onError
-      }
+      // Closed whatever the outcome: the toast reports any key that could not
+      // be deleted, and the refreshed list shows what is left to retry.
+      await deleteKeys.mutateAsync(pendingIds);
+      setPendingIds(null);
     },
     dialogCopy: deleteDialogCopy(pendingIds?.length ?? 0),
   };

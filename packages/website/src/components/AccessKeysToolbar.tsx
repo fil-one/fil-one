@@ -3,7 +3,12 @@ import { getRegionLabel } from '@filone/shared';
 
 import { SearchInput } from './SearchInput';
 import { Select } from './Select';
-import { ALL, type AccessKeyFilters, hasActiveAccessKeyFilters } from '../lib/access-key-table.js';
+import {
+  ALL,
+  type AccessKeyFilters,
+  getVisibleAccessKeyFilters,
+  hasActiveAccessKeyFilters,
+} from '../lib/access-key-table.js';
 
 type AccessKeysToolbarProps = {
   filters: AccessKeyFilters;
@@ -29,9 +34,7 @@ export function AccessKeysToolbar({
   regions,
   matchCount,
 }: AccessKeysToolbarProps) {
-  const showRegionFilter = regions.length > 1;
-  const showStatusFilter = keys.some((key) => key.status === 'expired');
-  const showTypeFilter = keys.some((key) => key.type === 'principal');
+  const visible = getVisibleAccessKeyFilters(keys);
   const filtering = hasActiveAccessKeyFilters(filters);
 
   return (
@@ -46,7 +49,7 @@ export function AccessKeysToolbar({
         className="w-full sm:w-64"
       />
 
-      {showRegionFilter && (
+      {visible.region && (
         <Select
           value={filters.region}
           onChange={(region) => onChange({ ...filters, region })}
@@ -63,7 +66,7 @@ export function AccessKeysToolbar({
         </Select>
       )}
 
-      {showStatusFilter && (
+      {visible.status && (
         <Select
           value={filters.status}
           onChange={(status) => onChange({ ...filters, status: toStatusFilter(status) })}
@@ -77,7 +80,7 @@ export function AccessKeysToolbar({
         </Select>
       )}
 
-      {showTypeFilter && (
+      {visible.type && (
         <Select
           value={filters.type}
           onChange={(type) => onChange({ ...filters, type: toTypeFilter(type) })}

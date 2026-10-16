@@ -38,16 +38,27 @@ const KEY_TYPE_DESCRIPTIONS: Record<AccessKey['type'], string> = {
   service: 'Carries its own permissions and buckets. Bucket policies do not apply.',
 };
 
+// The explanatory tooltips in this table are focusable, so a keyboard reaches
+// them too. Their label carries the visible text first, because a focusable
+// tooltip's label replaces what a screen reader would otherwise read.
 export function KeyTypeBadge({ type }: { type: AccessKey['type'] }) {
   return (
-    <Badge color="grey" size="sm" data-key-type={type} description={KEY_TYPE_DESCRIPTIONS[type]}>
-      {KEY_TYPE_LABELS[type]}
-    </Badge>
+    <Tooltip
+      content={KEY_TYPE_DESCRIPTIONS[type]}
+      side="bottom"
+      focusable
+      label={`${KEY_TYPE_LABELS[type]} key: ${KEY_TYPE_DESCRIPTIONS[type]}`}
+      className="rounded-full"
+    >
+      <Badge color="grey" size="sm" data-key-type={type}>
+        {KEY_TYPE_LABELS[type]}
+      </Badge>
+    </Tooltip>
   );
 }
 
 /**
- * The object permissions as plain, static facts — scannable across many rows
+ * The object permissions as plain, static facts, scannable across many rows
  * at once, nothing to click, nothing to guess about. Whatever else the key
  * carries (data-protection extras, bucket management, bucket info) is real
  * detail that a chip has no room to be honest about, so one "+N" opens the
@@ -60,7 +71,7 @@ export function PermissionBadges({
   accessKey: ServiceAccessKey;
   onShowDetails: () => void;
 }) {
-  // PERMISSION_OPTIONS' order, not the array's — same reason the drawer uses
+  // PERMISSION_OPTIONS' order, not the array's: same reason the drawer uses
   // it: Read/Write/List/Delete read in a fixed order everywhere else.
   const permissions = accessKey.permissions ?? [];
   const objectPermissions = PERMISSION_OPTIONS.filter((o) => permissions.includes(o.value));
@@ -94,7 +105,7 @@ export function PermissionBadges({
           data-testid="permission-badge-details"
           onClick={onShowDetails}
           aria-label={`Show all ${extraCount + objectPermissions.length} permissions`}
-          className="cursor-pointer rounded-sm px-0.5 text-xs text-zinc-500 hover:text-zinc-900 focus-visible:brand-outline"
+          className="cursor-pointer rounded-md px-0.5 text-xs text-zinc-500 hover:text-zinc-900 focus-visible:brand-outline"
         >
           +{extraCount}
         </button>
@@ -115,7 +126,13 @@ const BUCKET_NAMES_INLINE_MAX = 2;
 export function BucketSummary({ accessKey }: { accessKey: AccessKey }) {
   if (accessKey.type === 'principal') {
     return (
-      <Tooltip content="Buckets whose policy grants this key's owner access." side="bottom">
+      <Tooltip
+        content="Buckets whose policy grants this key's owner access."
+        side="bottom"
+        focusable
+        label="Per bucket policy: buckets whose policy grants this key's owner access."
+        className="rounded-md"
+      >
         <span className="text-xs text-zinc-500 underline decoration-zinc-400 decoration-dotted underline-offset-2 cursor-help">
           Per bucket policy
         </span>
@@ -162,7 +179,13 @@ export function BucketSummary({ accessKey }: { accessKey: AccessKey }) {
  */
 export function FollowsBucketPolicy() {
   return (
-    <Tooltip content="This key inherits the policy of every bucket it touches." side="bottom">
+    <Tooltip
+      content="This key inherits the policy of every bucket it touches."
+      side="bottom"
+      focusable
+      label="Follows bucket policy: this key inherits the policy of every bucket it touches."
+      className="rounded-md"
+    >
       <span
         data-testid="permission-badge-follows-bucket-policy"
         className="text-xs text-zinc-500 underline decoration-zinc-400 decoration-dotted underline-offset-2 cursor-help"

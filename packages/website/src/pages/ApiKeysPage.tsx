@@ -21,6 +21,7 @@ import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
 import {
   EMPTY_ACCESS_KEY_FILTERS,
   accessKeyRegions,
+  clearHiddenAccessKeyFilters,
   filterAccessKeys,
   shouldShowAccessKeyControls,
 } from '../lib/access-key-table.js';
@@ -81,16 +82,16 @@ function AccessKeysTab({
   const showControls = shouldShowAccessKeyControls(keys.length);
   // Below the threshold the controls are hidden, so filters left over from a
   // longer list must not keep narrowing a short one with no way to clear them.
-  const shownKeys = useMemo(
-    () => (showControls ? filterAccessKeys(keys, filters) : keys),
-    [keys, filters, showControls],
-  );
+  // A filter the toolbar hides stops narrowing the list, so the list and the
+  // controls on screen always agree.
+  const appliedFilters = clearHiddenAccessKeyFilters(keys, filters);
+  const shownKeys = showControls ? filterAccessKeys(keys, appliedFilters) : keys;
 
   return (
     <>
       {showControls && (
         <AccessKeysToolbar
-          filters={filters}
+          filters={appliedFilters}
           onChange={setFilters}
           keys={keys}
           regions={regions}

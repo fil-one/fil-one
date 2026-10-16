@@ -72,3 +72,37 @@ export function accessKeyRegions(keys: AccessKey[]): string[] {
   const regions = [...new Set(keys.map(regionOf))];
   return regions.sort((a, b) => getRegionLabel(a).localeCompare(getRegionLabel(b)));
 }
+
+/**
+ * Which filters can split these keys, so are worth showing: region with keys in
+ * more than one, status once one has expired, type once a personal key exists.
+ */
+export function getVisibleAccessKeyFilters(keys: AccessKey[]): {
+  region: boolean;
+  status: boolean;
+  type: boolean;
+} {
+  return {
+    region: accessKeyRegions(keys).length > 1,
+    status: keys.some((key) => key.status === 'expired'),
+    type: keys.some((key) => key.type === 'principal'),
+  };
+}
+
+/**
+ * The filters with any hidden one reset to keep every key. A filter hides once
+ * it cannot split the list (the last expired key deleted, say), and left set
+ * it would go on narrowing the list with no control on screen to clear it.
+ */
+export function clearHiddenAccessKeyFilters(
+  keys: AccessKey[],
+  filters: AccessKeyFilters,
+): AccessKeyFilters {
+  const visible = getVisibleAccessKeyFilters(keys);
+  return {
+    query: filters.query,
+    region: visible.region ? filters.region : ALL,
+    status: visible.status ? filters.status : ALL,
+    type: visible.type ? filters.type : ALL,
+  };
+}

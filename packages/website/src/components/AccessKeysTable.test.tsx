@@ -26,7 +26,7 @@ function makeKey(overrides: Partial<ServiceAccessKey>): ServiceAccessKey {
   };
 }
 
-describe('AccessKeysTable — permission detail', () => {
+describe('AccessKeysTable : permission detail', () => {
   it('offers a details trigger when a key carries more than its object permissions', () => {
     const keys = [makeKey({ permissions: ['read', 'GetBucketVersioning'] })];
     renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
@@ -66,7 +66,7 @@ describe('AccessKeysTable — permission detail', () => {
   });
 });
 
-describe('AccessKeysTable — the details drawer', () => {
+describe('AccessKeysTable : the details drawer', () => {
   const scopedKey = makeKey({
     keyName: 'any-key',
     bucketScope: 'specific',
@@ -197,10 +197,55 @@ describe('AccessKeysTable — the details drawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Key actions' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
 
-    expect({
-      deleted: onDelete.mock.calls,
-      drawerOpen: screen.queryByTestId('access-key-details-drawer') !== null,
-    }).toStrictEqual({ deleted: [[scopedKey.id]], drawerOpen: false });
+    await waitFor(() => expect(onDelete).toHaveBeenCalledWith(scopedKey.id));
+    expect(screen.queryByTestId('access-key-details-drawer')).not.toBeInTheDocument();
+  });
+
+  // The action's confirm dialog returns focus to whatever held it when it
+  // opened, so it has to be the row's name, not the drawer's vanishing menu.
+  it('puts focus back on the key name before running an action from the drawer', async () => {
+    const focusedWhenDeleting: Element[] = [];
+    const onDelete = vi.fn(async () => {
+      if (document.activeElement) focusedWhenDeleting.push(document.activeElement);
+    });
+    renderWithProviders(<AccessKeysTable keys={[scopedKey]} onDelete={onDelete} />);
+
+    fireEvent.click(screen.getByTestId('access-key-row'));
+    fireEvent.click(screen.getByRole('button', { name: 'Key actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+
+    await waitFor(() => expect(onDelete).toHaveBeenCalled());
+    expect(focusedWhenDeleting).toStrictEqual([screen.getByRole('button', { name: 'any-key' })]);
+  });
+
+  it('shows the key as the list now has it, updating while the drawer is open', () => {
+    const { rerender } = renderWithProviders(<AccessKeysTable keys={[scopedKey]} />);
+    fireEvent.click(screen.getByTestId('access-key-row'));
+
+    rerender(
+      <ToastProvider>
+        <AccessKeysTable keys={[{ ...scopedKey, keyName: 'renamed-key' }]} />
+      </ToastProvider>,
+    );
+
+    expect(screen.getByRole('dialog', { name: 'renamed-key' })).toBeInTheDocument();
+  });
+
+  it('closes when the key it shows leaves the list', async () => {
+    const { rerender } = renderWithProviders(
+      <AccessKeysTable keys={[scopedKey, makeKey({ id: '9' })]} />,
+    );
+    fireEvent.click(screen.getAllByTestId('access-key-row')[0]);
+
+    rerender(
+      <ToastProvider>
+        <AccessKeysTable keys={[makeKey({ id: '9' })]} />
+      </ToastProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByTestId('access-key-details-drawer')).not.toBeInTheDocument(),
+    );
   });
 
   it('offers no actions in the drawer when the caller may neither rotate nor delete', () => {
@@ -239,7 +284,7 @@ describe('AccessKeysTable — a principal-bound key', () => {
   });
 });
 
-describe('AccessKeysTable — the Buckets column', () => {
+describe('AccessKeysTable : the Buckets column', () => {
   it('lists the first two bucket names and counts the rest', () => {
     const key = makeKey({
       bucketScope: 'specific',
@@ -428,5 +473,34 @@ describe('AccessKeysTable — key status', () => {
     renderWithProviders(<AccessKeysTable keys={[makeKey({})]} />);
 
     expect(screen.queryByRole('columnheader', { name: 'Last Used' })).not.toBeInTheDocument();
+  });
+});
+
+describe('AccessKeysTable: bulk selection', () => {
+  const mine = makeKey({ id: 'mine', keyName: 'mine' });
+  const theirs = makeKey({ id: 'theirs', keyName: 'theirs' });
+  // A Member may revoke their own key and not a colleague's.
+  const canDelete = (key: AccessKey) => key.id === 'mine';
+
+  it('offers a checkbox only on the keys the caller may delete', () => {
+    renderWithProviders(
+      <AccessKeysTable keys={[mine, theirs]} onBulkDelete={async () => {}} canDelete={canDelete} />,
+    );
+
+    expect(
+      screen.getAllByRole('checkbox').map((checkbox) => checkbox.getAttribute('aria-label')),
+    ).toStrictEqual(['Select all keys', 'Select mine']);
+  });
+
+  it('bulk-deletes only the keys the caller may delete when all are selected', () => {
+    const onBulkDelete = vi.fn(async () => {});
+    renderWithProviders(
+      <AccessKeysTable keys={[mine, theirs]} onBulkDelete={onBulkDelete} canDelete={canDelete} />,
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all keys' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(onBulkDelete.mock.calls).toStrictEqual([[['mine']]]);
   });
 });

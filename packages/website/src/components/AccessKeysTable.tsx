@@ -131,7 +131,8 @@ function KeyNameCell({ accessKey: key, onOpen }: { accessKey: AccessKey; onOpen:
             type="button"
             onClick={onOpen}
             title={key.keyName}
-            className="min-w-0 cursor-pointer truncate rounded-sm text-left text-xs font-medium text-zinc-900 hover:underline focus-visible:brand-outline"
+            data-key-name-for={key.id}
+            className="min-w-0 cursor-pointer truncate rounded-md text-left text-xs font-medium text-zinc-900 hover:underline focus-visible:brand-outline"
           >
             {key.keyName}
           </button>
@@ -219,25 +220,27 @@ function isFromRowControl(target: EventTarget): boolean {
   );
 }
 
-/** The row's actions, closing the drawer before each runs so its dialog is not stacked under it. */
+/**
+ * The row's actions for the drawer: each closes the drawer, puts focus back on
+ * the key's name in its row, and only then runs. Run in the same render as the
+ * close, an action's confirm dialog would take the vanishing menu item as the
+ * place to return focus to, and focus would be lost when it closed.
+ */
 function closingFirst(
   actions: { onRotate?: () => void; onDelete?: () => void },
   close: () => void,
+  keyId: string,
 ): { onRotate?: () => void; onDelete?: () => void } {
-  const { onRotate, onDelete } = actions;
+  const afterClosing = (action: () => void) => () => {
+    close();
+    setTimeout(() => {
+      document.querySelector<HTMLElement>(`[data-key-name-for="${CSS.escape(keyId)}"]`)?.focus();
+      action();
+    }, 0);
+  };
   return {
-    onRotate:
-      onRotate &&
-      (() => {
-        close();
-        onRotate();
-      }),
-    onDelete:
-      onDelete &&
-      (() => {
-        close();
-        onDelete();
-      }),
+    onRotate: actions.onRotate && afterClosing(actions.onRotate),
+    onDelete: actions.onDelete && afterClosing(actions.onDelete),
   };
 }
 
@@ -306,9 +309,20 @@ export function AccessKeysTable({
   // names its rotator even on such a row, which is something to read.
   const showCreatedBy = Boolean(creatorFor) && keys.some((key) => key.createdBy || key.rotatedBy);
 
-  const selectable = Boolean(onBulkDelete);
-  const { selected, allSelected, toggleAll, toggleOne, clearSelection } = useKeySelection(keys);
-  const [detailKey, setDetailKey] = useState<AccessKey | null>(null);
+  // Only the keys this caller may delete can be selected, so a bulk delete
+  // never carries one the row's own menu would refuse.
+  const isDeletable = (key: AccessKey) => canDelete?.(key) ?? true;
+  const deletableKeys = keys.filter(isDeletable);
+  const selectable = Boolean(onBulkDelete) && deletableKeys.length > 0;
+  const { selected, allSelected, toggleAll, toggleOne, clearSelection } =
+    useKeySelection(deletableKeys);
+  // The id, not the key: the drawer reads the key from the current list, so a
+  // refetch updates it and a key deleted elsewhere closes it.
+  const [detailKeyId, setDetailKeyId] = useState<string | null>(null);
+  const detailKey = keys.find((key) => key.id === detailKeyId) ?? null;
+  useEffect(() => {
+    if (detailKeyId !== null && detailKey === null) setDetailKeyId(null);
+  }, [detailKeyId, detailKey]);
 
   if (keys.length === 0) {
     return (
@@ -367,21 +381,23 @@ export function AccessKeysTable({
                 selected={isSelected}
                 className="cursor-pointer"
                 onClick={(event) => {
-                  if (!isFromRowControl(event.target)) setDetailKey(key);
+                  if (!isFromRowControl(event.target)) setDetailKeyId(key.id);
                 }}
               >
                 {selectable && (
                   <Table.Cell className="w-0 !pr-0">
-                    <Checkbox
-                      checked={isSelected}
-                      onChange={() => toggleOne(key.id)}
-                      aria-label={`Select ${key.keyName}`}
-                    />
+                    {isDeletable(key) && (
+                      <Checkbox
+                        checked={isSelected}
+                        onChange={() => toggleOne(key.id)}
+                        aria-label={`Select ${key.keyName}`}
+                      />
+                    )}
                   </Table.Cell>
                 )}
 
                 {/* Name + Access Key ID */}
-                <KeyNameCell accessKey={key} onOpen={() => setDetailKey(key)} />
+                <KeyNameCell accessKey={key} onOpen={() => setDetailKeyId(key.id)} />
 
                 {/* Region, laid out as the buckets table lays it out */}
                 {showRegion && (
@@ -414,7 +430,10 @@ export function AccessKeysTable({
                     {key.type === 'principal' ? (
                       <FollowsBucketPolicy />
                     ) : (
-                      <PermissionBadges accessKey={key} onShowDetails={() => setDetailKey(key)} />
+                      <PermissionBadges
+                        accessKey={key}
+                        onShowDetails={() => setDetailKeyId(key.id)}
+                      />
                     )}
                   </Table.Cell>
                 )}
@@ -451,8 +470,8 @@ export function AccessKeysTable({
           accessKey={detailKey}
           creatorFor={creatorFor}
           linkBuckets={linkBuckets}
-          onClose={() => setDetailKey(null)}
-          {...closingFirst(actionsFor(detailKey), () => setDetailKey(null))}
+          onClose={() => setDetailKeyId(null)}
+          {...closingFirst(actionsFor(detailKey), () => setDetailKeyId(null), detailKey.id)}
         />
       )}
     </>

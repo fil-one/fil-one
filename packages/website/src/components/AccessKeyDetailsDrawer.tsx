@@ -11,7 +11,7 @@ import { XIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Link } from '@tanstack/react-router';
 
-import type { AccessKey, GranularPermission, S3Region, ServiceAccessKey } from '@filone/shared';
+import type { AccessKey, GranularPermission, ServiceAccessKey } from '@filone/shared';
 import {
   BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSION_LABELS,
@@ -275,7 +275,7 @@ function BucketsSection({
   }
 
   const buckets = accessKey.buckets ?? [];
-  const region = (accessKey.region ?? S3_REGION) as S3Region;
+  const region = accessKey.region ?? S3_REGION;
   const shown = showAll ? buckets : buckets.slice(0, BUCKETS_SHOWN_MAX);
   return (
     <DrawerSection
@@ -297,7 +297,7 @@ function BucketsSection({
                   to="/buckets/$bucketName"
                   params={{ bucketName: bucket }}
                   search={{ region }}
-                  className="rounded-sm text-zinc-900 hover:text-brand-600 focus-visible:brand-outline"
+                  className="rounded-md text-zinc-900 hover:text-brand-600 focus-visible:brand-outline"
                 >
                   {bucket}
                 </Link>
@@ -312,7 +312,7 @@ function BucketsSection({
         <button
           type="button"
           onClick={() => setShowAll((all) => !all)}
-          className="mt-2 cursor-pointer rounded-sm text-xs text-zinc-500 hover:text-zinc-900 focus-visible:brand-outline"
+          className="mt-2 cursor-pointer rounded-md text-xs text-zinc-500 hover:text-zinc-900 focus-visible:brand-outline"
         >
           {showAll ? 'Show fewer' : `Show all ${buckets.length}`}
         </button>

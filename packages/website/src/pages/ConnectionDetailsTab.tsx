@@ -144,7 +144,7 @@ function ConnectionFacts({
             <dd className="min-w-0 flex-1 truncate font-mono text-xs text-(--color-text-base)">
               {endpoint}
             </dd>
-            <span className="shrink-0 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100 max-sm:opacity-100">
+            <span className="shrink-0 transition pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 pointer-fine:focus-within:opacity-100">
               <CopyButton value={endpoint} />
             </span>
           </div>

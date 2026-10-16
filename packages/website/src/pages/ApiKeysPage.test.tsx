@@ -25,7 +25,7 @@ vi.mock('@tanstack/react-router', () => ({
 
 import { ApiKeysPage } from './ApiKeysPage.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
-import { queryKeys } from '../lib/query-client.js';
+import { queryClient as sharedQueryClient, queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
 const USER_1 = '00000000-0000-0000-0000-000000000001';
@@ -285,7 +285,7 @@ describe('ApiKeysPage — rotating a key', () => {
   });
 });
 
-describe('ApiKeysPage — searching and filtering keys', () => {
+describe('ApiKeysPage : searching and filtering keys', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -323,6 +323,26 @@ describe('ApiKeysPage — searching and filtering keys', () => {
     expect(rowNames()).toStrictEqual(['alpha', 'bravo', 'charlie', 'delta', 'echo']);
   });
 
+  it('shows every key again once the filter it set can no longer split the list', async () => {
+    const keys = [...fiveKeys, key({ id: 'key-5', keyName: 'foxtrot', status: 'expired' })];
+    mockApiRequest.mockResolvedValue({ keys });
+    const { client } = renderPage();
+    await screen.findByText('alpha');
+    fireEvent.change(screen.getByRole('combobox', { name: /filter keys by status/i }), {
+      target: { value: 'expired' },
+    });
+    expect(rowNames()).toStrictEqual(['foxtrot']);
+
+    // The only expired key is deleted elsewhere, so the Status filter hides.
+    act(() => {
+      client.setQueryData(queryKeys.accessKeys, { keys: fiveKeys });
+    });
+
+    await waitFor(() =>
+      expect(rowNames()).toStrictEqual(['alpha', 'bravo', 'charlie', 'delta', 'echo']),
+    );
+  });
+
   it('leaves out the search below five keys', async () => {
     mockApiRequest.mockResolvedValue({ keys: fiveKeys.slice(0, 4) });
     renderPage();
@@ -332,7 +352,7 @@ describe('ApiKeysPage — searching and filtering keys', () => {
   });
 });
 
-describe('ApiKeysPage — the details drawer', () => {
+describe('ApiKeysPage : the details drawer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -345,5 +365,53 @@ describe('ApiKeysPage — the details drawer', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'my key' }));
 
     expect(screen.getByRole('link', { name: 'any-bucket' })).toBeInTheDocument();
+  });
+});
+
+describe('ApiKeysPage : a bulk delete that partly fails', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const keys = [key(), key({ id: 'key-2', keyName: 'other key' })];
+
+  function mockOneRefusedDelete() {
+    mockApiRequest.mockImplementation((path: string, init?: { method?: string }) => {
+      if (init?.method !== 'DELETE') return Promise.resolve({ keys });
+      // The second key was already deleted elsewhere, so the server refuses it.
+      return path.endsWith('/key-2')
+        ? Promise.reject(new Error('Access key not found'))
+        : Promise.resolve({});
+    });
+  }
+
+  async function deleteBoth() {
+    renderPage();
+    await screen.findByText('my key');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all keys' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete 2 keys' }));
+  }
+
+  it('says how many were deleted and why the rest were not', async () => {
+    mockOneRefusedDelete();
+    await deleteBoth();
+
+    expect(
+      await screen.findByText("1 deleted. 1 couldn't be deleted: Access key not found"),
+    ).toBeInTheDocument();
+  });
+
+  // The deletion hook refreshes through the app's shared query client, which
+  // is a different one from the client this page renders with in tests.
+  it('refreshes the key list after the partial failure, so deleted keys stop showing', async () => {
+    const invalidate = vi.spyOn(sharedQueryClient, 'invalidateQueries');
+    mockOneRefusedDelete();
+    await deleteBoth();
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.accessKeys }),
+    );
+    invalidate.mockRestore();
   });
 });
