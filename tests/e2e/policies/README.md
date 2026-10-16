@@ -25,7 +25,7 @@ SST_STAGE=local pnpm test:e2e:policies
 
 ## Remote stage
 
-The same suite runs against staging. Register the five accounts against the stage once (`signup`, `verify`, `finish` with `https://staging.fil.one` as the origin), keep their credentials in `.env.e2e.local` or the `E2E_POLICY_*` secrets, and run the project through `sst shell` so the member and billing seeds reach the stage's tables:
+The same suite runs against staging. Register the five accounts against the stage once (`signup`, `verify`, `finish` with `https://staging.fil.one` as the origin; `E2E_POLICY_EMAIL_PREFIX` sets their addresses and `E2E_POLICY_ENV_FILE` the file they are written to), keep their credentials in `.env.e2e.local` or the `E2E_POLICY_*` secrets, and run the project through `sst shell` so the member and billing seeds reach the stage's tables:
 
 ```bash
 export AWS_REGION=us-east-2 BASE_URL=https://staging.fil.one

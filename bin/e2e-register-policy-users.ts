@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // One-time setup for the bucket policy e2e suite (tests/e2e/policies): signs up
-// the users it drives, on a local stage, and records their credentials in the
+// the users it drives on a stage, and records their credentials in the
 // gitignored .env.e2e.local that playwright.config.ts loads.
 //
 // Usage:
@@ -15,13 +15,16 @@
 // Auth0 mails with `verify` (or in any browser), then `finish` logs each account
 // in once, which creates its personal organization, and writes its user id.
 //
-// Credentials go to the file only; nothing is printed.
+// Credentials go to the file only; nothing is printed. E2E_POLICY_ENV_FILE
+// writes them elsewhere, for a stage other than the one .env.e2e.local serves.
+// E2E_POLICY_EMAIL_PREFIX sets the address: `<prefix>-<role>@fil.org`.
 
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium, type Page } from '@playwright/test';
 
-const ENV_FILE = '.env.e2e.local';
+const ENV_FILE = process.env.E2E_POLICY_ENV_FILE ?? '.env.e2e.local';
+const EMAIL_PREFIX = process.env.E2E_POLICY_EMAIL_PREFIX ?? 'srdjan+policy';
 const ROLES = ['OWNER', 'ADMIN', 'MEMBER', 'READONLY', 'LEAVER'] as const;
 type Role = (typeof ROLES)[number];
 const PRIMARY_BUTTON_SELECTOR = 'button[data-action-button-primary="true"]';
@@ -61,7 +64,7 @@ async function withBrowserPage(run: (page: Page) => Promise<void>): Promise<void
 async function signUpUsers(origin: string, roles: readonly Role[]): Promise<void> {
   const env = readEnv();
   for (const role of roles) {
-    const email = `srdjan+policy-${role.toLowerCase()}@fil.org`;
+    const email = `${EMAIL_PREFIX}-${role.toLowerCase()}@fil.org`;
     const password = generatePassword();
     await withBrowserPage(async (page) => {
       await page.goto(`${origin}/login?screen_hint=signup`);
