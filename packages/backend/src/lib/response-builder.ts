@@ -33,8 +33,9 @@ export function makeClearCookieHeader(name: string): string {
 // corsPreflight configuration in the CDK stack — no need to set them here.
 export class ResponseBuilder {
   private _statusCode = 200;
-  private _body: object = {};
+  private _body: object | null = {};
   private _cookies: string[] = [];
+  private _headers: Record<string, string> = {};
 
   status(code: number): this {
     this._statusCode = code;
@@ -43,6 +44,17 @@ export class ResponseBuilder {
 
   body<T extends object>(b: T): this {
     this._body = b;
+    return this;
+  }
+
+  /** No body and no Content-Type, as a 204 carries. */
+  emptyBody(): this {
+    this._body = null;
+    return this;
+  }
+
+  header(name: string, value: string): this {
+    this._headers[name] = value;
     return this;
   }
 
@@ -55,12 +67,13 @@ export class ResponseBuilder {
     return {
       statusCode: this._statusCode,
       headers: {
-        'Content-Type': 'application/json',
+        ...(this._body !== null && { 'Content-Type': 'application/json' }),
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
         'Strict-Transport-Security': 'max-age=2592000; includeSubDomains',
+        ...this._headers,
       },
-      body: JSON.stringify(this._body),
+      body: this._body === null ? '' : JSON.stringify(this._body),
       ...(this._cookies.length > 0 && { cookies: this._cookies }),
     };
   }

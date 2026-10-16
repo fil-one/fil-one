@@ -10,7 +10,9 @@ import {
   GRANULAR_PERMISSION_REQUIREMENT,
   OrgRole,
   PresignOpSchema,
+  RETENTION_WRITE_ACTIONS,
   ROUTE_MANIFEST,
+  S3Region,
   roleHasPermission,
   SubscriptionStatus,
 } from '@filone/shared';
@@ -55,7 +57,7 @@ process.env.FILONE_STAGE ??= 'test';
 process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
 
 const ORG_ID = 'org-1';
-const USER_ID = 'user-1';
+const USER_ID = '00000000-0000-4000-8000-000000000001';
 /** Not a foundation address, so the RAG gate's answer hinges on the allowlist. */
 const OUTSIDER_EMAIL = 'outsider@example.com';
 /** The refusal `ragAccessMiddleware` writes, verbatim. */
@@ -195,6 +197,7 @@ type LambdaModule = {
 /** The parts of a request an in-handler route reads to decide its permission. */
 type RouteRequest = {
   body?: string;
+  headers?: Record<string, string>;
   queryStringParameters?: Record<string, string>;
   pathParameters?: Record<string, string>;
 };
@@ -223,7 +226,7 @@ async function invokeRoute(
   },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const module = (await import(`./handlers/${route.handler}.ts`)) as LambdaModule;
-  const { pathParameters, ...eventProps } = request;
+  const { pathParameters, headers, ...eventProps } = request;
   const event = buildEvent({
     ...eventProps,
     method: route.method,
@@ -233,6 +236,7 @@ async function invokeRoute(
   // Assigned rather than passed: the shared builder takes no path parameters,
   // and the handler tests set them on the built event the same way.
   if (pathParameters) event.pathParameters = pathParameters;
+  if (headers) Object.assign(event.headers, headers);
   if (csrf) event.headers['x-csrf-token'] = CSRF_TOKEN;
   // Every route here answers with a ResponseBuilder, so the union's string arm
   // never occurs; middy's declared return type carries it anyway.
@@ -599,6 +603,7 @@ describe('the caps routes apply on top of their declared permission', () => {
     // A roster rather than a count, so a route that starts declaring a cap
     // arrives here and has to be given cases rather than passing on a number.
     expect(capped).toStrictEqual([
+      'put-bucket-policy',
       'create-access-key',
       'rotate-access-key',
       'update-member-role',
@@ -729,6 +734,69 @@ describe('the caps routes apply on top of their declared permission', () => {
       expect(result.body).toContain(keyPermission);
     },
   );
+
+  /**
+   * Writing a bucket policy needs `buckets.policy_manage` to reach the handler,
+   * and `privileged.grant` for a statement that grants a retention write. On a
+   * first policy (`If-None-Match: *`) that check runs before the region is
+   * read, so it answers even in a region without bucket policies: a caller who
+   * may grant reaches the region check (501), and anyone else gets the 403.
+   */
+  describe('granting a retention write through a policy needs privileged.grant', () => {
+    const buildPolicyGrantRequest = (action: string): RouteRequest => ({
+      body: JSON.stringify({
+        policy: { Statement: [{ Effect: 'Allow', Principal: [USER_ID], Action: [action] }] },
+      }),
+      headers: { 'if-none-match': '*' },
+      pathParameters: { name: 'photos' },
+      // A service-keys region, which serves no bucket policies.
+      queryStringParameters: { region: S3Region.EuWest1 },
+    });
+    const editors = Object.values(OrgRole).filter((role) =>
+      roleHasPermission(role, 'buckets.policy_manage'),
+    );
+    const retentionGrantActions = [...RETENTION_WRITE_ACTIONS, 's3:*'];
+    const pairWithRetentionActions = (roles: OrgRole[]) =>
+      roles.flatMap((role) => retentionGrantActions.map((action) => [role, action] as const));
+    const granters = editors.filter((role) => roleHasPermission(role, 'privileged.grant'));
+    const nonGranters = editors.filter((role) => !granters.includes(role));
+
+    it.each(editors)('%s may grant s3:GetObject', async (role) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: buildPolicyGrantRequest('s3:GetObject'),
+      });
+
+      expect({ ...result, body: errorBody(result) }).toMatchObject({
+        statusCode: 501,
+        body: { message: 'Bucket policies are not available in this region' },
+      });
+    });
+
+    it.each(pairWithRetentionActions(granters))('%s may grant %s', async (role, action) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: buildPolicyGrantRequest(action),
+      });
+
+      expect({ ...result, body: errorBody(result) }).toMatchObject({
+        statusCode: 501,
+        body: { message: 'Bucket policies are not available in this region' },
+      });
+    });
+
+    it.each(pairWithRetentionActions(nonGranters))('%s may not grant %s', async (role, action) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: buildPolicyGrantRequest(action),
+      });
+
+      expect({ ...result, body: errorBody(result) }).toMatchObject({
+        statusCode: 403,
+        body: { code: ApiErrorCode.RETENTION_GRANT_FORBIDDEN },
+      });
+    });
+  });
 
   /**
    * The other cap in this stack is a ceiling on who the caller may reach.
