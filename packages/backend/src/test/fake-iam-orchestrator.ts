@@ -1,5 +1,5 @@
 import { getEffectiveActions, getPrincipalIds, toPolicyPrincipal } from '@filone/shared';
-import type { BucketPolicy, MemberBucketAccess } from '@filone/shared';
+import type { BucketPolicy, MemberBucketAccess, PolicyStatement } from '@filone/shared';
 import {
   BucketNotFoundError,
   PolicyNotFoundError,
@@ -14,6 +14,12 @@ import type {
 } from '../lib/bucket-policy-orchestrator.ts';
 import type { MemberBucketPolicy, MemberOrchestrator } from '../lib/member-orchestrator.ts';
 import type { OrchestratorRequestOptions } from '../lib/service-orchestrator.ts';
+
+function removePrincipalFromStatement(s: PolicyStatement, userId: string): PolicyStatement {
+  if (s.Principal === '*') return s;
+  const principalIds = getPrincipalIds(s.Principal).filter((p) => p !== userId);
+  return { ...s, Principal: toPolicyPrincipal(principalIds) };
+}
 
 /**
  * An in-memory bucket-policy and member orchestrator with the storage system's semantics: real ETags and
@@ -67,18 +73,10 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
     this.throwInjectedFailure('removeMember');
     this.getOrCreatePrincipals(tenantId).delete(userId);
     for (const [bucketName, stored] of this.getOrCreatePolicies(tenantId)) {
-      const appliesToUser = (s: BucketPolicy['Statement'][number]) =>
-        getPrincipalIds(s.Principal).includes(userId);
+      const appliesToUser = (s: PolicyStatement) => getPrincipalIds(s.Principal).includes(userId);
       if (!stored.policy.Statement.some(appliesToUser)) continue;
       const remainingStatements = stored.policy.Statement.map((s) =>
-        s.Principal === '*'
-          ? s
-          : {
-              ...s,
-              Principal: toPolicyPrincipal(
-                getPrincipalIds(s.Principal).filter((p) => p !== userId),
-              ),
-            },
+        removePrincipalFromStatement(s, userId),
       ).filter((s) => s.Principal === '*' || s.Principal.AWS.length > 0);
       if (remainingStatements.length === 0) this.getOrCreatePolicies(tenantId).delete(bucketName);
       else
