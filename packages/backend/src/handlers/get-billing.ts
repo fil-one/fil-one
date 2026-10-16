@@ -165,7 +165,7 @@ function describePrice(price: StripePriceDetails | undefined): {
  * without a list of price ids to maintain. A negotiated product without the
  * metadata shows as "Pay as you go" until someone sets it.
  */
-function toPlanDisplayName(product: Stripe.Price['product']): string | undefined {
+function getPlanDisplayName(product: Stripe.Price['product']): string | undefined {
   if (typeof product !== 'object' || !product || product.deleted) return undefined;
   return product.metadata?.display_name || undefined;
 }
@@ -371,7 +371,7 @@ function amountToCents(
  * the cache when it changes.
  */
 function toStripePriceDetails(price: Stripe.Price): StripePriceDetails {
-  const planDisplayName = toPlanDisplayName(price.product);
+  const planDisplayName = getPlanDisplayName(price.product);
   return {
     id: price.id,
     product: typeof price.product === 'string' ? price.product : price.product?.id,
