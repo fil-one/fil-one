@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import { S3Region, supportsBucketManagement } from '../constants.ts';
 
-export type AccessKeyStatus = 'active' | 'inactive';
+/**
+ * Whether the key still authenticates. `expired` is computed by the server at
+ * read time from `expiresAt`, so the console never does date math.
+ */
+export type AccessKeyStatus = 'active' | 'expired';
 
 /** Object-level data operations. Each may act as a parent for data-protection granulars. */
 export const OBJECT_PERMISSIONS = ['read', 'write', 'list', 'delete'] as const;
@@ -233,7 +237,6 @@ interface AccessKeyBase {
   keyName: string;
   accessKeyId: string;
   createdAt: string;
-  lastUsedAt?: string;
   status: AccessKeyStatus;
   region?: S3Region;
   expiresAt?: string | null;

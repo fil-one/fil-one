@@ -134,15 +134,44 @@ async function runQuery(
   }
 }
 
+const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Whether a key's expiry has passed. The create route stores a bare
+ * `YYYY-MM-DD` date, and the key works through the whole of that day (UTC), so
+ * it counts as expired from the start of the next one. A full timestamp, which
+ * no route writes today, expires at that instant. The rotate route refuses an
+ * expired key on the same rule, so the table and the Rotate action never
+ * disagree.
+ */
+export function isAccessKeyExpired(
+  expiresAt: string | null | undefined,
+  now = new Date(),
+): boolean {
+  if (!expiresAt) return false;
+  const expiry = new Date(expiresAt);
+  // An unparseable expiry is treated as expired rather than as forever: the only
+  // way one gets stored is a bad write, and the safe reading of "we do not know
+  // when this stops being valid" is that it already has.
+  if (Number.isNaN(expiry.getTime())) return true;
+  // A bare date parses as midnight UTC at its start; the key lasts until the next day starts.
+  if (BARE_DATE.test(expiresAt)) expiry.setUTCDate(expiry.getUTCDate() + 1);
+  return now >= expiry;
+}
+
 function toAccessKey(record: Record<string, unknown>): AccessKey {
+  const expiresAt = (record.expiresAt as string | undefined) ?? null;
+  // Computed rather than read: the stored `status` is written once as
+  // `active` and nothing updates it when the key expires.
+  const status: AccessKey['status'] = isAccessKeyExpired(expiresAt) ? 'expired' : 'active';
   const base = {
     id: (record.sk as string).replace(AccessKeyKeys.keySkPrefix(), ''),
     keyName: record.keyName as string,
     accessKeyId: record.accessKeyId as string,
     createdAt: record.createdAt as string,
-    status: record.status as AccessKey['status'],
+    status,
     region: (record.region as AccessKey['region']) ?? DEFAULT_ACCESS_KEY_REGION,
-    expiresAt: (record.expiresAt as string | undefined) ?? null,
+    expiresAt,
     // Shipped so the console can gate the per-row revoke button on the same
     // rule the delete route enforces.
     ...(record.createdBy ? { createdBy: record.createdBy as string } : {}),
