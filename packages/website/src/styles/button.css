@@ -12,52 +12,60 @@
       @apply cursor-progress;
     }
 
-    /* default = md */
-    @apply px-4 py-2 text-sm;
+    /* default = md. Height comes from the shared control token so a button
+       lines up with an Input or Select beside it; padding sets only the
+       horizontal inset, matching the Input of the same size. */
+    @apply h-(--control-height-md) px-3 text-sm;
 
     &.button--sm {
-      @apply px-3 py-1.5 text-xs;
+      @apply h-(--control-height-sm) px-2.5 text-xs;
     }
 
     &.button--lg {
-      @apply px-5 py-2.5 text-sm;
+      @apply h-(--control-height-lg) px-4 text-sm;
     }
 
     /* Balanced padding when icon is present */
     &.button--icon-left {
       &.button--sm {
-        @apply pl-2.5;
+        @apply pl-2;
       }
       &.button--md {
-        @apply pl-3;
+        @apply pl-2.5;
       }
       &.button--lg {
-        @apply pl-4;
+        @apply pl-3.5;
       }
     }
 
     &.button--icon-right {
       &.button--sm {
-        @apply pr-2.5;
+        @apply pr-2;
       }
       &.button--md {
-        @apply pr-3;
+        @apply pr-2.5;
       }
       &.button--lg {
-        @apply pr-4;
+        @apply pr-3.5;
       }
     }
 
+    /* Filled variants darken on hover and press rather than lighten: the
+       lighter shades drop white text below WCAG AA (4.5:1). */
     &.button--primary {
       @apply border border-transparent bg-brand-600 text-white;
 
       &:not(:disabled) {
         &:hover {
-          @apply bg-brand-500;
+          @apply bg-brand-700;
         }
 
         &:focus-visible {
-          @apply bg-brand-500 outline-2 outline-offset-2 outline-brand-400;
+          @apply bg-brand-700 outline-2 outline-offset-2 outline-brand-400;
+        }
+
+        &:active {
+          @apply bg-brand-800;
         }
       }
 
@@ -71,11 +79,15 @@
 
       &:not(:disabled) {
         &:hover {
-          @apply bg-red-500;
+          @apply bg-red-700;
         }
 
         &:focus-visible {
-          @apply bg-red-500 outline-2 outline-offset-2 outline-red-400;
+          @apply bg-red-700 outline-2 outline-offset-2 outline-red-400;
+        }
+
+        &:active {
+          @apply bg-red-800;
         }
       }
 
@@ -89,11 +101,15 @@
 
       &:not(:disabled) {
         &:hover {
-          @apply bg-amber-600;
+          @apply bg-amber-800;
         }
 
         &:focus-visible {
-          @apply bg-amber-600 outline-2 outline-offset-2 outline-amber-400;
+          @apply bg-amber-800 outline-2 outline-offset-2 outline-amber-400;
+        }
+
+        &:active {
+          @apply bg-amber-900;
         }
       }
 
@@ -113,6 +129,10 @@
         &:hover,
         &:focus-visible {
           @apply bg-zinc-50;
+        }
+
+        &:active {
+          @apply bg-zinc-100;
         }
       }
 
@@ -137,6 +157,10 @@
             @apply text-zinc-800;
           }
         }
+
+        &:active {
+          @apply bg-zinc-200;
+        }
       }
 
       &:disabled:not(.button--loading) {
@@ -157,14 +181,20 @@
     &.split-button--primary {
       @apply bg-brand-600 text-white;
 
+      /* Darkens like Button's primary: brand-500 fails AA with white text. */
       & .split-button__main:not(:disabled):hover,
       & .split-button__caret:not(:disabled):hover {
-        @apply bg-brand-500;
+        @apply bg-brand-700;
       }
 
       & .split-button__main:not(:disabled):focus-visible,
       & .split-button__caret:not(:disabled):focus-visible {
-        @apply bg-brand-500 outline-2 outline-offset-2 outline-brand-400;
+        @apply bg-brand-700 outline-2 outline-offset-2 outline-brand-400;
+      }
+
+      & .split-button__main:not(:disabled):active,
+      & .split-button__caret:not(:disabled):active {
+        @apply bg-brand-800;
       }
 
       & .split-button__divider {
@@ -187,6 +217,11 @@
         @apply bg-zinc-50 outline-2 outline-offset-0 outline-brand-600;
       }
 
+      & .split-button__main:not(:disabled):active,
+      & .split-button__caret:not(:disabled):active {
+        @apply bg-zinc-100;
+      }
+
       & .split-button__divider {
         @apply bg-zinc-200;
       }
@@ -202,11 +237,12 @@
       }
     }
 
+    /* Height on the wrapper, which stretches both halves to it; matches Button. */
     &.split-button--sm {
-      @apply text-xs;
+      @apply h-(--control-height-sm) text-xs;
 
       & .split-button__main {
-        @apply px-3 py-1.5;
+        @apply px-2.5;
       }
       & .split-button__caret {
         @apply px-1.5;
@@ -214,10 +250,10 @@
     }
 
     &.split-button--md {
-      @apply text-sm;
+      @apply h-(--control-height-md) text-sm;
 
       & .split-button__main {
-        @apply px-4 py-2;
+        @apply px-3;
       }
       & .split-button__caret {
         @apply px-2.5;
@@ -225,10 +261,10 @@
     }
 
     &.split-button--lg {
-      @apply text-base;
+      @apply h-(--control-height-lg) text-base;
 
       & .split-button__main {
-        @apply px-5 py-2.5;
+        @apply px-4;
       }
       & .split-button__caret {
         @apply px-3;
