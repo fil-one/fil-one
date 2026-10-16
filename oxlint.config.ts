@@ -31,6 +31,11 @@ export default defineConfig({
     'blob-report',
     'playwright/.cache',
     'playwright/.auth',
+    // design-sync tooling: machine-generated barrels/previews for the
+    // claude.ai/design component sync, not product code.
+    '.design-sync',
+    'packages/website/.design-sync.entry.ts',
+    'packages/website/.design-sync.preview.tsx',
   ],
   overrides: [
     {
