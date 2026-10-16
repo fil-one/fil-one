@@ -88,6 +88,22 @@ export function formatDate(isoString: string): string {
   return dateFormatter.format(new Date(isoString));
 }
 
+const calendarDateFormatter = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  timeZone: 'UTC',
+});
+
+/**
+ * A bare `YYYY-MM-DD` date, e.g. "Jun 1, 2026", shown as the same calendar day
+ * everywhere. Such a date parses as midnight UTC, so `formatDate` would show the
+ * day before to anyone west of UTC.
+ */
+export function formatCalendarDate(date: string): string {
+  return calendarDateFormatter.format(new Date(date));
+}
+
 /**
  * Locale-aware date without the year, e.g. "Mar 27".
  *

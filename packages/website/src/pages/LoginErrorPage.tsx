@@ -41,7 +41,7 @@ export function LoginErrorPage({ error }: LoginErrorPageProps) {
       <a
         id="login-error-retry-button"
         href="/login"
-        className="button button--primary button--lg mt-6 w-full justify-center py-3.5"
+        className="button button--primary button--lg mt-6 w-full justify-center h-12"
       >
         Try signing in again
       </a>

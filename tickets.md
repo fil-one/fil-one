@@ -206,8 +206,8 @@ rather than the caller's, which is the deferral
 ### Give each package a tsc script for editor and CLI parity
 
 Type errors are caught on every PR: `oxlint.config.ts` sets `typeAware` and
-`typeCheck`, and `pnpm lint` runs first in `packages-ci.yaml` and again as the
-first half of `pnpm test`, so a misspelled required prop fails CI. What is
+`typeCheck`, and `pnpm lint` runs as its own step in `packages-ci.yaml`, so a
+misspelled required prop fails CI. What is
 missing is a way to ask the same question by hand — no package has a `typecheck`
 script. `tsc -p <package> --noEmit` exits clean for backend, shared and website,
 so the script is all that is left. Add a plain one per package, so an editor, a

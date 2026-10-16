@@ -28,6 +28,16 @@ vi.mock('@filone/orchestrator-client', () => ({
   deleteTenantsByTenantId: (options: Record<string, unknown>) => mockDeleteTenant(options),
 }));
 
+const mockListMembers = vi.fn(async (_orgId: string) => [] as { userId: string }[]);
+vi.mock('../org-membership.ts', () => ({
+  listMembers: (orgId: string) => mockListMembers(orgId),
+  MAX_MEMBERS: 500,
+}));
+const mockSyncPrincipal = vi.fn(async (..._args: unknown[]) => {});
+vi.mock('./members.ts', () => ({
+  syncPrincipal: (...args: unknown[]) => mockSyncPrincipal(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
 
@@ -37,6 +47,9 @@ const client = 'mock-management-client' as unknown as Client;
 import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
+
+const ANY_USER = '00000000-0000-0000-0000-000000000011';
+const OTHER_USER = '00000000-0000-0000-0000-000000000012';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const deps = { client, id: 'forge', stage: 'test', region: 'us-east-1' };
@@ -68,6 +81,7 @@ function stubHappyPath() {
       accessKeyId: 'AKIATEST',
       secretAccessKey: 'SKTEST',
       name: CONSOLE_KEY_NAME,
+      type: 'service',
       permissions: [],
       buckets: [],
       createdAt: '2026-01-01T00:00:00Z',
@@ -232,6 +246,50 @@ describe('ensureTenantReady', () => {
     });
   });
 
+  it('registers every current member as a principal before the pointer write', async () => {
+    stubHappyPath();
+    mockListMembers.mockResolvedValueOnce([{ userId: ANY_USER }, { userId: OTHER_USER }]);
+    const order: string[] = [];
+    mockSyncPrincipal.mockImplementation(async (args: unknown) => {
+      const { userId } = args as { userId: string };
+      order.push(`sync:${String(userId)}`);
+    });
+    ddbMock.on(UpdateItemCommand).callsFake(() => {
+      order.push('pointer');
+      return {};
+    });
+
+    await ensureTenantReady(deps, orgId);
+
+    expect(mockSyncPrincipal.mock.calls).toStrictEqual([
+      [{ client, orchestratorId: 'forge', tenantId: orgId, userId: ANY_USER }],
+      [{ client, orchestratorId: 'forge', tenantId: orgId, userId: OTHER_USER }],
+    ]);
+    expect(order).toStrictEqual([`sync:${ANY_USER}`, `sync:${OTHER_USER}`, 'pointer']);
+  });
+
+  it('returns null and writes no pointer when the member scan stopped at the cap', async () => {
+    stubHappyPath();
+    mockListMembers.mockResolvedValueOnce(
+      Array.from({ length: 500 }, (_, i) => ({
+        userId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      })),
+    );
+
+    await expect(ensureTenantReady(deps, orgId)).resolves.toBeNull();
+    expect(mockSyncPrincipal).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('returns null and writes no pointer when a member cannot be registered', async () => {
+    stubHappyPath();
+    mockListMembers.mockResolvedValueOnce([{ userId: ANY_USER }]);
+    mockSyncPrincipal.mockRejectedValueOnce(new Error('region down'));
+
+    await expect(ensureTenantReady(deps, orgId)).resolves.toBeNull();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
   it('scopes the SSM path and PROFILE attribute per id', async () => {
     // Region-encoded ids (multi-region Forge) must not collide across regions and
     // must produce a valid hyphenated DynamoDB attribute name via ExpressionAttributeNames.
@@ -250,19 +308,37 @@ describe('ensureTenantReady', () => {
     });
   });
 
-  it('requests only s3:* actions from the contract enum for the console key', async () => {
+  it('requests the bucket-policy actions but no bucket-configuration actions for the console key', async () => {
     stubHappyPath();
 
     await ensureTenantReady(deps, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).toHaveLength(15);
-    expect(permissions).toContain('s3:ListBucketMultipartUploads');
-    // The contract enum (unlike FTH) has no bucket-config actions.
-    expect(permissions).not.toContain('s3:GetBucketVersioning');
-    expect(permissions).not.toContain('s3:PutBucketVersioning');
-    expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
-    expect(permissions).not.toContain('s3:PutBucketObjectLockConfiguration');
+    // Every action in the contract enum. It carries no bucket-configuration
+    // actions: the versioning and object-lock reads classify as ListBucket
+    // (fil-one/RFC#30) and there are no writes.
+    expect(permissions).toStrictEqual([
+      's3:CreateBucket',
+      's3:ListAllMyBuckets',
+      's3:DeleteBucket',
+      's3:GetObject',
+      's3:GetObjectVersion',
+      's3:GetObjectRetention',
+      's3:GetObjectLegalHold',
+      's3:PutObject',
+      's3:PutObjectRetention',
+      's3:PutObjectLegalHold',
+      's3:ListBucket',
+      's3:ListBucketVersions',
+      's3:ListBucketMultipartUploads',
+      's3:ListMultipartUploadParts',
+      's3:AbortMultipartUpload',
+      's3:DeleteObject',
+      's3:DeleteObjectVersion',
+      's3:GetBucketPolicy',
+      's3:PutBucketPolicy',
+      's3:DeleteBucketPolicy',
+    ]);
   });
 
   describe('409 recovery (crash between key creation and SSM write)', () => {
@@ -279,6 +355,7 @@ describe('ensureTenantReady', () => {
             accessKeyId: 'AKIAFRESH',
             secretAccessKey: 'SKFRESH',
             name: CONSOLE_KEY_NAME,
+            type: 'service',
             permissions: [],
             buckets: [],
             createdAt: '2026-01-02T00:00:00Z',
@@ -293,6 +370,7 @@ describe('ensureTenantReady', () => {
                 {
                   accessKeyId: existingAccessKeyId,
                   name: CONSOLE_KEY_NAME,
+                  type: 'service',
                   permissions: [],
                   createdAt: '2026-01-01T00:00:00Z',
                 },
@@ -480,6 +558,7 @@ describe('signal forwarding', () => {
           accessKeyId: 'AKIAFRESH',
           secretAccessKey: 'SKFRESH',
           name: CONSOLE_KEY_NAME,
+          type: 'service',
           permissions: [],
           buckets: [],
           createdAt: '2026-01-02T00:00:00Z',
@@ -493,6 +572,7 @@ describe('signal forwarding', () => {
           {
             accessKeyId: 'AKIAOLD',
             name: CONSOLE_KEY_NAME,
+            type: 'service',
             permissions: [],
             createdAt: '2026-01-01T00:00:00Z',
           },

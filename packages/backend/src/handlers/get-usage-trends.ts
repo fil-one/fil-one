@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { UsageDataPoint, UsageTrendsPeriod, UsageTrendsResponse } from '@filone/shared';
-import type { ServiceOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.ts';
+import type { RegionOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -130,7 +130,7 @@ async function buildTimeSeries(
 }
 
 type FetchSamplesArgs = {
-  orchestrator: ServiceOrchestrator;
+  orchestrator: RegionOrchestrator;
   tenantId: string;
   from: Date;
   to: Date;
