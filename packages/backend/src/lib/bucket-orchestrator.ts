@@ -67,8 +67,15 @@ export interface BucketOrchestrator {
     bucketName: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
+  /**
+   * The tenant's buckets, or with `memberId` only the ones that member can
+   * access. Tenant-wide callers omit it. A region serving the `iam` access
+   * model honours it and every other region ignores it, so a region that
+   * flips models cannot break its callers in either direction.
+   */
   listBuckets(
     tenantId: string,
+    memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]>;
   getBucket(

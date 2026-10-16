@@ -34,6 +34,7 @@ const mockDeleteAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockDeleteTenant = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockGetPrincipalAccess = vi.fn((_o: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/orchestrator-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
@@ -47,6 +48,8 @@ vi.mock('@filone/orchestrator-client', () => ({
   getTenantsByTenantIdMetrics: (o: Record<string, unknown>) => mockGetTenantMetrics(o),
   getTenantsByTenantIdBucketsByBucketNameMetrics: (o: Record<string, unknown>) =>
     mockGetBucketMetrics(o),
+  getTenantsByTenantIdPrincipalsByPrincipalIdAccess: (o: Record<string, unknown>) =>
+    mockGetPrincipalAccess(o),
 }));
 
 vi.mock('./metrics.ts', () => ({
@@ -67,6 +70,7 @@ const ssmMock = mockClient(SSMClient);
 const s3Mock = mockClient(S3Client);
 
 import {
+  PolicyPublishError,
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
@@ -590,6 +594,20 @@ describe('deleteBucket', () => {
   });
 });
 
+const MEMBER_ID = 'user-1';
+
+// Two buckets exist in the tenant; the gateway returns both whatever key
+// signs, because every principal holds `s3:ListAllMyBuckets`.
+function stubTenantListing() {
+  stubS3Credentials();
+  s3Mock.on(ListBucketsCommand).resolves({
+    Buckets: [
+      { Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') },
+      { Name: 'backups', CreationDate: new Date('2026-01-02T00:00:00Z') },
+    ],
+  });
+}
+
 describe('listBuckets', () => {
   it('maps S3 gateway buckets to summaries without a per-bucket versioning read', async () => {
     stubS3Credentials();
@@ -612,6 +630,84 @@ describe('listBuckets', () => {
         encrypted: true,
       },
     ]);
+  });
+});
+
+describe('listBuckets for a member', () => {
+  const buildAccessResponse = (...bucketNames: string[]) => ({
+    data: { buckets: bucketNames.map((name) => ({ name, actions: ['s3:ListBucket'] })) },
+    error: undefined,
+    response: { status: 200 },
+  });
+
+  it('returns only the buckets the access lookup lists for the member', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
+
+    const result = await orchestrator.listBuckets(tenantId, MEMBER_ID);
+
+    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos']);
+  });
+
+  it('looks up access for the named member in the tenant', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
+
+    await orchestrator.listBuckets(tenantId, MEMBER_ID);
+
+    expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId, principalId: MEMBER_ID } }),
+    );
+  });
+
+  it('returns every tenant bucket without an access lookup when no member is named', async () => {
+    stubTenantListing();
+
+    // Tenant-wide callers omit the member and must keep seeing every bucket.
+    const result = await orchestrator.listBuckets(tenantId);
+
+    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos', 'backups']);
+    expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the access lookup fails', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(fail(400));
+
+    // The caller's fan-out turns this into an unavailable region. Returning the
+    // tenant listing here would hand the member every bucket name it holds.
+    await expect(orchestrator.listBuckets(tenantId, MEMBER_ID)).rejects.toThrow(
+      new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),
+    );
+  });
+
+  it('rejects as a transient failure when the storage system answers 503', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(fail(503));
+
+    await expect(orchestrator.listBuckets(tenantId, MEMBER_ID)).rejects.toBeInstanceOf(
+      PolicyPublishError,
+    );
+  });
+
+  it('returns no buckets when the member can access none', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse());
+
+    await expect(orchestrator.listBuckets(tenantId, MEMBER_ID)).resolves.toStrictEqual([]);
+  });
+
+  it('forwards the signal to the access lookup as well as S3', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
+    const signal = new AbortController().signal;
+
+    await orchestrator.listBuckets(tenantId, MEMBER_ID, { signal });
+
+    expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+    // aws-sdk-client-mock types `args` as `[command]`, but the call carries the send options too.
+    const [listCall] = s3Mock.commandCalls(ListBucketsCommand) as Array<{ args: unknown[] }>;
+    expect(listCall.args[1]).toStrictEqual({ abortSignal: signal });
   });
 });
 
@@ -1311,7 +1407,7 @@ describe('signal forwarding', () => {
   it('listBuckets forwards the signal to S3 ListBuckets', async () => {
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
 
-    await orchestrator.listBuckets(tenantId, { signal });
+    await orchestrator.listBuckets(tenantId, undefined, { signal });
 
     expect(sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand))).toEqual({
       abortSignal: signal,

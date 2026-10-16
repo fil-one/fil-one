@@ -17,6 +17,15 @@ import {
   PrincipalNotFoundError,
 } from '../errors.ts';
 import type { MemberBucketPolicy } from '../member-orchestrator.ts';
+import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
+
+/** A principal route's arguments: the Management API client, the orchestrator its errors name, the tenant and the member. */
+export interface PrincipalRouteArgs {
+  client: Client;
+  orchestratorId: string;
+  tenantId: string;
+  userId: string;
+}
 import { extractApiMessage } from './api-message.ts';
 import { withWriteRetry } from './policy-writes.ts';
 
@@ -63,15 +72,15 @@ function formatFailureMessage(orchestratorId: string, what: string, tenantId: st
   return `Failed to ${what} for ${orchestratorId} tenant ${tenantId}`;
 }
 
-export async function syncPrincipal(
-  client: Client,
-  orchestratorId: string,
-  tenantId: string,
-  userId: string,
-): Promise<void> {
+export async function syncPrincipal({
+  client,
+  orchestratorId,
+  tenantId,
+  userId,
+}: PrincipalRouteArgs): Promise<void> {
   await withWriteRetry(async () => {
     const result = await putTenantsByTenantIdPrincipalsByPrincipalId({
-      client,
+      client: client,
       path: { tenantId, principalId: userId },
       throwOnError: false,
     });
@@ -85,15 +94,15 @@ export async function syncPrincipal(
   });
 }
 
-export async function removePrincipal(
-  client: Client,
-  orchestratorId: string,
-  tenantId: string,
-  userId: string,
-): Promise<void> {
+export async function removePrincipal({
+  client,
+  orchestratorId,
+  tenantId,
+  userId,
+}: PrincipalRouteArgs): Promise<void> {
   await withWriteRetry(async () => {
     const result = await deleteTenantsByTenantIdPrincipalsByPrincipalId({
-      client,
+      client: client,
       path: { tenantId, principalId: userId },
       throwOnError: false,
     });
@@ -113,14 +122,14 @@ export async function removePrincipal(
   });
 }
 
-export async function listPrincipalPolicies(
-  client: Client,
-  orchestratorId: string,
-  tenantId: string,
-  userId: string,
-): Promise<MemberBucketPolicy[]> {
+export async function listPrincipalPolicies({
+  client,
+  orchestratorId,
+  tenantId,
+  userId,
+}: PrincipalRouteArgs): Promise<MemberBucketPolicy[]> {
   const result = await getTenantsByTenantIdPrincipalsByPrincipalIdPolicies({
-    client,
+    client: client,
     path: { tenantId, principalId: userId },
     throwOnError: false,
   });
@@ -141,16 +150,18 @@ export async function listPrincipalPolicies(
   }));
 }
 
-export async function resolvePrincipalAccess(
-  client: Client,
-  orchestratorId: string,
-  tenantId: string,
-  userId: string,
-): Promise<MemberBucketAccess[]> {
+export async function resolvePrincipalAccess({
+  client,
+  orchestratorId,
+  tenantId,
+  userId,
+  opts,
+}: PrincipalRouteArgs & { opts?: OrchestratorRequestOptions }): Promise<MemberBucketAccess[]> {
   const result = await getTenantsByTenantIdPrincipalsByPrincipalIdAccess({
-    client,
+    client: client,
     path: { tenantId, principalId: userId },
     throwOnError: false,
+    signal: opts?.signal,
   });
   if (isUnknownPrincipal(result)) {
     warnUnknownPrincipal(orchestratorId, tenantId, userId);

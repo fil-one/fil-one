@@ -257,6 +257,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
 
   async listBuckets(
     tenantId: string,
+    _memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]> {
     // Versioning and object-lock both cost a GetBucket*/GetObjectLockConfiguration

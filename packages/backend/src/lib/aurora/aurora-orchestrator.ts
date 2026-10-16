@@ -184,7 +184,11 @@ export const auroraOrchestrator = {
     await deleteAuroraBucket({ tenantId, bucketName, signal: opts?.signal });
   },
 
-  async listBuckets(tenantId: string, opts?: OrchestratorRequestOptions): Promise<BucketSummary[]> {
+  async listBuckets(
+    tenantId: string,
+    _memberId?: string,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<BucketSummary[]> {
     const client = await createPortalClient(tenantId, { signal: opts?.signal });
     const { data, error } = await listBuckets({
       client,
