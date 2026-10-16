@@ -269,7 +269,15 @@ export const WithManyPermissions: Story = {
         ...backupKey,
         keyName: 'new-key',
         permissions: ['read', 'write', 'list', 'delete', 'CreateBucket', 'DeleteBucket'],
-        granularPermissions: ['GetObjectVersion', 'PutObjectRetention', 'DeleteObjectVersion'],
+        granularPermissions: [
+          'GetObjectVersion',
+          'GetObjectRetention',
+          'GetObjectLegalHold',
+          'PutObjectRetention',
+          'PutObjectLegalHold',
+          'ListBucketVersions',
+          'DeleteObjectVersion',
+        ],
         buckets: ['fgrc-ltda', 'filipa-1'],
       },
       {
@@ -287,6 +295,7 @@ export const WithManyPermissions: Story = {
     showPermissions: true,
     onBulkDelete: () => Promise.resolve(),
     onDelete: () => Promise.resolve(),
+    onRotate: () => {},
   },
 };
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { AccessKey, ServiceAccessKey } from '@filone/shared';
 import { AccessKeysTable } from './AccessKeysTable.js';
 import { ToastProvider } from './Toast/ToastProvider';
@@ -85,12 +85,81 @@ describe('AccessKeysTable — the details drawer', () => {
     ).toStrictEqual(['bucket-a', 'bucket-b', 'bucket-c', 'bucket-d']);
   });
 
+  it('lists the first five buckets and reveals the rest on Show all', () => {
+    const buckets = ['b-1', 'b-2', 'b-3', 'b-4', 'b-5', 'b-6', 'b-7'];
+    renderWithProviders(<AccessKeysTable keys={[makeKey({ bucketScope: 'specific', buckets })]} />);
+    fireEvent.click(screen.getByTestId('access-key-row'));
+    const listed = () =>
+      [...screen.getByTestId('access-key-details-buckets').querySelectorAll('li')].map(
+        (item) => item.textContent,
+      );
+
+    expect(listed()).toStrictEqual(buckets.slice(0, 5));
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 7' }));
+    expect(listed()).toStrictEqual(buckets);
+  });
+
+  it('shows bucket names as plain text when the caller does not ask for links', () => {
+    renderWithProviders(<AccessKeysTable keys={[scopedKey]} />);
+    fireEvent.click(screen.getByTestId('access-key-row'));
+
+    expect(screen.getByTestId('access-key-details-buckets').querySelectorAll('a')).toHaveLength(0);
+  });
+
+  it.each([
+    ['every bucket', makeKey({ bucketScope: 'all' }), 'All buckets in this region'],
+    [
+      'bucket policies',
+      {
+        id: '2',
+        type: 'principal',
+        principalId: 'any-user',
+        keyName: 'any-personal-key',
+        accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
+        createdAt: '2026-01-15T10:00:00Z',
+        status: 'active',
+      } satisfies AccessKey,
+      'Per bucket policy',
+    ],
+  ] as const)('names the scope for a key that reaches %s', (_case, key, scope) => {
+    renderWithProviders(<AccessKeysTable keys={[key]} />);
+    fireEvent.click(screen.getByTestId('access-key-row'));
+
+    expect(screen.getByTestId('access-key-details-drawer-section-buckets')).toHaveTextContent(
+      scope,
+    );
+  });
+
   it('opens from the key name button, for a keyboard or screen reader', () => {
     renderWithProviders(<AccessKeysTable keys={[scopedKey]} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'any-key' }));
 
-    expect(screen.getByRole('dialog', { name: 'Details for any-key' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'any-key' })).toBeInTheDocument();
+  });
+
+  it('moves focus into the drawer when it opens', async () => {
+    renderWithProviders(<AccessKeysTable keys={[scopedKey]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'any-key' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'any-key' });
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+  });
+
+  it('closes on Escape and hands focus back to the key name that opened it', async () => {
+    renderWithProviders(<AccessKeysTable keys={[scopedKey]} />);
+    const trigger = screen.getByRole('button', { name: 'any-key' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole('dialog', { name: 'any-key' });
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'any-key' })).not.toBeInTheDocument(),
+    );
+    expect(document.activeElement).toBe(trigger);
   });
 
   it('stays closed when the row click lands on its checkbox', () => {
@@ -120,12 +189,13 @@ describe('AccessKeysTable — the details drawer', () => {
     ).toHaveTextContent("Each bucket's policy decides what it can reach.");
   });
 
-  it('runs Delete key for the open key and closes the drawer', () => {
+  it('runs Delete from the header menu for the open key and closes the drawer', async () => {
     const onDelete = vi.fn(async () => {});
     renderWithProviders(<AccessKeysTable keys={[scopedKey]} onDelete={onDelete} />);
 
     fireEvent.click(screen.getByTestId('access-key-row'));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete key' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Key actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
 
     expect({
       deleted: onDelete.mock.calls,
@@ -138,7 +208,7 @@ describe('AccessKeysTable — the details drawer', () => {
 
     fireEvent.click(screen.getByTestId('access-key-row'));
 
-    expect(screen.queryByTestId('access-key-details-drawer-footer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('access-key-details-drawer-actions')).not.toBeInTheDocument();
   });
 });
 
@@ -254,28 +324,28 @@ describe('AccessKeysTable — the controls a caller may not use', () => {
 describe('AccessKeysTable — the row menu', () => {
   /** The menu is a popover, so its items exist only once it is open. */
   function openMenu() {
-    fireEvent.click(screen.getByRole('button', { name: 'Key actions' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Actions for / }));
   }
 
-  it('offers rotation only when the page passes it', () => {
+  it('offers rotation only when the page passes it', async () => {
     renderWithProviders(<AccessKeysTable keys={[makeKey({})]} onDelete={async () => {}} />);
     openMenu();
 
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Rotate' })).not.toBeInTheDocument();
   });
 
-  it('carries both actions when both are on offer', () => {
+  it('carries both actions when both are on offer', async () => {
     renderWithProviders(
       <AccessKeysTable keys={[makeKey({})]} onDelete={async () => {}} onRotate={async () => {}} />,
     );
     openMenu();
 
-    expect(screen.getByRole('button', { name: 'Rotate' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Rotate' })).toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
   });
 
-  it('answers per row, not per table', () => {
+  it('answers per row, not per table', async () => {
     // A Member may rotate the key they could still mint and not the one they
     // could not, and both rows keep their Delete.
     renderWithProviders(
@@ -287,17 +357,17 @@ describe('AccessKeysTable — the row menu', () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Key actions' })[1]);
-    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: /^Actions for / })[1]);
+    expect(screen.queryByRole('menuitem', { name: 'Rotate' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
   });
 
-  it('keeps the actions column for a row that may only be rotated', () => {
+  it('keeps the actions column for a row that may only be rotated', async () => {
     renderWithProviders(<AccessKeysTable keys={[makeKey({})]} onRotate={async () => {}} />);
     openMenu();
 
-    expect(screen.getByRole('button', { name: 'Rotate' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Rotate' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).not.toBeInTheDocument();
   });
 });
 
@@ -332,23 +402,26 @@ describe('AccessKeysTable — who rotated a key', () => {
 describe('AccessKeysTable — key status', () => {
   // The status renders twice per row (inline on small screens, in its own
   // column from `sm` up), and jsdom applies no breakpoints, so each appears twice.
-  it('shows Expired with the expiry date for an expired key', () => {
+  it('shows Expired without the date in the row, which lives in the drawer', () => {
     renderWithProviders(
       <AccessKeysTable keys={[makeKey({ status: 'expired', expiresAt: '2026-06-01' })]} />,
     );
 
+    // Twice: in the Status column and inline under the name below `sm`.
     expect(screen.getAllByText('Expired')).toHaveLength(2);
-    expect(screen.getAllByText(formatCalendarDate('2026-06-01'))).toHaveLength(2);
-    expect(screen.queryByText('Active')).not.toBeInTheDocument();
+    expect(screen.queryByText(formatCalendarDate('2026-06-01'))).not.toBeInTheDocument();
   });
 
-  it('shows Active and no date for a key that has not expired yet', () => {
-    renderWithProviders(
-      <AccessKeysTable keys={[makeKey({ status: 'active', expiresAt: '2099-01-01' })]} />,
-    );
+  it.each([
+    ['an expired key', 'expired', 'Expired'],
+    ['an active key', 'active', 'Expires'],
+  ] as const)('labels the expiry date in the drawer for %s', (_case, status, label) => {
+    renderWithProviders(<AccessKeysTable keys={[makeKey({ status, expiresAt: '2026-06-01' })]} />);
+    fireEvent.click(screen.getByTestId('access-key-row'));
 
-    expect(screen.getAllByText('Active')).toHaveLength(2);
-    expect(screen.queryByText(formatCalendarDate('2099-01-01'))).not.toBeInTheDocument();
+    const facts = [...screen.getByTestId('access-key-details-facts').querySelectorAll('dt')];
+    const fact = facts.find((term) => term.textContent === label);
+    expect(fact?.nextElementSibling?.textContent).toBe(formatCalendarDate('2026-06-01'));
   });
 
   it('has no Last Used column', () => {

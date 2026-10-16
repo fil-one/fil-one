@@ -1,31 +1,28 @@
+import { ArrowsClockwiseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 import { Fragment } from 'react';
 
 import type { AccessKey, ServiceAccessKey } from '@filone/shared';
 import { isBucketInfoPermission, isBucketPermission } from '@filone/shared';
 
 import { Badge } from './Badge';
+import type { RowAction } from './RowActionsMenu';
 import { Tooltip } from './Tooltip';
 import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
-import { formatCalendarDate } from '../lib/time.js';
 
-/** Active, or Expired with the date it stopped working. */
+/**
+ * Active or Expired. The date an expired key stopped working is in the details
+ * drawer: in the table it made that row taller than the rest, and an expired
+ * key needs the same decision whenever it expired.
+ */
 export function KeyStatus({ accessKey }: { accessKey: AccessKey }) {
-  if (accessKey.status === 'active') {
-    return (
-      <Badge color="green" dot size="sm" weight="medium">
-        Active
-      </Badge>
-    );
-  }
-  return (
-    <div className="flex flex-col items-start gap-0.5">
-      <Badge color="grey" dot size="sm" weight="medium">
-        Expired
-      </Badge>
-      {accessKey.expiresAt && (
-        <p className="text-xs text-zinc-500">{formatCalendarDate(accessKey.expiresAt)}</p>
-      )}
-    </div>
+  return accessKey.status === 'active' ? (
+    <Badge color="green" dot size="sm" weight="medium">
+      Active
+    </Badge>
+  ) : (
+    <Badge color="grey" dot size="sm" weight="medium">
+      Expired
+    </Badge>
   );
 }
 
@@ -119,7 +116,9 @@ export function BucketSummary({ accessKey }: { accessKey: AccessKey }) {
   if (accessKey.type === 'principal') {
     return (
       <Tooltip content="Buckets whose policy grants this key's owner access." side="bottom">
-        <span className="text-xs text-zinc-500">Per bucket policy</span>
+        <span className="text-xs text-zinc-500 underline decoration-zinc-400 decoration-dotted underline-offset-2 cursor-help">
+          Per bucket policy
+        </span>
       </Tooltip>
     );
   }
@@ -156,13 +155,40 @@ export function BucketSummary({ accessKey }: { accessKey: AccessKey }) {
   );
 }
 
-/** A principal key's permissions: a scope described in muted text, like the Buckets column's. */
+/**
+ * A principal key's permissions: a scope described in muted text, like the
+ * Buckets column's. The dotted underline and help cursor say a definition waits
+ * on hover, the convention for a term explained in place.
+ */
 export function FollowsBucketPolicy() {
   return (
     <Tooltip content="This key inherits the policy of every bucket it touches." side="bottom">
-      <span data-testid="permission-badge-follows-bucket-policy" className="text-xs text-zinc-500">
+      <span
+        data-testid="permission-badge-follows-bucket-policy"
+        className="text-xs text-zinc-500 underline decoration-zinc-400 decoration-dotted underline-offset-2 cursor-help"
+      >
         Follows bucket policy
       </span>
     </Tooltip>
   );
+}
+
+/**
+ * A key's Rotate and Delete as menu items, for the row's menu and the drawer's,
+ * so the two offer the same actions in the same order and words. A handler the
+ * caller left out means the action is not on offer.
+ */
+export function keyMenuActions({
+  onRotate,
+  onDelete,
+}: {
+  onRotate?: () => void;
+  onDelete?: () => void;
+}): RowAction[] {
+  const actions: RowAction[] = [];
+  if (onRotate) actions.push({ label: 'Rotate', icon: ArrowsClockwiseIcon, onSelect: onRotate });
+  if (onDelete) {
+    actions.push({ label: 'Delete', icon: TrashIcon, onSelect: onDelete, destructive: true });
+  }
+  return actions;
 }

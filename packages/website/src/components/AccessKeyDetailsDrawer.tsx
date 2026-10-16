@@ -1,21 +1,32 @@
-import { useEffect, useState } from 'react';
-import { ArrowsClockwiseIcon, CheckIcon, TrashIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
+import { Fragment, useState } from 'react';
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogPanel,
+  DialogTitle,
+  Transition,
+  TransitionChild,
+} from '@headlessui/react';
+import { XIcon } from '@phosphor-icons/react/dist/ssr';
 
-import type { AccessKey, ServiceAccessKey } from '@filone/shared';
+import { Link } from '@tanstack/react-router';
+
+import type { AccessKey, GranularPermission, S3Region, ServiceAccessKey } from '@filone/shared';
 import {
   BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSION_LABELS,
   GRANULAR_PERMISSION_LABELS,
   GRANULAR_PERMISSION_MAP,
+  S3_REGION,
   getRegionLabel,
   isBucketInfoPermission,
   isBucketPermission,
 } from '@filone/shared';
 
-import { KeyStatus } from './AccessKeyCells';
-import { Button } from './Button';
+import { KeyStatus, keyMenuActions } from './AccessKeyCells';
 import { CopyButton } from './CopyButton';
 import { RegionFlag } from './RegionFlag';
+import { RowActionsMenu, type RowAction } from './RowActionsMenu';
 import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
 import { formatCalendarDate, formatDate } from '../lib/time.js';
 
@@ -30,13 +41,21 @@ export type AccessKeyDetailsDrawerProps = {
   onRotate?: () => void;
   /** Present only when the caller may delete this key, as in the row's menu. */
   onDelete?: () => void;
+  /**
+   * Whether each bucket name links to its page. Off where the drawer opens on a
+   * bucket's own page, which would only link to itself.
+   */
+  linkBuckets?: boolean;
 };
 
 /**
  * Everything about one key. The table keeps what is worth comparing across
  * rows; the rest (the full bucket list, every permission, who created it and
- * when) lives here, in the layout the create form uses, so reviewing a key and
- * minting one read the same way.
+ * when) lives here.
+ *
+ * Built on Headless UI's `Dialog`, as `Modal` is, for what a modal panel owes a
+ * keyboard: focus moves in when it opens, Tab stays inside, Escape and the
+ * backdrop close it, and focus goes back to the row that opened it.
  */
 export function AccessKeyDetailsDrawer({
   accessKey,
@@ -44,105 +63,122 @@ export function AccessKeyDetailsDrawer({
   creatorFor,
   onRotate,
   onDelete,
+  linkBuckets = false,
 }: AccessKeyDetailsDrawerProps) {
-  const [visible, setVisible] = useState(false);
-  const [closing, setClosing] = useState(false);
-
-  useEffect(() => {
-    requestAnimationFrame(() => setVisible(true));
-  }, []);
-
-  function handleClose() {
-    setClosing(true);
-    setTimeout(onClose, 200);
-  }
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') handleClose();
-    }
-    document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, []);
-
-  const shown = visible && !closing;
+  // Mounted open; closing plays the slide-out, then tells the table to unmount.
+  const [open, setOpen] = useState(true);
+  const close = () => setOpen(false);
 
   return (
-    <div data-testid="access-key-details-drawer">
-      <div
-        data-testid="access-key-details-drawer-overlay"
-        aria-hidden="true"
-        onClick={handleClose}
-        className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 ${shown ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-      />
-      <div
-        data-testid="access-key-details-drawer-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Details for ${accessKey.keyName}`}
-        className={`fixed inset-y-0 right-0 z-40 flex w-full flex-col bg-white shadow-xl transition-transform duration-200 ease-out sm:w-100 ${shown ? 'translate-x-0' : 'translate-x-full'}`}
-      >
-        <DrawerHeader accessKey={accessKey} onClose={handleClose} />
-
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          <div className="flex flex-col gap-6">
-            <KeyFacts accessKey={accessKey} creatorFor={creatorFor} />
-            {accessKey.type === 'principal' ? (
-              <DrawerSection title="Permissions" testId="follows-bucket-policy">
-                <p className="text-xs text-zinc-500">
-                  This key acts as its owner. Each bucket&apos;s policy decides what it can reach.
-                </p>
-              </DrawerSection>
-            ) : (
-              <ServiceKeyPermissions accessKey={accessKey} />
-            )}
-          </div>
-        </div>
-
-        {(onRotate ?? onDelete) && (
-          // The row's menu offers the same two actions; this is the key's detail
-          // view, so acting on it should not mean closing it to find the menu.
-          <div
-            data-testid="access-key-details-drawer-footer"
-            className="flex flex-shrink-0 justify-end gap-2 border-t border-zinc-100 px-5 py-3"
+    <Transition show={open} appear as={Fragment} afterLeave={onClose}>
+      <Dialog data-testid="access-key-details-drawer" className="relative z-40" onClose={close}>
+        <TransitionChild
+          as={Fragment}
+          enter="transition-opacity duration-200 ease-out"
+          enterFrom="opacity-0"
+          enterTo="opacity-100"
+          leave="transition-opacity duration-200 ease-in"
+          leaveFrom="opacity-100"
+          leaveTo="opacity-0"
+        >
+          <DialogBackdrop
+            data-testid="access-key-details-drawer-overlay"
+            className="fixed inset-0 bg-black/40"
+          />
+        </TransitionChild>
+        <div className="fixed inset-y-0 right-0 flex w-full sm:w-100">
+          {/* No resting transform: the classes that slide the panel apply only
+              while it moves, so nothing inside is positioned against a
+              transformed ancestor once it is open. */}
+          <TransitionChild
+            as={Fragment}
+            enter="transition-transform duration-200 ease-out"
+            enterFrom="translate-x-full"
+            leave="transition-transform duration-200 ease-in"
+            leaveTo="translate-x-full"
           >
-            {onRotate && (
-              <Button variant="ghost" size="sm" icon={ArrowsClockwiseIcon} onClick={onRotate}>
-                Rotate key
-              </Button>
-            )}
-            {onDelete && (
-              <Button variant="destructive" size="sm" icon={TrashIcon} onClick={onDelete}>
-                Delete key
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+            <DialogPanel
+              data-testid="access-key-details-drawer-panel"
+              className="flex w-full flex-col bg-white shadow-xl"
+            >
+              <DrawerHeader
+                accessKey={accessKey}
+                onClose={close}
+                actions={keyMenuActions({ onRotate, onDelete })}
+              />
+              <div className="flex-1 overflow-y-auto">
+                {/* Facts, object permissions and bucket management each sit in a
+                    band of their own, divided by the same full-width hairline as
+                    the header above them. */}
+                <div className="flex flex-col divide-y divide-zinc-100 text-ui *:px-5 *:py-5">
+                  <KeyFacts accessKey={accessKey} creatorFor={creatorFor} />
+                  <BucketsSection accessKey={accessKey} linkBuckets={linkBuckets} />
+                  {accessKey.type === 'principal' ? (
+                    <DrawerSection title="Permissions" testId="follows-bucket-policy">
+                      <p className="text-zinc-500">
+                        This key acts as its owner. Each bucket&apos;s policy decides what it can
+                        reach.
+                      </p>
+                    </DrawerSection>
+                  ) : (
+                    <ServiceKeyPermissions accessKey={accessKey} />
+                  )}
+                </div>
+              </div>
+            </DialogPanel>
+          </TransitionChild>
+        </div>
+      </Dialog>
+    </Transition>
   );
 }
 
-function DrawerHeader({ accessKey, onClose }: { accessKey: AccessKey; onClose: () => void }) {
+function DrawerHeader({
+  accessKey,
+  onClose,
+  actions,
+}: {
+  accessKey: AccessKey;
+  onClose: () => void;
+  actions: RowAction[];
+}) {
   return (
     <div className="flex flex-shrink-0 items-start justify-between gap-3 border-b border-zinc-100 px-5 py-4">
-      {/* min-w-0 so a long name or ID wraps inside the header rather than
-          pushing the close button off the panel. */}
+      {/* min-w-0 so a long name wraps, and a long ID truncates, inside the
+          header rather than pushing the buttons off the panel. */}
       <div className="min-w-0">
-        <p className="text-sm font-semibold break-words text-zinc-900">{accessKey.keyName}</p>
-        <div className="flex items-center gap-1">
-          <p className="font-mono text-xs break-all text-zinc-500">{accessKey.accessKeyId}</p>
+        <DialogTitle className="text-base font-medium break-words text-zinc-900">
+          {accessKey.keyName}
+        </DialogTitle>
+        {/* One line, as in the table: wrapped, a long ID turned the header into
+            a block of characters. `title` and the copy button keep the full value. */}
+        <div className="mt-0.5 flex items-center gap-1">
+          <p className="truncate font-mono text-xs text-zinc-500" title={accessKey.accessKeyId}>
+            {accessKey.accessKeyId}
+          </p>
           <CopyButton value={accessKey.accessKeyId} />
         </div>
       </div>
-      <button
-        data-testid="access-key-details-drawer-close"
-        onClick={onClose}
-        aria-label="Close"
-        className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
-      >
-        <XIcon size={16} weight="bold" />
-      </button>
+      <div className="flex shrink-0 items-center gap-1">
+        {/* One step away, as in the row: this panel is for reading, and a red
+            button pinned under it was the loudest thing on it. */}
+        {actions.length > 0 && (
+          <RowActionsMenu
+            actions={actions}
+            aria-label="Key actions"
+            testId="access-key-details-drawer-actions"
+          />
+        )}
+        <button
+          type="button"
+          data-testid="access-key-details-drawer-close"
+          onClick={onClose}
+          aria-label="Close"
+          className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 focus-visible:brand-outline"
+        >
+          <XIcon size={16} weight="bold" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -160,11 +196,26 @@ function KeyFacts({
   return (
     <dl
       data-testid="access-key-details-facts"
-      className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 text-xs"
+      className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-4 gap-y-3"
     >
       <Fact label="Status">
         <KeyStatus accessKey={accessKey} />
       </Fact>
+      {/* The dates sit together under the status they explain. "Expired" for a
+          date already passed, so the label agrees with the status above it. */}
+      <Fact label={accessKey.status === 'expired' ? 'Expired' : 'Expires'}>
+        {accessKey.expiresAt ? formatCalendarDate(accessKey.expiresAt) : 'Never'}
+      </Fact>
+      <Fact label="Created">
+        {formatDate(accessKey.createdAt)}
+        {creator && <span className="text-zinc-500"> by {creator.name}</span>}
+      </Fact>
+      {accessKey.rotatedBy && (
+        <Fact label="Rotated">
+          {accessKey.rotatedAt ? formatDate(accessKey.rotatedAt) : 'Yes'}
+          {rotator && <span className="text-zinc-500"> by {rotator.name}</span>}
+        </Fact>
+      )}
       <Fact label="Type">{accessKey.type === 'principal' ? 'Personal' : 'Service'}</Fact>
       {accessKey.region && (
         <Fact label="Region">
@@ -175,26 +226,6 @@ function KeyFacts({
               <span className="text-zinc-500">{accessKey.region}</span>
             </span>
           </div>
-        </Fact>
-      )}
-      <Fact label="Buckets">
-        <BucketList accessKey={accessKey} />
-      </Fact>
-      {/* An active key's expiry is a date still to come; an expired one already
-          shows it under its status. */}
-      {accessKey.status === 'active' && (
-        <Fact label="Expires">
-          {accessKey.expiresAt ? formatCalendarDate(accessKey.expiresAt) : 'Never'}
-        </Fact>
-      )}
-      <Fact label="Created">
-        {formatDate(accessKey.createdAt)}
-        {creator && <span className="text-zinc-500"> by {creator.name}</span>}
-      </Fact>
-      {accessKey.rotatedBy && (
-        <Fact label="Rotated">
-          {accessKey.rotatedAt ? formatDate(accessKey.rotatedAt) : 'Yes'}
-          {rotator && <span className="text-zinc-500"> by {rotator.name}</span>}
         </Fact>
       )}
     </dl>
@@ -210,20 +241,88 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-function BucketList({ accessKey }: { accessKey: AccessKey }) {
-  if (accessKey.type === 'principal') return <>Per bucket policy</>;
-  if (accessKey.bucketScope === 'all') return <>All buckets</>;
+const BUCKETS_SHOWN_MAX = 5;
+
+/**
+ * Which buckets the key reaches, in a band of its own: a list, unlike the
+ * single values in the facts above, and beside the permissions it scopes. A
+ * scope (every bucket, or whatever bucket policies grant) is one muted line.
+ */
+function BucketsSection({
+  accessKey,
+  linkBuckets,
+}: {
+  accessKey: AccessKey;
+  linkBuckets: boolean;
+}) {
+  const [showAll, setShowAll] = useState(false);
+
+  if (accessKey.type === 'principal') {
+    return (
+      <DrawerSection title="Buckets" testId="buckets">
+        <p className="text-zinc-500">
+          Per bucket policy: any bucket whose policy grants its owner access.
+        </p>
+      </DrawerSection>
+    );
+  }
+  if (accessKey.bucketScope === 'all') {
+    return (
+      <DrawerSection title="Buckets" testId="buckets">
+        <p className="text-zinc-500">All buckets in this region</p>
+      </DrawerSection>
+    );
+  }
+
   const buckets = accessKey.buckets ?? [];
-  if (buckets.length === 0) return <span className="text-zinc-400">None</span>;
+  const region = (accessKey.region ?? S3_REGION) as S3Region;
+  const shown = showAll ? buckets : buckets.slice(0, BUCKETS_SHOWN_MAX);
   return (
-    <ul data-testid="access-key-details-buckets" className="flex flex-col gap-1">
-      {buckets.map((bucket) => (
-        <li key={bucket} className="break-all">
-          {bucket}
-        </li>
-      ))}
-    </ul>
+    <DrawerSection
+      title={
+        <>
+          Buckets <span className="text-zinc-400 tabular-nums">{buckets.length}</span>
+        </>
+      }
+      testId="buckets"
+    >
+      {buckets.length === 0 ? (
+        <p className="text-zinc-500">None</p>
+      ) : (
+        <ul data-testid="access-key-details-buckets" className="flex flex-col gap-1.5">
+          {shown.map((bucket) => (
+            <li key={bucket} className="break-all">
+              {linkBuckets ? (
+                <Link
+                  to="/buckets/$bucketName"
+                  params={{ bucketName: bucket }}
+                  search={{ region }}
+                  className="rounded-sm text-zinc-900 hover:text-brand-600 focus-visible:brand-outline"
+                >
+                  {bucket}
+                </Link>
+              ) : (
+                <span className="text-zinc-900">{bucket}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {buckets.length > BUCKETS_SHOWN_MAX && (
+        <button
+          type="button"
+          onClick={() => setShowAll((all) => !all)}
+          className="mt-2 cursor-pointer rounded-sm text-xs text-zinc-500 hover:text-zinc-900 focus-visible:brand-outline"
+        >
+          {showAll ? 'Show fewer' : `Show all ${buckets.length}`}
+        </button>
+      )}
+    </DrawerSection>
   );
+}
+
+function PermissionList({ children }: { children: React.ReactNode }) {
+  return <ul className="flex flex-col gap-2.5">{children}</ul>;
 }
 
 function ServiceKeyPermissions({ accessKey }: { accessKey: ServiceAccessKey }) {
@@ -231,9 +330,7 @@ function ServiceKeyPermissions({ accessKey }: { accessKey: ServiceAccessKey }) {
   // presents Read/Write/List/Delete in that fixed order, and a key stores
   // whatever order they were toggled in, which is not a fact worth showing.
   const permissions = accessKey.permissions ?? [];
-  const objectPermissions = PERMISSION_OPTIONS.map((o) => o.value).filter((p) =>
-    permissions.includes(p),
-  );
+  const objectPermissions = PERMISSION_OPTIONS.filter((o) => permissions.includes(o.value));
   const bucketManagement = permissions.filter(isBucketPermission);
   const bucketInfo = permissions.filter(isBucketInfoPermission);
   const granularPermissions = accessKey.granularPermissions ?? [];
@@ -242,30 +339,17 @@ function ServiceKeyPermissions({ accessKey }: { accessKey: ServiceAccessKey }) {
     <>
       {objectPermissions.length > 0 && (
         <DrawerSection title="Object permissions" testId="object">
-          {objectPermissions.map((permission) => {
-            const option = PERMISSION_OPTIONS.find((o) => o.value === permission);
-            if (!option) return null;
-            const extras = GRANULAR_PERMISSION_MAP[permission].filter((g) =>
-              granularPermissions.includes(g),
-            );
-            return (
-              <div key={permission}>
-                <PermissionRow label={option.label} description={option.description} />
-                {extras.length > 0 && (
-                  <div className="mt-1 ml-6 flex flex-col gap-2 border-l-2 border-zinc-100 pl-3">
-                    {extras.map((g) => (
-                      <PermissionRow
-                        key={g}
-                        label={GRANULAR_PERMISSION_LABELS[g].label}
-                        description={GRANULAR_PERMISSION_LABELS[g].description}
-                        subtle
-                      />
-                    ))}
-                  </div>
+          <PermissionList>
+            {objectPermissions.map((option) => (
+              <PermissionRow
+                key={option.value}
+                label={option.label}
+                extras={GRANULAR_PERMISSION_MAP[option.value].filter((g) =>
+                  granularPermissions.includes(g),
                 )}
-              </div>
-            );
-          })}
+              />
+            ))}
+          </PermissionList>
         </DrawerSection>
       )}
 
@@ -276,21 +360,18 @@ function ServiceKeyPermissions({ accessKey }: { accessKey: ServiceAccessKey }) {
         // this is a different taxonomy from the one the key was built
         // with, and it isn't.
         <DrawerSection title="Bucket management" testId="bucket-management">
-          <PermissionRow label="List all buckets" description="List all buckets in the account" />
-          {bucketInfo.map((permission) => (
-            <PermissionRow
-              key={permission}
-              label={BUCKET_INFO_PERMISSION_LABELS[permission].label}
-              description={BUCKET_INFO_PERMISSION_LABELS[permission].description}
-            />
-          ))}
-          {bucketManagement.map((permission) => (
-            <PermissionRow
-              key={permission}
-              label={BUCKET_PERMISSION_LABELS[permission].label}
-              description={BUCKET_PERMISSION_LABELS[permission].description}
-            />
-          ))}
+          <PermissionList>
+            <PermissionRow label="List all buckets" />
+            {bucketInfo.map((permission) => (
+              <PermissionRow
+                key={permission}
+                label={BUCKET_INFO_PERMISSION_LABELS[permission].label}
+              />
+            ))}
+            {bucketManagement.map((permission) => (
+              <PermissionRow key={permission} label={BUCKET_PERMISSION_LABELS[permission].label} />
+            ))}
+          </PermissionList>
         </DrawerSection>
       )}
     </>
@@ -302,40 +383,40 @@ function DrawerSection({
   testId,
   children,
 }: {
-  title: string;
+  title: React.ReactNode;
   testId: string;
   children: React.ReactNode;
 }) {
   return (
-    <div data-testid={`access-key-details-drawer-section-${testId}`}>
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">{title}</p>
-      <div className="flex flex-col gap-2.5">{children}</div>
-    </div>
+    <section data-testid={`access-key-details-drawer-section-${testId}`}>
+      <h3 className="mb-2 text-xs font-medium text-zinc-500">{title}</h3>
+      {children}
+    </section>
   );
 }
 
-function PermissionRow({
-  label,
-  description,
-  subtle,
-}: {
-  label: string;
-  description: string;
-  subtle?: boolean;
-}) {
+/**
+ * One granted permission, with the extras it carries on a quieter line beneath.
+ * Run together on one line, the two levels read as a single dense string and
+ * wrapped raggedly. Only granted permissions are listed, so no check marks, and
+ * the labels stand on their own without tooltips.
+ */
+function PermissionRow({ label, extras = [] }: { label: string; extras?: GranularPermission[] }) {
   return (
-    <div className="flex items-start gap-2">
-      <CheckIcon
-        size={14}
-        weight="bold"
-        className={`mt-0.5 shrink-0 ${subtle ? 'text-brand-400' : 'text-brand-600'}`}
-      />
-      <div className="flex flex-col">
-        <span className={`text-xs font-medium ${subtle ? 'text-zinc-700' : 'text-zinc-900'}`}>
-          {label}
-        </span>
-        <span className="text-xs text-zinc-500">{description}</span>
-      </div>
-    </div>
+    <li>
+      <p className="text-zinc-900">{label}</p>
+      {extras.length > 0 && (
+        // Each label is kept whole, so a long list wraps between permissions
+        // rather than leaving the last word of one alone on a line.
+        <p className="mt-0.5 text-xs text-zinc-500">
+          {extras.map((extra, index) => (
+            <Fragment key={extra}>
+              {index > 0 && ', '}
+              <span className="whitespace-nowrap">{GRANULAR_PERMISSION_LABELS[extra].label}</span>
+            </Fragment>
+          ))}
+        </p>
+      )}
+    </li>
   );
 }

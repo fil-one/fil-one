@@ -15,7 +15,13 @@ vi.mock('../lib/api.js', () => ({
   getUsage: () => mockGetUsage(),
 }));
 
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn() }));
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => vi.fn(),
+  // The details drawer links each bucket; a plain anchor stands in for the router's.
+  Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
+    <a href={to}>{children}</a>
+  ),
+}));
 
 import { ApiKeysPage } from './ApiKeysPage.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
@@ -137,7 +143,7 @@ describe('ApiKeysPage — who may revoke', () => {
     renderPage(OrgRole.Member);
 
     expect(await screen.findByText('my key')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Key actions' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /^Actions for / })).toHaveLength(1);
   });
 
   it('requests the list for a Member — the server narrows it', async () => {
@@ -202,7 +208,7 @@ describe('ApiKeysPage — rotating a key', () => {
 
   /** Open the row menu and press one of its items. */
   async function openRowMenu() {
-    fireEvent.click(await screen.findByRole('button', { name: 'Key actions' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Actions for / }));
   }
 
   it('asks first, then shows the new secret once', async () => {
@@ -210,7 +216,7 @@ describe('ApiKeysPage — rotating a key', () => {
 
     renderPage(OrgRole.Owner);
     await openRowMenu();
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rotate' }));
 
     // Nothing is rotated until the caller confirms: the credential they are
     // using stops working the moment the replacement is issued.
@@ -231,7 +237,7 @@ describe('ApiKeysPage — rotating a key', () => {
 
     renderPage(OrgRole.Owner);
     await openRowMenu();
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rotate' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Rotate key' }));
 
     expect(await screen.findByText(/still active/)).toBeInTheDocument();
@@ -247,8 +253,8 @@ describe('ApiKeysPage — rotating a key', () => {
     renderPage(OrgRole.Admin);
     await openRowMenu();
 
-    expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Rotate' })).not.toBeInTheDocument();
   });
 
   it('hides the action on an expired key', async () => {
@@ -260,8 +266,8 @@ describe('ApiKeysPage — rotating a key', () => {
     renderPage(OrgRole.Owner);
     await openRowMenu();
 
-    expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Rotate' })).not.toBeInTheDocument();
   });
 
   it('offers no rotation to a role that cannot create keys', async () => {
@@ -274,7 +280,70 @@ describe('ApiKeysPage — rotating a key', () => {
     renderPage(OrgRole.Member);
     await openRowMenu();
 
-    expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Rotate' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ApiKeysPage — searching and filtering keys', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Five keys, the count at which the search and filters appear.
+  const fiveKeys = ['alpha', 'bravo', 'charlie', 'delta', 'echo'].map((name, index) =>
+    key({ id: `key-${index}`, keyName: name, accessKeyId: `ANYACCESSKEYID00000${index}` }),
+  );
+
+  const rowNames = () =>
+    screen.getAllByTestId('access-key-row').map((row) => row.querySelector('button')?.textContent);
+
+  it('narrows the rows to the keys whose name matches the search', async () => {
+    mockApiRequest.mockResolvedValue({ keys: fiveKeys });
+    renderPage();
+    await screen.findByText('alpha');
+
+    fireEvent.change(screen.getByRole('searchbox', { name: /search keys/i }), {
+      target: { value: 'CHAR' },
+    });
+
+    expect(rowNames()).toStrictEqual(['charlie']);
+  });
+
+  it('offers Clear filters when nothing matches, and Clear filters brings every key back', async () => {
+    mockApiRequest.mockResolvedValue({ keys: fiveKeys });
+    renderPage();
+    await screen.findByText('alpha');
+
+    fireEvent.change(screen.getByRole('searchbox', { name: /search keys/i }), {
+      target: { value: 'no-such-key' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+
+    expect(rowNames()).toStrictEqual(['alpha', 'bravo', 'charlie', 'delta', 'echo']);
+  });
+
+  it('leaves out the search below five keys', async () => {
+    mockApiRequest.mockResolvedValue({ keys: fiveKeys.slice(0, 4) });
+    renderPage();
+    await screen.findByText('alpha');
+
+    expect(screen.queryByRole('searchbox', { name: /search keys/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('ApiKeysPage — the details drawer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('links each bucket in the drawer to its page', async () => {
+    mockApiRequest.mockResolvedValue({
+      keys: [key({ bucketScope: 'specific', buckets: ['any-bucket'] })],
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'my key' }));
+
+    expect(screen.getByRole('link', { name: 'any-bucket' })).toBeInTheDocument();
   });
 });

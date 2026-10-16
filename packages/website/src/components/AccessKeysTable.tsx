@@ -1,12 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import {
-  ArrowsClockwiseIcon,
-  DotsThreeIcon,
-  KeyIcon,
-  PlusIcon,
-  TrashIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { KeyIcon, PlusIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { IconBox } from './IconBox';
 
@@ -15,6 +9,7 @@ import { getRegionLabel } from '@filone/shared';
 
 import {
   BucketSummary,
+  keyMenuActions,
   FollowsBucketPolicy,
   KeyStatus,
   KeyTypeBadge,
@@ -24,8 +19,8 @@ import { AccessKeyDetailsDrawer } from './AccessKeyDetailsDrawer';
 import { Button } from './Button';
 import { Checkbox } from './Checkbox';
 import { CopyButton } from './CopyButton';
-import { IconButton } from './IconButton';
 import { RegionFlag } from './RegionFlag';
+import { RowActionsMenu } from './RowActionsMenu';
 import { Table } from './Table/Table';
 import { formatDate } from '../lib/time.js';
 
@@ -68,83 +63,6 @@ function Attribution({
   );
 }
 
-function ActionMenu({ onRotate, onDelete }: { onRotate?: () => void; onDelete?: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (
-        menuRef.current &&
-        !menuRef.current.contains(e.target as Node) &&
-        buttonRef.current &&
-        !buttonRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [open]);
-
-  function handleOpen() {
-    if (buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-    }
-    setOpen((o) => !o);
-  }
-
-  return (
-    <div className="relative inline-block">
-      <IconButton
-        ref={buttonRef}
-        icon={DotsThreeIcon}
-        aria-label="Key actions"
-        size="md"
-        onClick={handleOpen}
-      />
-      {open && (
-        <div
-          ref={menuRef}
-          style={{ top: pos.top, right: pos.right }}
-          className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-md"
-        >
-          {onRotate && (
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onRotate();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 focus-visible:brand-outline focus-visible:outline-offset-[-2px] active:bg-zinc-100"
-            >
-              <ArrowsClockwiseIcon size={14} />
-              Rotate
-            </button>
-          )}
-          {onDelete && (
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onDelete();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 focus-visible:brand-outline focus-visible:outline-offset-[-2px] active:bg-red-100"
-            >
-              <TrashIcon size={14} />
-              Delete
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // AccessKeysTable
 // ---------------------------------------------------------------------------
@@ -154,6 +72,11 @@ export type AccessKeysTableProps = {
   showRegion?: boolean;
   showBuckets?: boolean;
   showPermissions?: boolean;
+  /**
+   * Whether the details drawer links each bucket to its page. Left off on a
+   * bucket's own access tab, where the link would lead back to the same page.
+   */
+  linkBuckets?: boolean;
   /**
    * Who minted each key, resolved from a user id. Passed only when the org has
    * somebody else in it: a column reading the same name on every row is noise
@@ -353,6 +276,7 @@ export function AccessKeysTable({
   showRegion = false,
   showBuckets = false,
   showPermissions = false,
+  linkBuckets = false,
   creatorFor,
   onDelete,
   onBulkDelete,
@@ -509,7 +433,12 @@ export function AccessKeysTable({
                 {/* Actions */}
                 {showActions && (
                   <Table.Cell className="text-right">
-                    {rowHasAction(key) && <ActionMenu {...actionsFor(key)} />}
+                    {rowHasAction(key) && (
+                      <RowActionsMenu
+                        actions={keyMenuActions(actionsFor(key))}
+                        aria-label={`Actions for ${key.keyName}`}
+                      />
+                    )}
                   </Table.Cell>
                 )}
               </Table.Row>
@@ -521,6 +450,7 @@ export function AccessKeysTable({
         <AccessKeyDetailsDrawer
           accessKey={detailKey}
           creatorFor={creatorFor}
+          linkBuckets={linkBuckets}
           onClose={() => setDetailKey(null)}
           {...closingFirst(actionsFor(detailKey), () => setDetailKey(null))}
         />
