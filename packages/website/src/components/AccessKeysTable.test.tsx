@@ -26,7 +26,7 @@ function makeKey(overrides: Partial<ServiceAccessKey>): ServiceAccessKey {
   };
 }
 
-describe('AccessKeysTable : permission detail', () => {
+describe('AccessKeysTable: permission detail', () => {
   it('offers a details trigger when a key carries more than its object permissions', () => {
     const keys = [makeKey({ permissions: ['read', 'GetBucketVersioning'] })];
     renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
@@ -66,7 +66,7 @@ describe('AccessKeysTable : permission detail', () => {
   });
 });
 
-describe('AccessKeysTable : the details drawer', () => {
+describe('AccessKeysTable: the details drawer', () => {
   const scopedKey = makeKey({
     keyName: 'any-key',
     bucketScope: 'specific',
@@ -144,7 +144,7 @@ describe('AccessKeysTable : the details drawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'any-key' }));
 
     const dialog = screen.getByRole('dialog', { name: 'any-key' });
-    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
   });
 
   it('closes on Escape and hands focus back to the key name that opened it', async () => {
@@ -284,7 +284,7 @@ describe('AccessKeysTable — a principal-bound key', () => {
   });
 });
 
-describe('AccessKeysTable : the Buckets column', () => {
+describe('AccessKeysTable: the Buckets column', () => {
   it('lists the first two bucket names and counts the rest', () => {
     const key = makeKey({
       bucketScope: 'specific',
@@ -492,6 +492,22 @@ describe('AccessKeysTable: bulk selection', () => {
     ).toStrictEqual(['Select all keys', 'Select mine']);
   });
 
+  it('marks select-all as partly checked while only some keys are selected', () => {
+    renderWithProviders(
+      <AccessKeysTable
+        keys={[mine, makeKey({ id: 'also-mine', keyName: 'also-mine' })]}
+        onBulkDelete={async () => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select mine' }));
+
+    expect(screen.getByRole('checkbox', { name: 'Select all keys' })).toHaveAttribute(
+      'aria-checked',
+      'mixed',
+    );
+  });
+
   it('bulk-deletes only the keys the caller may delete when all are selected', () => {
     const onBulkDelete = vi.fn(async () => {});
     renderWithProviders(
@@ -502,5 +518,44 @@ describe('AccessKeysTable: bulk selection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
     expect(onBulkDelete.mock.calls).toStrictEqual([[['mine']]]);
+  });
+});
+
+describe("AccessKeysTable: keyboard order and the drawer's key", () => {
+  const personalKey: AccessKey = {
+    id: 'personal',
+    type: 'principal',
+    principalId: 'any-user',
+    keyName: 'any-personal-key',
+    accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
+    createdAt: '2026-01-15T10:00:00Z',
+    status: 'active',
+  };
+
+  // Each explanation is in the key's drawer, which the name button opens.
+  it('keeps the row explanations out of the tab order', () => {
+    const { container } = renderWithProviders(
+      <AccessKeysTable keys={[personalKey]} showBuckets showPermissions />,
+    );
+
+    expect(container.querySelectorAll('[role="note"][tabindex]')).toHaveLength(0);
+  });
+
+  it('keeps the drawer open on a key the current filters no longer show', () => {
+    const key = makeKey({ id: 'shown-then-filtered', keyName: 'any-key' });
+    const other = makeKey({ id: 'still-shown', keyName: 'other-key' });
+    const { rerender } = renderWithProviders(
+      <AccessKeysTable keys={[key, other]} allKeys={[key, other]} />,
+    );
+    fireEvent.click(screen.getAllByTestId('access-key-row')[0]);
+
+    // It expires under an Active filter: gone from the rows, still in the list.
+    rerender(
+      <ToastProvider>
+        <AccessKeysTable keys={[other]} allKeys={[{ ...key, status: 'expired' }, other]} />
+      </ToastProvider>,
+    );
+
+    expect(screen.getByRole('dialog', { name: 'any-key' })).toBeInTheDocument();
   });
 });

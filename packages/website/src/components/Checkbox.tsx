@@ -2,7 +2,7 @@ import {
   Checkbox as HeadlessCheckbox,
   type CheckboxProps as HeadlessCheckboxProps,
 } from '@headlessui/react';
-import { CheckIcon } from '@phosphor-icons/react/dist/ssr';
+import { CheckIcon, MinusIcon } from '@phosphor-icons/react/dist/ssr';
 import clsx from 'clsx';
 
 import { Icon } from './Icon';
@@ -28,14 +28,19 @@ export function Checkbox(props: CheckboxProps) {
         className={clsx(
           'size-4 flex items-center justify-center rounded border border-zinc-300 bg-white p-0.5 text-white transition-colors',
           'group-data-checked:border-brand-600 group-data-checked:bg-brand-600',
+          'group-data-indeterminate:border-brand-600 group-data-indeterminate:bg-brand-600',
           'hover:border-zinc-400 hover:bg-zinc-50',
           'group-data-checked:hover:border-brand-600 group-data-checked:hover:bg-brand-600',
           'group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-brand-600',
           'group-data-disabled:cursor-not-allowed group-data-disabled:opacity-50',
         )}
       >
-        <span className="invisible group-data-checked:visible">
+        <span className="invisible group-data-checked:visible group-data-indeterminate:hidden">
           <Icon component={CheckIcon} size={12} weight="bold" />
+        </span>
+        {/* Partly selected, as a select-all over a partial selection shows. */}
+        <span className="hidden group-data-indeterminate:block">
+          <Icon component={MinusIcon} size={12} weight="bold" />
         </span>
       </div>
     </HeadlessCheckbox>

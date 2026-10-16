@@ -29,9 +29,9 @@ describe('SearchInput', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
 
-    const field = screen.getByRole('searchbox', { name: 'Search things' });
+    const field = screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search things' });
     expect({
-      value: (field as HTMLInputElement).value,
+      value: field.value,
       focused: document.activeElement === field,
     }).toStrictEqual({ value: '', focused: true });
   });

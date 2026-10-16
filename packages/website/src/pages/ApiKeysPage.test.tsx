@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
@@ -7,7 +7,9 @@ import type { ServiceAccessKey } from '@filone/shared';
 const mockApiRequest = vi.fn();
 const mockGetUsage = vi.fn(() => Promise.resolve({ tenantStatus: 'active' }));
 
-vi.mock('../lib/api.js', () => ({
+vi.mock('../lib/api.js', async () => ({
+  // The real helpers (errorStatusOf and the like); only the network calls are faked.
+  ...(await vi.importActual<typeof import('../lib/api.js')>('../lib/api.js')),
   apiRequest: (...args: unknown[]) => mockApiRequest(...args),
   getMe: vi.fn(() => new Promise(() => {})),
   // `useAccountDisabled` reads /usage. Tests that care about the disabled state
@@ -51,8 +53,10 @@ function key(over: Partial<ServiceAccessKey> = {}): ServiceAccessKey {
   };
 }
 
-function renderPage(role: OrgRole = OrgRole.Owner) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(
+  role: OrgRole = OrgRole.Owner,
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   seedPermissions(client, role);
   const view = render(
     <QueryClientProvider client={client}>
@@ -285,7 +289,7 @@ describe('ApiKeysPage — rotating a key', () => {
   });
 });
 
-describe('ApiKeysPage : searching and filtering keys', () => {
+describe('ApiKeysPage: searching and filtering keys', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -343,6 +347,42 @@ describe('ApiKeysPage : searching and filtering keys', () => {
     );
   });
 
+  it('clears a filter whose control hid, so it does not come back set', async () => {
+    const personal = {
+      ...fiveKeys[0],
+      id: 'key-p',
+      keyName: 'personal',
+      type: 'principal' as const,
+      principalId: 'any-user',
+    };
+    mockApiRequest.mockResolvedValue({ keys: [...fiveKeys, personal] });
+    const { client } = renderPage();
+    await screen.findByText('alpha');
+    fireEvent.change(screen.getByRole('combobox', { name: /filter keys by type/i }), {
+      target: { value: 'principal' },
+    });
+
+    // The only personal key goes, so the Type filter hides; then a new one arrives.
+    act(() => {
+      client.setQueryData(queryKeys.accessKeys, { keys: fiveKeys });
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('combobox', { name: /filter keys by type/i }),
+      ).not.toBeInTheDocument(),
+    );
+    act(() => {
+      client.setQueryData(queryKeys.accessKeys, {
+        keys: [...fiveKeys, { ...personal, id: 'key-q', keyName: 'new personal' }],
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /filter keys by type/i })).toHaveValue('all'),
+    );
+    expect(rowNames()).toHaveLength(6);
+  });
+
   it('leaves out the search below five keys', async () => {
     mockApiRequest.mockResolvedValue({ keys: fiveKeys.slice(0, 4) });
     renderPage();
@@ -352,7 +392,7 @@ describe('ApiKeysPage : searching and filtering keys', () => {
   });
 });
 
-describe('ApiKeysPage : the details drawer', () => {
+describe('ApiKeysPage: the details drawer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -368,25 +408,37 @@ describe('ApiKeysPage : the details drawer', () => {
   });
 });
 
-describe('ApiKeysPage : a bulk delete that partly fails', () => {
+describe('ApiKeysPage: a bulk delete that partly fails', () => {
+  // The deletion hook refreshes through the app's shared query client, so the
+  // page renders with that client here and its refetch reaches the screen.
+  afterEach(() => {
+    sharedQueryClient.clear();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  const keys = [key(), key({ id: 'key-2', keyName: 'other key' })];
-
-  function mockOneRefusedDelete() {
+  /** A server holding two keys, refusing the deletes `refuse` says to. */
+  function mockServer(refuse: (id: string) => Error | undefined) {
+    const existing = new Map([
+      ['key-1', key()],
+      ['key-2', key({ id: 'key-2', keyName: 'other key' })],
+    ]);
     mockApiRequest.mockImplementation((path: string, init?: { method?: string }) => {
-      if (init?.method !== 'DELETE') return Promise.resolve({ keys });
-      // The second key was already deleted elsewhere, so the server refuses it.
-      return path.endsWith('/key-2')
-        ? Promise.reject(new Error('Access key not found'))
-        : Promise.resolve({});
+      if (init?.method !== 'DELETE') return Promise.resolve({ keys: [...existing.values()] });
+      const id = path.split('/').at(-1) ?? '';
+      const refusal = refuse(id);
+      if (refusal) return Promise.reject(refusal);
+      existing.delete(id);
+      return Promise.resolve({});
     });
   }
 
+  const withStatus = (message: string, status: number) =>
+    Object.assign(new Error(message), { status });
+
   async function deleteBoth() {
-    renderPage();
+    renderPage(OrgRole.Owner, sharedQueryClient);
     await screen.findByText('my key');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select all keys' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
@@ -394,24 +446,30 @@ describe('ApiKeysPage : a bulk delete that partly fails', () => {
   }
 
   it('says how many were deleted and why the rest were not', async () => {
-    mockOneRefusedDelete();
+    mockServer((id) =>
+      id === 'key-2' ? withStatus('Not allowed to delete this key', 403) : undefined,
+    );
     await deleteBoth();
 
     expect(
-      await screen.findByText("1 deleted. 1 couldn't be deleted: Access key not found"),
+      await screen.findByText("1 deleted. 1 couldn't be deleted: Not allowed to delete this key"),
     ).toBeInTheDocument();
   });
 
-  // The deletion hook refreshes through the app's shared query client, which
-  // is a different one from the client this page renders with in tests.
-  it('refreshes the key list after the partial failure, so deleted keys stop showing', async () => {
-    const invalidate = vi.spyOn(sharedQueryClient, 'invalidateQueries');
-    mockOneRefusedDelete();
+  it('refreshes the key list after the partial failure, so the deleted key stops showing', async () => {
+    mockServer((id) =>
+      id === 'key-2' ? withStatus('Not allowed to delete this key', 403) : undefined,
+    );
     await deleteBoth();
 
-    await waitFor(() =>
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.accessKeys }),
-    );
-    invalidate.mockRestore();
+    await waitFor(() => expect(screen.queryByText('my key')).not.toBeInTheDocument());
+    expect(screen.getByText('other key')).toBeInTheDocument();
+  });
+
+  it('counts a key the server no longer has (404) as deleted', async () => {
+    mockServer((id) => (id === 'key-2' ? withStatus('Access key not found', 404) : undefined));
+    await deleteBoth();
+
+    expect(await screen.findByText('2 access keys deleted')).toBeInTheDocument();
   });
 });

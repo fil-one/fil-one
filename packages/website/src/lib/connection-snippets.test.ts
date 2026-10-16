@@ -99,4 +99,9 @@ describe('getConnectionSnippets', () => {
   it('names the Node.js file as an ES module, which import and top-level await need', () => {
     expect(snippets.nodejs.client?.split('\n')[0]).toBe('// upload.mjs');
   });
+
+  // `go get` needs a module to add to; in an empty folder it fails without one.
+  it('starts the Go set-up by creating a module', () => {
+    expect(snippets.go.setup.split('\n')[0]).toBe('go mod init filone-upload');
+  });
 });

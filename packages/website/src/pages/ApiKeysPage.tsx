@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 
@@ -80,12 +80,20 @@ function AccessKeysTab({
   const [filters, setFilters] = useState(EMPTY_ACCESS_KEY_FILTERS);
   const regions = useMemo(() => accessKeyRegions(keys), [keys]);
   const showControls = shouldShowAccessKeyControls(keys.length);
-  // Below the threshold the controls are hidden, so filters left over from a
-  // longer list must not keep narrowing a short one with no way to clear them.
-  // A filter the toolbar hides stops narrowing the list, so the list and the
-  // controls on screen always agree.
+  // The list only ever follows the controls on screen. Below the threshold
+  // there are no controls, so nothing narrows it; above it, a filter the
+  // toolbar hides (the last expired key deleted, say) stops narrowing it.
   const appliedFilters = clearHiddenAccessKeyFilters(keys, filters);
   const shownKeys = showControls ? filterAccessKeys(keys, appliedFilters) : keys;
+  // A hidden filter is cleared, not just ignored, so it cannot come back set
+  // when its control reappears (a new personal key after the last was deleted).
+  const hiddenFilterIsSet =
+    appliedFilters.region !== filters.region ||
+    appliedFilters.status !== filters.status ||
+    appliedFilters.type !== filters.type;
+  useEffect(() => {
+    if (hiddenFilterIsSet) setFilters((current) => clearHiddenAccessKeyFilters(keys, current));
+  }, [hiddenFilterIsSet, keys]);
 
   return (
     <>
@@ -116,6 +124,7 @@ function AccessKeysTab({
       ) : (
         <AccessKeysTable
           keys={shownKeys}
+          allKeys={keys}
           showRegion
           showBuckets
           showPermissions

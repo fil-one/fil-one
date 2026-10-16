@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { ArrowUpRightIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { S3Region } from '@filone/shared';
@@ -94,12 +95,12 @@ export function BucketPrerequisite({ region }: { region: S3Region }) {
   return (
     <p className="mb-3 text-sm text-(--color-paragraph-text)">
       You need an API key and a bucket. Create a bucket in{' '}
-      <a
-        href="/buckets"
-        className="font-medium text-brand-600 transition-colors hover:text-brand-700 hover:underline"
+      <Link
+        to="/buckets"
+        className="rounded-md font-medium text-brand-600 transition-colors hover:text-brand-700 hover:underline focus-visible:brand-outline"
       >
         Buckets
-      </a>
+      </Link>
       {supportsBucketManagement(region) ? ", or with the AWS CLI's optional step below." : '.'}
     </p>
   );
@@ -152,13 +153,16 @@ function ConnectionFacts({
             <dt className="shrink-0 text-ui text-(--color-paragraph-text-subtle) sm:w-24">
               Path style
             </dt>
-            <dd className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="font-mono text-xs whitespace-nowrap text-(--color-text-base)">
-                forcePathStyle: true
-              </span>
+            <dd className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-ui">
+              {/* Named by what it is, since each client spells the option its
+                  own way; every snippet below sets it. */}
+              <span className="text-(--color-text-base)">Path-style addressing</span>
               <Badge color="grey" size="sm">
                 required
               </Badge>
+              <span className="text-(--color-paragraph-text-subtle)">
+                Set in every snippet below
+              </span>
             </dd>
           </div>
         </dl>

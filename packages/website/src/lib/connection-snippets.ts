@@ -5,14 +5,14 @@
 // virtual-hosted default fails on the first call. Each runs as pasted, the two
 // steps in order into one file (or one shell).
 
+import type { S3Region } from '@filone/shared';
+import { supportsBucketManagement } from '@filone/shared';
+
 /**
  * The AWS CLI profile the snippets configure. A named profile, so setting up
  * Fil One leaves the reader's default AWS credentials and settings alone.
  */
 export const CLI_PROFILE = 'filone';
-
-import type { S3Region } from '@filone/shared';
-import { supportsBucketManagement } from '@filone/shared';
 
 export type ConnectionClient = 'cli' | 'python' | 'nodejs' | 'go';
 
@@ -93,7 +93,9 @@ const s3 = new S3Client({
     },
     go: {
       language: 'go',
-      setup: `go get github.com/aws/aws-sdk-go-v2/config github.com/aws/aws-sdk-go-v2/credentials github.com/aws/aws-sdk-go-v2/service/s3`,
+      // In an empty folder `go get` needs a module to add to, so one comes first.
+      setup: `go mod init filone-upload
+go get github.com/aws/aws-sdk-go-v2/config github.com/aws/aws-sdk-go-v2/credentials github.com/aws/aws-sdk-go-v2/service/s3`,
       // Two top-level pieces of one main.go, so each step pastes after the last.
       client: `package main
 

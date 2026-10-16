@@ -69,6 +69,12 @@ function Attribution({
 
 export type AccessKeysTableProps = {
   keys: AccessKey[];
+  /**
+   * The full list `keys` was filtered from, where the details drawer finds its
+   * key. A key that drops out of the current filters (it expires under an
+   * Active filter, say) stays open in the drawer. Omitted, it is `keys`.
+   */
+  allKeys?: AccessKey[];
   showRegion?: boolean;
   showBuckets?: boolean;
   showPermissions?: boolean;
@@ -175,7 +181,7 @@ function KeysTableHeader({
 }: {
   columns: KeysTableColumns;
   /** Omitted when the table offers no bulk actions, which drops the checkbox column. */
-  selection?: { allSelected: boolean; toggleAll: () => void };
+  selection?: { allSelected: boolean; someSelected: boolean; toggleAll: () => void };
 }) {
   return (
     <Table.Header>
@@ -184,6 +190,7 @@ function KeysTableHeader({
           <Table.Head className="w-0 !pr-0">
             <Checkbox
               checked={selection.allSelected}
+              indeterminate={selection.someSelected}
               onChange={selection.toggleAll}
               aria-label="Select all keys"
             />
@@ -262,6 +269,7 @@ function useKeySelection(keys: AccessKey[]) {
   return {
     selected,
     allSelected,
+    someSelected: selected.size > 0 && !allSelected,
     toggleAll: () => setSelected(allSelected ? new Set() : new Set(keys.map((k) => k.id))),
     toggleOne: (id: string) =>
       setSelected((prev) => {
@@ -276,6 +284,7 @@ function useKeySelection(keys: AccessKey[]) {
 
 export function AccessKeysTable({
   keys,
+  allKeys = keys,
   showRegion = false,
   showBuckets = false,
   showPermissions = false,
@@ -314,12 +323,12 @@ export function AccessKeysTable({
   const isDeletable = (key: AccessKey) => canDelete?.(key) ?? true;
   const deletableKeys = keys.filter(isDeletable);
   const selectable = Boolean(onBulkDelete) && deletableKeys.length > 0;
-  const { selected, allSelected, toggleAll, toggleOne, clearSelection } =
+  const { selected, allSelected, someSelected, toggleAll, toggleOne, clearSelection } =
     useKeySelection(deletableKeys);
-  // The id, not the key: the drawer reads the key from the current list, so a
-  // refetch updates it and a key deleted elsewhere closes it.
+  // The id, not the key: the drawer reads the key from the current full list,
+  // so a refetch updates it and a key deleted elsewhere closes it.
   const [detailKeyId, setDetailKeyId] = useState<string | null>(null);
-  const detailKey = keys.find((key) => key.id === detailKeyId) ?? null;
+  const detailKey = allKeys.find((key) => key.id === detailKeyId) ?? null;
   useEffect(() => {
     if (detailKeyId !== null && detailKey === null) setDetailKeyId(null);
   }, [detailKeyId, detailKey]);
@@ -368,7 +377,7 @@ export function AccessKeysTable({
             showCreatedBy,
             showActions,
           }}
-          selection={selectable ? { allSelected, toggleAll } : undefined}
+          selection={selectable ? { allSelected, someSelected, toggleAll } : undefined}
         />
         <Table.Body>
           {keys.map((key) => {

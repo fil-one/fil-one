@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import type { ListAccessKeysResponse } from '@filone/shared';
 
 import { useToast } from '../components/Toast/index.js';
-import { apiRequest } from './api.js';
+import { apiRequest, errorStatusOf } from './api.js';
 import { queryClient, queryKeys } from './query-client.js';
 
 /** Copy for the delete-confirmation dialog, adapted to how many keys are selected. */
@@ -52,10 +52,14 @@ export function useKeyDeletion(): {
       const results = await Promise.allSettled(
         ids.map((id) => apiRequest(`/access-keys/${id}`, { method: 'DELETE' })),
       );
+      // A 404 means the key is already gone (deleted in another tab, say),
+      // which is the outcome asked for, so it counts as deleted.
+      const isGone = (result: PromiseSettledResult<unknown>) =>
+        result.status === 'fulfilled' || errorStatusOf(result.reason) === 404;
       return {
-        deleted: ids.filter((_, index) => results[index].status === 'fulfilled'),
+        deleted: ids.filter((_, index) => isGone(results[index])),
         failures: results.flatMap((result) =>
-          result.status === 'rejected' ? [result.reason] : [],
+          result.status === 'rejected' && !isGone(result) ? [result.reason] : [],
         ),
       };
     },
@@ -79,7 +83,14 @@ export function useKeyDeletion(): {
       );
       return;
     }
-    const reason = failures[0] instanceof Error ? failures[0].message : 'Failed to delete keys';
+    // Every distinct reason, so two different refusals are both named.
+    const reason = [
+      ...new Set(
+        failures.map((failure) =>
+          failure instanceof Error ? failure.message : 'Failed to delete keys',
+        ),
+      ),
+    ].join('; ');
     if (deletedCount === 0) {
       toast.error(reason);
       return;
@@ -94,8 +105,9 @@ export function useKeyDeletion(): {
     cancel: () => setPendingIds(null),
     confirm: async () => {
       if (!pendingIds || deleteKeys.isPending) return;
-      // Closed whatever the outcome: the toast reports any key that could not
-      // be deleted, and the refreshed list shows what is left to retry.
+      // Closed whatever the outcome, as ConfirmDialog closes once this
+      // resolves: the toast says what could not be deleted, and the refreshed
+      // list shows what is left to retry.
       await deleteKeys.mutateAsync(pendingIds);
       setPendingIds(null);
     },

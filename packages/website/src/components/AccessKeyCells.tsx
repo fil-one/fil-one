@@ -38,18 +38,13 @@ const KEY_TYPE_DESCRIPTIONS: Record<AccessKey['type'], string> = {
   service: 'Carries its own permissions and buckets. Bucket policies do not apply.',
 };
 
-// The explanatory tooltips in this table are focusable, so a keyboard reaches
-// them too. Their label carries the visible text first, because a focusable
-// tooltip's label replaces what a screen reader would otherwise read.
+// The explanatory tooltips in this table are hover-only. As tab stops they
+// added three to every personal key's row, each repeating the same words; a
+// keyboard reaches the same explanations in the key's details drawer, through
+// the name button that opens it.
 export function KeyTypeBadge({ type }: { type: AccessKey['type'] }) {
   return (
-    <Tooltip
-      content={KEY_TYPE_DESCRIPTIONS[type]}
-      side="bottom"
-      focusable
-      label={`${KEY_TYPE_LABELS[type]} key: ${KEY_TYPE_DESCRIPTIONS[type]}`}
-      className="rounded-full"
-    >
+    <Tooltip content={KEY_TYPE_DESCRIPTIONS[type]} side="bottom">
       <Badge color="grey" size="sm" data-key-type={type}>
         {KEY_TYPE_LABELS[type]}
       </Badge>
@@ -126,13 +121,7 @@ const BUCKET_NAMES_INLINE_MAX = 2;
 export function BucketSummary({ accessKey }: { accessKey: AccessKey }) {
   if (accessKey.type === 'principal') {
     return (
-      <Tooltip
-        content="Buckets whose policy grants this key's owner access."
-        side="bottom"
-        focusable
-        label="Per bucket policy: buckets whose policy grants this key's owner access."
-        className="rounded-md"
-      >
+      <Tooltip content="Buckets whose policy grants this key's owner access." side="bottom">
         <span className="text-xs text-zinc-500 underline decoration-zinc-400 decoration-dotted underline-offset-2 cursor-help">
           Per bucket policy
         </span>
@@ -179,13 +168,7 @@ export function BucketSummary({ accessKey }: { accessKey: AccessKey }) {
  */
 export function FollowsBucketPolicy() {
   return (
-    <Tooltip
-      content="This key inherits the policy of every bucket it touches."
-      side="bottom"
-      focusable
-      label="Follows bucket policy: this key inherits the policy of every bucket it touches."
-      className="rounded-md"
-    >
+    <Tooltip content="This key inherits the policy of every bucket it touches." side="bottom">
       <span
         data-testid="permission-badge-follows-bucket-policy"
         className="text-xs text-zinc-500 underline decoration-zinc-400 decoration-dotted underline-offset-2 cursor-help"
