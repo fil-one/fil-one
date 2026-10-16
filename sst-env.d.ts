@@ -126,6 +126,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "CreateOrg": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "CreatePortalSession": {
       "name": string
       "type": "sst.aws.Function"
@@ -143,6 +147,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "DeleteBucket": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "DeleteBucketPolicy": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -206,6 +214,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "GetBucketPolicy": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "GetBucketRagEnablement": {
       "name": string
       "type": "sst.aws.Function"
@@ -219,6 +231,10 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "GetPreferences": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "GetRoleChangePreview": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -274,6 +290,14 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "OrgLogoBucket": {
+      "name": string
+      "type": "sst.aws.Bucket"
+    }
+    "OrgLogoBucketName": {
+      "name": string
+      "type": "sst.sst.Linkable"
+    }
     "OrgTable": {
       "name": string
       "type": "sst.aws.Dynamo"
@@ -287,6 +311,18 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "Presign": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "PresignAvatar": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "PresignOrgLogo": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "PutBucketPolicy": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -331,11 +367,27 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "RotateAccessKey": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "SetBucketRagEnablement": {
       "name": string
       "type": "sst.aws.Function"
     }
     "SetupIntegrations": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "StripeEventDlq": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "StripeEventQueue": {
+      "type": "sst.aws.Queue"
+      "url": string
+    }
+    "StripeEventWorker": {
       "name": string
       "type": "sst.aws.Function"
     }

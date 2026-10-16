@@ -3,6 +3,8 @@ import { OrgRole, ROLE_PERMISSIONS } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
 import { queryKeys } from './query-client.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 /**
  * Seed the `/me` cache a permission-gated component reads, for a caller in this
  * role.
@@ -22,6 +24,7 @@ export function seedPermissions(
   const me: MeResponse = {
     orgId: 'org-1',
     orgName: 'Acme',
+    nameConfirmed: true,
     emailVerified: true,
     email: 'user@example.com',
     mfaEnrollments: [],
@@ -30,7 +33,10 @@ export function seedPermissions(
     // not have to switch the feature on before it can render the thing it is
     // about. The surface tests override it.
     orgsBeta: true,
-    userId: 'user-1',
+    // On by default too — the whole-console billing gate has its own tests,
+    // and every other test here is about a page that gate would otherwise hide.
+    billingActive: true,
+    userId: USER_1,
     role,
     permissions: ROLE_PERMISSIONS[role],
     ...overrides,

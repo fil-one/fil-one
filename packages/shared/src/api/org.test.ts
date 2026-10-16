@@ -60,34 +60,33 @@ describe('OrgNameSchema', () => {
       ['single quotes', "Acme's"],
     ])('rejects name with %s', (_label, name) => {
       const result = OrgNameSchema.safeParse(name);
-      expect(result.success).toBe(false);
+      expect(result).toMatchZodValidationError({ code: 'invalid_format', format: 'regex' });
     });
   });
 
   describe('invalid — length', () => {
     it('rejects empty string', () => {
       const result = OrgNameSchema.safeParse('');
-      expect(result.success).toBe(false);
+      expect(result).toMatchZodValidationError(
+        { code: 'too_small' },
+        { code: 'invalid_format', format: 'regex' },
+      );
     });
 
     it('rejects single character', () => {
       const result = OrgNameSchema.safeParse('A');
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues[0].message).toContain(
-          `at least ${ORG_NAME_MIN_LENGTH} characters`,
-        );
-      }
+      expect(result).toMatchZodValidationError({
+        code: 'too_small',
+        message: expect.stringContaining(`at least ${ORG_NAME_MIN_LENGTH} characters`),
+      });
     });
 
     it('rejects string exceeding max length', () => {
       const result = OrgNameSchema.safeParse('A'.repeat(ORG_NAME_MAX_LENGTH + 1));
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues[0].message).toContain(
-          `at most ${ORG_NAME_MAX_LENGTH} characters`,
-        );
-      }
+      expect(result).toMatchZodValidationError({
+        code: 'too_big',
+        message: expect.stringContaining(`at most ${ORG_NAME_MAX_LENGTH} characters`),
+      });
     });
   });
 
@@ -103,11 +102,8 @@ describe('OrgNameSchema', () => {
 
   it('reports allowed-characters error message', () => {
     const result = OrgNameSchema.safeParse('Acme@Corp');
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues[0].message).toContain(
-        'letters, numbers, spaces, hyphens, and periods',
-      );
-    }
+    expect(result).toMatchZodValidationError({
+      message: expect.stringContaining('letters, numbers, spaces, hyphens, and periods'),
+    });
   });
 });

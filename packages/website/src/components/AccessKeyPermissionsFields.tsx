@@ -23,7 +23,7 @@ import {
 import { usePermissions } from '../lib/use-permissions.js';
 import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
 import { Checkbox } from './Checkbox';
-import { Tooltip } from './Tooltip';
+import { CheckboxRow } from './CheckboxRow.js';
 
 type AccessKeyPermissionsFieldsProps = {
   value: AccessKeyPermission[];
@@ -116,7 +116,7 @@ export function AccessKeyPermissionsFields({
                 />
                 <div className="flex flex-col gap-0.5">
                   <span className="text-xs font-medium text-zinc-900">{option.label}</span>
-                  <span className="text-[11px] text-zinc-500">{option.description}</span>
+                  <span className="text-meta text-zinc-500">{option.description}</span>
                 </div>
               </label>
 
@@ -137,7 +137,7 @@ export function AccessKeyPermissionsFields({
                         />
                         <div className="flex flex-col gap-0.5">
                           <span className="text-xs font-medium text-zinc-800">{meta.label}</span>
-                          <span className="text-[11px] text-zinc-500">{meta.description}</span>
+                          <span className="text-meta text-zinc-500">{meta.description}</span>
                         </div>
                       </label>
                     );
@@ -172,7 +172,7 @@ function Section({
 }) {
   return (
     <div className="flex flex-col" data-testid={testId}>
-      <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+      <p className="mb-1 px-3 text-meta font-semibold uppercase tracking-wider text-zinc-400">
         {title}
       </p>
       {children}
@@ -200,7 +200,7 @@ function BucketManagementFields({
   return (
     <>
       {/* List all buckets — always granted, not configurable. */}
-      <PermissionRow
+      <CheckboxRow
         testId="permission-list-buckets"
         label="List all buckets"
         description="List all buckets in the account"
@@ -213,7 +213,7 @@ function BucketManagementFields({
       {BUCKET_INFO_PERMISSIONS.filter(mayGrant).map((permission: BucketInfoPermission) => {
         const meta = BUCKET_INFO_PERMISSION_LABELS[permission];
         return (
-          <PermissionRow
+          <CheckboxRow
             key={permission}
             testId={`permission-${permission}`}
             label={meta.label}
@@ -227,7 +227,7 @@ function BucketManagementFields({
       {BUCKET_PERMISSIONS.filter(mayGrant).map((permission: BucketPermission) => {
         const meta = BUCKET_PERMISSION_LABELS[permission];
         return (
-          <PermissionRow
+          <CheckboxRow
             key={permission}
             testId={`permission-${permission}`}
             label={meta.label}
@@ -240,48 +240,5 @@ function BucketManagementFields({
         );
       })}
     </>
-  );
-}
-
-type PermissionRowProps = {
-  testId: string;
-  label: string;
-  description: string;
-  checked: boolean;
-  disabled?: boolean;
-  tooltip?: string;
-  onChange?: () => void;
-};
-
-function PermissionRow({
-  testId,
-  label,
-  description,
-  checked,
-  disabled = false,
-  tooltip,
-  onChange,
-}: PermissionRowProps) {
-  const row = (
-    <label
-      data-testid={testId}
-      className={
-        'flex items-center gap-3 rounded-lg px-3 py-2 transition-colors ' +
-        (disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-zinc-50')
-      }
-    >
-      <Checkbox aria-label={label} checked={checked} disabled={disabled} onChange={onChange} />
-      <div className="flex flex-col gap-0.5">
-        <span className="text-xs font-medium text-zinc-900">{label}</span>
-        <span className="text-[11px] text-zinc-500">{description}</span>
-      </div>
-    </label>
-  );
-
-  if (!tooltip) return row;
-  return (
-    <Tooltip content={tooltip} side="top">
-      {row}
-    </Tooltip>
   );
 }

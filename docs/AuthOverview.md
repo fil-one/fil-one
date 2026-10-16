@@ -286,7 +286,7 @@ These two levels are about entitlement, not about who the caller is. Role-based 
 
 ### Subscription state machine
 
-States are held on the org's billing record (`BillingTable`, key `ORG#${orgId} / SUBSCRIPTION`) and updated by the Stripe webhook ([`stripe-webhook.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/stripe-webhook.ts)). The middleware also performs _lazy_ transitions on read.
+States are held on the org's billing record (`BillingTable`, key `ORG#${orgId} / SUBSCRIPTION`) and updated by the Stripe event worker ([`stripe-event-worker.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/jobs/stripe-event-worker.ts)), which processes the events the Stripe webhook enqueues. The middleware also performs _lazy_ transitions on read.
 
 The subscription belongs to the organization, so every member of a paid org is covered by one subscription and the seat that pays is not a person. `CUSTOMER#${userId}` is the retired shape: nothing reads or writes those rows. What still recognizes them is the trial claim, which refuses to mint a trial while a pre-re-key row stands, and the migration scripts in [`bin/`](https://github.com/filecoin-project/fil-one/blob/main/bin) that move and then delete them. See [`docs/BillingRekeyRunbook.md`](https://github.com/filecoin-project/fil-one/blob/main/docs/BillingRekeyRunbook.md).
 
@@ -325,7 +325,7 @@ The org and member routes stay off this guard deliberately. Managing who is in t
 
 ### Stripe webhook
 
-[`stripe-webhook.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/stripe-webhook.ts) has no auth middleware. It verifies the signature with `stripe.webhooks.constructEvent`, claims the event ID via a conditional DDB write for idempotency, then updates `BillingTable` based on the Stripe event. Webhook secret is in SSM.
+[`stripe-webhook.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/handlers/stripe-webhook.ts) has no auth middleware. It verifies the signature with `stripe.webhooks.constructEvent`, skips an event ID it has already received (a `WEBHOOK#<eventId>` record in `BillingTable`), enqueues the rest on the `StripeEventQueue` FIFO queue, records the event ID, and returns 200. The `StripeEventWorker` Lambda ([`stripe-event-worker.ts`](https://github.com/filecoin-project/fil-one/blob/main/packages/backend/src/jobs/stripe-event-worker.ts)) updates `BillingTable` based on the event. Webhook secret is in SSM.
 
 ## Frontend
 

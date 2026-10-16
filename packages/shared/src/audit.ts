@@ -37,6 +37,7 @@ import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
 export const AUDIT_EVENT_TYPES = [
   'org.created',
   'org.renamed',
+  'org.logo_updated',
   'member.invited',
   'invite.revoked',
   'invite.accepted',
@@ -47,6 +48,9 @@ export const AUDIT_EVENT_TYPES = [
   'key.deleted',
   'audit.exported',
   'key.rotated',
+  'bucket_policy.created',
+  'bucket_policy.updated',
+  'bucket_policy.deleted',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -78,6 +82,9 @@ export const TWO_PHASE_AUDIT_EVENT_TYPES = [
   'member.removed',
   'ownership.transferred',
   'key.rotated',
+  'bucket_policy.created',
+  'bucket_policy.updated',
+  'bucket_policy.deleted',
 ] as const;
 export type TwoPhaseAuditEventType = (typeof TWO_PHASE_AUDIT_EVENT_TYPES)[number];
 
@@ -142,7 +149,8 @@ export type AuditSubject =
   | `org:${string}`
   | `user:${string}`
   | `invite:${string}`
-  | `key:${string}`;
+  | `key:${string}`
+  | `bucket:${string}`;
 
 /** Which credential a key event is about: an S3 access key or a RAG API key. */
 export type AuditKeyKind = 's3' | 'rag';
@@ -191,6 +199,24 @@ export type RevocationTrigger =
   | 'member_removed'
   | 'stale_role_at_mint';
 
+/** What asked for a bucket policy write. */
+export type BucketPolicyChangeTrigger = 'policy_edited' | 'role_changed' | 'bucket_created';
+
+/**
+ * Shared by the three `bucket_policy.*` events. A type alias rather than an
+ * interface, so it can be read with any string key (`details[name]`), which
+ * `AuditDetailRecord` requires of every payload.
+ */
+export type BucketPolicyEventDetails = {
+  region: string;
+  bucketName: string;
+  trigger: BucketPolicyChangeTrigger;
+  /** How many statements the written document carries. Absent on a delete. */
+  statements?: number;
+  /** How many distinct members the document names. Absent on a delete or a wildcard-only policy. */
+  principals?: number;
+};
+
 /**
  * The payload each event type carries, keyed by type.
  *
@@ -205,7 +231,18 @@ export type RevocationTrigger =
  */
 export interface AuditEventDetails {
   'org.created': { orgName: string; source?: OrgMembershipSource };
-  'org.renamed': { name: string; previousName?: string };
+  /**
+   * The logo fields are optional and only present when the same `PATCH /org`
+   * call also changed the logo — a rename-only save carries neither. A
+   * logo-only save (the name unchanged) is `org.logo_updated` instead.
+   */
+  'org.renamed': {
+    name: string;
+    previousName?: string;
+    logoUrl?: string;
+    previousLogoUrl?: string;
+  };
+  'org.logo_updated': { logoUrl: string; previousLogoUrl?: string };
   'member.invited': {
     inviteId: string;
     email: string;
@@ -273,6 +310,11 @@ export interface AuditEventDetails {
      */
     recovered?: boolean;
     /**
+     * The key is bound to its creator's principal and carries no authority of
+     * its own; bucket policies decide. Absent on a service key.
+     */
+    isPrincipalKey?: boolean;
+    /**
      * The abandoned mint's credential could not be taken back, so it is live at
      * the vendor with no local row — this event is its only trace.
      */
@@ -309,9 +351,22 @@ export interface AuditEventDetails {
     keyIdSuffix?: string;
     /** The key being replaced, by the same characters. Set on the intent. */
     replacedKeyIdSuffix: string;
+    /** As on `key.created`: the key, and so its replacement, is bound to a principal. */
+    isPrincipalKey?: boolean;
     /** As on `key.created`: the abandoned replacement could not be taken back. */
     cleanupFailed?: boolean;
   };
+  /**
+   * A bucket's policy written, replaced, or removed at the storage system. One
+   * event per write rather than one per member named: an edit touching twenty
+   * members is one act. Two-phase because the document lives at the vendor and
+   * nothing local records it. `trigger` says what asked for the write: an
+   * admin editing the policy tab, a role change rewriting the roster
+   * statements, or the create request that carried the first document.
+   */
+  'bucket_policy.created': BucketPolicyEventDetails;
+  'bucket_policy.updated': BucketPolicyEventDetails;
+  'bucket_policy.deleted': BucketPolicyEventDetails;
   /**
    * The one event written on a read path, and the highest-signal action the log
    * records: it is the one that takes an org's security history out of the
@@ -438,14 +493,19 @@ export type AuditEvent = { [T in AuditEventType]: AuditEventRecord<T> }[AuditEve
  */
 export type VendorBackedKeyEvent = Extract<AuditEvent, { details: { keyKind: 's3' } }>;
 
+/** A bucket-policy event: the document lives at the vendor, like an S3 key. */
+export type BucketPolicyEvent = Extract<AuditEvent, { type: `bucket_policy.${string}` }>;
+
 /**
  * An event that may ride a local transaction — what `commitAudited` accepts.
  *
- * Everything except a vendor-backed key event with no phase: that one names a
- * credential minted outside the transaction, so a single row recording it is a
- * half with nothing to pair it to.
+ * Excludes every event that records a write made outside the transaction and
+ * has no phase: a single row for it would be a half with nothing to pair it to.
  */
-export type CommittableAuditEvent = Exclude<AuditEvent, VendorBackedKeyEvent & AuditSinglePhase>;
+export type CommittableAuditEvent = Exclude<
+  AuditEvent,
+  (VendorBackedKeyEvent | BucketPolicyEvent) & AuditSinglePhase
+>;
 
 /**
  * A phased event — what `appendAuditEvent` accepts.
@@ -491,6 +551,7 @@ export type StandaloneAuditEvent =
 export const AUDIT_EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   'org.created': 'Organization created',
   'org.renamed': 'Organization renamed',
+  'org.logo_updated': 'Organization logo updated',
   'member.invited': 'Member invited',
   'invite.revoked': 'Invitation revoked',
   'invite.accepted': 'Invitation accepted',
@@ -501,6 +562,9 @@ export const AUDIT_EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   'key.deleted': 'Key deleted',
   'audit.exported': 'Audit log exported',
   'key.rotated': 'Key rotated',
+  'bucket_policy.created': 'Bucket policy created',
+  'bucket_policy.updated': 'Bucket policy updated',
+  'bucket_policy.deleted': 'Bucket policy deleted',
 };
 
 /**

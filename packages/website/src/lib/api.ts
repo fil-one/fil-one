@@ -130,8 +130,8 @@ export function errorStatusOf(error: unknown): number | undefined {
  * Those credentials are gone whatever the role now says, so a refusal that
  * mentions only the role is telling the admin half of what happened.
  */
-export function revokedKeysOf(error: unknown): AccessKeySummary[] {
-  const keys = (error as { revokedKeys?: unknown } | null | undefined)?.revokedKeys;
+export function keysRevokedOf(error: unknown): AccessKeySummary[] {
+  const keys = (error as { keysRevoked?: unknown } | null | undefined)?.keysRevoked;
   return Array.isArray(keys) ? (keys as AccessKeySummary[]) : [];
 }
 
@@ -211,11 +211,26 @@ export interface ApiRequestBehavior {
    */
   omitOrgHeader?: boolean;
   /**
+   * Name this org rather than the tab's active one. For a write that belongs to
+   * the org it started in: a logo upload that finishes after the user has
+   * switched away still saves to the org it was picked for, rather than
+   * landing on whichever org the tab shows by then.
+   */
+  orgId?: string;
+  /**
    * Do not navigate to `/verify-email` on `EMAIL_NOT_VERIFIED`. The caller
    * renders that state itself, with the invitation still named and the same CTA
    * the redirect would have landed on.
    */
   rendersUnverifiedEmail?: boolean;
+  /**
+   * Read straight past the org-switch latch instead of waiting it out.
+   *
+   * Only for `_app.tsx`'s `beforeLoad`: `switchToOrg`'s navigation does not
+   * settle until that `beforeLoad` does, so holding its `getMe()` on the latch
+   * would deadlock. Every other caller waits.
+   */
+  skipSwitchWait?: boolean;
 }
 
 /**
@@ -301,31 +316,40 @@ export interface SentOrg {
  * Every Fil.one API call, up to the point where the body is read.
  *
  * Cookies, the CSRF token, the org header, and the whole error ladder live here
- * so a caller that wants something other than JSON — the audit CSV — gets the
- * same 401 step-up, 403, and 410 handling rather than a second copy of it.
- * {@link apiRequest} and {@link apiDownload} are the two ways to read what it
- * returns.
+ * so a caller that wants something other than a JSON body, such as the audit
+ * CSV or a bucket policy's `ETag` header, gets the same 401 step-up, 403, and
+ * 410 handling rather than a second copy of it.
  */
 // eslint-disable-next-line complexity/complexity
-async function sendApiRequest(
+export async function sendApiRequest(
   path: string,
   options: RequestInit = {},
   behavior: ApiRequestBehavior = {},
   sentOrg?: SentOrg,
 ): Promise<Response> {
+  const method = options.method?.toUpperCase() ?? 'GET';
+  const isWrite = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
+
   // The tab is on its way to another org. Held rather than rejected, for the
   // reason `getMe` returns instead of throwing on a mismatch: the page is
   // disappearing, and an error rendered over it would be the last thing the user
   // sees of the org they just left. A switch that never navigates rolls back
   // instead, and the request goes ahead below against the restored stash.
-  await waitWhileSwitching();
+  const outcome = behavior.skipSwitchWait ? null : await waitWhileSwitching();
+  // A write held through a switch that landed was issued from the page the user
+  // left, about that page's org, and the stash now names the other one: sent,
+  // a rename or a delete clicked in org A would run in org B. It never settles
+  // instead, so nothing downstream of it runs either — no error toast over the
+  // new org's page, and no next step of a flow that awaited it. A read goes
+  // ahead: it names nothing from the old page, and the new page's own queries
+  // can start inside the same window.
+  if (outcome === 'committed' && isWrite) return new Promise<Response>(() => {});
 
-  const method = options.method?.toUpperCase() ?? 'GET';
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
-  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+  if (isWrite) {
     const token = getCsrfToken();
     if (token) headers.set('X-CSRF-Token', token);
   }
@@ -334,7 +358,7 @@ async function sendApiRequest(
   // who has switched — so the header goes on here, in the one funnel, rather
   // than at each call site. The exception is a call about an org the caller is
   // not in yet, which asks not to be asked.
-  const activeOrgId = behavior.omitOrgHeader ? null : getActiveOrgId();
+  const activeOrgId = behavior.omitOrgHeader ? null : (behavior.orgId ?? getActiveOrgId());
   if (activeOrgId) headers.set(ORG_ID_HEADER, activeOrgId);
   if (sentOrg) sentOrg.orgId = activeOrgId;
 
@@ -397,11 +421,11 @@ async function sendApiRequest(
       message?: string;
       code?: ApiErrorCode;
       resendAvailableAt?: string;
-      revokedKeys?: AccessKeySummary[];
+      keysRevoked?: AccessKeySummary[];
     };
     // Carry the backend's error code through so callers can render specific copy
     // (e.g. BUCKET_NOT_EMPTY), or honour a server-set cooldown (the deletion 429
-    // carries resendAvailableAt). `revokedKeys` rides along for the same reason:
+    // carries resendAvailableAt). `keysRevoked` rides along for the same reason:
     // a role change that fails after revoking keys leaves those credentials
     // gone, and a refusal that does not say so is a worse answer than none.
     throw Object.assign(
@@ -410,7 +434,7 @@ async function sendApiRequest(
         status: response.status,
         ...(error.code && { code: error.code }),
         ...(error.resendAvailableAt && { resendAvailableAt: error.resendAvailableAt }),
-        ...(error.revokedKeys?.length && { revokedKeys: error.revokedKeys }),
+        ...(error.keysRevoked?.length && { keysRevoked: error.keysRevoked }),
       },
     );
   }
@@ -456,8 +480,14 @@ export async function apiDownload(path: string): Promise<Blob> {
 
 import type {
   ConfirmAccountDeletionResponse,
+  CreateOrgRequest,
+  CreateOrgResponse,
   DeleteAccountRequest,
   MeResponse,
+  PresignAvatarRequest,
+  PresignAvatarResponse,
+  PresignOrgLogoRequest,
+  PresignOrgLogoResponse,
   RegenerateRecoveryCodeResponse,
   RequestAccountDeletionResponse,
   UpdateOrgRequest,
@@ -491,6 +521,8 @@ export async function getMe(options?: {
   forceRefresh?: boolean;
   include?: 'mfa';
   skipOrgReconcile?: boolean;
+  /** See `ApiRequestBehavior.skipSwitchWait`. */
+  skipSwitchWait?: boolean;
 }): Promise<MeResponse> {
   const params = new URLSearchParams();
   if (options?.forceRefresh) params.set('forceRefresh', '1');
@@ -501,7 +533,12 @@ export async function getMe(options?: {
   const sentOrg: SentOrg = { orgId: null };
   let me: MeResponse;
   try {
-    me = await apiRequest<MeResponse>(`/me${qs ? `?${qs}` : ''}`, undefined, {}, sentOrg);
+    me = await apiRequest<MeResponse>(
+      `/me${qs ? `?${qs}` : ''}`,
+      undefined,
+      { skipSwitchWait: options?.skipSwitchWait },
+      sentOrg,
+    );
   } catch (err) {
     // The status decides: only a refusal the header can be blamed for drops the
     // stash. A network error carries none at all.
@@ -520,13 +557,56 @@ export function updateProfile(data: UpdateProfileRequest): Promise<UpdateProfile
 }
 
 /**
+ * Ask for a place to put a personal avatar. The upload happens against the
+ * URL this returns, and `pictureUrl` from the result is what gets passed to
+ * {@link updateProfile}.
+ */
+export function presignAvatarUpload(data: PresignAvatarRequest): Promise<PresignAvatarResponse> {
+  return apiRequest<PresignAvatarResponse>('/me/avatar-upload-url', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
  * Rename the organization. Its own endpoint because it is its own permission —
  * `org.rename`, which Member and ReadOnly do not hold — while the profile call
  * above changes only the caller's own account.
+ *
+ * `orgId` pins the write to that org rather than the tab's active one; see
+ * `ApiRequestBehavior.orgId`.
  */
-export function updateOrg(data: UpdateOrgRequest): Promise<UpdateOrgResponse> {
-  return apiRequest<UpdateOrgResponse>('/org', {
-    method: 'PATCH',
+export function updateOrg(data: UpdateOrgRequest, orgId?: string): Promise<UpdateOrgResponse> {
+  return apiRequest<UpdateOrgResponse>(
+    '/org',
+    {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    },
+    orgId ? { orgId } : {},
+  );
+}
+
+/**
+ * Create an additional organization for the signed-in account. Distinct from
+ * signup's org, and from `updateOrg` above: this account has no role in the
+ * org being created yet, so there is nothing for `authorize()` to check.
+ */
+export function createOrg(data: CreateOrgRequest): Promise<CreateOrgResponse> {
+  return apiRequest<CreateOrgResponse>('/org', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Ask for a place to put an org logo before the org exists to attach it to —
+ * the upload happens against the URL this returns, and `logoUrl` from the
+ * result is what gets passed to {@link createOrg}.
+ */
+export function presignOrgLogoUpload(data: PresignOrgLogoRequest): Promise<PresignOrgLogoResponse> {
+  return apiRequest<PresignOrgLogoResponse>('/org/logo-upload-url', {
+    method: 'POST',
     body: JSON.stringify(data),
   });
 }
@@ -641,13 +721,18 @@ export async function regenerateRecoveryCode(
 
 // ── Usage API ────────────────────────────────────────────────────────────
 
-import type { UsageResponse, RecentActivityResponse, UsageTrendsResponse } from '@filone/shared';
+import type {
+  UsageResponse,
+  RecentActivityResponse,
+  UsageTrendsPeriod,
+  UsageTrendsResponse,
+} from '@filone/shared';
 
 export function getUsage(): Promise<UsageResponse> {
   return apiRequest<UsageResponse>('/usage');
 }
 
-export function getUsageTrends(period: '7d' | '30d'): Promise<UsageTrendsResponse> {
+export function getUsageTrends(period: UsageTrendsPeriod): Promise<UsageTrendsResponse> {
   return apiRequest<UsageTrendsResponse>(`/usage/trends?period=${period}`);
 }
 
@@ -696,9 +781,19 @@ export function getInvoices(): Promise<ListInvoicesResponse> {
 
 // ── Access Keys API ──────────────────────────────────────────────────────────
 
-import type { CreateAccessKeyRequest, CreateAccessKeyResponse } from '@filone/shared';
+import type {
+  CreateAccessKeyRequest,
+  CreateAccessKeyResponse,
+  CreatePrincipalAccessKeyRequest,
+} from '@filone/shared';
 
-export function createAccessKey(body: CreateAccessKeyRequest): Promise<CreateAccessKeyResponse> {
+/**
+ * Mint an S3 access key. The body is the principal-bound shape for a personal
+ * key on an `iam` region, and the service-key shape otherwise.
+ */
+export function createAccessKey(
+  body: CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest,
+): Promise<CreateAccessKeyResponse> {
   return apiRequest<CreateAccessKeyResponse>('/access-keys', {
     method: 'POST',
     body: JSON.stringify(body),

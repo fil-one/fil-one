@@ -1,6 +1,10 @@
 /// <reference types="node" />
 
+import { existsSync } from 'node:fs';
 import { defineConfig, devices } from '@playwright/test';
+
+// Credentials for the bucket policy suite, written by bin/e2e-register-policy-users.ts.
+if (existsSync('.env.e2e.local')) process.loadEnvFile('.env.e2e.local');
 
 const isCI = !!process.env.CI;
 const baseURL = process.env.BASE_URL;
@@ -40,21 +44,68 @@ export default defineConfig({
     {
       name: 'full-chromium',
       testDir: './tests/e2e',
+      testIgnore: /(multi-org|policies)\//,
       use: { ...devices['Desktop Chrome'] },
       dependencies: ['seed-buckets'],
     },
     {
       name: 'full-firefox',
       testDir: './tests/e2e',
+      testIgnore: /(multi-org|policies)\//,
       use: { ...devices['Desktop Firefox'] },
       dependencies: ['seed-buckets'],
     },
     {
       name: 'full-webkit',
       testDir: './tests/e2e',
+      testIgnore: /(multi-org|policies)\//,
       use: { ...devices['Desktop Safari'] },
       dependencies: ['seed-buckets'],
     },
+    // The multi-org suite, on its own accounts. Serial: the specs share them.
+    {
+      name: 'multi-org-setup',
+      testDir: './tests/e2e/multi-org',
+      testMatch: /login\.setup\.ts/,
+    },
+    {
+      name: 'multi-org',
+      testDir: './tests/e2e/multi-org',
+      fullyParallel: false,
+      // Lambdas start cold.
+      timeout: 90_000,
+      expect: { timeout: 20_000 },
+      use: {
+        ...devices['Desktop Chrome'],
+        trace: 'retain-on-failure',
+        screenshot: 'only-on-failure',
+      },
+      dependencies: ['multi-org-setup'],
+    },
+    // Bucket policies, against a stage whose Forge region serves the `iam`
+    // access model: us-east-9 from smelt locally, eu-central-3 on a remote stage
+    // (tests/e2e/policies/README.md). Only offered when the policy users are
+    // registered: the specs read their credentials at load.
+    ...(process.env.E2E_POLICY_OWNER_EMAIL
+      ? [
+          {
+            name: 'policies-setup',
+            testMatch: /policies\/policies\.setup\.ts/,
+            // The seat test activates the billing row the owner's login creates.
+            fullyParallel: false,
+            workers: 1,
+          },
+          {
+            name: 'policies',
+            testDir: './tests/e2e/policies',
+            use: { ...devices['Desktop Chrome'] },
+            // One org and one roster for every spec, and some specs change the roster.
+            fullyParallel: false,
+            workers: 1,
+            dependencies: ['policies-setup'],
+          },
+        ]
+      : []),
     // smoke tests executed in production
     {
       name: 'smoke',

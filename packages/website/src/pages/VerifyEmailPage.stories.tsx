@@ -6,11 +6,13 @@ import { VerifyEmailPage } from './VerifyEmailPage';
 const me: MeResponse = {
   orgId: 'org_acme',
   orgName: 'Acme Inc.',
+  nameConfirmed: true,
   emailVerified: false,
   email: 'jane@acme.com',
   mfaEnrollments: [],
   ragAccess: false,
   orgsBeta: false,
+  billingActive: true,
 };
 
 const meta: Meta<typeof VerifyEmailPage> = {

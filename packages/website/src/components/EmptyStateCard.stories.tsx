@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
-import { DatabaseIcon, KeyIcon } from '@phosphor-icons/react/dist/ssr';
+import { ClockCounterClockwiseIcon, DatabaseIcon, KeyIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Button } from './Button';
+import { Card } from './Card';
 import { EmptyStateCard } from './EmptyStateCard';
 
 const meta: Meta<typeof EmptyStateCard> = {
@@ -30,5 +31,20 @@ export const WithAction: Story = {
     >
       <Button variant="primary">Create API key</Button>
     </EmptyStateCard>
+  ),
+};
+
+export const Unbordered: Story = {
+  name: 'Unbordered (nested in a Card)',
+  render: () => (
+    <Card>
+      <EmptyStateCard
+        icon={ClockCounterClockwiseIcon}
+        iconColor="grey"
+        title="No activity yet"
+        description="Create a bucket to start storing objects"
+        bordered={false}
+      />
+    </Card>
   ),
 };

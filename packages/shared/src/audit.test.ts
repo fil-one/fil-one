@@ -27,6 +27,7 @@ import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
 const ADR_EVENT_TYPES = [
   'org.created',
   'org.renamed',
+  'org.logo_updated',
   'member.invited',
   'invite.revoked',
   'invite.accepted',
@@ -37,6 +38,9 @@ const ADR_EVENT_TYPES = [
   'key.deleted',
   'audit.exported',
   'key.rotated',
+  'bucket_policy.created',
+  'bucket_policy.updated',
+  'bucket_policy.deleted',
 ];
 
 describe('the event-type registry', () => {
@@ -77,6 +81,9 @@ describe('the event-type registry', () => {
       'member.removed',
       'ownership.transferred',
       'key.rotated',
+      'bucket_policy.created',
+      'bucket_policy.updated',
+      'bucket_policy.deleted',
     ]);
     for (const type of TWO_PHASE_AUDIT_EVENT_TYPES) {
       expect(AUDIT_EVENT_TYPES).toContain(type);

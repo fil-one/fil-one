@@ -11,6 +11,7 @@ import { hasOrgsBetaAccess } from './orgs-beta.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const EMAIL = 'Inviter@Example.com';
+const FOUNDATION_EMAIL = 'any-person@fil.org';
 
 function grant(pk: string) {
   ddbMock
@@ -66,6 +67,17 @@ describe('hasOrgsBetaAccess', () => {
       // immediately tries.
       expect(call.args[0].input.ConsistentRead).toBe(true);
     }
+  });
+
+  it('grants a verified @fil.org email when neither row exists', async () => {
+    // Foundation staff are in the beta by default, as they are for RAG.
+    expect(await hasOrgsBetaAccess({ verifiedEmail: FOUNDATION_EMAIL, orgId: ORG_ID })).toBe(true);
+  });
+
+  it('makes no read for a verified @fil.org email', async () => {
+    await hasOrgsBetaAccess({ verifiedEmail: FOUNDATION_EMAIL, orgId: ORG_ID });
+
+    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(0);
   });
 
   it('makes no read at all for a caller with no verified email and no org grant', async () => {

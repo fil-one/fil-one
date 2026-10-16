@@ -13,7 +13,7 @@ type ChoosePlanDialogProps = {
 
 const PAY_AS_YOU_GO_FEATURES = [
   'Pay monthly',
-  '$4.99/month minimum',
+  '$5.99/month minimum',
   'No egress fees',
   'No API request fees',
   'Data integrity guarantees',
@@ -61,7 +61,7 @@ export function ChoosePlanDialog({
           <div className="flex flex-col rounded-xl border-2 border-brand-200 bg-brand-50 p-5">
             <p className="text-xs uppercase text-zinc-500">Pay as you go</p>
             <div className="mt-2 flex items-baseline gap-1.5">
-              <span className="text-2xl font-bold text-zinc-950">$4.99</span>
+              <span className="text-2xl font-bold text-zinc-950">$5.99</span>
               <span className="text-sm text-zinc-500">TB/month</span>
             </div>
             <p className="mt-2 text-xs leading-[18px] text-zinc-600">
@@ -86,7 +86,7 @@ export function ChoosePlanDialog({
                 {savedCardLast4 ? 'Reactivate' : 'Upgrade now'}
               </Button>
               {savedCardLast4 && (
-                <p className="mt-2 text-center text-[11px] leading-[16px] text-zinc-500">
+                <p className="mt-2 text-center text-meta text-zinc-500">
                   Will use card ending in &bull;&bull;{savedCardLast4}
                   {onUseDifferentCard && (
                     <>

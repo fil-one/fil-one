@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
@@ -45,18 +45,23 @@ const mockGetStorageSamples = vi.fn();
 const mockGetOperationsSamples = vi.fn();
 const mockGetBucketStorageSamples = vi.fn();
 const mockGetTenantInfo = vi.fn();
+const mockDeleteAuroraTenant = vi.fn();
 vi.mock('./aurora-backoffice.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('../aurora/aurora-backoffice.ts')>();
   return {
     ...original,
     updateTenantStatus: (...args: unknown[]) => mockUpdateAuroraTenantStatusApi(...args),
     getTenantStatus: (...args: unknown[]) => mockGetAuroraTenantStatusApi(...args),
-    getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
-    getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
-    getBucketStorageSamples: (...args: unknown[]) => mockGetBucketStorageSamples(...args),
     getTenantInfo: (...args: unknown[]) => mockGetTenantInfo(...args),
+    deleteAuroraTenant: (...args: unknown[]) => mockDeleteAuroraTenant(...args),
   };
 });
+
+vi.mock('./aurora-backoffice-metrics.ts', () => ({
+  getStorageSamples: (...args: unknown[]) => mockGetStorageSamples(...args),
+  getOperationsSamples: (...args: unknown[]) => mockGetOperationsSamples(...args),
+  getBucketStorageSamples: (...args: unknown[]) => mockGetBucketStorageSamples(...args),
+}));
 
 const mockPortalListBuckets = vi.fn();
 const mockPortalGetBucketInfo = vi.fn();
@@ -68,6 +73,10 @@ vi.mock('@filone/aurora-portal-client', () => ({
 
 process.env.FILONE_STAGE = 'test';
 process.env.AURORA_PORTAL_URL = 'https://portal.dev.aur.lu/api';
+
+// The caller's deadline. Never aborted here: these tests check it is forwarded,
+// not what happens when it fires.
+const signal = new AbortController().signal;
 
 import { S3Region } from '@filone/shared';
 import { auroraOrchestrator, _resetSsmCacheForTesting } from './aurora-orchestrator.ts';
@@ -112,10 +121,10 @@ describe('auroraOrchestrator', () => {
     it('translates the legacy {ok, auroraTenantId} shape to {ok, tenantId}', async () => {
       mockEnsureAuroraTenantReady.mockResolvedValue({ ok: true, auroraTenantId: 'aurora-t-1' });
 
-      const result = await auroraOrchestrator.ensureTenantReady('org-1');
+      const result = await auroraOrchestrator.ensureTenantReady('org-1', { signal });
 
       expect(result).toEqual('aurora-t-1');
-      expect(mockEnsureAuroraTenantReady).toHaveBeenCalledWith('org-1');
+      expect(mockEnsureAuroraTenantReady).toHaveBeenCalledWith('org-1', { signal });
     });
 
     it('returns null when the Aurora tenant setup fails', async () => {
@@ -225,7 +234,11 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('deleteTenant', () => {
-    it('disables the tenant — Aurora exposes no tenant DELETE (FIL-919)', async () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it('only disables the tenant while tenant deletion is off', async () => {
       mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
 
       await auroraOrchestrator.deleteTenant('aurora-t-1');
@@ -235,6 +248,48 @@ describe('auroraOrchestrator', () => {
         status: 'DISABLED',
         allowMissing: true,
       });
+      expect(mockDeleteAuroraTenant).not.toHaveBeenCalled();
+    });
+
+    it('only disables the tenant when the flag is set to anything but true', async () => {
+      vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'false');
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.deleteTenant('aurora-t-1');
+
+      expect(mockDeleteAuroraTenant).not.toHaveBeenCalled();
+    });
+
+    it('disables, then deletes the tenant while tenant deletion is on', async () => {
+      vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'true');
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+      mockDeleteAuroraTenant.mockResolvedValue(undefined);
+
+      await auroraOrchestrator.deleteTenant('aurora-t-1');
+
+      expect(mockDeleteAuroraTenant).toHaveBeenCalledWith({ tenantId: 'aurora-t-1' });
+      expect(mockUpdateAuroraTenantStatusApi.mock.invocationCallOrder[0]).toBeLessThan(
+        mockDeleteAuroraTenant.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('retries a refused deletion and throws once the retry budget is exhausted', async () => {
+      vi.useFakeTimers();
+      vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'true');
+      mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+      mockDeleteAuroraTenant.mockRejectedValue(
+        new Error('Aurora tenant deletion failed for tenant aurora-t-1'),
+      );
+
+      const promise = auroraOrchestrator.deleteTenant('aurora-t-1').catch((e: unknown) => e);
+      await vi.runAllTimersAsync();
+
+      expect(await promise).toMatchObject({
+        message: 'Aurora tenant deletion failed for tenant aurora-t-1',
+      });
+      // 1 initial + 3 retries
+      expect(mockDeleteAuroraTenant).toHaveBeenCalledTimes(4);
+      vi.useRealTimers();
     });
 
     // A re-driven teardown disables a tenant a previous pass may have removed.
@@ -493,6 +548,7 @@ describe('auroraOrchestrator', () => {
       });
 
       expect(result).toEqual({
+        type: 'service',
         id: 'k1',
         accessKeyId: 'AK1',
         accessKeySecret: 'secret',
@@ -790,12 +846,13 @@ describe('auroraOrchestrator', () => {
   });
 
   describe('getTenantInfo', () => {
-    it('maps backoffice tenant info, applying defaults for missing fields', async () => {
+    it('maps backoffice tenant info, reading limits from the S3 component', async () => {
       mockGetTenantInfo.mockResolvedValue({
         bucketCount: 2,
-        bucketQuantityLimit: 50,
         keyCount: 3,
-        accessKeyQuantityLimit: 200,
+        components: {
+          s3: { properties: { limits: { bucketQuantityLimit: 50, accessKeyQuantityLimit: 200 } } },
+        },
         status: 'ACTIVE',
       });
 
@@ -907,4 +964,180 @@ describe('auroraOrchestrator', () => {
       expect(result).toEqual([]);
     });
   });
+});
+
+describe('auroraOrchestrator signal forwarding', () => {
+  const FROM = '2026-01-01T00:00:00Z';
+  const TO = '2026-01-02T00:00:00Z';
+  const bucketInfo = { data: { name: 'b', createdAt: '2026-01-01T00:00:00Z' }, error: undefined };
+  const issuedKey = {
+    id: 'k',
+    accessKeyId: 'AK',
+    accessKeySecret: 'secret',
+    createdAt: '2026-01-01T00:00:00Z',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // Each case names the Aurora-facing mocks the method must reach; the test
+  // checks every one of them received the caller's signal in its options.
+  const cases: Array<{
+    name: string;
+    run: () => Promise<unknown>;
+    mocks: Array<{ mock: { calls: unknown[][] } }>;
+  }> = [
+    {
+      name: 'createBucket',
+      run: () => {
+        mockCreateAuroraBucket.mockResolvedValue(undefined);
+        return auroraOrchestrator.createBucket('t', { bucketName: 'b' }, { signal });
+      },
+      mocks: [mockCreateAuroraBucket],
+    },
+    {
+      name: 'deleteBucket',
+      run: () => {
+        mockDeleteAuroraBucket.mockResolvedValue(undefined);
+        return auroraOrchestrator.deleteBucket('t', 'b', { signal });
+      },
+      mocks: [mockDeleteAuroraBucket],
+    },
+    {
+      name: 'listBuckets',
+      run: () => {
+        mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
+        return auroraOrchestrator.listBuckets('t', undefined, { signal });
+      },
+      mocks: [mockPortalListBuckets],
+    },
+    {
+      name: 'getBucket',
+      run: () => {
+        mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
+        return auroraOrchestrator.getBucket('t', 'b', undefined, { signal });
+      },
+      mocks: [mockPortalGetBucketInfo],
+    },
+    {
+      name: 'issueAccessKey',
+      run: () => {
+        mockCreateAuroraAccessKey.mockResolvedValue(issuedKey);
+        return auroraOrchestrator.issueAccessKey(
+          't',
+          { keyName: 'k', permissions: ['read'] },
+          { signal },
+        );
+      },
+      mocks: [mockCreateAuroraAccessKey],
+    },
+    {
+      name: 'findAccessKeyByName',
+      run: () => {
+        mockFindAuroraAccessKeyByName.mockResolvedValue(undefined);
+        return auroraOrchestrator.findAccessKeyByName('t', 'k', undefined, { signal });
+      },
+      mocks: [mockFindAuroraAccessKeyByName],
+    },
+    {
+      name: 'updateTenantStatus',
+      run: () => {
+        mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+        return auroraOrchestrator.updateTenantStatus('t', 'active', { signal });
+      },
+      mocks: [mockUpdateAuroraTenantStatusApi],
+    },
+    {
+      name: 'deleteTenant',
+      run: () => {
+        mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+        return auroraOrchestrator.deleteTenant('t', { signal });
+      },
+      mocks: [mockUpdateAuroraTenantStatusApi],
+    },
+    {
+      name: 'deleteTenant with tenant deletion on',
+      run: () => {
+        vi.stubEnv('AURORA_TENANT_DELETE_ENABLED', 'true');
+        mockUpdateAuroraTenantStatusApi.mockResolvedValue(undefined);
+        mockDeleteAuroraTenant.mockResolvedValue(undefined);
+        return auroraOrchestrator.deleteTenant('t', { signal });
+      },
+      mocks: [mockUpdateAuroraTenantStatusApi, mockDeleteAuroraTenant],
+    },
+    {
+      name: 'getTenantStatus',
+      run: () => {
+        mockGetAuroraTenantStatusApi.mockResolvedValue({ kind: 'ok', status: 'ACTIVE' });
+        return auroraOrchestrator.getTenantStatus('t', { signal });
+      },
+      mocks: [mockGetAuroraTenantStatusApi],
+    },
+    {
+      name: 'getTenantUsageMetrics',
+      run: () => {
+        mockGetStorageSamples.mockResolvedValue([]);
+        mockGetOperationsSamples.mockResolvedValue([]);
+        return auroraOrchestrator.getTenantUsageMetrics('t', { from: FROM, to: TO }, { signal });
+      },
+      mocks: [mockGetStorageSamples, mockGetOperationsSamples],
+    },
+    {
+      name: 'getTenantInfo',
+      run: () => {
+        mockGetTenantInfo.mockResolvedValue({});
+        return auroraOrchestrator.getTenantInfo('t', { signal });
+      },
+      mocks: [mockGetTenantInfo],
+    },
+    {
+      name: 'getBucketUsageMetrics',
+      run: () => {
+        mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
+        mockGetBucketStorageSamples.mockResolvedValue([]);
+        return auroraOrchestrator.getBucketUsageMetrics(
+          't',
+          'b',
+          { from: FROM, to: TO },
+          { signal },
+        );
+      },
+      mocks: [mockPortalGetBucketInfo, mockGetBucketStorageSamples],
+    },
+  ];
+
+  for (const { name, run, mocks } of cases) {
+    it(`${name} forwards the caller's signal to every Aurora call`, async () => {
+      await run();
+
+      const firstArgs = mocks.map((m) => m.mock.calls[0]?.[0]);
+      expect(firstArgs).toEqual(mocks.map(() => expect.objectContaining({ signal })));
+    });
+  }
+
+  // Both methods build their own portal client, so the signal has to reach the
+  // API-key lookup that happens before the portal request.
+  const portalClientCases: Record<string, () => Promise<unknown>> = {
+    listBuckets: () => {
+      mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
+      return auroraOrchestrator.listBuckets('t', undefined, { signal });
+    },
+    getBucket: () => {
+      mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
+      return auroraOrchestrator.getBucket('t', 'b', undefined, { signal });
+    },
+  };
+
+  for (const [name, run] of Object.entries(portalClientCases)) {
+    it(`${name} forwards the caller's signal to the portal client lookup`, async () => {
+      await run();
+
+      expect(mockCreatePortalClient).toHaveBeenCalledWith('t', { signal });
+    });
+  }
 });

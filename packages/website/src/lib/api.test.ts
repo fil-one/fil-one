@@ -5,6 +5,15 @@ import { apiRequest, ForbiddenRoleError, getMe, NotAMemberError } from './api.js
 import { setActiveOrgId } from './active-org.js';
 import { acceptInvitation } from './members-api.js';
 
+// `switchToOrg` imports the router dynamically to navigate;
+// the "switch in flight" cases below only care about the stash/latch side of
+// it, so the navigation itself is a controllable stand-in rather than the real
+// router.
+const routerNavigate = vi.fn();
+vi.mock('../router.js', () => ({
+  router: { navigate: (...args: unknown[]) => routerNavigate(...args) },
+}));
+
 /**
  * How `apiRequest` renders a denial. The role codes get their own error types
  * because a component may want to tell the two states apart; every other 403
@@ -284,13 +293,16 @@ describe('apiRequest — a switch in flight', () => {
 
   beforeEach(() => {
     sessionStorage.clear();
-    vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn());
     vi.stubGlobal('location', { hostname: 'localhost', assign: vi.fn(), reload: vi.fn() });
+    routerNavigate.mockReset();
+    // Pending forever by default: `switchToOrg`'s own latch only comes down
+    // when the navigation settles, and these cases are about the window while
+    // it has not.
+    routerNavigate.mockImplementation(() => new Promise(() => {}));
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -309,11 +321,12 @@ describe('apiRequest — a switch in flight', () => {
   });
 
   it('sends a held request in the org still on screen once the switch rolls back', async () => {
-    // The switch was cancelled — a `beforeunload` guard, and a user who
-    // answered "stay on this page". A request handed out inside that window has
+    // The navigation was blocked or failed — a `beforeLoad` redirect thrown
+    // somewhere unexpected, say. A request handed out inside that window has
     // no other resolution path: React Query starts no second fetch for a key
     // whose fetch is still in flight, so the panel would spin until a reload.
     vi.spyOn(console, 'warn').mockImplementation(() => {});
+    routerNavigate.mockRejectedValue(new Error('navigation blocked'));
     const { api, stash } = await freshApi();
     stash.setActiveOrgId(ORG_A);
     vi.mocked(fetch).mockResolvedValue(
@@ -326,13 +339,101 @@ describe('apiRequest — a switch in flight', () => {
     stash.switchToOrg(ORG_B);
     const held = api.apiRequest('/buckets');
 
-    await vi.runAllTimersAsync();
-
     await expect(held).resolves.toStrictEqual({ buckets: [] });
     // The rollback put ORG_A back before the request read the stash, so the
     // call names the org the page is still showing.
     const sent = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
     expect(sent.get(ORG_ID_HEADER)).toBe(ORG_A);
+  });
+
+  it('drops a write held from the page the user left once the switch lands', async () => {
+    // A rename clicked in org A while the switch to org B is still navigating.
+    // Released into the new stash, it would rename org B.
+    let land!: () => void;
+    routerNavigate.mockImplementation(() => new Promise<void>((resolve) => (land = resolve)));
+    const { api, stash } = await freshApi();
+    stash.setActiveOrgId(ORG_A);
+
+    stash.switchToOrg(ORG_B);
+    const held = api.apiRequest('/org', { method: 'PATCH', body: '{"name":"Renamed"}' });
+    await vi.waitFor(() => expect(routerNavigate).toHaveBeenCalled());
+    land();
+    await vi.waitFor(() => expect(stash.isSwitchingOrg()).toBe(false));
+
+    const settled = await Promise.race([
+      held.then(
+        () => 'settled',
+        () => 'settled',
+      ),
+      new Promise((resolve) => setTimeout(() => resolve('pending'), 20)),
+    ]);
+    expect(settled).toBe('pending');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('sends a read held through the switch under the org it landed in', async () => {
+    // The new page's own queries can start before the latch comes down, and
+    // they are about the org the user chose.
+    let land!: () => void;
+    routerNavigate.mockImplementation(() => new Promise<void>((resolve) => (land = resolve)));
+    const { api, stash } = await freshApi();
+    stash.setActiveOrgId(ORG_A);
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ buckets: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    stash.switchToOrg(ORG_B);
+    const held = api.apiRequest('/buckets');
+    await vi.waitFor(() => expect(routerNavigate).toHaveBeenCalled());
+    land();
+
+    await expect(held).resolves.toStrictEqual({ buckets: [] });
+    const sent = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
+    expect(sent.get(ORG_ID_HEADER)).toBe(ORG_B);
+  });
+
+  it('sends a held write in the org still on screen once the switch rolls back', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    routerNavigate.mockRejectedValue(new Error('navigation blocked'));
+    const { api, stash } = await freshApi();
+    stash.setActiveOrgId(ORG_A);
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    stash.switchToOrg(ORG_B);
+    const held = api.apiRequest('/org', { method: 'PATCH', body: '{"name":"Renamed"}' });
+
+    await expect(held).resolves.toStrictEqual({});
+    const sent = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
+    expect(sent.get(ORG_ID_HEADER)).toBe(ORG_A);
+  });
+
+  it('reads straight past the latch for the one request the navigation itself is waiting on', async () => {
+    // `routerNavigate` here stands for `_app.tsx`'s own `beforeLoad`, which
+    // calls `getMe()` to decide whether the navigation may proceed at all —
+    // the real reason a switch's own navigation never settles until this
+    // request does. Without `skipSwitchWait` this would deadlock: the
+    // navigation waits on this response, and this response waits on the
+    // navigation settling.
+    const { api, stash } = await freshApi();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ orgId: ORG_B, memberships: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    routerNavigate.mockImplementation(() => api.getMe({ skipSwitchWait: true }));
+
+    stash.switchToOrg(ORG_B);
+
+    await vi.waitFor(() => expect(stash.isSwitchingOrg()).toBe(false));
   });
 });
 

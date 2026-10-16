@@ -1,6 +1,14 @@
 {
   "compilerOptions": {
     "types": ["node"],
+    // Every package compiles for one target, so code shared between the
+    // backend and the console is checked against what both can run. The
+    // console must run in the browsers Vite builds for by default
+    // (Chrome 107, Firefox 104, Safari 16), which support ES2022 built-ins
+    // and nothing newer. Vite rewrites newer syntax but adds no polyfills,
+    // so this target is what keeps ES2023+ built-ins such as
+    // Array.prototype.toSorted out of the bundle. Change it together with
+    // Vite's build.target in packages/website.
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",

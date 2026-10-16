@@ -16,6 +16,7 @@ import {
   getAvailableRegions,
   supportsBucketManagement,
   getRegionAccessModel,
+  supportsIamMethods,
   isFoundationEmail,
   isSupportedRegion,
   formatRegion,
@@ -240,8 +241,8 @@ describe('getAvailableRegions', () => {
   it('returns all non-production regions when stage is empty', () => {
     expect(getAvailableRegions('')).toEqual([
       S3Region.EuWest1,
-      S3Region.UsEast1,
       S3Region.EuCentral3,
+      S3Region.UsEast1,
       S3Region.UsEast9,
     ]);
   });
@@ -253,8 +254,8 @@ describe('getAvailableRegions', () => {
   it('includes the Forge regions on non-production stages', () => {
     expect(getAvailableRegions(Stage.Staging)).toEqual([
       S3Region.EuWest1,
-      S3Region.UsEast1,
       S3Region.EuCentral3,
+      S3Region.UsEast1,
       S3Region.UsEast9,
     ]);
     expect(getAvailableRegions('dev-pr-123')).toContain(S3Region.EuCentral3);
@@ -306,17 +307,20 @@ describe('supportsBucketManagement', () => {
 });
 
 describe('getRegionAccessModel', () => {
-  it('answers scoped-keys for every region', () => {
+  it('answers iam for the Forge regions and service-keys for Aurora and FTH', () => {
     const models = Object.fromEntries(
       Object.values(S3Region).map((region) => [region, getRegionAccessModel(region)]),
     );
 
     expect(models).toEqual({
-      [S3Region.EuWest1]: 'scoped-keys',
-      [S3Region.UsEast1]: 'scoped-keys',
-      [S3Region.EuCentral3]: 'scoped-keys',
-      [S3Region.UsEast9]: 'scoped-keys',
+      [S3Region.EuWest1]: 'service-keys',
+      [S3Region.UsEast1]: 'service-keys',
+      [S3Region.EuCentral3]: 'iam',
+      [S3Region.UsEast9]: 'iam',
     });
+    for (const region of Object.values(S3Region)) {
+      expect(supportsIamMethods(region), `${region} supports IAM`).toBe(models[region] === 'iam');
+    }
   });
 });
 

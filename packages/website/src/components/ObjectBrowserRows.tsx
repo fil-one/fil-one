@@ -5,6 +5,7 @@ import {
   DownloadSimpleIcon,
   FileIcon,
   FolderIcon,
+  LinkIcon,
   TrashIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
@@ -17,12 +18,56 @@ import { Table } from './Table/Table';
 import { VersionRowBadge, truncateVersionId } from './VersionHistoryCard';
 import type { VersionGroup } from '../lib/object-grouping.js';
 import { selectionId } from '../lib/object-selection.js';
+import { SHARE_UNAVAILABLE_TOOLTIP } from '../lib/use-can-share-objects.js';
 import { formatDate } from '../lib/time.js';
+
+/**
+ * Columns dropped below `sm`, header and rows alike. With them a phone scrolls
+ * the table sideways and the row actions start off-screen; without them the row
+ * is the name, a line of facts under it, and the actions. Same split as
+ * `BucketsTable`.
+ */
+export const SECONDARY_COLUMN = 'hidden sm:table-cell';
+
+/**
+ * The name cell takes whatever width the other columns leave, and no more, so
+ * a long key truncates instead of pushing the actions out of the row.
+ */
+const NAME_CELL = 'w-full max-w-0';
+
+/**
+ * Below `sm`, the facts the hidden columns carry, under the name: the size and
+ * the date. A delete marker's date is when the object was deleted, so it reads
+ * as one red fact rather than a pill beside a date.
+ *
+ * The line may still wrap on the narrowest phones; each separator travels with
+ * the fact after it, so a wrap never leaves one hanging at a line's end.
+ */
+function MobileFacts({ version }: { version: S3ObjectVersion }) {
+  const date = formatDate(version.lastModified);
+  const facts = version.isDeleteMarker
+    ? [<span className="font-medium text-red-600">Deleted {date}</span>]
+    : [<span>{formatBytes(version.sizeBytes)}</span>, <span>{date}</span>];
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-500 tabular-nums sm:hidden">
+      {facts.map((fact, i) => (
+        <span key={i} className="flex items-center gap-1.5">
+          {i > 0 && <span aria-hidden="true">·</span>}
+          {fact}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 /** Callbacks every object/version row needs, threaded down from the browser. */
 export type RowActions = {
   downloading: string | null;
   onDownload: (key: string, versionId?: string) => void;
+  /** Whether the plan allows share links; when not, Share stays visible but disabled. */
+  canShare: boolean;
+  onShare: (key: string, versionId: string) => void;
   /** Absent for a role without `objects.delete` — the control is not rendered. */
   onRequestDelete?: (key: string, versionId: string) => void;
   onNavigate: (key: string, versionId: string) => void;
@@ -50,7 +95,7 @@ function VersionActions({
   actions: RowActions;
   label: string;
 }) {
-  const { downloading, onDownload, onRequestDelete } = actions;
+  const { downloading, onDownload, canShare, onShare, onRequestDelete } = actions;
   return (
     <div className="flex items-center justify-end gap-1">
       {!version.isDeleteMarker &&
@@ -63,14 +108,30 @@ function VersionActions({
           <IconButton
             icon={DownloadSimpleIcon}
             aria-label={`Download ${label}`}
+            tooltip="Download"
+            tooltipSide="top"
             size="md"
             onClick={() => onDownload(groupKey, version.versionId)}
           />
         ))}
+      {/* A delete marker has no content to link to, same as Download. */}
+      {!version.isDeleteMarker && (
+        <IconButton
+          icon={LinkIcon}
+          aria-label={`Share ${label}`}
+          tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
+          tooltipSide="top"
+          size="md"
+          disabled={!canShare}
+          onClick={() => onShare(groupKey, version.versionId)}
+        />
+      )}
       {onRequestDelete && (
         <IconButton
           icon={TrashIcon}
           aria-label={`Delete ${label}`}
+          tooltip="Delete"
+          tooltipSide="top"
           size="md"
           // Same IconButton as the others, but the hover keeps a danger cue since
           // this deletes directly (twMerge lets it win over the base zinc hover).
@@ -124,23 +185,35 @@ function VersionSubRow({
           label={`Select version ${version.versionId} of ${displayName}`}
         />
       )}
-      <Table.Cell className="py-3 pr-4 pl-10">
-        <div className="flex items-center gap-2 text-zinc-500">
+      <Table.Cell className={`py-3 pr-4 pl-10 ${NAME_CELL}`}>
+        <div className="flex items-center gap-2 text-zinc-500" title={displayName}>
           <FileIcon size={14} className="shrink-0 text-zinc-300" aria-hidden="true" />
-          {displayName}
+          {/* Below `sm` the Version column is hidden, and every older version
+              repeats the object's name, so the id takes the name's place. */}
+          <span className="truncate font-mono text-xs sm:hidden">
+            {truncateVersionId(version.versionId)}
+          </span>
+          <span className="hidden truncate sm:inline">{displayName}</span>
         </div>
+        <MobileFacts version={version} />
       </Table.Cell>
-      <Table.Cell className="font-mono text-xs text-zinc-500" title={version.versionId}>
+      <Table.Cell
+        className={`font-mono text-xs text-zinc-500 ${SECONDARY_COLUMN}`}
+        title={version.versionId}
+      >
         {truncateVersionId(version.versionId)}
       </Table.Cell>
-      <Table.Cell>
+      <Table.Cell className={SECONDARY_COLUMN}>
         <VersionRowBadge version={version} />
       </Table.Cell>
-      <Table.Cell className="text-zinc-500">
+      <Table.Cell className={`text-zinc-500 ${SECONDARY_COLUMN}`}>
         {version.isDeleteMarker ? '\u2014' : formatBytes(version.sizeBytes)}
       </Table.Cell>
-      <Table.Cell className="text-zinc-500">{formatDate(version.lastModified)}</Table.Cell>
-      <Table.Cell onClick={(e) => e.stopPropagation()}>
+      <Table.Cell className={`text-zinc-500 ${SECONDARY_COLUMN}`}>
+        {formatDate(version.lastModified)}
+      </Table.Cell>
+      {/* Narrower padding below `sm`, where every pixel goes to the name. */}
+      <Table.Cell className="px-2 sm:px-4" onClick={(e) => e.stopPropagation()}>
         <VersionActions
           version={version}
           groupKey={groupKey}
@@ -190,9 +263,11 @@ function NameCell({
       ) : (
         <FileIcon size={16} className="shrink-0 text-zinc-400" aria-hidden="true" />
       )}
-      {name}
+      <span className="truncate">{name}</span>
       {hasMultipleVersions && (
-        <span className="ml-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
+        // Below `sm` the expand caret alone says there is history, so the
+        // name keeps the room.
+        <span className="ml-1 hidden shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-meta font-medium text-zinc-500 sm:inline">
           {group.versionCount} versions
         </span>
       )}
@@ -242,7 +317,7 @@ function LatestVersionRow({
           label={`Select ${name}`}
         />
       )}
-      <Table.Cell>
+      <Table.Cell className={NAME_CELL}>
         <NameCell
           name={name}
           group={group}
@@ -250,22 +325,29 @@ function LatestVersionRow({
           isExpanded={isExpanded}
           onToggleExpand={onToggleExpand}
         />
+        <MobileFacts version={group.latest} />
       </Table.Cell>
       {versioningEnabled && (
         <>
-          <Table.Cell className="font-mono text-xs text-zinc-500" title={group.latest.versionId}>
+          <Table.Cell
+            className={`font-mono text-xs text-zinc-500 ${SECONDARY_COLUMN}`}
+            title={group.latest.versionId}
+          >
             {truncateVersionId(group.latest.versionId)}
           </Table.Cell>
-          <Table.Cell>
+          <Table.Cell className={SECONDARY_COLUMN}>
             <VersionRowBadge version={{ ...group.latest, isLatest: true }} />
           </Table.Cell>
         </>
       )}
-      <Table.Cell className="text-zinc-600">
+      <Table.Cell className={`text-zinc-600 ${SECONDARY_COLUMN}`}>
         {group.latest.isDeleteMarker ? '\u2014' : formatBytes(group.latest.sizeBytes)}
       </Table.Cell>
-      <Table.Cell className="text-zinc-600">{formatDate(group.latest.lastModified)}</Table.Cell>
-      <Table.Cell onClick={(e) => e.stopPropagation()}>
+      <Table.Cell className={`text-zinc-600 ${SECONDARY_COLUMN}`}>
+        {formatDate(group.latest.lastModified)}
+      </Table.Cell>
+      {/* Narrower padding below `sm`, where every pixel goes to the name. */}
+      <Table.Cell className="px-2 sm:px-4" onClick={(e) => e.stopPropagation()}>
         <VersionActions
           version={group.latest}
           groupKey={group.key}
@@ -359,20 +441,20 @@ export function FolderRow({
           label={`Select everything in ${name}`}
         />
       )}
-      <Table.Cell>
-        <div className="flex items-center gap-2 font-medium text-zinc-900">
+      <Table.Cell className={NAME_CELL}>
+        <div className="flex items-center gap-2 font-medium text-zinc-900" title={name}>
           <FolderIcon size={16} className="shrink-0 text-zinc-400" aria-hidden="true" />
-          {name}
+          <span className="truncate">{name}</span>
         </div>
       </Table.Cell>
       {versioningEnabled && (
         <>
-          <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
-          <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
+          <Table.Cell className={`text-zinc-400 ${SECONDARY_COLUMN}`}>&mdash;</Table.Cell>
+          <Table.Cell className={`text-zinc-400 ${SECONDARY_COLUMN}`}>&mdash;</Table.Cell>
         </>
       )}
-      <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
-      <Table.Cell className="text-zinc-400">&mdash;</Table.Cell>
+      <Table.Cell className={`text-zinc-400 ${SECONDARY_COLUMN}`}>&mdash;</Table.Cell>
+      <Table.Cell className={`text-zinc-400 ${SECONDARY_COLUMN}`}>&mdash;</Table.Cell>
       <Table.Cell />
     </Table.Row>
   );

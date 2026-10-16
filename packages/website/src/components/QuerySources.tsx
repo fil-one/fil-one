@@ -23,7 +23,7 @@ export function QuerySources({ bucket, sources }: QuerySourcesProps) {
           params={{ bucketName: bucket.name }}
           search={{ key: source, region: bucket.region }}
           title={source}
-          className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-[11px] text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900"
+          className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-meta text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900"
         >
           {source.split('/').pop() ?? source}
         </Link>

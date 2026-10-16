@@ -1,4 +1,4 @@
-import type { Breadcrumb, ErrorEvent } from '@sentry/react';
+import type { Breadcrumb, ErrorEvent, Event } from '@sentry/react';
 import type { PlausibleRequestPayload } from '@plausible-analytics/tracker';
 
 /**
@@ -49,7 +49,7 @@ export function scrubBreadcrumb(breadcrumb: Breadcrumb): Breadcrumb {
  * it — those were collected before `beforeBreadcrumb` could have been asked
  * about the ones the SDK adds internally.
  */
-export function scrubEvent(event: ErrorEvent): ErrorEvent {
+export function scrubEvent<E extends Event = ErrorEvent>(event: E): E {
   const url = event.request?.url;
   const breadcrumbs = event.breadcrumbs;
 
@@ -57,6 +57,27 @@ export function scrubEvent(event: ErrorEvent): ErrorEvent {
     ...event,
     ...(url ? { request: { ...event.request, url: scrubInviteToken(url) } } : {}),
     ...(breadcrumbs ? { breadcrumbs: breadcrumbs.map(scrubBreadcrumb) } : {}),
+  };
+}
+
+/**
+ * Scrub a bug report. Feedback events skip `beforeSend` (Sentry runs it for
+ * error events only), so this runs as an event processor instead, which every
+ * event passes through. Sentry records the page on the event's `request.url`
+ * as it does for an error, and the report's own `contexts.feedback.url` names
+ * it too; any other event is returned as it came.
+ */
+export function scrubFeedbackEvent(event: Event): Event {
+  if (event.type !== 'feedback') return event;
+  const scrubbed = scrubEvent(event);
+  const feedback = scrubbed.contexts?.feedback;
+  if (typeof feedback?.url !== 'string') return scrubbed;
+  return {
+    ...scrubbed,
+    contexts: {
+      ...scrubbed.contexts,
+      feedback: { ...feedback, url: scrubInviteToken(feedback.url) },
+    },
   };
 }
 

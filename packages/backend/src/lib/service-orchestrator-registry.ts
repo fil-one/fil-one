@@ -4,7 +4,11 @@ import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
 import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
 import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
 import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
-import type { ServiceOrchestrator } from './service-orchestrator.ts';
+import type {
+  LegacyServiceOrchestrator,
+  RegionOrchestrator,
+  ServiceOrchestrator,
+} from './service-orchestrator.ts';
 
 // Aurora is built at import; its module reads no secret while loading. FTH and
 // Forge are built lazily on the first request for their region and memoized,
@@ -15,23 +19,24 @@ import type { ServiceOrchestrator } from './service-orchestrator.ts';
 // bin/ scripts run without `sst shell`. The Forge api config arrives as a thunk
 // for the same reason: an argument evaluated at every registry call would touch
 // the secret on stages that never link it.
-let fthOrchestrator: ServiceOrchestrator | undefined;
+let fthOrchestrator: LegacyServiceOrchestrator | undefined;
 const forgeOrchestrators = new Map<string, ServiceOrchestrator>();
 
 function getForgeOrchestrator(
   id: string,
   region: S3Region,
   api: () => ForgeManagementApi,
+  s3?: { endpointUrl?: string; presignEndpointUrl?: string },
 ): ServiceOrchestrator {
   let orchestrator = forgeOrchestrators.get(id);
   if (!orchestrator) {
-    orchestrator = createForgeOrchestrator(id, region, api());
+    orchestrator = createForgeOrchestrator(id, region, api(), s3);
     forgeOrchestrators.set(id, orchestrator);
   }
   return orchestrator;
 }
 
-export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator {
+export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
   const stage = process.env.FILONE_STAGE!;
   if (isSupportedRegion(region, stage)) {
     switch (region) {
@@ -46,16 +51,24 @@ export function getOrchestratorForRegion(region: S3Region): ServiceOrchestrator 
           accessToken: Resource.ForgeManagementApiToken.value,
         }));
       case S3Region.UsEast9:
-        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], region, () => ({
-          baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
-          accessToken: Resource.ForgeDevManagementApiToken.value,
-        }));
+        return getForgeOrchestrator(
+          ORCHESTRATOR_ID_BY_REGION[region],
+          region,
+          () => ({
+            baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
+            accessToken: Resource.ForgeDevManagementApiToken.value,
+          }),
+          {
+            endpointUrl: process.env.FORGE_DEV_S3_ENDPOINT_URL,
+            presignEndpointUrl: process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL,
+          },
+        );
     }
   }
   throw new Error(`Unsupported region "${String(region)}".`);
 }
 
-export function getAvailableOrchestrators(): ServiceOrchestrator[] {
+export function getAvailableOrchestrators(): RegionOrchestrator[] {
   const stage = process.env.FILONE_STAGE!;
   return getAvailableRegions(stage).map(getOrchestratorForRegion);
 }

@@ -10,7 +10,7 @@ import {
 
 import { IconBox } from './IconBox';
 
-import type { AccessKey } from '@filone/shared';
+import type { AccessKey, ServiceAccessKey } from '@filone/shared';
 import { isBucketInfoPermission, isBucketPermission } from '@filone/shared';
 
 import { AccessKeyPermissionsDrawer } from './AccessKeyPermissionsDrawer';
@@ -22,16 +22,38 @@ import { IconButton } from './IconButton';
 import { OverflowBadge } from './OverflowBadge';
 import { Table } from './Table/Table';
 import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
-import { formatDate } from '../lib/time.js';
+import { formatCalendarDate, formatDate } from '../lib/time.js';
 
-function StatusBadge({ status }: { status: AccessKey['status'] }) {
-  return status === 'active' ? (
-    <Badge color="green" dot size="sm" weight="medium">
-      Active
-    </Badge>
-  ) : (
-    <Badge color="grey" dot size="sm" weight="medium">
-      Inactive
+/** Active, or Expired with the date it stopped working. */
+function KeyStatus({ accessKey }: { accessKey: AccessKey }) {
+  if (accessKey.status === 'active') {
+    return (
+      <Badge color="green" dot size="sm" weight="medium">
+        Active
+      </Badge>
+    );
+  }
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      <Badge color="grey" dot size="sm" weight="medium">
+        Expired
+      </Badge>
+      {accessKey.expiresAt && (
+        <p className="text-xs text-zinc-500">{formatCalendarDate(accessKey.expiresAt)}</p>
+      )}
+    </div>
+  );
+}
+
+const KEY_TYPE_LABELS: Record<AccessKey['type'], string> = {
+  principal: 'Personal',
+  service: 'Service',
+};
+
+function KeyTypeBadge({ type }: { type: AccessKey['type'] }) {
+  return (
+    <Badge color="grey" size="sm" data-key-type={type}>
+      {KEY_TYPE_LABELS[type]}
     </Badge>
   );
 }
@@ -47,16 +69,15 @@ function PermissionBadges({
   accessKey,
   onShowDetails,
 }: {
-  accessKey: AccessKey;
+  accessKey: ServiceAccessKey;
   onShowDetails: () => void;
 }) {
   // PERMISSION_OPTIONS' order, not the array's — same reason the drawer uses
   // it: Read/Write/List/Delete read in a fixed order everywhere else.
-  const objectPermissions = PERMISSION_OPTIONS.filter((o) =>
-    accessKey.permissions.includes(o.value),
-  );
-  const bucketManagement = accessKey.permissions.filter(isBucketPermission);
-  const bucketInfo = accessKey.permissions.filter(isBucketInfoPermission);
+  const permissions = accessKey.permissions ?? [];
+  const objectPermissions = PERMISSION_OPTIONS.filter((o) => permissions.includes(o.value));
+  const bucketManagement = permissions.filter(isBucketPermission);
+  const bucketInfo = permissions.filter(isBucketInfoPermission);
   const extraCount =
     (accessKey.granularPermissions?.length ?? 0) + bucketManagement.length + bucketInfo.length;
 
@@ -90,7 +111,13 @@ function PermissionBadges({
 
 const BUCKET_BADGES_INLINE_MAX = 3;
 
-function BucketBadges({ scope, buckets }: { scope: AccessKey['bucketScope']; buckets: string[] }) {
+function BucketBadges({
+  scope,
+  buckets,
+}: {
+  scope: ServiceAccessKey['bucketScope'];
+  buckets: string[];
+}) {
   if (scope === 'all') {
     return (
       <Badge color="grey" size="sm">
@@ -209,7 +236,7 @@ function ActionMenu({ onRotate, onDelete }: { onRotate?: () => void; onDelete?: 
         <div
           ref={menuRef}
           style={{ top: pos.top, right: pos.right }}
-          className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
+          className="fixed z-50 w-40 rounded-lg border border-zinc-200 bg-white py-1 shadow-md"
         >
           {onRotate && (
             <button
@@ -288,6 +315,36 @@ export type AccessKeysTableProps = {
   emptyDescription?: string;
 };
 
+/** Which rows are checked, dropping any whose key has gone (after a delete, say). */
+function useKeySelection(keys: AccessKey[]) {
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const existing = new Set(keys.map((k) => k.id));
+      const next = new Set<string>();
+      for (const id of prev) if (existing.has(id)) next.add(id);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [keys]);
+
+  const allSelected = keys.length > 0 && selected.size === keys.length;
+  return {
+    selected,
+    allSelected,
+    toggleAll: () => setSelected(allSelected ? new Set() : new Set(keys.map((k) => k.id))),
+    toggleOne: (id: string) =>
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    clearSelection: () => setSelected(new Set()),
+  };
+}
+
 export function AccessKeysTable({
   keys,
   showRegion = false,
@@ -324,19 +381,8 @@ export function AccessKeysTable({
   const showCreatedBy = Boolean(creatorFor) && keys.some((key) => key.createdBy || key.rotatedBy);
 
   const selectable = Boolean(onBulkDelete);
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  const [detailKey, setDetailKey] = useState<AccessKey | null>(null);
-
-  // Drop any selected ids that no longer exist (e.g. after a delete).
-  useEffect(() => {
-    setSelected((prev) => {
-      if (prev.size === 0) return prev;
-      const existing = new Set(keys.map((k) => k.id));
-      const next = new Set<string>();
-      for (const id of prev) if (existing.has(id)) next.add(id);
-      return next.size === prev.size ? prev : next;
-    });
-  }, [keys]);
+  const { selected, allSelected, toggleAll, toggleOne, clearSelection } = useKeySelection(keys);
+  const [detailKey, setDetailKey] = useState<ServiceAccessKey | null>(null);
 
   if (keys.length === 0) {
     return (
@@ -353,28 +399,13 @@ export function AccessKeysTable({
     );
   }
 
-  const allSelected = selected.size === keys.length;
-
-  function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set(keys.map((k) => k.id)));
-  }
-
-  function toggleOne(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
   return (
     <>
       {selectable && selected.size > 0 && (
         <div className="mb-3 flex items-center justify-between rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
           <span className="text-sm text-zinc-600">{selected.size} selected</span>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
               Clear
             </Button>
             <Button
@@ -397,6 +428,7 @@ export function AccessKeysTable({
               </Table.Head>
             )}
             <Table.Head>Name</Table.Head>
+            <Table.Head className="hidden sm:table-cell">Type</Table.Head>
             {showRegion && <Table.Head className="hidden md:table-cell">Region</Table.Head>}
             {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
             {showPermissions && (
@@ -405,7 +437,6 @@ export function AccessKeysTable({
             {showCreatedBy && <Table.Head className="hidden lg:table-cell">Created by</Table.Head>}
             <Table.Head className="hidden sm:table-cell">Status</Table.Head>
             {showCreated && <Table.Head className="hidden lg:table-cell">Created</Table.Head>}
-            <Table.Head className="hidden md:table-cell">Last Used</Table.Head>
             {showActions && (
               <Table.Head>
                 <span className="sr-only">Actions</span>
@@ -440,10 +471,15 @@ export function AccessKeysTable({
                     <p className="font-mono text-xs text-zinc-500">{key.accessKeyId}</p>
                     <CopyButton value={key.accessKeyId} />
                   </div>
-                  {/* Status shown inline on small screens */}
-                  <div className="mt-1 sm:hidden">
-                    <StatusBadge status={key.status} />
+                  {/* Type and status shown inline on small screens */}
+                  <div className="mt-1 flex items-start gap-1 sm:hidden">
+                    <KeyTypeBadge type={key.type} />
+                    <KeyStatus accessKey={key} />
                   </div>
+                </Table.Cell>
+
+                <Table.Cell className="hidden sm:table-cell">
+                  <KeyTypeBadge type={key.type} />
                 </Table.Cell>
 
                 {/* Region — the code a caller configures their SDK with, not
@@ -457,14 +493,36 @@ export function AccessKeysTable({
                 {/* Buckets */}
                 {showBuckets && (
                   <Table.Cell className="hidden lg:table-cell">
-                    <BucketBadges scope={key.bucketScope} buckets={key.buckets ?? []} />
+                    {key.type === 'principal' ? (
+                      <Badge
+                        color="grey"
+                        size="sm"
+                        description="Buckets whose policy grants this key's owner access."
+                      >
+                        Per bucket policy
+                      </Badge>
+                    ) : (
+                      <BucketBadges scope={key.bucketScope} buckets={key.buckets ?? []} />
+                    )}
                   </Table.Cell>
                 )}
 
-                {/* Permissions */}
+                {/* Permissions. A principal-bound key carries none of its own: what
+                    it may do follows the bucket policies naming its holder. */}
                 {showPermissions && (
                   <Table.Cell className="hidden md:table-cell">
-                    <PermissionBadges accessKey={key} onShowDetails={() => setDetailKey(key)} />
+                    {key.type === 'principal' ? (
+                      <Badge
+                        color="grey"
+                        size="sm"
+                        data-testid="permission-badge-follows-bucket-policy"
+                        description="This key inherits the policy of every bucket it touches."
+                      >
+                        Follows bucket policy
+                      </Badge>
+                    ) : (
+                      <PermissionBadges accessKey={key} onShowDetails={() => setDetailKey(key)} />
+                    )}
                   </Table.Cell>
                 )}
 
@@ -476,7 +534,7 @@ export function AccessKeysTable({
 
                 {/* Status */}
                 <Table.Cell className="hidden sm:table-cell">
-                  <StatusBadge status={key.status} />
+                  <KeyStatus accessKey={key} />
                 </Table.Cell>
 
                 {/* Created */}
@@ -485,11 +543,6 @@ export function AccessKeysTable({
                     {formatDate(key.createdAt)}
                   </Table.Cell>
                 )}
-
-                {/* Last Used */}
-                <Table.Cell className="hidden text-xs text-zinc-500 md:table-cell">
-                  {key.lastUsedAt ? formatDate(key.lastUsedAt) : 'Never'}
-                </Table.Cell>
 
                 {/* Actions */}
                 {showActions && (

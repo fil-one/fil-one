@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
 
-import type { AccessKey } from '@filone/shared';
+import type { ServiceAccessKey } from '@filone/shared';
 import {
   BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSION_LABELS,
@@ -14,7 +14,7 @@ import {
 import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
 
 export type AccessKeyPermissionsDrawerProps = {
-  accessKey: AccessKey;
+  accessKey: ServiceAccessKey;
   onClose: () => void;
 };
 
@@ -53,11 +53,12 @@ export function AccessKeyPermissionsDrawer({
   // PERMISSION_OPTIONS' order, not the array's: the create form always
   // presents Read/Write/List/Delete in that fixed order, and a key stores
   // whatever order they were toggled in, which is not a fact worth showing.
+  const permissions = accessKey.permissions ?? [];
   const objectPermissions = PERMISSION_OPTIONS.map((o) => o.value).filter((p) =>
-    accessKey.permissions.includes(p),
+    permissions.includes(p),
   );
-  const bucketManagement = accessKey.permissions.filter(isBucketPermission);
-  const bucketInfo = accessKey.permissions.filter(isBucketInfoPermission);
+  const bucketManagement = permissions.filter(isBucketPermission);
+  const bucketInfo = permissions.filter(isBucketInfoPermission);
   const granularPermissions = accessKey.granularPermissions ?? [];
 
   return (

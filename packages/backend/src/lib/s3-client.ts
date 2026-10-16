@@ -13,6 +13,8 @@ export interface S3ClientContext {
   orchestratorId: string;
   /** Whose credentials the client acts with — for error decoration only. */
   tenantId: string;
+  /** The endpoint browsers reach, when it differs from `endpointUrl`. Presigned URLs use it. */
+  presignEndpointUrl?: string;
 }
 
 export function createS3Client(ctx: S3ClientContext): S3Client {

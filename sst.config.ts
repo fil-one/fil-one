@@ -5,6 +5,11 @@ export default $config({
     const stage = input?.stage;
     const isProduction = stage === 'production';
     const isStaging = stage === 'staging';
+    // LOCAL=true deploys to a local AWS emulator (floci); see bin/deploy-local.sh.
+    const isLocal = process.env.LOCAL === 'true';
+    if (isLocal && !process.env.AWS_ENDPOINT_URL) {
+      throw new Error('LOCAL=true requires AWS_ENDPOINT_URL; run `eval "$(floci env)"` first');
+    }
 
     // Region: us-east-2 for staging/production, AWS_REGION / profile default for personal dev
     const region =
@@ -25,6 +30,10 @@ export default $config({
       awsProvider.allowedAccountIds = ['811430801166'];
     }
 
+    if (isLocal) {
+      awsProvider.allowedAccountIds = ['000000000000'];
+    }
+
     return {
       name: 'filone',
       removal: isProduction ? 'retain' : 'remove',
@@ -43,6 +52,15 @@ export default $config({
     const isProduction = stage === 'production';
     const isStaging = stage === 'staging';
     const isEphemeralStage = !isProduction && !isStaging;
+    const isLocal = process.env.LOCAL === 'true';
+
+    // floci's UpdateFunction returns no ETag, so publishing an updated CloudFront
+    // Function fails. floci never runs them, so local deploys leave them unpublished.
+    if (isLocal) {
+      $transform(aws.cloudfront.Function, (args) => {
+        args.publish = false;
+      });
+    }
 
     // ── Secrets (set via: pnpx sst secret set <Name> <value>) ─────────
     const auth0ClientId = new sst.Secret('Auth0ClientId');
@@ -100,6 +118,18 @@ export default $config({
     });
 
     // ── DynamoDB Tables ──────────────────────────────────────────────
+    // Point-in-time recovery on the stages that carry real data, stated here
+    // so it does not depend on the SST default. A table with its own table
+    // transform states the setting there (OrgTable, AuditTable).
+    $transform(sst.aws.Dynamo, (args) => {
+      args.transform = {
+        ...args.transform,
+        table: args.transform?.table ?? {
+          pointInTimeRecovery: { enabled: isProduction || isStaging },
+        },
+      };
+    });
+
     const billingTable = new sst.aws.Dynamo('BillingTable', {
       fields: {
         pk: 'string',
@@ -264,6 +294,42 @@ export default $config({
     // ── S3 Bucket for user file storage ──────────────────────────────
     const userFilesBucket = new sst.aws.Bucket('UserFilesBucket');
 
+    // ── S3 Bucket for org logos ────────────────────────────────────────
+    // Platform identity data, not tenant data — an org logo is uploaded during
+    // "Create organization," before the org (and therefore any tenant) exists,
+    // so it cannot share presign.ts's tenant-scoped signer or trust boundary.
+    // Public read, the same treatment `me.picture` gets: a plain public URL,
+    // no presigned-GET machinery. See packages/backend/src/lib/org-logo-storage.ts.
+    //
+    // Uploads happen before anything references them (a logo is picked before
+    // its org exists), so each lands tagged `state=unclaimed` and the handler
+    // that saves the URL removes the tag. Whatever is still unclaimed a day
+    // later was abandoned: a cancelled dialog, a re-picked file. SST's own
+    // `lifecycle` option filters by prefix only, hence the transform.
+    const orgLogoBucket = new sst.aws.Bucket('OrgLogoBucket', {
+      access: 'public',
+      transform: {
+        lifecycle: (args) => {
+          args.rules = [
+            {
+              id: 'expire-unclaimed-uploads',
+              status: 'Enabled',
+              filter: { tag: { key: 'state', value: 'unclaimed' } },
+              expiration: { days: 1 },
+            },
+          ];
+        },
+      },
+      // The transform only reshapes a rule SST creates, so one has to exist.
+      lifecycle: [{ id: 'expire-unclaimed-uploads', expiresIn: '1 day' }],
+    });
+
+    // The bucket's name alone, with no permissions, for the routes that only
+    // check a stored URL points into it. Linking the bucket itself grants s3:*.
+    const orgLogoBucketName = new sst.Linkable('OrgLogoBucketName', {
+      properties: { name: orgLogoBucket.name },
+    });
+
     // ── S3 Vectors bucket for RAG embeddings (FIL-548) ───────────────
     // One vector bucket hosts one index per RAG-enabled bucket. The
     // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
@@ -365,19 +431,21 @@ export default $config({
         ? PROD_CONSOLE_ALIAS_HOSTS[0]
         : domainName;
     const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
-    const cert = await aws.acm.getCertificate(
-      {
-        domain: certDomain,
-        statuses: ['ISSUED'],
-        // The lookup errors if more than one ISSUED cert matches. That happens
-        // transiently whenever a cert is replaced rather than mutated in place,
-        // since both carry the same primary domain until the old one is retired.
-        // Picking the newest is right: the older one is the one going away.
-        mostRecent: true,
-      },
-      { provider: usEast1 },
-    );
-    const certArn = cert.arn;
+    const cert = isLocal
+      ? undefined
+      : await aws.acm.getCertificate(
+          {
+            domain: certDomain,
+            statuses: ['ISSUED'],
+            // The lookup errors if more than one ISSUED cert matches. That happens
+            // transiently whenever a cert is replaced rather than mutated in place,
+            // since both carry the same primary domain until the old one is retired.
+            // Picking the newest is right: the older one is the one going away.
+            mostRecent: true,
+          },
+          { provider: usEast1 },
+        );
+    const certArn = cert?.arn;
 
     // ── API Gateway ──────────────────────────────────────────────────
     // While we stick to a same origin for both website and API,
@@ -392,20 +460,21 @@ export default $config({
       cors: {
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        // Authorization carries RAG API key bearer tokens (query endpoint);
-        // X-Org-Id names the organization each request operates on. Deployed
-        // stages serve the console and the API from one origin through the
-        // Router, so CORS never applies there — local dev at
+        // Deployed stages serve the console and the API from one origin
+        // through the Router, so CORS never applies there. Local dev at
         // https://localhost:5173 is cross-origin, and a preflight that omitted
-        // X-Org-Id would strip the header before it reached the API. Origins
-        // stay locked to our own domain above.
+        // a header the console sends would strip it before it reached the API.
+        // Origins stay locked to our own domain above.
         allowHeaders: [
           'Content-Type',
           'X-CSRF-Token',
           'X-Requested-With',
           'Authorization',
           'X-Org-Id',
+          'If-Match',
+          'If-None-Match',
         ],
+        exposeHeaders: ['ETag'],
         allowCredentials: true,
         maxAge: '1 day',
       },
@@ -428,6 +497,11 @@ export default $config({
       .map((r) => getS3Endpoint(r, stageForEndpoints))
       .join(' ');
 
+    // Org logos are POSTed straight to OrgLogoBucket and rendered from it, so its
+    // regional host belongs in both `connect-src` and `img-src`. The regional
+    // domain is the exact host `publicOrgLogoUrl` in org-logo-storage.ts builds.
+    const orgLogoOrigin = $interpolate`https://${orgLogoBucket.nodes.bucket.bucketRegionalDomainName}`;
+
     // ── CloudFront security headers (CSP applied to the HTML document) ──
     const sentryCspEndpoint =
       'https://o4507369657991168.ingest.us.sentry.io/api/4511144562655232/security/' +
@@ -439,8 +513,9 @@ export default $config({
         name: $interpolate`filone-${$app.stage}-security-headers`,
         securityHeadersConfig: {
           contentSecurityPolicy: {
-            // i1.wp.com: WordPress Photon CDN — Auth0 proxies some avatar images through it
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://s.gravatar.com https://cdn.auth0.com https://i1.wp.com https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://status.fil.one ${s3GatewayUrls}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            // img-src: our own uploads, plus the social providers' picture hosts
+            // (`pictureHost` in connection-providers.ts), the only pictures /me shows.
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com ${orgLogoOrigin}; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://status.fil.one ${s3GatewayUrls} ${orgLogoOrigin}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -526,18 +601,21 @@ export default $config({
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
       },
-      domain: {
-        name: domainName,
-        // Demo aliases keep visitors on the alias hostname (unlike `redirects`,
-        // which would bounce them back to the blocklisted canonical host). The
-        // cert above must cover every entry or CloudFront rejects the deploy.
-        aliases: aliasHosts,
-        // Ephemeral stages: SST creates the Route 53 alias in the delegated
-        // dev.fil.one zone. Staging/prod: records are managed in Cloudflare
-        // by the fil-one/infrastructure Terraform.
-        dns: isEphemeralStage ? sst.aws.dns({ override: true }) : false,
-        cert: certArn,
-      },
+      // Local deploys have no cert or DNS, so they keep the generated CloudFront domain.
+      domain: isLocal
+        ? undefined
+        : {
+            name: domainName,
+            // Demo aliases keep visitors on the alias hostname (unlike `redirects`,
+            // which would bounce them back to the blocklisted canonical host). The
+            // cert above must cover every entry or CloudFront rejects the deploy.
+            aliases: aliasHosts,
+            // Ephemeral stages: SST creates the Route 53 alias in the delegated
+            // dev.fil.one zone. Staging/prod: records are managed in Cloudflare
+            // by the fil-one/infrastructure Terraform.
+            dns: isEphemeralStage ? sst.aws.dns({ override: true }) : false,
+            cert: certArn,
+          },
       transform: {
         cdn: (args) => {
           // Also covered by the SPA rewrite function, which maps `/` to
@@ -606,35 +684,38 @@ export default $config({
       timeout: '10 seconds',
     });
 
-    new aws.cloudformation.Stack('SetupStack', {
-      ...(isEphemeralStage && { onFailure: 'DELETE' }),
-      templateBody: $jsonStringify({
-        AWSTemplateFormatVersion: '2010-09-09',
-        Resources: {
-          Setup: {
-            Type: 'Custom::FiloneSetup',
-            Properties: {
-              ServiceToken: setupFn.arn,
-              SiteUrl: siteUrl,
-              // Derived from aliasHosts rather than allowedOrigins: the latter
-              // also carries https://localhost:5173 outside production, which
-              // must never be written into the shared Auth0 tenant.
-              SiteAliasUrls: aliasHosts.map((h) => `https://${h}`).join(','),
-              Stage: $app.stage,
-              // Bumped for the SiteAliasUrls property: this custom resource only
-              // re-runs when a property changes, and SiteUrl is unchanged, so
-              // without a bump the alias never reaches the Auth0 client.
-              Version: '2.12',
+    // Local deploys skip the Stripe webhook and Auth0 callbacks; bin/deploy-local.sh covers both.
+    if (!isLocal) {
+      new aws.cloudformation.Stack('SetupStack', {
+        ...(isEphemeralStage && { onFailure: 'DELETE' }),
+        templateBody: $jsonStringify({
+          AWSTemplateFormatVersion: '2010-09-09',
+          Resources: {
+            Setup: {
+              Type: 'Custom::FiloneSetup',
+              Properties: {
+                ServiceToken: setupFn.arn,
+                SiteUrl: siteUrl,
+                // Derived from aliasHosts rather than allowedOrigins: the latter
+                // also carries https://localhost:5173 outside production, which
+                // must never be written into the shared Auth0 tenant.
+                SiteAliasUrls: aliasHosts.map((h) => `https://${h}`).join(','),
+                Stage: $app.stage,
+                // Bumped for the SiteAliasUrls property: this custom resource only
+                // re-runs when a property changes, and SiteUrl is unchanged, so
+                // without a bump the alias never reaches the Auth0 client.
+                Version: '2.12',
+              },
             },
           },
-        },
-      }),
-    });
+        }),
+      });
+    }
 
     // Ensure the Stripe webhook endpoint is removed when an ephemeral
     // stage is torn down. The CloudFormation custom resource above may
     // not fire its Delete event if the Lambda is destroyed first.
-    if (isEphemeralStage) {
+    if (isEphemeralStage && !isLocal) {
       const teardownScript = require('path').resolve(
         $cli.paths.root,
         'packages/backend/src/scripts/teardown-stripe-webhook.ts',
@@ -691,6 +772,9 @@ export default $config({
         : 'https://api-portal.dev.aur.lu/api',
       AURORA_PARTNER_ID: 'ff',
       AURORA_REGION_ID: 'ff',
+      // Aurora serves tenant DELETE on its dev backoffice only. Turn it on for
+      // production once Aurora ships it there.
+      AURORA_TENANT_DELETE_ENABLED: isProduction ? 'false' : 'true',
     };
 
     const fthEnv = {
@@ -700,9 +784,22 @@ export default $config({
     // Forge (Management-API) — non-prod only. One endpoint per Forge network,
     // serving every region in it; the region is sent per-tenant in the PUT
     // /tenants body.
+    // SMELT=true points a local deploy's dev sandbox slot (us-east-9) at a smelt
+    // network on this machine. Lambdas reach it through host.docker.internal.
+    // Presigned URLs use localhost instead, which https pages may fetch over http.
+    const useSmelt = isLocal && process.env.SMELT === 'true';
+    const smeltHost = process.env.SMELT_HOST ?? 'host.docker.internal';
     const forgeEnv = {
       FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.staging.fil-forge.com',
-      FORGE_DEV_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.latest.dev.fil-forge.com',
+      FORGE_DEV_MANAGEMENT_API_URL: isProduction
+        ? ''
+        : useSmelt
+          ? `http://${smeltHost}:15110`
+          : 'https://auth.latest.dev.fil-forge.com',
+      ...(useSmelt && {
+        FORGE_DEV_S3_ENDPOINT_URL: `http://${smeltHost}:15130`,
+        FORGE_DEV_S3_PRESIGN_ENDPOINT_URL: 'http://localhost:15130',
+      }),
     };
 
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
@@ -732,8 +829,9 @@ export default $config({
         resources: orchestratorS3KeySsmArns,
       },
     ];
-    // Per-tenant credentials for the bucket read path (getBucket/listBuckets):
-    // Aurora resolves its portal API key from SSM, FTH its console S3 key.
+    // Per-tenant credentials for the bucket read path (getBucket/listBuckets,
+    // and the usage dashboard's bucket count): Aurora resolves its portal API
+    // key from SSM, FTH its console S3 key.
     const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
@@ -903,9 +1001,10 @@ export default $config({
     const allowedRedirectOrigins = allowedOrigins.join(',');
 
     // ── Account deletion ─────────────────────────────────────────────
-    // Off on every stage until FIL-919 gives Aurora a tenant DELETE. Gates the
-    // self-serve routes only — the customer.deleted trigger stays live. Keep in
-    // step with packages/website/src/lib/account-deletion.ts.
+    // Off on every stage until Aurora serves its tenant DELETE in production
+    // (AURORA_TENANT_DELETE_ENABLED). Gates the self-serve routes only — the
+    // customer.deleted trigger stays live. Keep in step with
+    // packages/website/src/lib/account-deletion.ts.
     const accountDeletionEnabled = 'false';
 
     // Catches payloads that exhaust Lambda's async retries. The sweeper
@@ -924,6 +1023,9 @@ export default $config({
         stripeSecretKey,
         stripePriceId,
         orgTable,
+        // Deletes the org's saved logo and each departing account's uploaded
+        // avatar, which are claimed and so outlive the lifecycle expiry.
+        orgLogoBucket,
         ...managementApiTokens,
         ...mgmtRuntimeResources,
       ],
@@ -975,6 +1077,48 @@ export default $config({
       function: accountDeletionSweeper.arn,
     });
 
+    // ── Stripe events (webhook → FIFO queue → worker) ────────────────
+    // The webhook verifies Stripe's signature, enqueues the event and returns
+    // 200, so Stripe's delivery never waits on a Stripe lookup or an
+    // orchestrator status sync. The worker does that processing. Events that
+    // fail every delivery land in the DLQ, where they can be inspected and
+    // redriven. See packages/backend/src/lib/stripe-event-queue.ts.
+    const stripeEventDlq = new sst.aws.Queue('StripeEventDlq', {
+      fifo: true,
+      // The SQS maximum, 14 days rather than the default 4. Stripe has its 200
+      // and will not redeliver, so an event parked here is the only copy left.
+      transform: { queue: { messageRetentionSeconds: 14 * 24 * 60 * 60 } },
+    });
+
+    // FIFO so the message group (the Stripe customer) admits one in-flight
+    // event per customer: a payment success cannot race the cancellation it
+    // follows.
+    const stripeEventQueue = new sst.aws.Queue('StripeEventQueue', {
+      fifo: true,
+      // At least six times the worker's timeout, AWS's guidance for a queue
+      // driving a Lambda, so SQS never redelivers an event still in progress.
+      visibilityTimeout: '6 minutes',
+      dlq: { queue: stripeEventDlq.arn, retry: 3 },
+    });
+
+    const stripeEventWorker = createFn('StripeEventWorker', {
+      handler: 'packages/backend/src/jobs/stripe-event-worker.handler',
+      // Billing and user tables, Stripe secrets and orchestrator tokens, plus
+      // the queue it consumes.
+      link: [...allResources, stripeEventQueue],
+      environment: {
+        ...orchestratorEnv,
+        ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
+      },
+      // Each region's status sync retries with 1s/2s/4s backoff on both its
+      // probe and its update.
+      timeout: '60 seconds',
+      permissions: [{ actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] }],
+    });
+    // Subscribed by ARN so the worker keeps the logging and defaults createFn
+    // applies. One event at a time, so a failure redelivers only that event.
+    stripeEventQueue.subscribe(stripeEventWorker.arn, { batch: { size: 1 } });
+
     // ── Routes ───────────────────────────────────────────────────────
     // The manifest is the route list: every entry becomes a Lambda and an API
     // Gateway route below, so a handler cannot reach the internet without a
@@ -1011,6 +1155,19 @@ export default $config({
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
           resources: [auroraApiKeySsmArn, ...orchestratorS3KeySsmArns],
+        },
+      ],
+      timeout: '30 seconds',
+    };
+
+    // A bucket policy write may provision the tenant, which stores its console
+    // S3 key in SSM. Only Forge regions serve bucket policies.
+    const bucketPolicyWriteRoute: RouteInfraConfig = {
+      extraEnv: orchestratorEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn],
         },
       ],
       timeout: '30 seconds',
@@ -1068,6 +1225,19 @@ export default $config({
         permissions: bucketReadPermissions,
         extraEnv: orchestratorEnv,
       },
+      // Bucket policies are S3 operations signed with the tenant's console S3
+      // key, which getConsoleS3Credentials reads from SSM. A write may first
+      // provision the tenant (ensureTenantReady), which stores that key. Only
+      // Forge regions carry bucket policies, so only their key parameters.
+      // Dark until a region declares the `iam` access model.
+      'get-bucket-policy': {
+        extraEnv: orchestratorEnv,
+        permissions: [
+          { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
+        ],
+      },
+      'put-bucket-policy': bucketPolicyWriteRoute,
+      'delete-bucket-policy': bucketPolicyWriteRoute,
 
       // ── Keys ───────────────────────────────────────────────────────
       // The RAG API key routes take no entry: they are named bearer tokens
@@ -1114,6 +1284,9 @@ export default $config({
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
         timeout: '30 seconds',
       },
+      // Removing a member drops their principal on every ready `iam` region.
+      // Needs the orchestrator environment to reach those regions at all.
+      'remove-member': { extraEnv: orchestratorEnv },
 
       // ── RAG ────────────────────────────────────────────────────────
       // RAG query playground (FIL-554): embed the question, vector-search the
@@ -1175,13 +1348,16 @@ export default $config({
       },
 
       // ── Account and MFA ────────────────────────────────────────────
+      // OrgLogoBucketName, to check a stored logo is one of its uploads.
       'get-me': {
-        extraLink: mgmtRuntimeResources,
+        extraLink: [...mgmtRuntimeResources, orgLogoBucketName],
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
+      // Also checks a submitted avatar URL against OrgLogoBucket, claims it,
+      // and deletes the avatar it replaced.
       'update-profile': {
-        extraLink: mgmtRuntimeResources,
+        extraLink: [...mgmtRuntimeResources, orgLogoBucket],
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
       },
       'get-preferences': {
@@ -1223,8 +1399,39 @@ export default $config({
         extraLink: mgmtRuntimeResources,
         extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
       },
+      // Presigns a POST into OrgLogoBucket.
+      'presign-org-logo': {
+        extraLink: [orgLogoBucket],
+      },
+      // Confirms a submitted logoUrl names an unclaimed upload in OrgLogoBucket,
+      // then claims it, so it needs the bucket as much as the presign route does.
+      'create-org': {
+        extraLink: [orgLogoBucket],
+      },
+      // Presigns a POST into OrgLogoBucket too, under an `avatars/` prefix -
+      // see avatar-storage.ts for why this reuses the org logo bucket rather
+      // than standing up one of its own.
+      'presign-avatar': {
+        extraLink: [orgLogoBucket],
+      },
+      // Checks a submitted logo URL against OrgLogoBucket, claims it, and
+      // deletes the logo it replaced.
+      'update-org': {
+        extraLink: [orgLogoBucket, orgLogoBucketName],
+      },
 
       // ── Invitations ────────────────────────────────────────────────
+      // The only route that sends mail. `SendGridApiKey` exists on staging and
+      // production alone; every other stage sends no email and logs the invitation
+      // by id, never the accept URL, because the URL carries the token.
+      // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
+      // than from the request, since the link goes to somebody else's inbox.
+      // OrgLogoBucketName, to check the joined org's logo is one of its uploads.
+      'accept-invitation': {
+        // Registers the new member as a principal on each ready iam region.
+        extraEnv: orchestratorEnv,
+        extraLink: [orgLogoBucketName],
+      },
       // The only route that sends mail. `SendGridApiKey` exists on staging and
       // production alone; every other stage sends no email and logs the invitation
       // by id, never the accept URL, because the URL carries the token.
@@ -1236,9 +1443,12 @@ export default $config({
       },
 
       // ── Usage and dashboard ────────────────────────────────────────
+      // Counts buckets from each region's live listing (FIL-996), so it takes the
+      // bucket read path's credentials. Usage metrics and tenant info go through
+      // the backoffice client's linked secret and need no SSM of their own.
       'get-usage': {
         extraEnv: orchestratorEnv,
-        permissions: s3DataPlanePermissions,
+        permissions: bucketReadPermissions,
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
       'get-usage-trends': {
@@ -1290,10 +1500,9 @@ export default $config({
       },
       'stripe-webhook': {
         extraEnv: {
-          ...orchestratorEnv,
           STRIPE_WEBHOOK_SECRET_SSM_PATH: $interpolate`/filone/${$app.stage}/stripe-webhook-secret`,
-          ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
         },
+        extraLink: [stripeEventQueue],
         permissions: [
           {
             actions: ['ssm:GetParameter'],
@@ -1301,7 +1510,6 @@ export default $config({
               $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/stripe-webhook-secret`,
             ],
           },
-          { actions: ['lambda:InvokeFunction'], resources: [accountDeletionWorker.arn] },
         ],
       },
     };
@@ -1668,6 +1876,7 @@ export default $config({
 
     return {
       baseUrl: siteUrl,
+      ...(isLocal ? { apiUrl: api.url } : {}),
       ...(s3abBillingReadRoleArn ? { s3abBillingReadRoleArn } : {}),
       ...(s3abRespondRoleArn ? { s3abRespondRoleArn } : {}),
     };

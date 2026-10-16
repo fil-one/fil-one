@@ -1,12 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
-import { STORAGE_STATE, requireEmail, requireUserId } from './roles.util.ts';
+import { STORAGE_STATE, requireUserId } from './roles.util.ts';
 import {
   deleteMembership,
-  grantEmailBeta,
   readOrgName,
   repairOwnerCount,
   resolvePersonalOrgId,
-  revokeEmailBeta,
   runCleanup,
   seedMembership,
   setMembershipRole,
@@ -19,10 +17,6 @@ import {
 // invitee's own session, which invite-accept.spec.ts drives. Here the member is
 // the material for three changes — a role change, the refusal that keeps an
 // organization owned, and a removal the removed account then walks into.
-//
-// The beta is granted as the caller's ALLOWLIST#{email} row, so this spec and
-// invitations.spec.ts — same account, same organization — hold their grants
-// under different keys and neither teardown can revoke the other's.
 //
 // Cross-run note: these specs mutate shared staging state, and the suite runs
 // with one worker in CI (`workers: isCI ? 1 : undefined`). A local run with
@@ -47,7 +41,6 @@ test.describe('paid owner manages members', () => {
     orgName = await readOrgName(orgId);
     memberOwnOrgName = await readOrgName(await resolvePersonalOrgId(memberUserId));
 
-    await grantEmailBeta(requireEmail(OWNER));
     await seedMembership({
       orgId,
       userId: memberUserId,
@@ -74,12 +67,11 @@ test.describe('paid owner manages members', () => {
       // The counter is the last-Owner invariant and a teardown is the wrong
       // place to assume nothing touched it.
       { label: 'ownerCount', run: () => repairOwnerCount(orgId) },
-      { label: 'beta grant', run: () => revokeEmailBeta(requireEmail(OWNER)) },
     ]);
   });
 
   test('owner changes a member role through the picker', async ({ page }) => {
-    await page.goto('/organization');
+    await page.goto('/members');
     const row = memberRow(page, memberUserId);
     await expect(row).toHaveAttribute('data-member-role', 'member');
 
@@ -109,7 +101,7 @@ test.describe('paid owner manages members', () => {
   });
 
   test('the last owner cannot demote themselves', async ({ page }) => {
-    await page.goto('/organization');
+    await page.goto('/members');
     const ownRow = memberRow(page, ownerUserId);
     await expect(ownRow).toHaveAttribute('data-member-role', 'owner');
 
@@ -150,12 +142,12 @@ test.describe('paid owner manages members', () => {
 
     try {
       await memberPage.goto('/dashboard');
-      await memberPage.getByTestId('user-profile').click();
+      await memberPage.getByTestId('org-switcher-button').click();
       await memberPage.getByTestId('org-switcher').locator('button:not([aria-current])').click();
-      await expect(memberPage.getByTestId('user-profile')).toContainText(orgName);
+      await expect(memberPage.getByTestId('org-switcher-button')).toContainText(orgName);
       await expect.poll(() => activeOrgStash(memberPage)).toBe(orgId);
 
-      await page.goto('/organization');
+      await page.goto('/members');
       const row = memberRow(page, memberUserId);
       const removed = page.waitForResponse(
         (response) =>
@@ -184,7 +176,7 @@ test.describe('paid owner manages members', () => {
       // match what it asked for, drops the stash and reloads. What it must not be
       // is a dead end — no interstitial, no 403 page, just the account's own org.
       await memberPage.goto('/buckets');
-      await expect(memberPage.getByTestId('user-profile')).toContainText(memberOwnOrgName);
+      await expect(memberPage.getByTestId('org-switcher-button')).toContainText(memberOwnOrgName);
       await expect(memberPage.getByTestId('not-a-member')).toHaveCount(0);
       await expect(memberPage.getByTestId('nav-buckets')).toBeVisible();
       // The stash is what the recovery drops on its way to the reload, and the

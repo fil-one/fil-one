@@ -21,7 +21,7 @@ export function csrfMiddleware() {
     const method = request.event.requestContext.http.method;
     if (SAFE_METHODS.has(method)) return;
 
-    const cookies = parseCookies(request.event.cookies);
+    const cookies = parseCookies(request.event);
     const cookieToken = cookies[CSRF_COOKIE_NAME];
     const headerToken = request.event.headers['x-csrf-token'];
 

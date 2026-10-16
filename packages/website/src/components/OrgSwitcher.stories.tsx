@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { Menu, MenuItems } from '@headlessui/react';
 import { SignOutIcon } from '@phosphor-icons/react/dist/ssr';
 import { OrgRole } from '@filone/shared';
 
@@ -16,17 +17,22 @@ const meta: Meta<typeof OrgSwitcher> = {
     // width, background, and border come from. `Log out` is rendered with it
     // because the switcher's trailing rule is the divider between the two — on
     // its own it reads as a stray line under the last org.
+    // An always-open, unstyled `Menu` panel: the rows are its items.
     (Story) => (
-      <div className="w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg">
-        <Story />
-        <button
-          type="button"
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
-        >
-          <SignOutIcon size={18} className="shrink-0 text-zinc-400" />
-          Log out
-        </button>
-      </div>
+      <Menu>
+        <MenuItems static>
+          <div className="w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg">
+            <Story />
+            <button
+              type="button"
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100"
+            >
+              <SignOutIcon size={18} className="shrink-0 text-zinc-400" />
+              Log out
+            </button>
+          </div>
+        </MenuItems>
+      </Menu>
     ),
   ],
   args: {
@@ -50,7 +56,11 @@ export const ManyOrgs: Story = {
     activeOrgId: ORG_C,
     memberships: [
       { orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner },
-      { orgId: ORG_B, orgName: 'Globex Manufacturing Holdings', role: OrgRole.Admin },
+      {
+        orgId: ORG_B,
+        orgName: 'Globex Manufacturing Holdings',
+        role: OrgRole.Admin,
+      },
       { orgId: ORG_C, orgName: 'Initech', role: OrgRole.ReadOnly },
     ],
   },
@@ -71,21 +81,4 @@ export const UnnamedOrg: Story = {
       { orgId: ORG_B, orgName: '', role: OrgRole.Member },
     ],
   },
-};
-
-/**
- * Inside the mobile user menu, where the panel is a `role="menu"` and the org
- * rows are its radio items.
- */
-export const InsideAMenu: Story = {
-  args: { inMenu: true },
-  // Only the `role="menu"` context: the panel chrome comes from the decorator
-  // on `meta`, and a second styled panel here nests one card inside another.
-  decorators: [
-    (Story) => (
-      <div role="menu">
-        <Story />
-      </div>
-    ),
-  ],
 };

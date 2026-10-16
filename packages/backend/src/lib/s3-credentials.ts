@@ -29,6 +29,7 @@ export const _resetS3CredentialsCacheForTesting = () => ssmCache.clear();
 
 export async function getConsoleS3Credentials(
   args: GetConsoleS3CredentialsArgs,
+  requestOptions?: { signal?: AbortSignal },
 ): Promise<S3Credentials> {
   const { orchestratorId, stage, tenantId } = args;
   // Include orchestratorId in the cache key so providers sharing this LRU
@@ -42,6 +43,7 @@ export async function getConsoleS3Credentials(
   try {
     const { Parameter } = await ssm.send(
       new GetParameterCommand({ Name: parameterName, WithDecryption: true }),
+      { abortSignal: requestOptions?.signal },
     );
     value = Parameter?.Value;
   } catch (err) {

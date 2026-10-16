@@ -4,7 +4,7 @@ import type { AuditActor, RevocationTrigger, S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { AuditSubjects, twoPhaseAudit } from './audit.ts';
 import { AccessKeyKeys } from './dynamo-records.ts';
-import type { ServiceOrchestrator } from './service-orchestrator.ts';
+import type { AccessKeyOrchestrator } from './service-orchestrator.ts';
 
 export interface RevokeAccessKeyArgs {
   orgId: string;
@@ -14,7 +14,7 @@ export interface RevokeAccessKeyArgs {
   accessKeyId?: string | undefined;
   keyName?: string | undefined;
   region: S3Region;
-  orchestrator: Pick<ServiceOrchestrator, 'deleteAccessKey'>;
+  orchestrator: Pick<AccessKeyOrchestrator, 'deleteAccessKey'>;
   tenantId: string;
   /** Who asked. On a role change this is the admin, never the key's holder. */
   actor: AuditActor;

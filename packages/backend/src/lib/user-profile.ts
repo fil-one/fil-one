@@ -68,6 +68,51 @@ export async function readUserProfile(
 }
 
 /**
+ * An account's Auth0 subject and the two home-org pointers a floor org
+ * repoints: `orgId` on `USER#{userId}/PROFILE` and on `SUB#{sub}/IDENTITY`.
+ *
+ * Split out from {@link readUserProfile} because almost nothing needs these:
+ * today only a removal that leaves the account with a floor org to log in to.
+ * Both reads are strongly consistent, because the caller conditions its own
+ * transaction on the values read here and must not miss a write from moments
+ * ago.
+ *
+ * Unlike the other readers in this module, a failed read throws. The caller
+ * decides from this whether an account is about to be left with nowhere to
+ * log in, and "could not read" answered as "no sub" would skip the floor org
+ * and let the removal leave the account with no org at all.
+ */
+export async function readHomeOrgPointers(userId: string): Promise<{
+  sub?: string;
+  profileOrgId?: string;
+  identityOrgId?: string;
+}> {
+  const client = getDynamoClient();
+  const { Item: profile } = await client.send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `USER#${userId}` }, sk: { S: 'PROFILE' } },
+      // `sub` is a DynamoDB reserved word, hence #sub.
+      ProjectionExpression: '#sub, orgId',
+      ExpressionAttributeNames: { '#sub': 'sub' },
+      ConsistentRead: true,
+    }),
+  );
+  const sub = profile?.sub?.S;
+  if (!sub) return { profileOrgId: profile?.orgId?.S };
+
+  const { Item: identity } = await client.send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
+      ProjectionExpression: 'orgId',
+      ConsistentRead: true,
+    }),
+  );
+  return { sub, profileOrgId: profile?.orgId?.S, identityOrgId: identity?.orgId?.S };
+}
+
+/**
  * Record the address a session proved it holds.
  *
  * Removal sweeps the invitations addressed TO the member it removes, and it

@@ -659,7 +659,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     request: AuthMiddlewareRequest,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
     const { event } = request;
-    const cookies = parseCookies(event.cookies);
+    const cookies = parseCookies(event);
 
     const accessToken = cookies[COOKIE_NAMES.ACCESS_TOKEN];
     const idToken = cookies[COOKIE_NAMES.ID_TOKEN];

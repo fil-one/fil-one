@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { STORAGE_STATE, type Role } from './roles.util.ts';
 import { resetBillingState } from './billing-reset.util.ts';
+import { grantEmailBeta } from './invite.util.ts';
 import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
 const REQUIRED_CREDENTIAL_VARS = [
@@ -57,6 +58,7 @@ for (const role of roles) {
     // state. Trial periods elapse and `past_due` can advance to `canceled`
     // between scheduled runs, so the prior run's state is not safe to reuse.
     await resetBillingState(role.name, role.userId);
+    await grantEmailBeta(role.email);
 
     await page.goto('/');
     await page.locator('#username').fill(role.email);

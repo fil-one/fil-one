@@ -9,7 +9,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router';
 
-import { S3Region, type S3ObjectVersion } from '@filone/shared';
+import { S3Region, SubscriptionStatus, type S3ObjectVersion } from '@filone/shared';
 
 import { ObjectBrowser, type ObjectBrowserProps } from './ObjectBrowser';
 
@@ -160,6 +160,8 @@ const meta: Meta<typeof ObjectBrowser> = {
   title: 'Components/ObjectBrowser',
   component: ObjectBrowser,
   decorators: [withRouter],
+  // Rows offer Share only on a paid plan; an unknown plan would show it disabled.
+  parameters: { billingStatus: SubscriptionStatus.Active },
 };
 
 export default meta;
@@ -319,6 +321,41 @@ export const DeleteMarker: Story = {
           isLatest: true,
           isDeleteMarker: true,
         },
+      ]}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+    />
+  ),
+};
+
+/**
+ * Keys far longer than a row: the name truncates with an ellipsis rather than
+ * pushing the size, date and actions out of the row. Hover shows the full key.
+ */
+export const LongNames: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={[
+        {
+          key: 'quarterly-financial-report-final-reviewed-by-legal-and-approved-2026-q1.pdf',
+          sizeBytes: 3_481_221,
+          lastModified: '2026-04-14T16:20:00Z',
+          versionId: 'v-report-q1',
+          isLatest: true,
+          isDeleteMarker: false,
+        },
+        {
+          key: 'a-folder-with-a-very-long-name-for-archived-customer-uploads/file.bin',
+          sizeBytes: 1_024,
+          lastModified: '2026-04-11T08:00:00Z',
+          versionId: 'v-file-1',
+          isLatest: true,
+          isDeleteMarker: false,
+        },
+        ...sampleVersions.slice(0, 2),
       ]}
       currentPrefix=""
       onDownload={() => {}}

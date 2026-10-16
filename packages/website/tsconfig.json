@@ -1,12 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2020",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "noEmit": true,
-    "types": ["vite/client", "@testing-library/jest-dom"],
+    "types": ["vite/client"],
     "paths": {
       "@filone/shared": ["../shared/src/index.ts"]
     }

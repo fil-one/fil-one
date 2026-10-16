@@ -4,6 +4,7 @@ import type { S3Region } from '@filone/shared';
 import { useToast } from '../components/Toast/index.js';
 import { queryKeys } from './query-client.js';
 import { batchPresign } from './use-presign.js';
+import { holdLeaveGuard } from './use-warn-before-unload.js';
 
 export type UploadStep = 'idle' | 'uploading' | 'done';
 
@@ -30,6 +31,8 @@ export type UseFileUploadOptions = {
 };
 
 const PRESIGN_BATCH_SIZE = 10;
+
+const CANCELLED_MESSAGE = 'Upload cancelled';
 
 const SYSTEM_FILE_NAMES = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini']);
 
@@ -98,9 +101,13 @@ async function presignEntries(
   region: S3Region,
   bucketName: string,
   entries: FileEntry[],
+  signal: AbortSignal,
 ): Promise<PresignBatchResult[]> {
   const results: PresignBatchResult[] = [];
   for (let i = 0; i < entries.length; i += PRESIGN_BATCH_SIZE) {
+    // Each batch reads the active org when it goes out, so a batch started after
+    // a cancel would be signed in whatever org the tab has moved on to.
+    if (signal.aborted) break;
     const batch = entries.slice(i, i + PRESIGN_BATCH_SIZE);
     const ops = batch.map((e) => ({
       op: 'putObject' as const,
@@ -110,11 +117,12 @@ async function presignEntries(
       fileName: e.file.name,
     }));
     try {
-      const { items } = await batchPresign(region, ops);
+      const { items } = await batchPresign(region, ops, signal);
       for (let j = 0; j < batch.length; j++) {
         results.push({ type: 'job', entry: batch[j], url: items[j].url, method: items[j].method });
       }
     } catch (err) {
+      if (signal.aborted) break;
       results.push({
         type: 'error',
         entries: batch,
@@ -125,14 +133,22 @@ async function presignEntries(
   return results;
 }
 
+type UploadJob = { entry: FileEntry; url: string; method: string };
+
 function uploadFile(
-  entry: FileEntry,
-  url: string,
-  method: string,
+  { entry, url, method }: UploadJob,
   onProgress: (progress: number) => void,
+  signal: AbortSignal,
 ): Promise<{ success: boolean; error?: string }> {
   return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve({ success: false, error: CANCELLED_MESSAGE });
+      return;
+    }
     const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    xhr.onloadend = () => signal.removeEventListener('abort', abort);
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && e.total > 0) {
         onProgress(Math.floor((e.loaded / e.total) * 100));
@@ -146,21 +162,27 @@ function uploadFile(
       }
     };
     xhr.onerror = () => resolve({ success: false, error: 'Network error' });
+    xhr.onabort = () => resolve({ success: false, error: CANCELLED_MESSAGE });
     xhr.open(method, url);
     xhr.setRequestHeader('Content-Type', entry.file.type || 'application/octet-stream');
     xhr.send(entry.file);
   });
 }
 
+type UploadContext = {
+  bucketName: string;
+  region: S3Region;
+  updateEntry: (id: string, patch: Partial<FileEntry>) => void;
+  signal: AbortSignal;
+};
+
 async function uploadEntries(
   entries: FileEntry[],
-  bucketName: string,
-  region: S3Region,
-  updateEntry: (id: string, patch: Partial<FileEntry>) => void,
+  { bucketName, region, updateEntry, signal }: UploadContext,
 ): Promise<{ failedCount: number }> {
-  const presignResults = await presignEntries(region, bucketName, entries);
+  const presignResults = await presignEntries(region, bucketName, entries, signal);
   let failedCount = 0;
-  const jobs: Array<{ entry: FileEntry; url: string; method: string }> = [];
+  const jobs: UploadJob[] = [];
 
   for (const result of presignResults) {
     if (result.type === 'error') {
@@ -174,10 +196,13 @@ async function uploadEntries(
   }
 
   await Promise.all(
-    jobs.map(async ({ entry, url, method }) => {
+    jobs.map(async (job) => {
+      const { entry } = job;
       updateEntry(entry.id, { status: 'uploading', progress: 0 });
-      const result = await uploadFile(entry, url, method, (progress) =>
-        updateEntry(entry.id, { progress }),
+      const result = await uploadFile(
+        job,
+        (progress) => updateEntry(entry.id, { progress }),
+        signal,
       );
       if (result.success) {
         updateEntry(entry.id, { status: 'done', progress: 100 });
@@ -200,9 +225,65 @@ function invalidateAfterUpload(queryClient: QueryClient, bucketName: string, reg
   void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
 }
 
-export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOptions) {
+type UseUploadRunOptions = Omit<UploadContext, 'signal'> & {
+  setUploadStep: (step: UploadStep) => void;
+  onSuccess?: () => void;
+};
+
+/**
+ * Runs an upload under a leave guard held for as long as the upload runs, not
+ * as long as its page is mounted. An org switch cancels it through that guard
+ * before it moves the tab: each presign batch reads the active org when it
+ * goes out, so an upload left running, even in the background after the user
+ * left its page, would sign its later batches in the org being switched to.
+ */
+function useUploadRun({
+  bucketName,
+  region,
+  updateEntry,
+  setUploadStep,
+  onSuccess,
+}: UseUploadRunOptions) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const runUpload = useCallback(
+    async (entries: FileEntry[], successMessage: string) => {
+      const controller = new AbortController();
+      const release = holdLeaveGuard(() => controller.abort());
+      setUploadStep('uploading');
+      let failedCount: number;
+      try {
+        ({ failedCount } = await uploadEntries(entries, {
+          bucketName,
+          region,
+          updateEntry,
+          signal: controller.signal,
+        }));
+      } finally {
+        release();
+      }
+
+      // Cancelled on purpose: the user already agreed to lose it, so no toast.
+      if (controller.signal.aborted) {
+        setUploadStep('idle');
+      } else if (failedCount === 0) {
+        toast.success(successMessage);
+        setUploadStep('done');
+        invalidateAfterUpload(queryClient, bucketName, region);
+        onSuccess?.();
+      } else {
+        toast.error(`${failedCount} file${failedCount > 1 ? 's' : ''} failed to upload`);
+        setUploadStep('idle');
+      }
+    },
+    [bucketName, region, updateEntry, setUploadStep, toast, queryClient, onSuccess],
+  );
+
+  return runUpload;
+}
+
+export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOptions) {
+  const { toast } = useToast();
 
   const [uploadStep, setUploadStep] = useState<UploadStep>('idle');
   const [files, setFiles] = useState<FileEntry[]>([]);
@@ -211,6 +292,18 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const updateEntry = useCallback((id: string, patch: Partial<FileEntry>) => {
+    setFiles((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  }, []);
+
+  const runUpload = useUploadRun({
+    bucketName,
+    region,
+    updateEntry,
+    setUploadStep,
+    onSuccess,
+  });
 
   const reset = useCallback(() => {
     setUploadStep('idle');
@@ -289,31 +382,17 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
     );
   }, []);
 
-  const updateEntry = useCallback((id: string, patch: Partial<FileEntry>) => {
-    setFiles((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
-  }, []);
-
   const handleUpload = useCallback(async () => {
     const pending = files.filter((e) => e.status === 'pending' || e.status === 'error');
     if (pending.length === 0) return;
 
-    setUploadStep('uploading');
-    const { failedCount } = await uploadEntries(pending, bucketName, region, updateEntry);
-
-    if (failedCount === 0) {
-      toast.success(
-        files.length === 1
-          ? `${files[0].file.name} uploaded successfully`
-          : `${files.length} files uploaded successfully`,
-      );
-      setUploadStep('done');
-      invalidateAfterUpload(queryClient, bucketName, region);
-      onSuccess?.();
-    } else {
-      toast.error(`${failedCount} file${failedCount > 1 ? 's' : ''} failed to upload`);
-      setUploadStep('idle');
-    }
-  }, [files, bucketName, region, updateEntry, toast, queryClient, onSuccess]);
+    await runUpload(
+      pending,
+      files.length === 1
+        ? `${files[0].file.name} uploaded successfully`
+        : `${files.length} files uploaded successfully`,
+    );
+  }, [files, runUpload]);
 
   const handleRetry = useCallback(async () => {
     const failed = files.filter((e) => e.status === 'error');
@@ -323,22 +402,11 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
     for (const e of failed) {
       updateEntry(e.id, { status: 'pending', progress: 0, error: undefined });
     }
-    setUploadStep('uploading');
 
     // Re-read from state after update — use the failed list directly
     const toRetry = failed.map((e) => ({ ...e, status: 'pending' as FileUploadStatus }));
-    const { failedCount } = await uploadEntries(toRetry, bucketName, region, updateEntry);
-
-    if (failedCount === 0) {
-      toast.success('All files uploaded successfully');
-      setUploadStep('done');
-      invalidateAfterUpload(queryClient, bucketName, region);
-      onSuccess?.();
-    } else {
-      toast.error(`${failedCount} file${failedCount > 1 ? 's' : ''} failed to upload`);
-      setUploadStep('idle');
-    }
-  }, [files, bucketName, region, updateEntry, toast, queryClient, onSuccess]);
+    await runUpload(toRetry, 'All files uploaded successfully');
+  }, [files, runUpload, updateEntry]);
 
   const doneCount = files.filter((e) => e.status === 'done').length;
   const failedCount = files.filter((e) => e.status === 'error').length;

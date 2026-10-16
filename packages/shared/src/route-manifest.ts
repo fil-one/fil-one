@@ -44,11 +44,18 @@ export type RouteCategory =
  * invited address, both checked in the handler; a membership gate in the chain
  * would refuse every invitation there is. Deliberately not `'self'`, which is
  * for routes that touch no org state at all — accepting creates a membership.
+ *
+ * Two `'in-handler'` routes are membership-only: creating an additional org,
+ * and presigning a home for its logo before that org exists. The caller holds
+ * no role in the org being made, so there is no permission to check, and the
+ * handler checks nothing past the chain's membership gate (the caller's own
+ * active org). They are `'in-handler'` rather than `'self'` because `'self'` is
+ * for routes with no org gate at all.
  */
 export type RouteRequirement = Permission | 'self' | 'in-handler' | 'invite-token';
 
 export interface RouteManifestEntry {
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** API Gateway route path, as passed to `addRoute` in sst.config.ts. */
   path: string;
   /** Handler module under `packages/backend/src/handlers/`, without extension. */
@@ -117,6 +124,33 @@ const MANIFEST = [
     handler: 'get-bucket-analytics',
     category: 'authenticated',
     requires: 'buckets.read',
+  },
+  // The bucket's policy, on a region serving the `iam` access model. Reading
+  // takes the same permission as writing: the document names other members,
+  // and a member learns their own reach from the bucket list. The PUT narrows
+  // further in the handler: a statement granting a retention or legal-hold
+  // write needs `privileged.grant`, which depends on the body.
+  {
+    method: 'GET',
+    path: '/api/buckets/{name}/policy',
+    handler: 'get-bucket-policy',
+    category: 'authenticated',
+    requires: 'buckets.policy_manage',
+  },
+  {
+    method: 'PUT',
+    path: '/api/buckets/{name}/policy',
+    handler: 'put-bucket-policy',
+    category: 'authenticated',
+    requires: 'buckets.policy_manage',
+    capsInHandler: true,
+  },
+  {
+    method: 'DELETE',
+    path: '/api/buckets/{name}/policy',
+    handler: 'delete-bucket-policy',
+    category: 'authenticated',
+    requires: 'buckets.policy_manage',
   },
   {
     method: 'GET',
@@ -199,6 +233,9 @@ const MANIFEST = [
   // Minting a key is `keys.create`. The creator-authority cap runs in the
   // handler on top of it: the requested key permissions are intersected with the
   // creator's own, so a key can never carry more than the member minting it.
+  // A service-key body on a region serving the `iam` model also takes
+  // `keys.create_service`, checked in the handler beside the cap: which check
+  // applies depends on the body, which the chain cannot read.
   {
     method: 'POST',
     path: '/api/access-keys',
@@ -288,6 +325,23 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'org.transfer',
   },
+  // Membership-only: see the `'in-handler'` doc comment above.
+  {
+    method: 'POST',
+    path: '/api/org',
+    handler: 'create-org',
+    category: 'authenticated',
+    requires: 'in-handler',
+  },
+  // A place to put an org logo before the org it belongs to exists.
+  // Membership-only, like create-org.
+  {
+    method: 'POST',
+    path: '/api/org/logo-upload-url',
+    handler: 'presign-org-logo',
+    category: 'authenticated',
+    requires: 'in-handler',
+  },
 
   // ── Members ──────────────────────────────────────────────────────
   // Every role reads the roster: the matrix grants `members.read` to all four,
@@ -312,6 +366,12 @@ const MANIFEST = [
     requires: 'members.manage',
     capsInHandler: true,
   },
+  // `members.manage` is what removing someone ELSE costs, capped the same way
+  // update-member-role's is. A caller targeting their own `userId` is a
+  // different verb — leaving — and needs no permission at all: the handler's
+  // gate is membership alone, and it waives `members.manage` for that one
+  // case rather than the manifest naming a `members.leave` permission
+  // nothing else would ever check.
   {
     method: 'DELETE',
     path: '/api/org/members/{userId}',
@@ -395,6 +455,16 @@ const MANIFEST = [
     method: 'PATCH',
     path: '/api/me/profile',
     handler: 'update-profile',
+    category: 'authenticated',
+    requires: 'self',
+  },
+  // A place to put a personal avatar before PATCH /api/me/profile persists it.
+  // Same shape as the org logo's own presign step, `self` rather than
+  // `in-handler` because the caller's own identity is the whole requirement.
+  {
+    method: 'POST',
+    path: '/api/me/avatar-upload-url',
+    handler: 'presign-avatar',
     category: 'authenticated',
     requires: 'self',
   },

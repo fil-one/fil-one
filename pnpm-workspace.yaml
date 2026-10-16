@@ -9,8 +9,19 @@ trustPolicy: no-downgrade
 # was published after semver 7.5.1-7.5.4, which have provenance attestations.
 # The trust check compares by publish date only, so the v6 backport looks like
 # a downgrade from the v7 line.
+#
+# False positives from the same date-only comparison: these versions shipped
+# without provenance after an earlier release that had it. Dependabot re-checks
+# the locked versions and drops every npm update when the check fails.
+# - jose@4.15.9 (2024-07-03): v4 backport published after jose 5.x releases
+#   with provenance; openid-client@5 (via sst) requires jose ^4.15.4.
+# - react-redux@9.2.0 (2024-12-10): 9.1.0 had provenance; 9.3.0 has it again.
+# - reselect@5.1.1 (2024-06-01): 5.1.0 had provenance; 5.2.0 has it again.
 trustPolicyExclude:
   - 'semver@6.3.1'
+  - 'jose@4.15.9'
+  - 'react-redux@9.2.0'
+  - 'reselect@5.1.1'
 
 # Dependencies allowed to run postinstall/build scripts
 onlyBuiltDependencies:

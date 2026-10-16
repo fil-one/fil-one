@@ -7,11 +7,17 @@ export interface OrgMembershipSummary {
   orgId: string;
   orgName: string;
   role: OrgRole;
+  /** Uploaded logo, if any. Absent falls back to a generated monogram, same as `MeResponse.picture` does for the user. */
+  logoUrl?: string;
+  /** When this membership began. Absent for a row that predates the field. */
+  joinedAt?: string;
 }
 
 export interface MeResponse {
   orgId: string;
   orgName: string;
+  /** The active org's uploaded logo, if any. Falls back to a generated monogram. */
+  logoUrl?: string;
   emailVerified: boolean;
   email?: string;
   name?: string;
@@ -38,6 +44,17 @@ export interface MeResponse {
   permissions?: readonly Permission[];
   /** Every org the caller belongs to, for the org switcher. */
   memberships?: OrgMembershipSummary[];
+  /** Whether the org's name was chosen; only an explicit `false` sends the caller to the naming step. */
+  nameConfirmed?: boolean;
+  /**
+   * Whether this organization was made for the caller because they lost their
+   * last membership (they left it, were removed, or it was deleted), rather
+   * than at signup. Paired with an unconfirmed name, it sends the caller to
+   * `/left-organization` instead of the new-account naming step, so they are
+   * told why they have no organization before they create one. Present only
+   * when true.
+   */
+  floorOrg?: boolean;
   /**
    * Whether the organizations beta is switched on for this caller — their own
    * allowlist row, or {@link MeResponse.orgId}'s. Computed server-side like
@@ -49,6 +66,15 @@ export interface MeResponse {
    * what makes the answer follow the org rather than the session.
    */
   orgsBeta: boolean;
+  /**
+   * Whether the active org has usable billing — a plan chosen, trial or paid,
+   * as opposed to never having had one. Computed server-side like
+   * {@link MeResponse.ragAccess}, and visible to every role rather than gated
+   * on `billing.view`: the console's whole-console gate has to answer for a
+   * Member too, who cannot read the billing detail behind why but still needs
+   * to know the org is blocked and who to ask.
+   */
+  billingActive: boolean;
 }
 
 export interface MfaEnrollment {
@@ -84,8 +110,10 @@ export const UpdateProfileSchema = z
       .max(PROFILE_NAME_MAX_LENGTH, `Name must be at most ${PROFILE_NAME_MAX_LENGTH} characters`)
       .optional(),
     email: z.string().trim().email('Please provide a valid email address').optional(),
+    /** Must already point at a file `POST /api/me/avatar-upload-url` put there. */
+    pictureUrl: z.string().url().optional(),
   })
-  .refine((data) => data.name || data.email, {
+  .refine((data) => data.name || data.email || data.pictureUrl, {
     message: 'At least one field is required.',
   });
 
@@ -94,6 +122,32 @@ export type UpdateProfileRequest = z.infer<typeof UpdateProfileSchema>;
 export interface UpdateProfileResponse {
   name?: string;
   email?: string;
+  /** Named to match {@link MeResponse.picture}, which this patches once saved. */
+  picture?: string;
+}
+
+/** Accepted image types for an avatar upload, and the size ceiling for one. */
+export const AVATAR_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * `POST /api/me/avatar-upload-url` — a place to put a personal avatar before
+ * `PATCH /api/me/profile` persists it, same shape as the org logo's own
+ * presign step (`PresignOrgLogoSchema` in `org.ts`).
+ */
+export const PresignAvatarSchema = z.object({
+  contentType: z.enum(AVATAR_CONTENT_TYPES),
+});
+
+export type PresignAvatarRequest = z.infer<typeof PresignAvatarSchema>;
+
+export interface PresignAvatarResponse {
+  /** Where the client POSTs the file, as a multipart form. */
+  uploadUrl: string;
+  /** The form fields the POST must carry alongside the file, before `file` itself. */
+  fields: Record<string, string>;
+  /** The public URL to read it back from afterward, and what gets sent to `UpdateProfileRequest.pictureUrl`. */
+  pictureUrl: string;
 }
 
 export interface RegenerateRecoveryCodeResponse {

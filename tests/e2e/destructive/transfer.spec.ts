@@ -2,11 +2,9 @@ import { test, expect, type Page, type Response } from '@playwright/test';
 import { STORAGE_STATE, requireEmail, requirePassword, requireUserId } from './roles.util.ts';
 import {
   deleteMembership,
-  grantEmailBeta,
   readOrgName,
   repairOwnerCount,
   resolvePersonalOrgId,
-  revokeEmailBeta,
   runCleanup,
   seedMembership,
   setMembershipRole,
@@ -56,7 +54,6 @@ test.describe('trial owner transfers the organization', () => {
     orgId = await resolvePersonalOrgId(ownerUserId);
     orgName = await readOrgName(orgId);
 
-    await grantEmailBeta(requireEmail(OWNER));
     // Admin, because the seat is what this spec moves: a second Owner cannot be
     // seeded without the counter that guards the last one.
     await seedMembership({
@@ -83,14 +80,13 @@ test.describe('trial owner transfers the organization', () => {
         run: () => deleteMembership({ orgId, userId: successorUserId }),
       },
       { label: 'ownerCount', run: () => repairOwnerCount(orgId) },
-      { label: 'beta grant', run: () => revokeEmailBeta(requireEmail(OWNER)) },
     ]);
   });
 
   test('trial owner hands the organization to another member', async ({ page }) => {
     test.setTimeout(TRANSFER_TEST_TIMEOUT_MS);
 
-    await page.goto('/organization');
+    await page.goto('/members');
     const successorRow = memberRow(page, successorUserId);
     await expect(successorRow).toHaveAttribute('data-member-role', 'admin');
 
@@ -109,7 +105,7 @@ test.describe('trial owner transfers the organization', () => {
       await reauthenticateThroughAuth0(page);
       // The step-up stash brings the caller back to the page they left, with the
       // member the transfer was about named in `?action=`.
-      await page.waitForURL((url) => url.pathname === '/organization', {
+      await page.waitForURL((url) => url.pathname === '/members', {
         timeout: AUTH0_TIMEOUT_MS,
       });
       // Reopened rather than resubmitted: the change nobody can reverse on their

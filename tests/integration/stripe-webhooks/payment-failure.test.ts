@@ -1,6 +1,8 @@
 import { describe, it, beforeAll, afterAll, expect } from 'vitest';
 import {
+  createTestClock,
   createTestCustomer,
+  createPastDueSubscription,
   attachDecliningCard,
   seedBillingRecord,
   createAndFailInvoice,
@@ -10,47 +12,84 @@ import {
   pollForPaymentMethod,
   getBillingRecord,
   testOrgId,
+  waitForEventHandled,
+  waitForWebhookMark,
 } from './helpers.js';
 
-describe('Payment Failure (invoice.payment_failed)', () => {
+describe('Payment Failure (customer.subscription.updated to past_due)', () => {
   let userId: string;
   let cusId: string;
+  let clockId: string;
+  let paymentMethodId: string;
 
   beforeAll(async () => {
     userId = `test-pf-${crypto.randomUUID()}`;
-    cusId = await createTestCustomer(userId);
+    clockId = await createTestClock('payment-failure');
+    cusId = await createTestCustomer(userId, clockId);
     await seedBillingRecord(userId, cusId, 'active');
-    const paymentMethodId = await attachDecliningCard(cusId);
+    paymentMethodId = await attachDecliningCard(cusId);
     await pollForPaymentMethod({ userId, paymentMethodId });
   });
 
   afterAll(async () => {
-    await getStripeClient().customers.del(cusId);
+    // Deleting the clock deletes its customer and subscriptions with it.
+    await getStripeClient().testHelpers.testClocks.del(clockId);
     await deleteBillingRecord(userId);
   });
 
-  it('should set status to past_due and record failure timestamp', async () => {
-    await createAndFailInvoice(cusId);
-    await pollForBillingStatusChange({
+  it('sets past_due when Stripe fails to charge a renewal', async () => {
+    const subId = await createPastDueSubscription({
       userId,
-      expectedStatus: 'past_due',
-      fromStatus: 'active',
+      customerId: cusId,
+      clockId,
+      paymentMethodId,
     });
-    const record = await getBillingRecord(userId);
-    expect(record).toStrictEqual({
+    await pollForBillingStatusChange({ userId, expectedStatus: 'past_due', fromStatus: 'active' });
+
+    expect(await getBillingRecord(userId)).toStrictEqual({
       pk: { S: `ORG#${testOrgId(userId)}` },
       sk: { S: 'SUBSCRIPTION' },
       orgId: { S: testOrgId(userId) },
       userId: { S: userId },
       stripeCustomerId: { S: cusId },
+      subscriptionId: { S: subId },
       subscriptionStatus: { S: 'past_due' },
+      currentPeriodStart: { S: expect.any(String) },
+      currentPeriodEnd: { S: expect.any(String) },
       updatedAt: { S: expect.any(String) },
-      lastPaymentFailedAt: { S: expect.any(String) },
       paymentMethodBrand: { S: 'visa' },
-      paymentMethodId: { S: expect.any(String) },
+      paymentMethodId: { S: paymentMethodId },
       paymentMethodLast4: { S: '0341' }, // last4 numbers for declined after attach test card
       paymentMethodExpYear: { N: expect.any(String) },
       paymentMethodExpMonth: { N: expect.any(String) },
+    });
+  }, 420_000);
+
+  it('marks a received event so a later duplicate is dropped', async () => {
+    const invoiceId = await createAndFailInvoice(cusId);
+
+    const { eventId, mark } = await waitForWebhookMark('invoice.payment_failed', invoiceId);
+
+    expect(mark).toStrictEqual({
+      pk: { S: `WEBHOOK#${eventId}` },
+      sk: { S: 'EVENT' },
+      eventType: { S: 'invoice.payment_failed' },
+      processedAt: { S: expect.any(String) },
+      ttl: { N: expect.any(String) },
+    });
+  });
+
+  it('records the event as handled once the worker has processed it', async () => {
+    const invoiceId = await createAndFailInvoice(cusId);
+
+    const { eventId, handled } = await waitForEventHandled('invoice.payment_failed', invoiceId);
+
+    expect(handled).toStrictEqual({
+      pk: { S: `WEBHOOK#${eventId}` },
+      sk: { S: 'HANDLED' },
+      eventType: { S: 'invoice.payment_failed' },
+      handledAt: { S: expect.any(String) },
+      ttl: { N: expect.any(String) },
     });
   });
 });

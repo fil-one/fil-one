@@ -4,7 +4,6 @@ import { WarningCircleIcon } from '@phosphor-icons/react/dist/ssr';
 import { Modal, ModalBody, ModalFooter } from './Modal';
 import { Button } from './Button';
 import { IconBox } from './IconBox';
-import { Spinner } from './Spinner';
 
 export type ConfirmDialogProps = {
   open: boolean;
@@ -14,6 +13,13 @@ export type ConfirmDialogProps = {
   description: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /**
+   * Disables the confirm button without touching Cancel — for a dialog whose
+   * description explains why the action in front of it would fail server-side
+   * (e.g. "promote another owner first"), so the caller reads why before
+   * finding out from a rejected request.
+   */
+  confirmDisabled?: boolean;
 };
 
 export function ConfirmDialog({
@@ -24,6 +30,7 @@ export function ConfirmDialog({
   description,
   confirmLabel = 'Delete',
   cancelLabel = 'Cancel',
+  confirmDisabled = false,
 }: ConfirmDialogProps) {
   const [loading, setLoading] = useState(false);
 
@@ -65,10 +72,11 @@ export function ConfirmDialog({
             id="confirm-dialog-confirm-button"
             variant="destructive"
             className="flex-1"
-            disabled={loading}
+            disabled={confirmDisabled}
+            loading={loading}
+            loadingLabel="Processing"
             onClick={() => void handleConfirm()}
           >
-            {loading && <Spinner ariaLabel="Processing" size={14} />}
             {confirmLabel}
           </Button>
         </div>

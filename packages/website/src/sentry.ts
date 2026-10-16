@@ -1,6 +1,6 @@
 import * as Sentry from '@sentry/react';
 import { FILONE_STAGE } from './env.js';
-import { scrubBreadcrumb, scrubEvent } from './lib/url-scrub.js';
+import { scrubBreadcrumb, scrubEvent, scrubFeedbackEvent } from './lib/url-scrub.js';
 
 Sentry.init({
   dsn: 'https://a67c49004e3562393b7c63deedcbb951@o4507369657991168.ingest.us.sentry.io/4511144562655232',
@@ -14,3 +14,6 @@ Sentry.init({
   beforeBreadcrumb: (breadcrumb) => scrubBreadcrumb(breadcrumb),
   beforeSend: (event) => scrubEvent(event),
 });
+
+// Bug reports are feedback events, which skip `beforeSend`.
+Sentry.addEventProcessor((event) => scrubFeedbackEvent(event));

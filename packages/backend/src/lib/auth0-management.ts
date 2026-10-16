@@ -87,6 +87,25 @@ export async function getAuth0UserEmail(sub: string): Promise<string | undefined
 }
 
 /**
+ * The user's current picture URL, or undefined when Auth0 has none (or no such
+ * user). Read before an avatar change so the upload it replaces can be deleted.
+ */
+export async function getAuth0UserPicture(sub: string): Promise<string | undefined> {
+  const domain = getMgmtDomain();
+  const token = await getManagementToken();
+  const resp = await fetch(
+    `https://${domain}/api/v2/users/${encodeURIComponent(sub)}?fields=picture&include_fields=true`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+
+  if (resp.status === 404) return undefined;
+  await throwIfNotOk(resp, 'Auth0 get user failed');
+
+  const data = (await resp.json()) as { picture?: string };
+  return data.picture;
+}
+
+/**
  * Permanently delete the Auth0 user. Requires `delete:users`.
  *
  * A 404 is success: account teardown re-runs on every retry, so the second pass

@@ -140,13 +140,14 @@ Charge $5/TB metered, but enforce a monthly minimum (e.g., $10/month).
 
 **Stripe implementation:** Metered price + conditional invoice item adjustment if usage is below minimum.
 
-**As shipped (July 2026):** no invoice-item adjustment is needed — the minimum is the
+**Current pricing:** no invoice-item adjustment is needed — the minimum is the
 flat amount of the first tier of a graduated metered price. Storage bills at
-$4.99/TB metered in GB: a $4.99 flat fee covers the first 1000 GB, and usage above
-that bills at $0.00499/GB, so Stripe enforces the minimum when it bills. New
-signups get that price via the `StripePriceId` secret; customers created before the
-switch stay on the old per-unit price ($0.00499/GB with no flat fee) and are
-grandfathered without a minimum.
+$5.99/TB metered in GB: a $5.99 flat fee covers the first 1000 GB, and usage above
+that bills at $0.00599/GB, so Stripe enforces the minimum when it bills. New
+signups get that price via the `StripePriceId` secret. Earlier customers keep the
+price they subscribed on: the $4.99 graduated price ($4.99 flat fee, then
+$0.00499/GB), or the original per-unit price ($0.00499/GB with no flat fee, so no
+minimum).
 `GET /api/billing` derives `subscription.monthlyMinimumCents` from the first tier's
 flat amount of whichever price the org's subscription carries. The field is absent
 only when the price genuinely has no minimum (per-unit or volume-tiered); a
@@ -273,43 +274,33 @@ Radar prevents fraudulent payments. It does not verify identity. If identity ver
 Locking (`write-locked`, `disabled`) and unlocking (`active`) a tenant in response to billing
 changes propagates to **every region where the org has a provisioned tenant** — not just Aurora.
 All billing-driven status-change sites (grace-period enforcer, usage-reporting worker, Stripe
-webhook, subscription activation) go through the shared helper
+event worker, subscription activation) go through the shared helper
 `syncTenantStatusInProvisionedRegions`, so an account is locked/unlocked everywhere it exists.
 
-The retry budget for each region's probe + status update is caller-dependent. Background callers
-(the `grace-period-enforcer` and `usage-reporting-worker` crons, the activate-subscription API)
-have generous timeouts and re-run, so they use the default several-retry policy. The Stripe webhook
-awaits this sync synchronously and should return a 2xx quickly, so it passes a tight override
-(`WEBHOOK_STATUS_SYNC_RETRY` in `region-helpers.ts`): a single retry with a ~200ms backoff. With
-typical ~200–300ms orchestrator round-trips the webhook's sync stays well under Stripe's ~2s window.
-A brief transient blip is ridden out, so the webhook never blocks on a region that is down. A
-persistent failure leaves the region out of sync, reconciled afterwards by the next relevant billing
-event (the sync is probe-first and idempotent) or by the `grace-period-enforcer` cron re-attempting
-locks; the customer-deletion path instead returns 500 so Stripe retries. The
-`subscription-drift-checker` cron (every 12h) is **observe-only** — it surfaces residual drift via
-logs/metrics for alerting, but does not itself reconcile.
-
-Longer term, the most robust fix per Stripe's guidance ("return a 2xx before any complex logic that
-might cause a timeout") is to acknowledge the webhook immediately and run this tenant-status sync
-out-of-band (e.g. via an event/queue), making the response time independent of orchestrator latency
-entirely. See
-[FIL-498](https://linear.app/filecoin-foundation/issue/FIL-498/stripe-webhook-must-return-quickly).
+The retry budget for each region's probe + status update is the default several-retry policy for
+every caller. The Stripe webhook verifies the signature, enqueues the event on the
+`StripeEventQueue` FIFO queue and returns 200; the `StripeEventWorker` Lambda processes the event,
+including the sync. A failed sync fails the delivery, so SQS retries the
+event (the sync is probe-first and idempotent) and moves it to `StripeEventDlq` once its retries are
+spent. `StripeEventDlq` keeps an event for 14 days. The `grace-period-enforcer` cron also re-attempts locks. The `subscription-drift-checker`
+cron (every 12h) is **observe-only** — it surfaces residual drift via logs/metrics for alerting,
+but does not itself reconcile.
 
 ---
 
 ## Webhook Events to Handle
 
-| Event                                  | Action                                      |
-| -------------------------------------- | ------------------------------------------- |
-| `customer.subscription.created`        | Record subscription, start usage tracking   |
-| `customer.subscription.trial_will_end` | Notify customer (3 days before)             |
-| `customer.subscription.updated`        | Handle plan changes, payment method updates |
-| `customer.subscription.deleted`        | Stop tracking, begin data retention policy  |
-| `invoice.creating`                     | **Report metered usage to Stripe**          |
-| `invoice.payment_succeeded`            | Record payment, update status               |
-| `invoice.payment_failed`               | Dunning flow                                |
-| `charge.dispute.created`               | Flag account, potentially suspend           |
-| `radar.early_fraud_warning`            | Flag account for review                     |
+| Event                                  | Action                                     |
+| -------------------------------------- | ------------------------------------------ |
+| `customer.subscription.created`        | Record subscription, start usage tracking  |
+| `customer.subscription.trial_will_end` | Notify customer (3 days before)            |
+| `customer.subscription.updated`        | Record status changes, plan changes        |
+| `customer.subscription.deleted`        | Stop tracking, begin data retention policy |
+| `invoice.creating`                     | **Report metered usage to Stripe**         |
+| `invoice.payment_succeeded`            | Metrics only, never the status             |
+| `invoice.payment_failed`               | Dunning metrics only, never the status     |
+| `charge.dispute.created`               | Flag account, potentially suspend          |
+| `radar.early_fraud_warning`            | Flag account for review                    |
 
 Webhook security: verify signatures, idempotency layer (webhooks can be delivered multiple times), async processing via DB queue or SQS.
 

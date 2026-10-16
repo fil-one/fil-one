@@ -36,6 +36,12 @@ export const PERMISSIONS = [
   'buckets.create',
   /** Delete a bucket. */
   'buckets.delete',
+  /**
+   * Read and edit a bucket's policy on a region that serves the `iam` access
+   * model. Reading takes the same permission as editing: a member learns their
+   * own reach from the bucket list, and the policy names other people.
+   */
+  'buckets.policy_manage',
   /** View, download, and mint read presigns for objects. */
   'objects.read',
   /** Upload objects (console and presign). */
@@ -48,6 +54,12 @@ export const PERMISSIONS = [
   'keys.manage_own',
   /** List and revoke every key in the org. */
   'keys.manage_all',
+  /**
+   * Mint a service key on a region serving the `iam` access model: a key with
+   * its own permissions and bucket list that answers to no bucket policy. The
+   * creator-authority cap still bounds it.
+   */
+  'keys.create_service',
   /** Read the org's audit log. */
   'audit.view',
   /**
@@ -92,12 +104,14 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.f
     'buckets.read',
     'buckets.create',
     'buckets.delete',
+    'buckets.policy_manage',
     'objects.read',
     'objects.write',
     'objects.delete',
     'keys.create',
     'keys.manage_own',
     'keys.manage_all',
+    'keys.create_service',
     'audit.view',
     'audit.export',
     'privileged.grant',
@@ -110,12 +124,14 @@ export const ROLE_PERMISSIONS: Record<OrgRole, readonly Permission[]> = Object.f
     'buckets.read',
     'buckets.create',
     'buckets.delete',
+    'buckets.policy_manage',
     'objects.read',
     'objects.write',
     'objects.delete',
     'keys.create',
     'keys.manage_own',
     'keys.manage_all',
+    'keys.create_service',
     'audit.view',
     'audit.export',
   ] as const),
@@ -155,12 +171,10 @@ export const ROLE_RANK = {
  * The parameter is `string` because every caller is holding a value read out of
  * DynamoDB: taking the raw value keeps the fail-closed branch reachable instead
  * of casting past it. The own-property check is what keeps an inherited key such
- * as `'constructor'` from resolving to something that is not a permission list —
- * `Object.hasOwn` semantics, spelled the ES2020 way because the console
- * compiles this file at that target.
+ * as `'constructor'` from resolving to something that is not a permission list.
  */
 export function permissionsForRole(role: string): readonly Permission[] {
-  return isOrgRole(role) && Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, role)
+  return isOrgRole(role) && Object.hasOwn(ROLE_PERMISSIONS, role)
     ? ROLE_PERMISSIONS[role]
     : NO_PERMISSIONS;
 }

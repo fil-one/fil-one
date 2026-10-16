@@ -2,19 +2,12 @@ import { test, expect } from '@playwright/test';
 import { STORAGE_STATE, requireEmail, requireUserId } from './roles.util.ts';
 import {
   deleteInvitationsFor,
-  grantOrgBeta,
   resolvePersonalOrgId,
-  revokeOrgBeta,
   runCleanup,
   uniqueInviteEmail,
 } from './invite.util.ts';
 
 // Inviting somebody and withdrawing it again, through the form an Owner uses.
-//
-// The organizations beta is granted here as the ORG#{orgId} row rather than the
-// caller's allowlist row, so this spec's teardown cannot take the grant away
-// from members.spec.ts, which runs against the same account and grants itself
-// the ALLOWLIST#{email} one.
 //
 // The address is minted per run because the three browser projects run this same
 // spec against the same staging organization, and re-inviting an address revokes
@@ -37,7 +30,6 @@ test.describe('paid user (organizations beta)', () => {
 
   test.beforeAll(async () => {
     orgId = await resolvePersonalOrgId(requireUserId(ROLE));
-    await grantOrgBeta(orgId);
   });
 
   test.afterAll(async () => {
@@ -45,16 +37,14 @@ test.describe('paid user (organizations beta)', () => {
       // Both the row the test withdrew and any row a failure left behind: the
       // pending cap counts addresses, and a leaked one is a slot nobody frees.
       { label: 'invitation rows', run: () => deleteInvitationsFor({ orgId, email: invitedEmail }) },
-      { label: 'beta grant', run: () => revokeOrgBeta(orgId) },
     ]);
   });
 
   test('paid user invites a teammate and withdraws the invitation', async ({ page }) => {
-    await page.goto('/dashboard');
-    // The nav entry itself is the beta gate's other half: `useMembersSurface`
-    // renders it for a solo org only once the flag is on.
-    await page.getByTestId('nav-organization').click();
-    await expect(page.locator('#organization-heading')).toBeVisible();
+    // Members is its own page now, reached from the org switcher; navigating
+    // straight to it is what the switcher's link resolves to.
+    await page.goto('/members');
+    await expect(page.locator('#members-heading')).toBeVisible();
 
     const created = page.waitForResponse(
       (response) =>
@@ -126,7 +116,7 @@ test.describe('paid user (organizations beta)', () => {
     // withdrawal is the server's answer rather than the cache edit that follows
     // a successful revoke.
     await page.reload();
-    await expect(page.locator('#organization-heading')).toBeVisible();
+    await expect(page.locator('#members-heading')).toBeVisible();
     // A reload comes back on the default tab, and the row lives in the
     // Invitations panel: without selecting it, "no such row" is true of every
     // run and says nothing about the withdrawal.

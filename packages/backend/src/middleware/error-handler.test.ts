@@ -1,10 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
-import { ApiErrorCode } from '@filone/shared';
+import { ApiErrorCode, S3Region } from '@filone/shared';
 import { errorHandlerMiddleware } from './error-handler.ts';
 import { OrgDeletingError } from '../lib/org-profile.ts';
+import { IamRegionRefusedError } from '../lib/errors.ts';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
+
+const USER_1 = '00000000-0000-0000-0000-000000000001';
 
 type ErrorRequest = Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
 
@@ -59,6 +62,50 @@ describe('errorHandlerMiddleware', () => {
     });
   });
 
+  it.each([
+    {
+      action: 'remove' as const,
+      succeeded: [],
+      message: 'We could not remove the member from this organization. Please try again.',
+    },
+    {
+      action: 'remove' as const,
+      succeeded: [S3Region.EuCentral3],
+      message: `The member was removed from ${S3Region.EuCentral3} but could not be removed from ${S3Region.UsEast9}. They are still in this organization, please try again.`,
+    },
+    {
+      action: 'register' as const,
+      succeeded: [],
+      message:
+        'The member joined, but could not be registered on the storage regions. Please try again.',
+    },
+    {
+      action: 'register' as const,
+      succeeded: [S3Region.EuCentral3],
+      message: `The member joined, and was registered on ${S3Region.EuCentral3} but not on ${S3Region.UsEast9}. Please try again.`,
+    },
+  ])(
+    'maps IamRegionRefusedError on $action to 502 that says which regions applied it',
+    async ({ action, succeeded, message }) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { onError } = errorHandlerMiddleware();
+      const request = buildErrorRequest(
+        new IamRegionRefusedError(action, [S3Region.UsEast9], succeeded),
+      );
+
+      try {
+        await onError!(request);
+      } finally {
+        warn.mockRestore();
+      }
+
+      expect(request.response).toMatchObject({
+        statusCode: 502,
+        body: JSON.stringify({ message }),
+      });
+    },
+  );
+
   it('does not expose the original error message in the response', async () => {
     const { onError } = errorHandlerMiddleware();
     const secret = 'password=hunter2&host=prod-db.internal';
@@ -77,14 +124,14 @@ describe('errorHandlerMiddleware', () => {
     const error = new Error('something broke');
     const request = buildErrorRequest(error);
     request.event = buildEvent({
-      userInfo: { userId: 'user-1', orgId: 'org-1' },
+      userInfo: { userId: USER_1, orgId: 'org-1' },
     });
 
     await onError!(request);
 
     expect(spy).toHaveBeenCalledWith(
       'Unhandled handler error:',
-      { orgId: 'org-1', userId: 'user-1', apiRequestId: 'req-1' },
+      { orgId: 'org-1', userId: USER_1, apiRequestId: 'req-1' },
       error,
     );
     spy.mockRestore();

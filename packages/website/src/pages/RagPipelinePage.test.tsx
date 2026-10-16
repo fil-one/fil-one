@@ -52,12 +52,14 @@ import { ToastProvider } from '../components/Toast/ToastProvider.js';
 const ME: MeResponse = {
   orgId: 'org-1',
   orgName: 'Acme',
+  nameConfirmed: true,
   emailVerified: true,
   email: 'user@example.com',
   name: 'User',
   mfaEnrollments: [],
   ragAccess: true,
   orgsBeta: true,
+  billingActive: true,
 };
 
 const BUCKETS: ListBucketsResponse = {
@@ -372,7 +374,7 @@ describe('RagPipelinePage — API Keys tab', () => {
 
     expect(await screen.findByTestId('rag-api-keys-tab')).toBeInTheDocument();
     expect(mockListRagApiKeys).toHaveBeenCalled();
-    expect(await screen.findByTestId('rag-api-keys-empty')).toBeInTheDocument();
+    expect(await screen.findByText('No API keys yet')).toBeInTheDocument();
   });
 
   it('shows the API key count in the stats grid instead of pricing', async () => {

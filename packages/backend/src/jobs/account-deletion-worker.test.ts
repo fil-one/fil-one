@@ -21,6 +21,19 @@ const mockGetAuth0UserEmail = vi.fn(async (sub: string) => {
   order.push(`email:${sub}`);
   return 'user@example.com' as string | undefined;
 });
+const AVATAR_URL = 'https://logos.example/avatars/me.png';
+const LOGO_URL = 'https://logos.example/logos/org.png';
+const mockGetAuth0UserPicture = vi.fn(async (sub: string) => {
+  order.push(`picture:${sub}`);
+  return AVATAR_URL as string | undefined;
+});
+const mockDeleteReplacedAvatar = vi.fn(
+  async (url: string | undefined, _options?: unknown) => void order.push(`avatar:${url}`),
+);
+const mockGetOrgProfile = vi.fn(async () => ({ logoUrl: { S: LOGO_URL } }) as unknown);
+const mockDeleteReplacedOrgLogo = vi.fn(
+  async (url: string | undefined, _options?: unknown) => void order.push(`logo:${url}`),
+);
 const mockDeleteTenant = vi.fn(async (tenantId: string) => void order.push(`tenant:${tenantId}`));
 const mockResolveTargets = vi.fn(async () => ({
   members: [{ userId: 'user-1', sub: 'auth0|one', deleteIdentity: true }] as DeletionMember[],
@@ -37,7 +50,17 @@ vi.mock('../lib/deletion-targets.ts', () => ({
 vi.mock('../lib/auth0-management.ts', () => ({
   deleteAuth0User: (sub: string) => mockDeleteAuth0User(sub),
   getAuth0UserEmail: (sub: string) => mockGetAuth0UserEmail(sub),
+  getAuth0UserPicture: (sub: string) => mockGetAuth0UserPicture(sub),
 }));
+vi.mock('../lib/avatar-storage.ts', () => ({
+  deleteReplacedAvatar: (url: string | undefined, options: unknown) =>
+    mockDeleteReplacedAvatar(url, options),
+}));
+vi.mock('../lib/org-logo-storage.ts', () => ({
+  deleteReplacedOrgLogo: (url: string | undefined, options: unknown) =>
+    mockDeleteReplacedOrgLogo(url, options),
+}));
+vi.mock('../lib/org-profile.ts', () => ({ getOrgProfile: () => mockGetOrgProfile() }));
 
 const mockGetAvailableOrchestrators = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
@@ -87,7 +110,60 @@ describe('account-deletion-worker', () => {
   it('runs Auth0, Stripe, tenants and the scrub in that order', async () => {
     await handler({ orgId: ORG });
 
-    expect(order).toEqual(['email:auth0|one', 'auth0:auth0|one', 'stripe', 'tenant:42', 'scrub']);
+    expect(order).toEqual([
+      'email:auth0|one',
+      'picture:auth0|one',
+      `avatar:${AVATAR_URL}`,
+      'auth0:auth0|one',
+      'stripe',
+      'tenant:42',
+      `logo:${LOGO_URL}`,
+      'scrub',
+    ]);
+  });
+
+  // A saved avatar or logo is claimed, so the bucket's expiry rule never
+  // removes it, and it would stay publicly readable after the account or org.
+  describe('uploaded images', () => {
+    it("deletes the account's avatar while Auth0 can still say which it is", async () => {
+      await handler({ orgId: ORG });
+
+      expect(mockDeleteReplacedAvatar).toHaveBeenCalledWith(AVATAR_URL, { rethrow: true });
+      expect(order.indexOf(`avatar:${AVATAR_URL}`)).toBeLessThan(order.indexOf('auth0:auth0|one'));
+    });
+
+    it("deletes the org's logo before the scrub takes the row that names it", async () => {
+      await handler({ orgId: ORG });
+
+      expect(mockDeleteReplacedOrgLogo).toHaveBeenCalledWith(LOGO_URL, { rethrow: true });
+      expect(order.indexOf(`logo:${LOGO_URL}`)).toBeLessThan(order.indexOf('scrub'));
+    });
+
+    // Erasure must not finish with a public image left behind; a retry re-deletes.
+    it.each([
+      ['avatar', mockDeleteReplacedAvatar, ['email:auth0|one', 'picture:auth0|one']],
+      [
+        'logo',
+        mockDeleteReplacedOrgLogo,
+        [
+          'email:auth0|one',
+          'picture:auth0|one',
+          `avatar:${AVATAR_URL}`,
+          'auth0:auth0|one',
+          'stripe',
+          'tenant:42',
+        ],
+      ],
+    ])('stops for a retry when the %s delete fails', async (_label, mock, ranBefore) => {
+      mock.mockRejectedValueOnce(new Error('S3 down'));
+
+      await expect(handler({ orgId: ORG })).rejects.toThrow('S3 down');
+      expect(order).toEqual(ranBefore);
+      const marked = ddbMock
+        .commandCalls(UpdateItemCommand)
+        .some((c) => c.args[0].input.ExpressionAttributeValues?.[':done']);
+      expect(marked).toBe(false);
+    });
   });
 
   // The teardown falls back to the members' legacy billing rows when the org row
@@ -148,6 +224,8 @@ describe('account-deletion-worker', () => {
         expect(mockDeleteAuth0User).toHaveBeenCalledTimes(1);
         expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|two');
         expect(mockGetAuth0UserEmail).not.toHaveBeenCalledWith('auth0|one');
+        // Their avatar goes with the account, and the account is staying.
+        expect(mockGetAuth0UserPicture).not.toHaveBeenCalledWith('auth0|one');
         expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1);
       } finally {
         log.mockRestore();

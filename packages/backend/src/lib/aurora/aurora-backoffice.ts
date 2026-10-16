@@ -1,30 +1,22 @@
 import {
   createClient,
-  createTenant,
-  createTenantToken,
-  getBucketStorageMetrics,
-  getTenant,
-  getTenantOperationMetrics,
-  getTenantStorageMetrics,
-  listTenants,
+  createTenantV2,
+  deleteTenant,
+  createTenantTokenV2,
+  getTenantV2,
+  listTenantsV2,
   setTenantStatus,
   setupS3Component,
   type ModelsSetupStep,
-  type ModelOperationMetricsSample,
-  type ModelStorageMetricsSample,
   type ModelsTenantStatus,
-  type ModelsTenantWithMetricsBackofficeResponse,
+  type RbacPortalPermission,
+  type ModelsTenantWithMetricsBackofficeResponseV2,
 } from '@filone/aurora-backoffice-client';
 import { instrumentClient } from './aurora-api-metrics.ts';
 import { getAuroraBackofficeSecrets } from '../auth-secrets.ts';
 import type { TenantStatus } from '@filone/shared';
 
-export type {
-  ModelOperationMetricsSample,
-  ModelStorageMetricsSample,
-  ModelsTenantStatus,
-  ModelsTenantWithMetricsBackofficeResponse,
-};
+export type { ModelsTenantStatus, ModelsTenantWithMetricsBackofficeResponseV2 };
 
 export class DuplicateTokenNameError extends Error {
   constructor() {
@@ -33,7 +25,7 @@ export class DuplicateTokenNameError extends Error {
   }
 }
 
-function createBackofficeClient() {
+export function createBackofficeClient() {
   const baseUrl = process.env.AURORA_BACKOFFICE_URL!;
   const { AURORA_BACKOFFICE_TOKEN: token } = getAuroraBackofficeSecrets();
 
@@ -49,6 +41,8 @@ function createBackofficeClient() {
 export interface CreateAuroraTenantOptions {
   orgId: string;
   displayName: string;
+  /** Aborts the backoffice requests, including the 409 lookup. The caller owns the deadline. */
+  signal?: AbortSignal;
 }
 
 export interface CreateAuroraTenantResult {
@@ -58,13 +52,15 @@ export interface CreateAuroraTenantResult {
 export async function createAuroraTenant({
   orgId,
   displayName,
+  signal,
 }: CreateAuroraTenantOptions): Promise<CreateAuroraTenantResult> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const regionId = process.env.AURORA_REGION_ID!;
   const client = createBackofficeClient();
 
-  const { data, error, response } = await createTenant({
+  const { data, error, response } = await createTenantV2({
     client,
+    signal,
     path: { partnerId },
     body: {
       name: orgId,
@@ -79,7 +75,7 @@ export async function createAuroraTenant({
     if (status === 409) {
       console.log(`Aurora tenant already exists for org ${orgId}, looking up existing tenant`);
       try {
-        return await findAuroraTenantByOrgId({ client, partnerId, orgId });
+        return await findAuroraTenantByOrgId({ client, partnerId, orgId, signal });
       } catch (cause) {
         throw new Error(`Aurora tenant already exists for org ${orgId} but lookup failed`, {
           cause,
@@ -105,16 +101,19 @@ async function findAuroraTenantByOrgId({
   client,
   partnerId,
   orgId,
+  signal,
 }: {
   client: ReturnType<typeof createClient>;
   partnerId: string;
   orgId: string;
+  signal?: AbortSignal;
 }): Promise<CreateAuroraTenantResult> {
-  const { data, error } = await listTenants({
+  const { data, error } = await listTenantsV2({
     client,
+    signal,
     path: { partnerId },
-    // TODO: paginate through all pages instead of assuming ≤1000 tenants
-    query: { pageSize: 1000 },
+    // Aurora caps pageSize at 20; orgName matches the tenant name exactly.
+    query: { orgName: orgId },
     throwOnError: false,
   });
 
@@ -135,6 +134,8 @@ async function findAuroraTenantByOrgId({
 
 export interface SetupAuroraTenantOptions {
   tenantId: string;
+  /** Aborts the backoffice request. The caller owns the deadline. */
+  signal?: AbortSignal;
 }
 
 export interface SetupAuroraTenantResult {
@@ -143,12 +144,14 @@ export interface SetupAuroraTenantResult {
 
 export async function setupAuroraTenant({
   tenantId,
+  signal,
 }: SetupAuroraTenantOptions): Promise<SetupAuroraTenantResult> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
   const { data, error } = await setupS3Component({
     client,
+    signal,
     path: { partnerId, tenantId },
     throwOnError: false,
     // Aurora API returns content-type: text/plain, force JSON parsing
@@ -179,9 +182,23 @@ export async function setupAuroraTenant({
   return { lastSetupStep };
 }
 
+// The portal calls the console makes with the tenant token: bucket and S3
+// access-key management. Nothing else.
+const TENANT_TOKEN_PERMISSIONS: RbacPortalPermission[] = [
+  'read:s3:access_keys',
+  'create:s3:access_keys',
+  'delete:s3:access_keys',
+  'read:s3:buckets',
+  'create:s3:buckets',
+  'update:s3:buckets',
+  'delete:s3:buckets',
+];
+
 export interface CreateAuroraTenantApiKeyOptions {
   tenantId: string;
   orgId: string;
+  /** Aborts the backoffice request. The caller owns the deadline. */
+  signal?: AbortSignal;
 }
 
 export interface CreateAuroraTenantApiKeyResult {
@@ -192,14 +209,16 @@ export interface CreateAuroraTenantApiKeyResult {
 export async function createAuroraTenantApiKey({
   tenantId,
   orgId,
+  signal,
 }: CreateAuroraTenantApiKeyOptions): Promise<CreateAuroraTenantApiKeyResult> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error, response } = await createTenantToken({
+  const { data, error, response } = await createTenantTokenV2({
     client,
+    signal,
     path: { partnerId, tenantId },
-    body: { name: `filone-${orgId}` },
+    body: { name: `filone-${orgId}`, permissions: TENANT_TOKEN_PERMISSIONS },
     throwOnError: false,
   });
 
@@ -231,216 +250,20 @@ export async function createAuroraTenantApiKey({
   return { token: apiToken, tokenId };
 }
 
-// Aurora's metrics endpoints reject queries whose (to − from) span exceeds
-// ~40 days. For longer spans (e.g. grace-period subscriptions whose
-// currentPeriodStart can be ~60 days old) we split the request into ≤40-day
-// sub-ranges, fetch them in parallel, and merge the samples — dedupe by
-// timestamp absorbs any overlap at range boundaries.
-const MAX_AURORA_QUERY_RANGE_DAYS = 40;
-const MAX_AURORA_QUERY_RANGE_MS = MAX_AURORA_QUERY_RANGE_DAYS * 24 * 60 * 60 * 1000;
-
-function splitTimeRange(fromIso: string, toIso: string): Array<{ from: string; to: string }> {
-  const fromMs = Date.parse(fromIso);
-  const toMs = Date.parse(toIso);
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
-    return [{ from: fromIso, to: toIso }];
-  }
-  if (toMs - fromMs <= MAX_AURORA_QUERY_RANGE_MS) {
-    return [{ from: fromIso, to: toIso }];
-  }
-  const ranges: Array<{ from: string; to: string }> = [];
-  let cursor = fromMs;
-  while (cursor < toMs) {
-    const next = Math.min(cursor + MAX_AURORA_QUERY_RANGE_MS, toMs);
-    ranges.push({ from: new Date(cursor).toISOString(), to: new Date(next).toISOString() });
-    cursor = next;
-  }
-  return ranges;
-}
-
-function dedupeByTimestamp<T extends { timestamp?: string }>(samples: T[]): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const sample of samples) {
-    const key = sample.timestamp;
-    if (key === undefined) {
-      out.push(sample);
-      continue;
-    }
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(sample);
-  }
-  return out;
-}
-
-export interface GetStorageSamplesOptions {
-  tenantId: string;
-  from: string;
-  to: string;
-  window?: string;
-}
-
-async function fetchStorageSamplesRange({
-  tenantId,
-  from,
-  to,
-  window,
-}: {
-  tenantId: string;
-  from: string;
-  to: string;
-  window: string;
-}): Promise<ModelStorageMetricsSample[]> {
-  const partnerId = process.env.AURORA_PARTNER_ID!;
-  const client = createBackofficeClient();
-
-  const { data, error, response } = await getTenantStorageMetrics({
-    client,
-    path: { partnerId, tenantId },
-    query: { from, to, window },
-    throwOnError: false,
-  });
-
-  if (error) {
-    throw new Error(
-      `Aurora storage API failed for tenant ${tenantId} (status=${response?.status ?? 'unknown'} from=${from} to=${to} window=${window})`,
-      { cause: error },
-    );
-  }
-
-  return data?.samples ?? [];
-}
-
-export async function getStorageSamples({
-  tenantId,
-  from,
-  to,
-  window = '1h',
-}: GetStorageSamplesOptions): Promise<ModelStorageMetricsSample[]> {
-  const ranges = splitTimeRange(from, to);
-  if (ranges.length === 1) {
-    return fetchStorageSamplesRange({ tenantId, from, to, window });
-  }
-
-  console.log('[aurora-client] Splitting storage query into ranges', {
-    tenantId,
-    ranges: ranges.length,
-    from,
-    to,
-    window,
-  });
-  const results = await Promise.all(
-    ranges.map((r) => fetchStorageSamplesRange({ tenantId, from: r.from, to: r.to, window })),
-  );
-  return dedupeByTimestamp(results.flat());
-}
-
-export interface GetBucketStorageSamplesOptions {
-  bucketName: string;
-  from: string;
-  to: string;
-  window?: string;
-}
-
-export async function getBucketStorageSamples({
-  bucketName,
-  from,
-  to,
-  window = '1h',
-}: GetBucketStorageSamplesOptions): Promise<ModelStorageMetricsSample[]> {
-  const partnerId = process.env.AURORA_PARTNER_ID!;
-  const client = createBackofficeClient();
-
-  const { data, error, response } = await getBucketStorageMetrics({
-    client,
-    path: { partnerId, bucketName },
-    query: { from, to, window },
-    throwOnError: false,
-  });
-
-  if (error) {
-    throw new Error(
-      `Aurora bucket storage API failed for bucket ${bucketName} (status=${response?.status ?? 'unknown'})`,
-      { cause: error },
-    );
-  }
-
-  return data?.samples ?? [];
-}
-
-export interface GetOperationsSamplesOptions {
-  tenantId: string;
-  from: string;
-  to: string;
-  window?: string;
-}
-
-async function fetchOperationsSamplesRange({
-  tenantId,
-  from,
-  to,
-  window,
-}: {
-  tenantId: string;
-  from: string;
-  to: string;
-  window: string;
-}): Promise<ModelOperationMetricsSample[]> {
-  const partnerId = process.env.AURORA_PARTNER_ID!;
-  const client = createBackofficeClient();
-
-  const { data, error, response } = await getTenantOperationMetrics({
-    client,
-    path: { partnerId, tenantId },
-    query: { from, to, window },
-    throwOnError: false,
-  });
-
-  if (error) {
-    throw new Error(
-      `Aurora operations API failed for tenant ${tenantId} (status=${response?.status ?? 'unknown'} from=${from} to=${to} window=${window})`,
-      { cause: error },
-    );
-  }
-
-  return data?.series?.[0]?.samples ?? [];
-}
-
-export async function getOperationsSamples({
-  tenantId,
-  from,
-  to,
-  window = '24h',
-}: GetOperationsSamplesOptions): Promise<ModelOperationMetricsSample[]> {
-  const ranges = splitTimeRange(from, to);
-  if (ranges.length === 1) {
-    return fetchOperationsSamplesRange({ tenantId, from, to, window });
-  }
-
-  console.log('[aurora-client] Splitting operations query into ranges', {
-    tenantId,
-    ranges: ranges.length,
-    from,
-    to,
-    window,
-  });
-  const results = await Promise.all(
-    ranges.map((r) => fetchOperationsSamplesRange({ tenantId, from: r.from, to: r.to, window })),
-  );
-  return dedupeByTimestamp(results.flat());
-}
-
 export async function getTenantInfo({
   tenantId,
+  signal,
 }: {
   tenantId: string;
-}): Promise<ModelsTenantWithMetricsBackofficeResponse> {
+  /** Aborts the backoffice request. The caller owns the deadline. */
+  signal?: AbortSignal;
+}): Promise<ModelsTenantWithMetricsBackofficeResponseV2> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
-  const { data, error } = await getTenant({
+  const { data, error } = await getTenantV2({
     client,
+    signal,
     path: { partnerId, tenantId },
     throwOnError: false,
   });
@@ -468,15 +291,19 @@ export type TenantStatusResult =
 // can classify those cases separately instead of bucketing them together.
 export async function getTenantStatus({
   tenantId,
+  signal,
 }: {
   tenantId: string;
+  /** Aborts the backoffice request. The caller owns the deadline. */
+  signal?: AbortSignal;
 }): Promise<TenantStatusResult> {
   try {
     const partnerId = process.env.AURORA_PARTNER_ID!;
     const client = createBackofficeClient();
 
-    const { data, error, response } = await getTenant({
+    const { data, error, response } = await getTenantV2({
       client,
+      signal,
       path: { partnerId, tenantId },
       throwOnError: false,
     });
@@ -524,25 +351,59 @@ export async function updateTenantStatus({
   tenantId,
   status,
   allowMissing,
+  signal,
 }: {
   tenantId: string;
   status: ModelsTenantStatus;
-  /** Treat a 404 as success — for callers whose goal is the tenant being gone. */
+  /** Treat a 404 or 410 as success — for callers whose goal is the tenant being gone. */
   allowMissing?: boolean;
+  /** Aborts the backoffice request. The caller owns the deadline. */
+  signal?: AbortSignal;
 }): Promise<void> {
   const partnerId = process.env.AURORA_PARTNER_ID!;
   const client = createBackofficeClient();
 
   const { error, response } = await setTenantStatus({
     client,
+    signal,
     path: { partnerId, tenantId },
     body: { status },
     throwOnError: false,
   });
 
   if (error) {
-    if (allowMissing && response?.status === 404) return;
+    // 410: Aurora has started deleting the tenant, which also leaves it gone.
+    if (allowMissing && (response?.status === 404 || response?.status === 410)) return;
     throw new Error(`Aurora status update failed for tenant ${tenantId}`, {
+      cause: error,
+    });
+  }
+}
+
+// Aurora tears the tenant down asynchronously and the call is idempotent:
+// repeating it resumes an interrupted teardown. A 404 means the tenant is
+// already gone, which is the goal.
+export async function deleteAuroraTenant({
+  tenantId,
+  signal,
+}: {
+  tenantId: string;
+  /** Aborts the backoffice request. The caller owns the deadline. */
+  signal?: AbortSignal;
+}): Promise<void> {
+  const partnerId = process.env.AURORA_PARTNER_ID!;
+  const client = createBackofficeClient();
+
+  const { error, response } = await deleteTenant({
+    client,
+    signal,
+    path: { partnerId, tenantId },
+    throwOnError: false,
+  });
+
+  if (error) {
+    if (response?.status === 404) return;
+    throw new Error(`Aurora tenant deletion failed for tenant ${tenantId}`, {
       cause: error,
     });
   }

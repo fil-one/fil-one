@@ -8,16 +8,20 @@ export interface ConnectionProvider {
   label: string;
   /** URL where users can manage their profile at this provider */
   profileUrl: string;
+  /** The host this provider serves profile pictures from */
+  pictureHost: string;
 }
 
 const providers: Record<string, ConnectionProvider> = {
   'google-oauth2': {
     label: 'Google',
     profileUrl: 'https://myaccount.google.com/personal-info',
+    pictureHost: 'lh3.googleusercontent.com',
   },
   github: {
     label: 'GitHub',
     profileUrl: 'https://github.com/settings/profile',
+    pictureHost: 'avatars.githubusercontent.com',
   },
 };
 

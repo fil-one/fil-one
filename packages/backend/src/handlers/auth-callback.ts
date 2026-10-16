@@ -40,7 +40,7 @@ async function baseHandler(
   }
 
   // Validate OAuth state parameter to prevent CSRF on the login flow
-  const cookies = parseCookies(event.cookies);
+  const cookies = parseCookies(event);
   const storedState = cookies[OAUTH_STATE_COOKIE];
   if (!state || !storedState || state !== storedState) {
     console.error('OAuth state mismatch', { state, storedState: !!storedState });

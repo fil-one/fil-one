@@ -16,7 +16,6 @@ import {
   assertRegionSyncSucceeded,
   getProvisionedRegions,
   syncTenantStatusInProvisionedRegions,
-  WEBHOOK_STATUS_SYNC_RETRY,
   type RegionSyncOutcome,
 } from './region-helpers.ts';
 import { fakeOrchestrator, fakeOrgProfile } from '../test/fake-orchestrator.ts';
@@ -196,23 +195,6 @@ describe('syncTenantStatusInProvisionedRegions', () => {
     const result = await promise;
 
     expect(result).toEqual([{ orchestratorId: 'fth', tenantId: 'fth:org-1', outcome: 'updated' }]);
-  });
-
-  it('honors a tighter retry override (1 initial + 1 retry)', async () => {
-    vi.useFakeTimers();
-    const aurora = fakeOrchestrator('aurora');
-    aurora.getTenantStatus.mockResolvedValue({ kind: 'error', cause: new Error('outage') });
-    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
-
-    const promise = syncTenantStatusInProvisionedRegions(
-      'org-1',
-      'write-locked',
-      WEBHOOK_STATUS_SYNC_RETRY,
-    );
-    await vi.runAllTimersAsync();
-    await promise;
-
-    expect(aurora.getTenantStatus).toHaveBeenCalledTimes(2);
   });
 });
 

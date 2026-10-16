@@ -56,10 +56,13 @@ import type { FthManagementClient } from './fth-management-client.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 
 import { createFthOrchestrator } from './fth-orchestrator.ts';
-import type { IssueAccessKeyOpts, ServiceOrchestrator } from '../service-orchestrator.ts';
+import type { IssueAccessKeyOpts, LegacyServiceOrchestrator } from '../service-orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
+// The caller's deadline. Never aborted here: these tests check it is forwarded,
+// not what happens when it fires.
+const signal = new AbortController().signal;
 
 function profileItem(attrs: Record<string, string>) {
   return Object.fromEntries(Object.entries(attrs).map(([k, v]) => [k, { S: v }]));
@@ -67,7 +70,7 @@ function profileItem(attrs: Record<string, string>) {
 
 // A fresh instance per test replaces a cache reset: the console storage-user
 // cache lives on the instance.
-let fthOrchestrator: ServiceOrchestrator;
+let fthOrchestrator: LegacyServiceOrchestrator;
 
 beforeEach(() => {
   ssmMock.reset();
@@ -94,10 +97,10 @@ describe('fthOrchestrator.ensureTenantReady', () => {
   it('delegates to ensureTenantReady from fth-tenant-setup', async () => {
     mockEnsureFthTenantReady.mockResolvedValue(fthClientId);
 
-    const result = await fthOrchestrator.ensureTenantReady(orgId);
+    const result = await fthOrchestrator.ensureTenantReady(orgId, { signal });
 
     expect(result).toBe(fthClientId);
-    expect(mockEnsureFthTenantReady).toHaveBeenCalledWith(mockFthClient, orgId);
+    expect(mockEnsureFthTenantReady).toHaveBeenCalledWith(mockFthClient, orgId, { signal });
   });
 
   it('returns null when ensureTenantReady from fth-tenant-setup returns null', async () => {
@@ -132,9 +135,9 @@ describe('fthOrchestrator.updateTenantStatus', () => {
     it(`passes "${status}" straight through to updateClientStatus`, async () => {
       mockUpdateClientStatus.mockResolvedValue(undefined);
 
-      await fthOrchestrator.updateTenantStatus(fthClientId, status);
+      await fthOrchestrator.updateTenantStatus(fthClientId, status, { signal });
 
-      expect(mockUpdateClientStatus).toHaveBeenCalledWith(fthClientId, { status });
+      expect(mockUpdateClientStatus).toHaveBeenCalledWith(fthClientId, { status }, { signal });
     });
   }
 
@@ -162,10 +165,14 @@ describe('fthOrchestrator.deleteTenant', () => {
     mockUpdateClientStatus.mockResolvedValue(undefined);
     mockFthClient.deleteClient.mockResolvedValue(undefined);
 
-    await fthOrchestrator.deleteTenant(fthClientId);
+    await fthOrchestrator.deleteTenant(fthClientId, { signal });
 
-    expect(mockUpdateClientStatus).toHaveBeenCalledWith(fthClientId, { status: 'disabled' });
-    expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId);
+    expect(mockUpdateClientStatus).toHaveBeenCalledWith(
+      fthClientId,
+      { status: 'disabled' },
+      { signal },
+    );
+    expect(mockFthClient.deleteClient).toHaveBeenCalledWith(fthClientId, { signal });
     expect(mockUpdateClientStatus.mock.invocationCallOrder[0]!).toBeLessThan(
       mockFthClient.deleteClient.mock.invocationCallOrder[0]!,
     );
@@ -263,10 +270,10 @@ describe('fthOrchestrator.getTenantStatus', () => {
   it('returns the status straight through from getClient', async () => {
     mockGetClient.mockResolvedValue({ id: fthClientId, status: 'write-locked' });
 
-    const result = await fthOrchestrator.getTenantStatus(fthClientId);
+    const result = await fthOrchestrator.getTenantStatus(fthClientId, { signal });
 
     expect(result).toEqual({ kind: 'ok', status: 'write-locked' });
-    expect(mockGetClient).toHaveBeenCalledWith(fthClientId);
+    expect(mockGetClient).toHaveBeenCalledWith(fthClientId, { signal });
   });
 
   it('returns status undefined when FTH reports an unmodeled status', async () => {
@@ -593,18 +600,23 @@ describe('fthOrchestrator.issueAccessKey', () => {
       createdAt: '2026-03-10T00:00:00Z',
     });
 
-    const result = await fthOrchestrator.issueAccessKey(fthClientId, {
-      keyName: baseOpts.keyName,
-      permissions: [...baseOpts.permissions],
-    });
+    const result = await fthOrchestrator.issueAccessKey(
+      fthClientId,
+      {
+        keyName: baseOpts.keyName,
+        permissions: [...baseOpts.permissions],
+      },
+      { signal },
+    );
 
     expect(result).toEqual({
+      type: 'service',
       id: 'AKIAFTH',
       accessKeyId: 'AKIAFTH',
       accessKeySecret: 'sk-secret',
       createdAt: '2026-03-10T00:00:00Z',
     });
-    expect(mockFthClient.listStorageUsers).toHaveBeenCalledWith(fthClientId);
+    expect(mockFthClient.listStorageUsers).toHaveBeenCalledWith(fthClientId, { signal });
     expect(mockFthClient.createAccessKey).toHaveBeenCalledWith(
       fthClientId,
       '7',
@@ -614,6 +626,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
         buckets: [],
         expiresAt: null,
       }),
+      { signal },
     );
   });
 
@@ -629,10 +642,14 @@ describe('fthOrchestrator.issueAccessKey', () => {
       createdAt: '2026-03-10T00:00:00Z',
     });
 
-    await fthOrchestrator.issueAccessKey(fthClientId, {
-      keyName: baseOpts.keyName,
-      permissions: ['read', 'write', 'CreateBucket', 'DeleteBucket'],
-    });
+    await fthOrchestrator.issueAccessKey(
+      fthClientId,
+      {
+        keyName: baseOpts.keyName,
+        permissions: ['read', 'write', 'CreateBucket', 'DeleteBucket'],
+      },
+      { signal },
+    );
 
     expect(mockFthClient.createAccessKey).toHaveBeenCalledWith(
       fthClientId,
@@ -644,6 +661,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
           's3:ListAllMyBuckets',
         ]),
       }),
+      { signal },
     );
   });
 
@@ -659,10 +677,14 @@ describe('fthOrchestrator.issueAccessKey', () => {
       createdAt: '2026-03-10T00:00:00Z',
     });
 
-    await fthOrchestrator.issueAccessKey(fthClientId, {
-      keyName: baseOpts.keyName,
-      permissions: ['GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
-    });
+    await fthOrchestrator.issueAccessKey(
+      fthClientId,
+      {
+        keyName: baseOpts.keyName,
+        permissions: ['GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
+      },
+      { signal },
+    );
 
     expect(mockFthClient.createAccessKey).toHaveBeenCalledWith(
       fthClientId,
@@ -673,6 +695,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
           's3:GetBucketObjectLockConfiguration',
         ]),
       }),
+      { signal },
     );
   });
 
@@ -1095,26 +1118,85 @@ describe('fthOrchestrator.getTenantUsageMetrics', () => {
   });
 
   it('calls getClientMetricsTimeseries with tenantId as clientRef and defaults interval to "1d"', async () => {
-    await fthOrchestrator.getTenantUsageMetrics(fthClientId, { from: FROM, to: TO });
+    await fthOrchestrator.getTenantUsageMetrics(fthClientId, { from: FROM, to: TO }, { signal });
 
-    expect(mockGetClientMetricsTimeseries).toHaveBeenCalledWith(fthClientId, {
-      from: FROM,
-      to: TO,
-      interval: '1d',
-    });
+    expect(mockGetClientMetricsTimeseries).toHaveBeenCalledWith(
+      fthClientId,
+      { from: FROM, to: TO, interval: '1d' },
+      { signal },
+    );
   });
 
   it('forwards a custom interval when provided', async () => {
-    await fthOrchestrator.getTenantUsageMetrics(fthClientId, {
-      from: FROM,
-      to: TO,
-      interval: '24h',
-    });
+    await fthOrchestrator.getTenantUsageMetrics(
+      fthClientId,
+      { from: FROM, to: TO, interval: '24h' },
+      { signal },
+    );
 
     expect(mockGetClientMetricsTimeseries).toHaveBeenCalledWith(
       fthClientId,
       expect.objectContaining({ interval: '24h' }),
+      { signal },
     );
+  });
+
+  it('splits a 1d range over 90 days at UTC midnight and keeps the later chunk on a shared day', async () => {
+    mockGetClientMetricsTimeseries
+      .mockResolvedValueOnce({
+        points: [
+          { ts: '2026-01-01T00:00:00Z', usage_avg_bytes: 1, object_count_avg: 1, egress_bytes: 10 },
+          // The boundary day as a zero-length sliver of the first chunk.
+          { ts: '2026-04-01T00:00:00Z', usage_avg_bytes: 0, object_count_avg: 0, egress_bytes: 0 },
+        ],
+      })
+      .mockResolvedValueOnce({
+        points: [
+          { ts: '2026-04-01T00:00:00Z', usage_avg_bytes: 2, object_count_avg: 2, egress_bytes: 20 },
+          { ts: '2026-05-30T00:00:00Z', usage_avg_bytes: 3, object_count_avg: 3, egress_bytes: 30 },
+        ],
+      });
+
+    const result = await fthOrchestrator.getTenantUsageMetrics(
+      fthClientId,
+      { from: '2026-01-01T07:02:05.000Z', to: '2026-05-31T00:00:00.000Z' },
+      { signal },
+    );
+
+    expect(mockGetClientMetricsTimeseries.mock.calls).toEqual([
+      [
+        fthClientId,
+        { from: '2026-01-01T07:02:05.000Z', to: '2026-04-01T00:00:00.000Z', interval: '1d' },
+        { signal },
+      ],
+      [
+        fthClientId,
+        { from: '2026-04-01T00:00:00.000Z', to: '2026-05-31T00:00:00.000Z', interval: '1d' },
+        { signal },
+      ],
+    ]);
+    expect(result).toEqual({
+      storage: [
+        { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 1, objectCount: 1 },
+        { timestamp: '2026-04-01T00:00:00.000Z', bytesUsed: 2, objectCount: 2 },
+        { timestamp: '2026-05-30T00:00:00.000Z', bytesUsed: 3, objectCount: 3 },
+      ],
+      egress: [
+        { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 10 },
+        { timestamp: '2026-04-01T00:00:00.000Z', bytesUsed: 20 },
+        { timestamp: '2026-05-30T00:00:00.000Z', bytesUsed: 30 },
+      ],
+    });
+  });
+
+  it('does not split ranges for intervals other than 1d', async () => {
+    const from = '2026-01-01T00:00:00.000Z';
+    const to = '2026-05-31T00:00:00.000Z';
+    await fthOrchestrator.getTenantUsageMetrics(fthClientId, { from, to, interval: '1h' });
+
+    expect(mockGetClientMetricsTimeseries.mock.calls).toEqual([
+      [fthClientId, { from, to, interval: '1h' }, undefined],
+    ]);
   });
 
   it('maps points to normalized storage and egress shapes', async () => {
@@ -1222,7 +1304,7 @@ describe('fthOrchestrator.getTenantInfo', () => {
       createdAt: '2026-01-01T00:00:00Z',
     });
 
-    const result = await fthOrchestrator.getTenantInfo(fthClientId);
+    const result = await fthOrchestrator.getTenantInfo(fthClientId, { signal });
 
     expect(result).toEqual({
       bucketCount: 4,
@@ -1231,7 +1313,7 @@ describe('fthOrchestrator.getTenantInfo', () => {
       accessKeyLimit: 300,
       status: 'write-locked',
     });
-    expect(mockGetClient).toHaveBeenCalledWith(fthClientId);
+    expect(mockGetClient).toHaveBeenCalledWith(fthClientId, { signal });
   });
 
   it.each([
@@ -1313,12 +1395,14 @@ describe('fthOrchestrator.getBucketUsageMetrics', () => {
       },
     });
 
-    const result = await fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS);
+    const result = await fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS, {
+      signal,
+    });
 
     expect(result).toEqual([
       { timestamp: '2026-01-15T00:00:00.000Z', bytesUsed: 1500, objectCount: 5 },
     ]);
-    expect(mockGetClientMetricsCurrent).toHaveBeenCalledWith(fthClientId);
+    expect(mockGetClientMetricsCurrent).toHaveBeenCalledWith(fthClientId, { signal });
   });
 
   it('returns an empty array when the bucket is absent from the snapshot', async () => {
@@ -1338,5 +1422,149 @@ describe('fthOrchestrator.getBucketUsageMetrics', () => {
     const result = await fthOrchestrator.getBucketUsageMetrics(fthClientId, 'my-bucket', OPTS);
 
     expect(result).toEqual([]);
+  });
+});
+
+describe('fthOrchestrator signal forwarding', () => {
+  // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
+  // but the recorded sinon call carries every argument `send` received.
+  function sendOptionsOf(calls: Array<{ args: unknown[] }>): unknown {
+    return calls[0].args[1];
+  }
+
+  beforeEach(() => {
+    ssmMock.on(GetParameterCommand).resolves({
+      Parameter: { Value: JSON.stringify({ accessKeyId: 'AK', secretAccessKey: 'SK' }) },
+    });
+  });
+
+  const credentialLookups = {
+    getS3ClientContext: (signal: AbortSignal) =>
+      fthOrchestrator.getS3ClientContext(fthClientId, { signal }),
+    createBucket: (signal: AbortSignal) =>
+      fthOrchestrator.createBucket(fthClientId, { bucketName: 'b' }, { signal }),
+    deleteBucket: (signal: AbortSignal) =>
+      fthOrchestrator.deleteBucket(fthClientId, 'b', { signal }),
+    listBuckets: (signal: AbortSignal) =>
+      fthOrchestrator.listBuckets(fthClientId, undefined, { signal }),
+    getBucket: (signal: AbortSignal) =>
+      fthOrchestrator.getBucket(fthClientId, 'b', undefined, { signal }),
+  };
+
+  for (const [method, invoke] of Object.entries(credentialLookups)) {
+    it(`${method} forwards the signal to a cold SSM credential lookup`, async () => {
+      s3Mock.on(CreateBucketCommand).resolves({});
+      s3Mock.on(DeleteBucketCommand).resolves({});
+      s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
+
+      await invoke(signal);
+
+      expect(sendOptionsOf(ssmMock.commandCalls(GetParameterCommand))).toEqual({
+        abortSignal: signal,
+      });
+    });
+
+    it(`${method} propagates cancellation while SSM is pending`, async () => {
+      const controller = new AbortController();
+      const reason = new Error('Caller cancelled the credential lookup');
+      ssmMock.reset();
+      ssmMock.send.callsFake((...args: unknown[]) => {
+        const abortSignal = (args[1] as { abortSignal?: AbortSignal })?.abortSignal;
+        return new Promise<never>((_resolve, reject) => {
+          abortSignal?.addEventListener('abort', () => reject(abortSignal.reason), { once: true });
+          controller.abort(reason);
+        });
+      });
+
+      await expect(invoke(controller.signal)).rejects.toBe(reason);
+    });
+  }
+
+  it('listBuckets forwards the signal to S3 ListBuckets', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
+
+    await fthOrchestrator.listBuckets(fthClientId, undefined, { signal });
+
+    expect(sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand))).toEqual({
+      abortSignal: signal,
+    });
+  });
+
+  it('deleteBucket forwards the signal to S3 DeleteBucket', async () => {
+    s3Mock.on(DeleteBucketCommand).resolves({});
+
+    await fthOrchestrator.deleteBucket(fthClientId, 'b', { signal });
+
+    expect(sendOptionsOf(s3Mock.commandCalls(DeleteBucketCommand))).toEqual({
+      abortSignal: signal,
+    });
+  });
+
+  it('getBucket forwards the signal to the list and both per-bucket reads', async () => {
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [{ Name: 'b', CreationDate: new Date('2026-01-01T00:00:00Z') }],
+    });
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
+
+    await fthOrchestrator.getBucket(fthClientId, 'b', undefined, { signal });
+
+    const sent = [
+      sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand)),
+      sendOptionsOf(s3Mock.commandCalls(GetBucketVersioningCommand)),
+      sendOptionsOf(s3Mock.commandCalls(GetObjectLockConfigurationCommand)),
+    ];
+    expect(sent).toEqual([
+      { abortSignal: signal },
+      { abortSignal: signal },
+      { abortSignal: signal },
+    ]);
+  });
+
+  it('createBucket forwards the signal to CreateBucket and both configuration calls', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    s3Mock.on(PutBucketVersioningCommand).resolves({});
+    s3Mock.on(PutObjectLockConfigurationCommand).resolves({});
+
+    await fthOrchestrator.createBucket(
+      fthClientId,
+      {
+        bucketName: 'b',
+        versioning: true,
+        lock: true,
+        retention: { enabled: true, mode: 'governance', duration: 1, durationType: 'd' },
+      },
+      { signal },
+    );
+
+    const sent = [
+      sendOptionsOf(s3Mock.commandCalls(CreateBucketCommand)),
+      sendOptionsOf(s3Mock.commandCalls(PutBucketVersioningCommand)),
+      sendOptionsOf(s3Mock.commandCalls(PutObjectLockConfigurationCommand)),
+    ];
+    expect(sent).toEqual([
+      { abortSignal: signal },
+      { abortSignal: signal },
+      { abortSignal: signal },
+    ]);
+  });
+
+  it('findAccessKeyByName forwards the signal to listAccessKeys', async () => {
+    mockFthClient.listAccessKeys.mockResolvedValue([]);
+
+    await fthOrchestrator.findAccessKeyByName(fthClientId, 'k', undefined, { signal });
+
+    expect(mockFthClient.listAccessKeys).toHaveBeenCalledWith(fthClientId, { signal });
+  });
+
+  it('deleteAccessKey forwards the signal next to the idempotency key', async () => {
+    mockFthClient.deleteAccessKey.mockResolvedValue(undefined);
+
+    await fthOrchestrator.deleteAccessKey(fthClientId, 'AKIA', { signal });
+
+    expect(mockFthClient.deleteAccessKey).toHaveBeenCalledWith(fthClientId, 'AKIA', {
+      idempotencyKey: 'delete-AKIA',
+      signal,
+    });
   });
 });

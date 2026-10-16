@@ -18,12 +18,13 @@ import {
   membershipRows,
   ownerCountItem,
 } from '../lib/membership-changes.ts';
+import { registerMemberPrincipal } from '../lib/member-principals.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
 import {
   OrgDeletingError,
   isGuardRejection,
   orgNotDeletingCheck,
-  resolveOrgName,
+  resolveOrgSummary,
 } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
@@ -121,6 +122,12 @@ export async function baseHandler(
       { invitation, userId, verifiedEmail, accepterOrgId },
     );
   }
+
+  // The member is in the org before they become a principal on each region
+  // serving the `iam` access model, so a refusal leaves no unaudited principal
+  // behind: the join stands, the answer is a 502, and the first key mint or
+  // policy write naming them registers the principal if the retry never comes.
+  if (!existing) await registerMemberPrincipal({ orgId: invitation.orgId, userId });
 
   await rememberVerifiedEmail(userId, verifiedEmail);
 
@@ -333,13 +340,17 @@ async function acceptedResponse({
   role: OrgRole;
   alreadyMember: boolean;
 }): Promise<APIGatewayProxyStructuredResultV2> {
+  // The console sets the active org from this response and reloads, so it
+  // needs the name (and logo, for the accepted panel's avatar) it is
+  // switching to, as well as the id.
+  const { name: orgName, logoUrl } = await resolveOrgSummary(invitation.orgId);
+
   return new ResponseBuilder()
     .status(200)
     .body<AcceptInvitationResponse>({
       orgId: invitation.orgId,
-      // The console sets the active org from this response and reloads, so it
-      // needs the name it is switching to as well as the id.
-      orgName: await resolveOrgName(invitation.orgId),
+      orgName,
+      ...(logoUrl ? { logoUrl } : {}),
       // A member who was already in the org keeps the role they hold: the
       // invitation is marked accepted, and accepting an invitation is not a way
       // to give somebody a role change nobody authorized.

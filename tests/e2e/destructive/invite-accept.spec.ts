@@ -109,15 +109,15 @@ test.describe('trial user joins a second organization', () => {
     // the new document is the one being asserted about.
     await page.locator('#accept-continue-button').click();
     await page.waitForURL((url) => url.pathname === '/dashboard');
-    await expect(page.getByTestId('user-profile')).toContainText(hostOrgName);
+    await expect(page.getByTestId('org-switcher-button')).toContainText(hostOrgName);
 
-    await page.goto('/organization');
+    await page.goto('/members');
     await expect(memberRow(page, hostUserId)).toBeVisible();
     await expect(memberRow(page, inviteeUserId)).toHaveAttribute('data-member-role', 'member');
 
     // The switcher exists only from the second membership onwards, which this
     // acceptance is what produced.
-    await page.getByTestId('user-profile').click();
+    await page.getByTestId('org-switcher-button').click();
     const switcher = page.getByTestId('org-switcher');
     await expect(switcher).toBeVisible();
     // The active org carries `aria-current`; the other button is the org to
@@ -126,11 +126,11 @@ test.describe('trial user joins a second organization', () => {
 
     // Switching loads the console's root too, so the same signal applies.
     await page.waitForURL((url) => url.pathname === '/dashboard');
-    await expect(page.getByTestId('user-profile')).toContainText(personalOrgName);
+    await expect(page.getByTestId('org-switcher-button')).toContainText(personalOrgName);
 
     // The rosters are different lists, not the same one re-rendered: the org the
     // invitee came from has nobody else in it.
-    await page.goto('/organization');
+    await page.goto('/members');
     await expect(memberRow(page, inviteeUserId)).toBeVisible();
     await expect(memberRow(page, hostUserId)).toHaveCount(0);
   });

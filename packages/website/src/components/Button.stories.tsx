@@ -3,6 +3,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { PlusIcon, TrashIcon, ArrowRightIcon } from '@phosphor-icons/react/dist/ssr';
 
 import { Button, type ButtonVariant, type ButtonSize } from './Button';
+import { Input, type InputSize } from './Input';
+import { Select } from './Select';
+import { SplitButton } from './SplitButton';
 
 const meta: Meta<typeof Button> = {
   title: 'Components/Button',
@@ -15,6 +18,7 @@ const meta: Meta<typeof Button> = {
     size: { control: 'select', options: ['sm', 'md', 'lg'] },
     iconPosition: { control: 'select', options: ['left', 'right'] },
     iconSize: { control: 'number' },
+    loading: { control: 'boolean' },
   },
 };
 
@@ -52,6 +56,10 @@ const labels: Record<ButtonVariant, string> = {
   tertiary: 'Learn more',
   destructive: 'Delete',
   warning: 'Upgrade',
+};
+
+export const Loading: Story = {
+  args: { variant: 'destructive', children: 'Delete bucket', loading: true },
 };
 
 export const AllVariants: Story = {
@@ -109,6 +117,15 @@ export const AllVariants: Story = {
                 </Button>
               ))}
             </div>
+
+            {/* Loading: the variant's colour stays, a spinner takes the icon's place */}
+            <div className="flex items-center gap-3">
+              {(['sm', 'md', 'lg'] as ButtonSize[]).map((size) => (
+                <Button key={size} variant={variant} size={size} loading>
+                  {labels[variant]}
+                </Button>
+              ))}
+            </div>
           </div>
         ),
       )}
@@ -140,6 +157,48 @@ export const LabelsNeverWrap: Story = {
           Generate access key
         </Button>
       </div>
+    </div>
+  ),
+};
+
+// Every control takes its height from `--control-height-*`, so a search field,
+// a filter and an action in one row share their top and bottom edges exactly.
+// Input and Select stop at `md`, so `lg` has no row here.
+export const AlignedWithFormControls: Story = {
+  render: () => (
+    <div className="flex flex-col gap-6 p-4">
+      {(['sm', 'md'] as InputSize[]).map((size) => (
+        <div key={size} className="flex flex-col gap-2">
+          <p className="text-xs font-medium uppercase tracking-wider text-zinc-400">{size}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1 basis-40">
+              <Input
+                aria-label="Search buckets"
+                placeholder="Search buckets"
+                inputSize={size}
+                onChange={() => {}}
+              />
+            </div>
+            <div className="w-36">
+              <Select aria-label="Region" selectSize={size} onChange={() => {}}>
+                <option value="eu-west-1">eu-west-1</option>
+              </Select>
+            </div>
+            <Button variant="ghost" size={size}>
+              Cancel
+            </Button>
+            <SplitButton
+              size={size}
+              label="Download"
+              onMainClick={() => {}}
+              items={[{ label: 'Download .env', onClick: () => {} }]}
+            />
+            <Button variant="primary" size={size} icon={PlusIcon}>
+              Create bucket
+            </Button>
+          </div>
+        </div>
+      ))}
     </div>
   ),
 };

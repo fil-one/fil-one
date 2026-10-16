@@ -38,6 +38,8 @@ export type RowActionsMenuProps = {
   /** Names the menu for the row it belongs to — "Actions for Ada Lovelace". */
   'aria-label': string;
   disabled?: boolean;
+  /** A handle on the trigger for tests, as `RowAction` carries for its item. */
+  testId?: string;
 };
 
 /**
@@ -58,6 +60,7 @@ export function RowActionsMenu({
   actions,
   'aria-label': ariaLabel,
   disabled = false,
+  testId,
 }: RowActionsMenuProps) {
   if (actions.length === 0) return null;
 
@@ -67,12 +70,17 @@ export function RowActionsMenu({
         as={IconButton}
         icon={DotsTrigger}
         aria-label={ariaLabel}
+        data-testid={testId}
         disabled={disabled}
         className="text-zinc-600 data-open:bg-zinc-100 data-open:text-zinc-900"
       />
       <MenuItems
         anchor="bottom end"
-        className="z-50 mt-1 min-w-48 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg focus:outline-none"
+        // Sized to match `BucketActionMenu` — the console's canonical
+        // dropdown size (DESIGN.md rule 4a). No outline on the panel: it holds
+        // focus while the arrow keys move between items, so the highlighted
+        // item is what shows a keyboard user where they are.
+        className="z-50 mt-1 min-w-36 rounded-lg border border-zinc-200 bg-white py-1 shadow-md outline-none"
       >
         {actions.map((action) => (
           <MenuItem key={action.label} disabled={action.disabled}>
@@ -82,17 +90,17 @@ export function RowActionsMenu({
               onClick={action.onSelect}
               disabled={action.disabled}
               className={clsx(
-                'flex w-full items-center gap-2 px-3 py-2 text-left text-sm whitespace-nowrap',
+                'flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs whitespace-nowrap',
                 // `data-focus` rather than `hover`: the menu moves focus with
                 // the arrow keys, and a hover-only highlight leaves a keyboard
                 // caller with no idea which item they are on.
                 action.destructive
                   ? 'text-red-600 data-focus:bg-red-50'
-                  : 'text-zinc-700 data-focus:bg-zinc-50',
+                  : 'text-zinc-700 data-focus:bg-zinc-100',
                 'disabled:cursor-not-allowed disabled:opacity-50',
               )}
             >
-              {action.icon && <Icon component={action.icon} size={14} />}
+              {action.icon && <Icon component={action.icon} size={13} />}
               {action.label}
             </button>
           </MenuItem>

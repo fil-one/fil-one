@@ -4,6 +4,8 @@ import type {
   GranularPermission,
   ObjectPermission,
 } from './api/access-keys.ts';
+import { getRegionAccessModel } from './constants.ts';
+import type { S3Region } from './constants.ts';
 import { permissionsForRole, roleHasPermission } from './permissions.ts';
 import type { Permission } from './permissions.ts';
 
@@ -118,35 +120,33 @@ export function excessKeyPermissions(
  *
  * The table's own keys are the membership test, so there is no second list to
  * keep in step with it. The own-property check keeps an inherited key such as
- * `'constructor'` from resolving to something that is not a permission —
- * `Object.hasOwn` semantics, spelled the ES2020 way because the console
- * compiles this file at that target.
+ * `'constructor'` from resolving to something that is not a permission.
  */
 function requirementFor(
   keyPermission: string,
   table: Record<string, Permission>,
 ): Permission | undefined {
-  return Object.prototype.hasOwnProperty.call(table, keyPermission)
-    ? table[keyPermission]
-    : undefined;
+  return Object.hasOwn(table, keyPermission) ? table[keyPermission] : undefined;
 }
 
 /**
- * What a key row records about the authority it carries.
+ * What a service key row records about the authority it carries.
  *
- * Both fields are optional because a row the console rebuilt after a vendor
- * 409 carries neither: the retry answers 409 with no secret, so the credential
- * was never handed to anyone and the console never learned what it holds.
+ * The permission fields are optional because a recovered row (see
+ * `ServiceAccessKey.permissions`) carries neither.
  */
-export interface AccessKeyPermissions {
+export interface ServiceKeyGrant {
   permissions?: readonly string[] | undefined;
   granularPermissions?: readonly string[] | undefined;
+  /** Where the key lives. On an `iam` region a service key needs `keys.create_service`. */
+  region?: S3Region | undefined;
 }
 
 /**
  * Why a role cannot keep a key, and therefore why the key is revoked.
  *
- * `role_cannot_mint`: the role holds no `keys.create`, so it can hold no key.
+ * `role_cannot_mint`: the role holds no `keys.create`, so it can hold no key,
+ * or the key is a service key and the role holds no `keys.create_service`.
  * `permissions_unrecorded`: the row records no permission set.
  * `exceeds_role`: the role could not grant everything the row carries.
  *
@@ -172,8 +172,9 @@ export type KeyRetentionResult =
   | { retained: false; reason: 'exceeds_role'; excess: ExcessKeyPermission[] };
 
 /**
- * Whether a key its holder already has may be kept once that holder moves to
- * `role`.
+ * Whether a service key its holder already has may be kept once that holder
+ * moves to `role`. Principal-bound keys are never revoked on a role change, so
+ * callers do not ask about them.
  *
  * One test, and the same one {@link excessKeyPermissions} applies at creation:
  * a key is kept when its holder could mint it today. A role without
@@ -183,14 +184,22 @@ export type KeyRetentionResult =
  * delete.
  *
  * A row recording no permission set cannot be placed inside the new role, so it
- * goes. Bucket scope is never compared: it is the creator's choice at mint time
- * and no role caps it.
+ * goes. A service key on an `iam` region is kept only by a role that holds
+ * `keys.create_service`, since the bucket policies never see it. Bucket scope is
+ * never compared: it is the creator's choice at mint time and no role caps it.
  *
  * The caller decides whose keys to ask about. A row with no `createdBy` belongs
  * to nobody the console can name and is outside this rule entirely.
  */
-export function canRetainAccessKey(role: string, key: AccessKeyPermissions): KeyRetentionResult {
+export function canRetainAccessKey(role: string, key: ServiceKeyGrant): KeyRetentionResult {
   if (!roleHasPermission(role, 'keys.create')) {
+    return { retained: false, reason: 'role_cannot_mint' };
+  }
+  if (
+    key.region &&
+    getRegionAccessModel(key.region) === 'iam' &&
+    !roleHasPermission(role, 'keys.create_service')
+  ) {
     return { retained: false, reason: 'role_cannot_mint' };
   }
   if (!key.permissions) return { retained: false, reason: 'permissions_unrecorded' };

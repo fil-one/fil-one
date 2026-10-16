@@ -15,6 +15,7 @@ export {
   isSupportedRegion,
   supportsBucketManagement,
   getRegionAccessModel,
+  supportsIamMethods,
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
@@ -37,7 +38,7 @@ export {
   senderAddress,
 } from './constants.ts';
 export type { AccessModel, UsageLimits, StageLike, S3RegionLike } from './constants.ts';
-export { formatBytes, formatBytesShort } from './formatBytes.ts';
+export { formatBytes, formatBytesShort, bytesAxisFormatter } from './formatBytes.ts';
 export { UUID_PATTERN, isUuid } from './uuid.ts';
 export type {
   MeResponse,
@@ -46,10 +47,18 @@ export type {
   PasskeyEnrollment,
   UpdateProfileRequest,
   UpdateProfileResponse,
+  PresignAvatarRequest,
+  PresignAvatarResponse,
   RegenerateRecoveryCodeResponse,
   StepUpRequiredResponse,
 } from './api/me.ts';
-export { PASSKEY_PER_USER_LIMIT, UpdateProfileSchema } from './api/me.ts';
+export {
+  PASSKEY_PER_USER_LIMIT,
+  UpdateProfileSchema,
+  AVATAR_CONTENT_TYPES,
+  AVATAR_MAX_BYTES,
+  PresignAvatarSchema,
+} from './api/me.ts';
 
 export type { PreferencesResponse, UpdatePreferencesRequest } from './api/preferences.ts';
 export { UpdatePreferencesSchema } from './api/preferences.ts';
@@ -61,12 +70,25 @@ export {
   isOrgRole,
   OrgNameSchema,
   UpdateOrgSchema,
+  CreateOrgSchema,
+  PresignOrgLogoSchema,
   ORG_NAME_MIN_LENGTH,
   ORG_NAME_MAX_LENGTH,
   ORG_NAME_PATTERN,
   ORG_NAME_DISALLOWED_CHARS,
+  ORG_LOGO_CONTENT_TYPES,
+  ORG_LOGO_MAX_BYTES,
+  MAX_OWNED_ORGS,
 } from './api/org.ts';
-export type { OrgMembershipSource, UpdateOrgRequest, UpdateOrgResponse } from './api/org.ts';
+export type {
+  OrgMembershipSource,
+  UpdateOrgRequest,
+  UpdateOrgResponse,
+  CreateOrgRequest,
+  CreateOrgResponse,
+  PresignOrgLogoRequest,
+  PresignOrgLogoResponse,
+} from './api/org.ts';
 
 export {
   INVITATION_STATUSES,
@@ -153,6 +175,8 @@ export type {
   AuditPhaseFields,
   AuditSinglePhase,
   AuditSubject,
+  BucketPolicyChangeTrigger,
+  BucketPolicyEventDetails,
   CommittableAuditEvent,
   StandaloneAuditEvent,
   TwoPhaseAuditEvent,
@@ -183,7 +207,7 @@ export type {
   ExcessKeyPermission,
   AccessKeyRevocationReason,
   KeyRetentionResult,
-  AccessKeyPermissions,
+  ServiceKeyGrant,
 } from './access-key-permissions.ts';
 
 export { ROUTE_MANIFEST } from './route-manifest.ts';
@@ -195,6 +219,46 @@ export type {
 } from './route-manifest.ts';
 export { ApiErrorCode } from './api/coreInterfaces.ts';
 export type { ErrorResponse } from './api/coreInterfaces.ts';
+
+export {
+  POLICY_ACTIONS,
+  POLICY_ACTION_WILDCARD,
+  POLICY_ACTION_GROUPS,
+  POLICY_ACTION_GROUP_LABELS,
+  POLICY_ACTION_LABELS,
+  POLICY_EFFECTS,
+  POLICY_SID_MAX_LENGTH,
+  POLICY_WILDCARD_PRINCIPAL,
+  RETENTION_WRITE_ACTIONS,
+  CREATOR_ACTIONS,
+  BucketPolicySchema,
+  PolicyStatementSchema,
+  PutBucketPolicyRequestSchema,
+  POLICY_VERSION,
+  buildStatement,
+  fromPrincipalArn,
+  getCreatorBucketPolicy,
+  getEffectiveActions,
+  getNamedPrincipals,
+  getPolicyActionsInGroup,
+  getPrincipalIds,
+  getStatementResources,
+  hasNewRetentionGrants,
+  toPolicyPrincipal,
+  toPrincipalArn,
+} from './api/bucket-policies.ts';
+export type {
+  BucketPolicy,
+  GetBucketPolicyResponse,
+  MemberBucketAccess,
+  PolicyAction,
+  PolicyActionGroup,
+  PolicyActionOrWildcard,
+  PolicyEffect,
+  PolicyPrincipal,
+  PolicyStatement,
+  PutBucketPolicyRequest,
+} from './api/bucket-policies.ts';
 export {
   DELETION_CODE_LENGTH,
   DELETION_CODE_TTL_MINUTES,
@@ -209,6 +273,7 @@ export type {
 
 export type {
   Bucket,
+  BucketDetails,
   ListBucketsResponse,
   ListBucketsQuery,
   BucketSortKey,
@@ -312,6 +377,7 @@ export {
   RESERVED_KEY_NAME_PREFIX,
   isReservedKeyName,
   CreateAccessKeySchema,
+  CreatePrincipalAccessKeySchema,
 } from './api/access-keys.ts';
 export type {
   AccessKeyStatus,
@@ -322,11 +388,14 @@ export type {
   BucketInfoPermission,
   GranularPermission,
   AccessKey,
+  ServiceAccessKey,
+  PrincipalAccessKey,
   ListAccessKeysResponse,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   RotateAccessKeyResponse,
   DeleteAccessKeyRequest,
+  CreatePrincipalAccessKeyRequest,
 } from './api/access-keys.ts';
 
 export {
@@ -350,6 +419,7 @@ export { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './api/dashboard.
 
 export type {
   UsageDataPoint,
+  UsageTrendsPeriod,
   UsageTrendsRequest,
   UsageTrendsResponse,
   BucketActivity,

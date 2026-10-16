@@ -5,13 +5,47 @@ export interface UsageDataPoint {
   value: number;
 }
 
+/**
+ * Windows the trend endpoint answers for.
+ *
+ * `24h` samples hourly; the others sample daily. Anything else falls back to
+ * `7d` rather than erroring, so an old client keeps working.
+ */
+export type UsageTrendsPeriod = '24h' | '7d' | '30d';
+
 export interface UsageTrendsRequest {
-  period: '7d' | '30d';
+  period: UsageTrendsPeriod;
 }
 
 export interface UsageTrendsResponse {
+  /** Bytes held at the close of each bucket. A stock: read the last point. */
   storage: UsageDataPoint[];
+  /**
+   * Objects held at the close of each bucket. A stock, like `storage`.
+   *
+   * Not charted on the dashboard: an object count maps to neither the bill nor
+   * a limit, and the current figure is already a stat card there. Kept in the
+   * response for the usage page (FIL-1099), since the storage query returns it
+   * at no extra cost.
+   */
   objects: UsageDataPoint[];
+  /**
+   * Bytes served during each bucket. A flow: sum the points for a window
+   * total, and never carry a value forward across a gap.
+   */
+  egress: UsageDataPoint[];
+  /**
+   * Whether every provisioned region answered this request.
+   *
+   * The series above are always gap-filled to the full window, zeros
+   * included, whether or not the underlying metrics fetch succeeded. Without
+   * this flag a region outage and a genuinely empty account are the same
+   * all-zero shape, and the console would tell a returning customer to
+   * "upload your first object" while the pipeline that would have told it
+   * otherwise was down. `false` means at least one region's fetch failed, so
+   * the zeros above may understate real usage.
+   */
+  complete: boolean;
 }
 
 // ---------------------------------------------------------------------------
