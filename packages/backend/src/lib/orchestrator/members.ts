@@ -45,7 +45,13 @@ function toPrincipalError(
         extractApiMessage(cause) ?? 'The storage system refused the principal id.',
         { cause },
       );
+    // The storage system committed nothing, and the same request may be sent
+    // again: a 5xx, or no answer at all (the request never reached it).
     case 500:
+    case 502:
+    case 503:
+    case 504:
+    case undefined:
       return new PolicyPublishError({ cause });
     default:
       return new Error(fallback, { cause });
@@ -118,6 +124,10 @@ export async function listPrincipalPolicies(
     path: { tenantId, principalId: userId },
     throwOnError: false,
   });
+  if (isUnknownPrincipal(result)) {
+    warnUnknownPrincipal(orchestratorId, tenantId, userId);
+    return [];
+  }
   if (result.error || !result.data) {
     throw toPrincipalError(
       result,
@@ -142,6 +152,10 @@ export async function resolvePrincipalAccess(
     path: { tenantId, principalId: userId },
     throwOnError: false,
   });
+  if (isUnknownPrincipal(result)) {
+    warnUnknownPrincipal(orchestratorId, tenantId, userId);
+    return [];
+  }
   if (result.error || !result.data) {
     throw toPrincipalError(
       result,
@@ -153,4 +167,15 @@ export async function resolvePrincipalAccess(
     bucketName: bucket.name,
     actions: bucket.actions as MemberBucketAccess['actions'],
   }));
+}
+
+// A principal the storage system does not know (never registered, or removed)
+// is named in no policy and reaches no bucket, so the reads answer that rather
+// than failing the region.
+function isUnknownPrincipal(result: SdkResult<unknown>): boolean {
+  return result.response?.status === 404;
+}
+
+function warnUnknownPrincipal(orchestratorId: string, tenantId: string, userId: string): void {
+  console.warn(`[${orchestratorId}] Principal "${userId}" is not known to tenant ${tenantId}`);
 }

@@ -1425,6 +1425,8 @@ export default $config({
       // than from the request, since the link goes to somebody else's inbox.
       // OrgLogoBucketName, to check the joined org's logo is one of its uploads.
       'accept-invitation': {
+        // Registers the new member as a principal on each ready iam region.
+        extraEnv: orchestratorEnv,
         extraLink: [orgLogoBucketName],
       },
       'create-invitation': {

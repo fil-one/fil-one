@@ -319,7 +319,7 @@ export interface MembershipListing {
  * people; a page that would need more than this is a product decision (paging,
  * search) rather than something to discover by timing out.
  */
-const MAX_MEMBERS = 500;
+export const MAX_MEMBERS = 500;
 
 /**
  * Every member of an org, from the canonical rows. One Query on the org's

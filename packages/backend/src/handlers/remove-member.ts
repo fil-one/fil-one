@@ -9,6 +9,7 @@ import { AuditSubjects, auditPut, userActor } from '../lib/audit.ts';
 import { prepareFloorOrg } from '../lib/account-creation.ts';
 import type { FloorOrgPreparation } from '../lib/account-creation.ts';
 import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
+import { removeMemberPrincipal } from '../lib/member-principals.ts';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
 import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
 import { requireManageableMember } from '../lib/manageable-member.ts';
@@ -172,9 +173,16 @@ export async function baseHandler(
     lastMembership,
   });
 
-  const orgProfile = await getOrgProfile(orgId);
+  const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   const { keysToRevoke, fence } = await reviewKeysForRoleChange(orgId, targetUserId, NO_ROLE);
   const changedBy = actorEmail ?? userId;
+
+  // On an `iam` region the principal goes first, taking its keys and every
+  // statement naming it with it at the storage system. A region that refuses
+  // throws, which leaves the member in the org like a vendor refusing a key
+  // below: a re-invited member keeps the same user id, and statements left
+  // behind would hand their old access back on the new invitation.
+  await removeMemberPrincipal({ orgProfile, userId: targetUserId });
 
   const committed = await commitAfterRevokingKeys({
     items,

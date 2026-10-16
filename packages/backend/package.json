@@ -25,6 +25,7 @@
     "@middy/http-header-normalizer": "^7.9.2",
     "disposable-domains": "^2.0.1",
     "jose": "^6.2.2",
+    "p-map": "^7.1.1",
     "p-retry": "^8.0.0",
     "psl": "^1.15.0",
     "quick-lru": "^7.3.0",

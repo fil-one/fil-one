@@ -23,6 +23,7 @@ import {
 } from './errors.ts';
 import type { PolicyPrecondition } from './bucket-policy-orchestrator.ts';
 import { getOrgProfile, isOrgDeleting } from './org-profile.ts';
+import { listMembers } from './org-membership.ts';
 import { getRequestHeader } from './request-headers.ts';
 import {
   accountDeletedResponse,
@@ -202,4 +203,24 @@ export function toPolicyErrorResponse(err: unknown): APIGatewayProxyStructuredRe
 export function countNamedPrincipals(policy: BucketPolicy): number | undefined {
   const count = new Set(getNamedPrincipals(policy)).size;
   return count > 0 ? count : undefined;
+}
+
+/**
+ * Registers every current member the document names as a principal before the
+ * write, so a member the storage system has not met yet (one who joined while
+ * tenant setup ran, or whose registration was refused once) does not fail it.
+ * A removed member is left alone: the document may still name them, and the
+ * storage system answers that write as it sees fit.
+ */
+export async function syncNamedMembers(
+  orchestrator: ServiceOrchestrator,
+  tenantId: string,
+  orgId: string,
+  policy: BucketPolicy,
+): Promise<void> {
+  const named = new Set(getNamedPrincipals(policy));
+  if (named.size === 0) return;
+  for (const { userId } of await listMembers(orgId)) {
+    if (named.has(userId)) await orchestrator.syncMember(tenantId, userId);
+  }
 }

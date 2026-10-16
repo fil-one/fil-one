@@ -115,7 +115,6 @@ export type {
   ListMembersResponse,
   MemberSummary,
   AccessKeySummary,
-  PolicySyncReport,
   RemoveMemberResponse,
   RoleChangePreviewResponse,
   UpdateMemberRoleFailure,

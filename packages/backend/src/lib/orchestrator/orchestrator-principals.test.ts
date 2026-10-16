@@ -27,6 +27,8 @@ import { PolicyValidationError } from '../errors.ts';
 import { FilOneOrchestrator } from './orchestrator.ts';
 
 const ALICE = '00000000-0000-0000-0000-00000000000a';
+/** A principal the storage system does not know. */
+const GHOST = '00000000-0000-0000-0000-0000000000ee';
 
 const tenantId = '00000000-0000-0000-0000-000000000001';
 const policy: BucketPolicy = {
@@ -68,6 +70,34 @@ describe('principals', () => {
     );
   });
 
+  it('syncMember sends the PUT again after a 503 and succeeds', async () => {
+    mockPutPrincipal
+      .mockResolvedValueOnce(fail(503))
+      .mockResolvedValueOnce(ok({ principalId: ALICE }, 201));
+    await expect(orchestrator.syncMember(tenantId, ALICE)).resolves.toBeUndefined();
+    expect(mockPutPrincipal).toHaveBeenCalledTimes(2);
+  });
+
+  it('syncMember sends the PUT again when no answer came back', async () => {
+    mockPutPrincipal
+      .mockResolvedValueOnce({
+        data: undefined,
+        error: new Error('socket hang up'),
+        response: undefined,
+      })
+      .mockResolvedValueOnce(ok({ principalId: ALICE }, 201));
+    await expect(orchestrator.syncMember(tenantId, ALICE)).resolves.toBeUndefined();
+    expect(mockPutPrincipal).toHaveBeenCalledTimes(2);
+  });
+
+  it('syncMember does not send a refused PUT again', async () => {
+    mockPutPrincipal.mockResolvedValue(fail(422, { message: 'invalid principal id' }));
+    await expect(orchestrator.syncMember(tenantId, '*')).rejects.toBeInstanceOf(
+      PolicyValidationError,
+    );
+    expect(mockPutPrincipal).toHaveBeenCalledTimes(1);
+  });
+
   it('syncMember throws PolicyValidationError when the storage system answers 422', async () => {
     mockPutPrincipal.mockResolvedValue(fail(422, { message: 'invalid principal id' }));
     await expect(orchestrator.syncMember(tenantId, '*')).rejects.toBeInstanceOf(
@@ -104,4 +134,29 @@ describe('principals', () => {
       { bucketName: 'photos', actions: ['s3:GetObject'] },
     ]);
   });
+
+  it.each([
+    {
+      read: 'listBucketPoliciesForMember',
+      arrange: () => mockListPrincipalPolicies.mockResolvedValue(fail(404)),
+      call: () => orchestrator.listBucketPoliciesForMember(tenantId, GHOST),
+    },
+    {
+      read: 'resolveMemberAccess',
+      arrange: () => mockGetPrincipalAccess.mockResolvedValue(fail(404)),
+      call: () => orchestrator.resolveMemberAccess(tenantId, GHOST),
+    },
+  ])(
+    '$read answers nothing for a principal the storage system does not know',
+    async ({ arrange, call }) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      arrange();
+
+      try {
+        await expect(call()).resolves.toStrictEqual([]);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
 });

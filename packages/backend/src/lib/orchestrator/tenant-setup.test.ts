@@ -28,6 +28,16 @@ vi.mock('@filone/orchestrator-client', () => ({
   deleteTenantsByTenantId: (options: Record<string, unknown>) => mockDeleteTenant(options),
 }));
 
+const mockListMembers = vi.fn(async (_orgId: string) => [] as { userId: string }[]);
+vi.mock('../org-membership.ts', () => ({
+  listMembers: (orgId: string) => mockListMembers(orgId),
+  MAX_MEMBERS: 500,
+}));
+const mockSyncPrincipal = vi.fn(async (..._args: unknown[]) => {});
+vi.mock('./members.ts', () => ({
+  syncPrincipal: (...args: unknown[]) => mockSyncPrincipal(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
 
@@ -37,6 +47,9 @@ const client = 'mock-management-client' as unknown as Client;
 import { ensureTenantReady, CONSOLE_KEY_NAME } from './tenant-setup.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
+
+const ANY_USER = '00000000-0000-0000-0000-000000000011';
+const OTHER_USER = '00000000-0000-0000-0000-000000000012';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const deps = { client, id: 'forge', stage: 'test', region: 'us-east-1' };
@@ -231,6 +244,49 @@ describe('ensureTenantReady', () => {
     expect(updateCalls[0].args[0].input.ExpressionAttributeValues).toMatchObject({
       ':tenantId': { S: orgId },
     });
+  });
+
+  it('registers every current member as a principal before the pointer write', async () => {
+    stubHappyPath();
+    mockListMembers.mockResolvedValueOnce([{ userId: ANY_USER }, { userId: OTHER_USER }]);
+    const order: string[] = [];
+    mockSyncPrincipal.mockImplementation(async (_client, _orchestratorId, _tenantId, userId) => {
+      order.push(`sync:${String(userId)}`);
+    });
+    ddbMock.on(UpdateItemCommand).callsFake(() => {
+      order.push('pointer');
+      return {};
+    });
+
+    await ensureTenantReady(deps, orgId);
+
+    expect(mockSyncPrincipal.mock.calls).toStrictEqual([
+      [client, 'forge', orgId, ANY_USER],
+      [client, 'forge', orgId, OTHER_USER],
+    ]);
+    expect(order).toStrictEqual([`sync:${ANY_USER}`, `sync:${OTHER_USER}`, 'pointer']);
+  });
+
+  it('returns null and writes no pointer when the member scan stopped at the cap', async () => {
+    stubHappyPath();
+    mockListMembers.mockResolvedValueOnce(
+      Array.from({ length: 500 }, (_, i) => ({
+        userId: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      })),
+    );
+
+    await expect(ensureTenantReady(deps, orgId)).resolves.toBeNull();
+    expect(mockSyncPrincipal).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+  });
+
+  it('returns null and writes no pointer when a member cannot be registered', async () => {
+    stubHappyPath();
+    mockListMembers.mockResolvedValueOnce([{ userId: ANY_USER }]);
+    mockSyncPrincipal.mockRejectedValueOnce(new Error('region down'));
+
+    await expect(ensureTenantReady(deps, orgId)).resolves.toBeNull();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
   });
 
   it('scopes the SSM path and PROFILE attribute per id', async () => {
