@@ -9,6 +9,9 @@ vi.mock('./api.js', () => ({ getMe: () => mockGetMe() }));
 import { useKeyActionScope } from './use-key-scope.js';
 import { seedPermissions } from './test-permissions.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 function renderScope(role?: OrgRole) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   if (role) seedPermissions(client, role);
@@ -19,9 +22,9 @@ function renderScope(role?: OrgRole) {
   });
 }
 
-// `seedPermissions` writes userId 'user-1'.
-const OWN = { createdBy: 'user-1' };
-const THEIRS = { createdBy: 'user-2' };
+// `seedPermissions` writes userId USER_1.
+const OWN = { createdBy: USER_1 };
+const THEIRS = { createdBy: USER_2 };
 /** Minted before attribution existed: the server lists these to manage_all only. */
 const UNATTRIBUTED = {};
 

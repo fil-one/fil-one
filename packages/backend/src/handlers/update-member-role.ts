@@ -176,7 +176,7 @@ export async function baseHandler(
       ...(invitationsToRevoke.length > 0 ? { revokedInvitations: invitationsToRevoke.length } : {}),
     },
     source: SOURCE,
-    onCancelled: (err, revokedKeys) => changeFailureResponse(err, { ...failure, revokedKeys }),
+    onCancelled: (err, keysRevoked) => changeFailureResponse(err, { ...failure, keysRevoked }),
     onRefused: (refused, revoked) => vendorRefusedResponse(revoked, refused),
     notifyMember: (revoked) =>
       notifyRevokedKeys({
@@ -252,7 +252,7 @@ async function finishRoleChange({
     role: toRole,
     previousRole: fromRole,
     // Named only when there are any, so a widening and a no-op read alike.
-    ...(revoked.length > 0 ? { revokedKeys: revoked } : {}),
+    ...(revoked.length > 0 ? { keysRevoked: revoked } : {}),
   });
 }
 
@@ -305,14 +305,14 @@ function roleChangeBase({
   ]);
 }
 
-/** The answer when the role transaction cancels; every answer carries `revokedKeys`. */
+/** The answer when the role transaction cancels; every answer carries `keysRevoked`. */
 async function changeFailureResponse(
   err: unknown,
   context: {
     orgId: string;
     delta: ReturnType<typeof ownerCountDeltaFor>;
     labels: string[];
-    revokedKeys: AccessKeySummary[];
+    keysRevoked: AccessKeySummary[];
   },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   // The fence, at its own index. A role change into an org being torn down has
@@ -324,11 +324,11 @@ async function changeFailureResponse(
     return unattributableFailure(err, {
       source: SOURCE,
       orgId: context.orgId,
-      revokedKeys: context.revokedKeys,
+      keysRevoked: context.keysRevoked,
     });
   }
 
-  const { revokedKeys } = context;
+  const { keysRevoked } = context;
 
   if (failed.includes('ownerCount')) {
     // The decrement's condition IS the last-Owner invariant: an org at one Owner
@@ -341,15 +341,15 @@ async function changeFailureResponse(
       context.delta === 'decrement' &&
       (await readOwnerCountForDiagnosis(context.orgId)) !== undefined
     ) {
-      return lastOwnerResponse(LAST_OWNER_REMEDY, revokedKeys);
+      return lastOwnerResponse(LAST_OWNER_REMEDY, keysRevoked);
     }
     console.error('[update-member-role] ownerCount unreadable — role change refused', {
       orgId: context.orgId,
     });
-    return ownerCountUnavailableResponse('updated', revokedKeys);
+    return ownerCountUnavailableResponse('updated', keysRevoked);
   }
-  if (failed.includes('invitation')) return invitationRaceResponse(revokedKeys);
-  return memberRoleChangedResponse('while you were editing it', revokedKeys);
+  if (failed.includes('invitation')) return invitationRaceResponse(keysRevoked);
+  return memberRoleChangedResponse('while you were editing it', keysRevoked);
 }
 
 function roleResponse(body: UpdateMemberRoleResponse): APIGatewayProxyStructuredResultV2 {
@@ -361,14 +361,14 @@ function roleResponse(body: UpdateMemberRoleResponse): APIGatewayProxyStructured
  * revoked are named. Retrying is the same PATCH, which finds fewer keys.
  */
 function vendorRefusedResponse(
-  revokedKeys: AccessKeySummary[],
+  keysRevoked: AccessKeySummary[],
   failedKeys: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(502)
     .body<UpdateMemberRoleFailure>({
       message: `${refusedKeysSubject(failedKeys)} could not be revoked, so the role is unchanged. Try again.`,
-      revokedKeys,
+      keysRevoked,
       failedKeys,
     })
     .build();

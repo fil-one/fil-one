@@ -5,6 +5,7 @@ import {
   DownloadSimpleIcon,
   FileIcon,
   FolderIcon,
+  LinkIcon,
   TrashIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
@@ -17,6 +18,7 @@ import { Table } from './Table/Table';
 import { VersionRowBadge, truncateVersionId } from './VersionHistoryCard';
 import type { VersionGroup } from '../lib/object-grouping.js';
 import { selectionId } from '../lib/object-selection.js';
+import { SHARE_UNAVAILABLE_TOOLTIP } from '../lib/use-can-share-objects.js';
 import { formatDate } from '../lib/time.js';
 
 /**
@@ -63,6 +65,9 @@ function MobileFacts({ version }: { version: S3ObjectVersion }) {
 export type RowActions = {
   downloading: string | null;
   onDownload: (key: string, versionId?: string) => void;
+  /** Whether the plan allows share links; when not, Share stays visible but disabled. */
+  canShare: boolean;
+  onShare: (key: string, versionId: string) => void;
   /** Absent for a role without `objects.delete` — the control is not rendered. */
   onRequestDelete?: (key: string, versionId: string) => void;
   onNavigate: (key: string, versionId: string) => void;
@@ -90,7 +95,7 @@ function VersionActions({
   actions: RowActions;
   label: string;
 }) {
-  const { downloading, onDownload, onRequestDelete } = actions;
+  const { downloading, onDownload, canShare, onShare, onRequestDelete } = actions;
   return (
     <div className="flex items-center justify-end gap-1">
       {!version.isDeleteMarker &&
@@ -103,14 +108,30 @@ function VersionActions({
           <IconButton
             icon={DownloadSimpleIcon}
             aria-label={`Download ${label}`}
+            tooltip="Download"
+            tooltipSide="top"
             size="md"
             onClick={() => onDownload(groupKey, version.versionId)}
           />
         ))}
+      {/* A delete marker has no content to link to, same as Download. */}
+      {!version.isDeleteMarker && (
+        <IconButton
+          icon={LinkIcon}
+          aria-label={`Share ${label}`}
+          tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
+          tooltipSide="top"
+          size="md"
+          disabled={!canShare}
+          onClick={() => onShare(groupKey, version.versionId)}
+        />
+      )}
       {onRequestDelete && (
         <IconButton
           icon={TrashIcon}
           aria-label={`Delete ${label}`}
+          tooltip="Delete"
+          tooltipSide="top"
           size="md"
           // Same IconButton as the others, but the hover keeps a danger cue since
           // this deletes directly (twMerge lets it win over the base zinc hover).

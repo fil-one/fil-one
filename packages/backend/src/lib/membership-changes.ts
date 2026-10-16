@@ -7,9 +7,10 @@ import {
   canRetainAccessKey,
   roleHasPermission,
 } from '@filone/shared';
-import type { AccessKeyPermissions, OrgMembershipSource } from '@filone/shared';
+import type { OrgMembershipSource } from '@filone/shared';
 import { retireInvitationItems } from './invitations.ts';
 import type { InvitationRecord } from './invitations.ts';
+import type { KeyMinter } from './key-mint.ts';
 import { OrgKeys } from './org-membership.ts';
 
 /**
@@ -317,6 +318,16 @@ export function inviterAuthorityCheck({
 }
 
 /**
+ * Whether a role may hold a key: a principal-bound key needs `keys.create`, a
+ * service key must fit inside the role (`canRetainAccessKey`).
+ */
+export function canRoleHoldKey(role: string, key: KeyMinter['key']): boolean {
+  return key.type === 'principal'
+    ? roleHasPermission(role, 'keys.create')
+    : canRetainAccessKey(role, key.grant).retained;
+}
+
+/**
  * Assert, inside the transaction, that the creator still holds a role that
  * mints the key being written.
  *
@@ -324,33 +335,23 @@ export function inviterAuthorityCheck({
  * then writes the key row, and a role narrowing between the two would leave a
  * key above the role that authorized it. The narrowing revokes what it finds,
  * so this closes the window where a row lands after its listing: the row cannot
- * be written unless the role on file could still grant everything the key
- * carries.
+ * be written unless the role on file could still hold the key.
  *
- * The requested permissions rather than the cap role, because those are the
- * question. An Owner demoted to Admin mid-mint keeps a key carrying nothing
- * above Admin — comparing the whole former role would discard it, and the
- * narrowing that demoted them would have retained the identical key.
+ * The requested key rather than the cap role, because that is the question. An
+ * Owner demoted to Admin mid-mint keeps a key carrying nothing above Admin —
+ * comparing the whole former role would discard it, and the narrowing that
+ * demoted them would have retained the identical key.
  *
- * The admissible roles are asked of `canRetainAccessKey` one by one, the way
+ * The admissible roles are asked of {@link canRoleHoldKey} one by one, the way
  * {@link inviterAuthorityCheck} asks the registry, so a role change and a mint
  * decide what a role may hold by the same test.
  */
-export function creatorRoleStillMintsCheck({
-  orgId,
-  userId,
-  key,
-}: {
-  orgId: string;
-  userId: string;
-  /** The permissions the requested key would carry. */
-  key: AccessKeyPermissions;
-}): TransactWriteItem {
+export function creatorRoleStillMintsCheck({ orgId, userId, key }: KeyMinter): TransactWriteItem {
   return {
     ConditionCheck: {
       TableName: Resource.OrgTable.name,
       Key: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: OrgKeys.memberSk(userId) } },
-      ...roleIsOneOf((current) => canRetainAccessKey(current, key).retained),
+      ...roleIsOneOf((current) => canRoleHoldKey(current, key)),
     },
   };
 }
@@ -367,15 +368,7 @@ export function creatorRoleStillMintsCheck({
  * rotation of the caller's own key needs no second item — the owner's check is
  * the same row, and a transaction may touch an item once.
  */
-export function rotatorStillAuthorizedCheck({
-  orgId,
-  userId,
-  key,
-}: {
-  orgId: string;
-  userId: string;
-  key: AccessKeyPermissions;
-}): TransactWriteItem {
+export function rotatorStillAuthorizedCheck({ orgId, userId, key }: KeyMinter): TransactWriteItem {
   return {
     ConditionCheck: {
       TableName: Resource.OrgTable.name,
@@ -384,7 +377,7 @@ export function rotatorStillAuthorizedCheck({
         (current) =>
           roleHasPermission(current, 'keys.create') &&
           roleHasPermission(current, 'keys.manage_all') &&
-          canRetainAccessKey(current, key).retained,
+          canRoleHoldKey(current, key),
       ),
     },
   };
@@ -396,9 +389,9 @@ export function rotatorStillAuthorizedCheck({
  *
  * A predicate admitting nothing would build `#role IN ()`, which DynamoDB
  * rejects as a malformed expression rather than reporting an unmet condition —
- * so a caller must always admit at least one role. Both do, structurally rather
- * than by luck: the creator's own role passed the mint's cap, so it retains the
- * key it asked for, and every invitable role has some role that may invite it.
+ * so a caller must always admit at least one role. Each caller asks about
+ * something the acting member's own role already passed before the transaction,
+ * so that role is always admitted.
  */
 function roleIsOneOf(admits: (role: OrgRole) => boolean) {
   const values = Object.fromEntries(

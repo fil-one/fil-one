@@ -130,8 +130,8 @@ export function errorStatusOf(error: unknown): number | undefined {
  * Those credentials are gone whatever the role now says, so a refusal that
  * mentions only the role is telling the admin half of what happened.
  */
-export function revokedKeysOf(error: unknown): AccessKeySummary[] {
-  const keys = (error as { revokedKeys?: unknown } | null | undefined)?.revokedKeys;
+export function keysRevokedOf(error: unknown): AccessKeySummary[] {
+  const keys = (error as { keysRevoked?: unknown } | null | undefined)?.keysRevoked;
   return Array.isArray(keys) ? (keys as AccessKeySummary[]) : [];
 }
 
@@ -316,13 +316,12 @@ export interface SentOrg {
  * Every Fil.one API call, up to the point where the body is read.
  *
  * Cookies, the CSRF token, the org header, and the whole error ladder live here
- * so a caller that wants something other than JSON — the audit CSV — gets the
- * same 401 step-up, 403, and 410 handling rather than a second copy of it.
- * {@link apiRequest} and {@link apiDownload} are the two ways to read what it
- * returns.
+ * so a caller that wants something other than a JSON body, such as the audit
+ * CSV or a bucket policy's `ETag` header, gets the same 401 step-up, 403, and
+ * 410 handling rather than a second copy of it.
  */
 // eslint-disable-next-line complexity/complexity
-async function sendApiRequest(
+export async function sendApiRequest(
   path: string,
   options: RequestInit = {},
   behavior: ApiRequestBehavior = {},
@@ -422,11 +421,11 @@ async function sendApiRequest(
       message?: string;
       code?: ApiErrorCode;
       resendAvailableAt?: string;
-      revokedKeys?: AccessKeySummary[];
+      keysRevoked?: AccessKeySummary[];
     };
     // Carry the backend's error code through so callers can render specific copy
     // (e.g. BUCKET_NOT_EMPTY), or honour a server-set cooldown (the deletion 429
-    // carries resendAvailableAt). `revokedKeys` rides along for the same reason:
+    // carries resendAvailableAt). `keysRevoked` rides along for the same reason:
     // a role change that fails after revoking keys leaves those credentials
     // gone, and a refusal that does not say so is a worse answer than none.
     throw Object.assign(
@@ -435,7 +434,7 @@ async function sendApiRequest(
         status: response.status,
         ...(error.code && { code: error.code }),
         ...(error.resendAvailableAt && { resendAvailableAt: error.resendAvailableAt }),
-        ...(error.revokedKeys?.length && { revokedKeys: error.revokedKeys }),
+        ...(error.keysRevoked?.length && { keysRevoked: error.keysRevoked }),
       },
     );
   }
@@ -782,9 +781,19 @@ export function getInvoices(): Promise<ListInvoicesResponse> {
 
 // ── Access Keys API ──────────────────────────────────────────────────────────
 
-import type { CreateAccessKeyRequest, CreateAccessKeyResponse } from '@filone/shared';
+import type {
+  CreateAccessKeyRequest,
+  CreateAccessKeyResponse,
+  CreatePrincipalAccessKeyRequest,
+} from '@filone/shared';
 
-export function createAccessKey(body: CreateAccessKeyRequest): Promise<CreateAccessKeyResponse> {
+/**
+ * Mint an S3 access key. The body is the principal-bound shape for a personal
+ * key on an `iam` region, and the service-key shape otherwise.
+ */
+export function createAccessKey(
+  body: CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest,
+): Promise<CreateAccessKeyResponse> {
   return apiRequest<CreateAccessKeyResponse>('/access-keys', {
     method: 'POST',
     body: JSON.stringify(body),

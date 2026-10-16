@@ -113,7 +113,7 @@ export function CreateBucketPage() {
 
   // eslint-disable-next-line complexity/complexity
   async function handleSubmit() {
-    if (createKeyToggled && form.permissions.length === 0) return;
+    if (createKeyToggled && form.keyType === 'service' && form.permissions.length === 0) return;
 
     const bucketBody = {
       bucketName: bucketName.trim(),
@@ -162,17 +162,9 @@ export function CreateBucketPage() {
       return;
     }
 
-    // Step 2: Optionally create API key scoped to this bucket
+    // Step 2: optionally create an access key
     if (createKeyToggled) {
-      const keyBody = {
-        keyName: form.keyName.trim(),
-        permissions: form.permissions,
-        bucketScope: form.bucketScope,
-        buckets: form.bucketScope === 'specific' ? form.selectedBuckets : undefined,
-        region,
-        expiresAt: form.expiresAt,
-      };
-      const parsed = CreateAccessKeySchema.safeParse(keyBody);
+      const parsed = form.schema.safeParse(form.request);
       if (!parsed.success) {
         toast.error(parsed.error.issues[0].message);
         setCreating(false);
@@ -223,8 +215,9 @@ export function CreateBucketPage() {
   const accessKeyFormValid =
     !createKeyToggled ||
     (accessKeyNameValid &&
-      form.permissions.length > 0 &&
-      (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0));
+      (form.keyType === 'principal' ||
+        (form.permissions.length > 0 &&
+          (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0))));
 
   const canSubmit =
     bucketName.trim().length > 0 && !bucketNameError && !creating && accessKeyFormValid;

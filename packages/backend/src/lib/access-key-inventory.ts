@@ -1,6 +1,6 @@
 import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import type { AccessKey, GranularPermission } from '@filone/shared';
+import type { AccessKey, GranularPermission, ServiceAccessKey } from '@filone/shared';
 import { S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
@@ -74,8 +74,12 @@ function buildQueryInput(
 
   // When a bucket filter is provided, only return keys that have access to that bucket:
   // either keys with bucketScope = 'all' or keys that include the bucket in their buckets list.
+  // A principal-bound key stores neither: what it reaches follows the bucket's
+  // policy, which the list route asks, so every such row comes through.
   if (bucketFilter) {
-    filterExpressions.push('(bucketScope = :all OR contains(buckets, :bucket))');
+    filterExpressions.push(
+      '(bucketScope = :all OR contains(buckets, :bucket) OR attribute_exists(principalId))',
+    );
     values[':all'] = { S: 'all' };
     values[':bucket'] = { S: bucketFilter };
   }
@@ -130,26 +134,64 @@ async function runQuery(
   }
 }
 
+const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Whether a key's expiry has passed. The create route stores a bare
+ * `YYYY-MM-DD` date, and the key works through the whole of that day (UTC), so
+ * it counts as expired from the start of the next one. A full timestamp, which
+ * no route writes today, expires at that instant. The rotate route refuses an
+ * expired key on the same rule, so the table and the Rotate action never
+ * disagree.
+ */
+export function isAccessKeyExpired(
+  expiresAt: string | null | undefined,
+  now = new Date(),
+): boolean {
+  if (!expiresAt) return false;
+  const expiry = new Date(expiresAt);
+  // An unparseable expiry is treated as expired rather than as forever: the only
+  // way one gets stored is a bad write, and the safe reading of "we do not know
+  // when this stops being valid" is that it already has.
+  if (Number.isNaN(expiry.getTime())) return true;
+  // A bare date parses as midnight UTC at its start; the key lasts until the next day starts.
+  if (BARE_DATE.test(expiresAt)) expiry.setUTCDate(expiry.getUTCDate() + 1);
+  return now >= expiry;
+}
+
 function toAccessKey(record: Record<string, unknown>): AccessKey {
-  return {
+  const expiresAt = (record.expiresAt as string | undefined) ?? null;
+  // Computed rather than read: the stored `status` is written once as
+  // `active` and nothing updates it when the key expires.
+  const status: AccessKey['status'] = isAccessKeyExpired(expiresAt) ? 'expired' : 'active';
+  const base = {
     id: (record.sk as string).replace(AccessKeyKeys.keySkPrefix(), ''),
     keyName: record.keyName as string,
     accessKeyId: record.accessKeyId as string,
     createdAt: record.createdAt as string,
-    status: record.status as AccessKey['status'],
-    permissions: record.permissions as AccessKey['permissions'],
-    granularPermissions:
-      (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
-    bucketScope: record.bucketScope as AccessKey['bucketScope'],
-    buckets: record.buckets as string[] | undefined,
+    status,
     region: (record.region as AccessKey['region']) ?? DEFAULT_ACCESS_KEY_REGION,
-    expiresAt: (record.expiresAt as string | undefined) ?? null,
+    expiresAt,
     // Shipped so the console can gate the per-row revoke button on the same
     // rule the delete route enforces.
     ...(record.createdBy ? { createdBy: record.createdBy as string } : {}),
     ...(record.rotatedBy
       ? { rotatedBy: record.rotatedBy as string, rotatedAt: record.rotatedAt as string }
       : {}),
+  };
+  // A principal-bound key: the console shows it following the bucket
+  // policies rather than a permission set, which such a row does not carry.
+  if (record.principalId) {
+    return { ...base, type: 'principal', principalId: record.principalId as string };
+  }
+  return {
+    ...base,
+    type: 'service',
+    permissions: record.permissions as ServiceAccessKey['permissions'],
+    granularPermissions:
+      (record.granularPermissions as GranularPermission[] | undefined) ?? undefined,
+    bucketScope: record.bucketScope as ServiceAccessKey['bucketScope'],
+    buckets: record.buckets as string[] | undefined,
   };
 }
 

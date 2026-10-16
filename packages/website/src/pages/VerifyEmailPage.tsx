@@ -127,9 +127,9 @@ export function VerifyEmailPage({ me, onVerified }: VerifyEmailPageProps) {
         type="button"
         size="lg"
         icon={verified ? CheckIcon : undefined}
-        // py-3.5 lifts the height past the lg default (~40px) to ~48px, matching
-        // the taller Auth0 primary button so the two flows feel continuous.
-        className="mt-6 w-full justify-center py-3.5"
+        // h-12 lifts the height past the lg control height (44px) to 48px,
+        // matching the taller Auth0 primary button so the two flows feel continuous.
+        className="mt-6 w-full justify-center h-12"
         // Not `disabled` when verified: the greyed-out treatment reads as a
         // dead control, which is the opposite of the signal success needs.
         disabled={checking}

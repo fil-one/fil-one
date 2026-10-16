@@ -1,5 +1,5 @@
 // Forge service orchestrators. Forge ("Hilt" on the Forge side) is backed by
-// the generic Service Orchestrator Management API (createFilOneOrchestrator).
+// the generic Service Orchestrator Management API (FilOneOrchestrator).
 // Forge runs as independent networks, each with its own Hilt serving every
 // region in that network; the region is sent per-tenant in the PUT /tenants
 // body. Non-production talks to two of them, staging and the dev sandbox;
@@ -17,7 +17,7 @@
 // production at import time.
 
 import { getS3Endpoint, S3Region } from '@filone/shared';
-import { createFilOneOrchestrator } from '../orchestrator/orchestrator.ts';
+import { FilOneOrchestrator } from '../orchestrator/orchestrator.ts';
 import type { ServiceOrchestrator } from '../service-orchestrator.ts';
 
 /** Management API endpoint and bearer credential of one Forge network's Hilt. */
@@ -34,8 +34,7 @@ export interface ForgeManagementApi {
  *            the region.
  * @param s3 Overrides of the region's S3 endpoint (default getS3Endpoint()) and
  *           of the endpoint presigned URLs carry.
- * @returns A `ServiceOrchestrator` instance configured for the specified Forge
- *          region.
+ * @returns The orchestrator for the specified Forge region.
  */
 export function createForgeOrchestrator(
   id: string,
@@ -44,7 +43,7 @@ export function createForgeOrchestrator(
   s3: { endpointUrl?: string; presignEndpointUrl?: string } = {},
 ): ServiceOrchestrator {
   const stage = process.env.FILONE_STAGE!;
-  return createFilOneOrchestrator({
+  return new FilOneOrchestrator({
     id,
     region,
     stage,

@@ -81,19 +81,19 @@ export interface UpdateMemberRoleResponse {
    * the preview offered: the commit revokes from a fresh read, so this can name
    * a key minted since the preview and omit one revoked since.
    */
-  revokedKeys?: AccessKeySummary[];
+  keysRevoked?: AccessKeySummary[];
 }
 
 /**
  * A role change that stopped partway.
  *
- * The keys named in `revokedKeys` are gone whatever the role now says, so the
+ * The keys named in `keysRevoked` are gone whatever the role now says, so the
  * console reports them rather than treating the whole request as a no-op. The
  * retry is the same PATCH, which finds fewer keys.
  */
 export interface UpdateMemberRoleFailure {
   message: string;
-  revokedKeys: AccessKeySummary[];
+  keysRevoked: AccessKeySummary[];
   /** The keys a vendor refused, when that is what stopped the change. */
   failedKeys?: AccessKeySummary[];
 }
@@ -112,7 +112,7 @@ export interface RemoveMemberResponse {
    * The access keys the removal revoked, named only when there were any, so a
    * removal of somebody holding none reads as the empty answer it is.
    */
-  revokedKeys?: AccessKeySummary[];
+  keysRevoked?: AccessKeySummary[];
 }
 
 /**
@@ -161,5 +161,5 @@ export interface TransferOwnershipResponse {
    * `privileged.grant`, so a key carrying one outlives the authority that
    * minted it. Named here because the holder is the person reading this.
    */
-  revokedKeys?: AccessKeySummary[];
+  keysRevoked?: AccessKeySummary[];
 }
