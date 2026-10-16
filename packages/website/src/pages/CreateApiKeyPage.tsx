@@ -11,7 +11,6 @@ import { Card } from '../components/Card.js';
 import { IconButton } from '../components/IconButton.js';
 import { InfoAside } from '../components/InfoAside.js';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal.js';
-import { SlowOperationIndicator } from '../components/SlowOperationIndicator.js';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
 // ---------------------------------------------------------------------------
@@ -73,10 +72,11 @@ export function CreateApiKeyPage() {
                 variant="primary"
                 size="lg"
                 disabled={!form.canSubmit}
+                loading={form.creating}
+                loadingLabel="Creating API key"
               >
-                {form.creating ? 'Creating...' : 'Create API key'}
+                Create API key
               </Button>
-              <SlowOperationIndicator isLoading={form.creating} operation="Creating access key" />
             </form>
           </Card>
 

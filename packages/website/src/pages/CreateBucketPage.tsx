@@ -36,7 +36,6 @@ import { RegionSelect } from '../components/RegionSelect';
 import { useAvailableRegions } from '../lib/use-available-regions.js';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
-import { SlowOperationIndicator } from '../components/SlowOperationIndicator';
 import { useToast } from '../components/Toast';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
@@ -342,15 +341,12 @@ export function CreateBucketPage() {
               variant="primary"
               size="lg"
               disabled={!canSubmit}
+              loading={creating}
+              loadingLabel="Creating bucket"
               onClick={handleSubmit}
             >
-              {creating
-                ? 'Creating...'
-                : createKeyToggled
-                  ? 'Create bucket and API key'
-                  : 'Create bucket'}
+              {createKeyToggled ? 'Create bucket and API key' : 'Create bucket'}
             </Button>
-            <SlowOperationIndicator isLoading={creating} operation="Creating bucket" />
           </div>
         </Card>
 
