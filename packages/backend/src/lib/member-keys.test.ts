@@ -167,6 +167,30 @@ describe('reviewAccessKeysForRole', () => {
     expect(review.retainedKeyCount).toBe(3);
   });
 
+  it.each([
+    ['Member', OrgRole.Member],
+    ['ReadOnly', OrgRole.ReadOnly],
+  ] as const)('never revokes a principal-bound key when the role becomes %s', (_name, role) => {
+    // The key carries no authority of its own; bucket policies decide.
+    const boundToPrincipal = [key({ permissions: undefined, principalId: MEMBER })];
+
+    expect(reviewAccessKeysForRole(boundToPrincipal, MEMBER, role)).toStrictEqual({
+      keysToRevoke: [],
+      retainedKeyCount: 1,
+      unattributedKeyCount: 0,
+    });
+  });
+
+  it('revokes a principal-bound key when the member is removed', () => {
+    const boundToPrincipal = key({ permissions: undefined, principalId: MEMBER });
+
+    expect(reviewAccessKeysForRole([boundToPrincipal], MEMBER, NO_ROLE)).toStrictEqual({
+      keysToRevoke: [{ ...boundToPrincipal, reason: 'role_cannot_mint', excess: [] }],
+      retainedKeyCount: 0,
+      unattributedKeyCount: 0,
+    });
+  });
+
   it('counts an org with no keys as nothing to do', () => {
     expect(reviewAccessKeysForRole([], MEMBER, OrgRole.ReadOnly)).toStrictEqual({
       keysToRevoke: [],

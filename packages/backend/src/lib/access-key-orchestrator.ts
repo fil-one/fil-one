@@ -28,14 +28,24 @@ export interface IssuePrincipalKeyOpts {
 /** The request's shape is the key's kind, as it is at the storage system. */
 export type IssueAccessKeyOpts = IssueServiceKeyOpts | IssuePrincipalKeyOpts;
 
-export interface IssuedAccessKey {
+interface IssuedKeyFields {
   id: string;
   accessKeyId: string;
   accessKeySecret: string;
   createdAt: string;
-  /** The member a principal-bound key belongs to; absent on a service key. */
-  principalId?: string;
 }
+
+export interface IssuedServiceKey extends IssuedKeyFields {
+  type: 'service';
+}
+
+export interface IssuedPrincipalKey extends IssuedKeyFields {
+  type: 'principal';
+  /** The member the key belongs to. */
+  principalId: string;
+}
+
+export type IssuedAccessKey = IssuedServiceKey | IssuedPrincipalKey;
 
 /** Access keys the tenant's S3 clients sign with. */
 export interface AccessKeyOrchestrator {
@@ -44,9 +54,15 @@ export interface AccessKeyOrchestrator {
     keyOpts: IssueAccessKeyOpts,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey>;
+  /**
+   * A principal-bound key's name is unique only within its principal, so a
+   * lookup for one names the principal; only an `iam` region mints such keys.
+   * Without a principal, only service keys are considered.
+   */
   findAccessKeyByName(
     tenantId: string,
     keyName: string,
+    principalId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<{ id: string; accessKeyId: string; createdAt: string } | undefined>;
 

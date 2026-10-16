@@ -548,6 +548,7 @@ describe('auroraOrchestrator', () => {
       });
 
       expect(result).toEqual({
+        type: 'service',
         id: 'k1',
         accessKeyId: 'AK1',
         accessKeySecret: 'secret',
@@ -1039,7 +1040,7 @@ describe('auroraOrchestrator signal forwarding', () => {
       name: 'findAccessKeyByName',
       run: () => {
         mockFindAuroraAccessKeyByName.mockResolvedValue(undefined);
-        return auroraOrchestrator.findAccessKeyByName('t', 'k', { signal });
+        return auroraOrchestrator.findAccessKeyByName('t', 'k', undefined, { signal });
       },
       mocks: [mockFindAuroraAccessKeyByName],
     },

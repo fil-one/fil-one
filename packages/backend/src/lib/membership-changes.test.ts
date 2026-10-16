@@ -7,11 +7,13 @@ vi.mock('sst', () => sstResourceMock());
 
 import { OrgKeys } from './org-membership.ts';
 import {
+  canRoleHoldKey,
   cancelledLabels,
   creatorRoleStillMintsCheck,
   inviterAuthorityCheck,
   membershipDeleteItems,
   membershipRows,
+  rotatorStillAuthorizedCheck,
   ownerCountDeltaFor,
   ownerCountItem,
   roleChangeItems,
@@ -194,7 +196,10 @@ describe('creatorRoleStillMintsCheck', () => {
     const check = creatorRoleStillMintsCheck({
       orgId: ORG_ID,
       userId: 'creator-id',
-      key: { permissions: ['write'], granularPermissions: ['PutObjectRetention'] },
+      key: {
+        type: 'service',
+        grant: { permissions: ['write'], granularPermissions: ['PutObjectRetention'] },
+      },
     });
 
     expect(check.ConditionCheck).toMatchObject({
@@ -211,7 +216,7 @@ describe('creatorRoleStillMintsCheck', () => {
     const check = creatorRoleStillMintsCheck({
       orgId: ORG_ID,
       userId: 'creator-id',
-      key: { permissions: ['read', 'DeleteBucket'] },
+      key: { type: 'service', grant: { permissions: ['read', 'DeleteBucket'] } },
     });
 
     expect(check.ConditionCheck?.ConditionExpression).toBe(
@@ -227,7 +232,7 @@ describe('creatorRoleStillMintsCheck', () => {
     const check = creatorRoleStillMintsCheck({
       orgId: ORG_ID,
       userId: 'creator-id',
-      key: { permissions: ['read'] },
+      key: { type: 'service', grant: { permissions: ['read'] } },
     });
 
     expect(check.ConditionCheck?.ExpressionAttributeValues).toStrictEqual({
@@ -235,6 +240,45 @@ describe('creatorRoleStillMintsCheck', () => {
       ':role1': { S: OrgRole.Admin },
       ':role2': { S: OrgRole.Member },
     });
+  });
+
+  it('admits every role holding keys.create for a principal-bound key', () => {
+    const check = creatorRoleStillMintsCheck({
+      orgId: ORG_ID,
+      userId: 'creator-id',
+      key: { type: 'principal' },
+    });
+
+    expect(check.ConditionCheck?.ExpressionAttributeValues).toStrictEqual({
+      ':role0': { S: OrgRole.Owner },
+      ':role1': { S: OrgRole.Admin },
+      ':role2': { S: OrgRole.Member },
+    });
+  });
+});
+
+describe('rotatorStillAuthorizedCheck', () => {
+  it('admits every role holding keys.create and keys.manage_all for a principal-bound key', () => {
+    const check = rotatorStillAuthorizedCheck({
+      orgId: ORG_ID,
+      userId: 'rotator-id',
+      key: { type: 'principal' },
+    });
+
+    expect(check.ConditionCheck?.ExpressionAttributeValues).toStrictEqual({
+      ':role0': { S: OrgRole.Owner },
+      ':role1': { S: OrgRole.Admin },
+    });
+  });
+});
+
+describe('canRoleHoldKey', () => {
+  it('admits every role holding keys.create for a principal-bound key', () => {
+    const admitted = Object.values(OrgRole).filter((role) =>
+      canRoleHoldKey(role, { type: 'principal' }),
+    );
+
+    expect(admitted).toStrictEqual([OrgRole.Owner, OrgRole.Admin, OrgRole.Member]);
   });
 });
 

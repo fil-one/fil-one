@@ -57,11 +57,14 @@ import { buildEvent, membershipFor, stubMembershipRead } from '../test/lambda-te
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { OrgKeys } from '../lib/org-membership.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 const KEY_ID = 'key-1';
 const TENANT_ID = 'aurora-t-1';
 
@@ -124,7 +127,7 @@ function eventFor(role: OrgRole = OrgRole.Owner, keyId: string | typeof NO_KEY_I
 }
 
 /** The key's owner when that is not the caller, as the post-write recheck reads them. */
-const OWNER = { orgId: USER_INFO.orgId, userId: 'user-2' };
+const OWNER = { orgId: USER_INFO.orgId, userId: USER_2 };
 
 /** The items of the mint transaction, so a test can say what rode alongside the row. */
 function mintItems() {
@@ -288,7 +291,7 @@ describe('rotate-access-key baseHandler', () => {
   });
 
   it('refuses a key the caller did not create', async () => {
-    stubStoredKey({ createdBy: 'user-2' });
+    stubStoredKey({ createdBy: USER_2 });
 
     const result = await baseHandler(eventFor(OrgRole.Member));
 
@@ -481,7 +484,7 @@ describe('rotate-access-key baseHandler', () => {
     await baseHandler(eventFor(OrgRole.Admin));
 
     expect(replacementRow()).toMatchObject({
-      createdBy: 'user-2',
+      createdBy: USER_2,
       creatorEmail: 'them@example.com',
       // The Admin who reissued it is recorded beside the owner, not instead.
       rotatedBy: USER_INFO.userId,
@@ -518,6 +521,114 @@ describe('rotate-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(403);
     expect(mockIssueAccessKey).not.toHaveBeenCalled();
+  });
+
+  describe('a principal-bound key', () => {
+    /** The stored row of a key bound to the caller's principal, with no grant of its own. */
+    const boundToPrincipal = {
+      permissions: undefined,
+      bucketScope: undefined,
+      buckets: undefined,
+      principalId: USER_INFO.userId,
+      expiresAt: '2099-01-01',
+    };
+
+    it('mints the replacement bound to the same principal', async () => {
+      stubStoredKey(boundToPrincipal);
+      stubWrites();
+
+      await baseHandler(eventFor());
+
+      expect(mockIssueAccessKey).toHaveBeenCalledWith(TENANT_ID, {
+        keyName: expect.stringMatching(/^My Key\.r[0-9a-f]{6}$/),
+        principalId: USER_INFO.userId,
+        expiresAt: '2099-01-01',
+      });
+    });
+
+    it('records the replacement row bound to the same principal', async () => {
+      stubStoredKey(boundToPrincipal);
+      stubWrites();
+
+      await baseHandler(eventFor());
+
+      expect(replacementRow()).toStrictEqual({
+        pk: 'ORG#org-1',
+        sk: 'ACCESSKEY#aurora-key-2',
+        keyName: 'My Key',
+        accessKeyId: 'AKIANEW00000000',
+        createdAt: '2026-09-11T10:00:00.000Z',
+        status: 'active',
+        region: 'eu-west-1',
+        principalId: USER_INFO.userId,
+        vendorKeyName: expect.stringMatching(/^My Key\.r[0-9a-f]{6}$/),
+        rotatedBy: USER_INFO.userId,
+        rotatedAt: '2026-09-11T10:00:00.000Z',
+        expiresAt: '2099-01-01',
+        createdBy: USER_INFO.userId,
+        policyVersion: 'pre-member-scope',
+      });
+    });
+
+    it('revokes the key it replaces', async () => {
+      stubStoredKey(boundToPrincipal);
+      stubWrites();
+
+      await baseHandler(eventFor());
+
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith(TENANT_ID, KEY_ID);
+    });
+
+    it('records in the rotation audit that the key is bound to a principal', async () => {
+      stubStoredKey(boundToPrincipal);
+      stubWrites();
+
+      await baseHandler(eventFor());
+
+      const intent = standaloneEvents().find(
+        (event) => event.type === 'key.rotated' && event.phase === 'intent',
+      );
+      expect(intent?.details).toStrictEqual({
+        keyKind: 's3',
+        keyName: 'My Key',
+        region: 'eu-west-1',
+        replacedKeyIdSuffix: expect.any(String),
+        isPrincipalKey: true,
+      });
+    });
+
+    it('lets a Member rotate their own principal-bound key', async () => {
+      stubStoredKey(boundToPrincipal);
+      stubWrites(OrgRole.Member);
+
+      const result = await baseHandler(eventFor(OrgRole.Member));
+
+      expect(result.statusCode).toBe(201);
+    });
+
+    it('refuses a ReadOnly member a rotation of their principal-bound key', async () => {
+      stubStoredKey(boundToPrincipal);
+
+      const result = await baseHandler(eventFor(OrgRole.ReadOnly));
+
+      expect(result.statusCode).toBe(403);
+      // ReadOnly holds no `keys.manage_own`, so the key scope refuses first.
+      expect(body(result)).toStrictEqual({
+        message: 'Your role in this organization only permits revoking keys you created.',
+        code: ApiErrorCode.FORBIDDEN_ROLE,
+      });
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
+    });
+
+    it("lets an Admin rotate a member's principal-bound key", async () => {
+      stubStoredKey({ ...boundToPrincipal, createdBy: OWNER.userId, principalId: OWNER.userId });
+      stubWrites();
+      stubMembershipRead(ddbMock, { ...OWNER, role: OrgRole.Member });
+
+      const result = await baseHandler(eventFor(OrgRole.Admin));
+
+      expect(result.statusCode).toBe(201);
+    });
   });
 
   it('refuses a row that never recorded what its key carries', async () => {

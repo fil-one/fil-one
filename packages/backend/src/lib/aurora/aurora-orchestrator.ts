@@ -267,6 +267,7 @@ export const auroraOrchestrator = {
       signal: opts?.signal,
     });
     return {
+      type: 'service',
       id: key.id,
       accessKeyId: key.accessKeyId,
       accessKeySecret: key.accessKeySecret,
@@ -274,7 +275,12 @@ export const auroraOrchestrator = {
     };
   },
 
-  async findAccessKeyByName(tenantId: string, keyName: string, opts?: OrchestratorRequestOptions) {
+  async findAccessKeyByName(
+    tenantId: string,
+    keyName: string,
+    _principalId?: string,
+    opts?: OrchestratorRequestOptions,
+  ) {
     return findAuroraAccessKeyByName({ tenantId, keyName, signal: opts?.signal });
   },
 

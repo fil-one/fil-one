@@ -413,25 +413,28 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
       );
     }
 
-    const principalId = data.type === 'principal' ? data.principalId : undefined;
-    return {
+    const issued = {
       // The contract has no identifier separate from the accessKeyId.
       id: data.accessKeyId,
       accessKeyId: data.accessKeyId,
       accessKeySecret: data.secretAccessKey,
       createdAt: data.createdAt,
-      ...(principalId ? { principalId } : {}),
     };
+    return data.type === 'principal'
+      ? { ...issued, type: 'principal', principalId: data.principalId }
+      : { ...issued, type: 'service' };
   }
 
   async findAccessKeyByName(
     tenantId: string,
     keyName: string,
+    principalId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ) {
     const { data, error } = await getTenantsByTenantIdAccessKeys({
       client: this.client,
       path: { tenantId },
+      ...(principalId ? { query: { principalId } } : {}),
       throwOnError: false,
       ...requestOptions,
     });
@@ -440,7 +443,11 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
         cause: error,
       });
     }
-    const match = (data?.items ?? []).find((k) => k.name === keyName);
+    // Names are unique per kind, and the list carries both kinds when no
+    // principal narrows it, so a service-key lookup skips principal-bound keys.
+    const match = (data?.items ?? []).find(
+      (k) => k.name === keyName && (principalId ? true : k.type === 'service'),
+    );
     if (!match) return undefined;
     return {
       id: match.accessKeyId,

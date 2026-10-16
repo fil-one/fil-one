@@ -610,6 +610,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     );
 
     expect(result).toEqual({
+      type: 'service',
       id: 'AKIAFTH',
       accessKeyId: 'AKIAFTH',
       accessKeySecret: 'sk-secret',
@@ -1549,7 +1550,7 @@ describe('fthOrchestrator signal forwarding', () => {
   it('findAccessKeyByName forwards the signal to listAccessKeys', async () => {
     mockFthClient.listAccessKeys.mockResolvedValue([]);
 
-    await fthOrchestrator.findAccessKeyByName(fthClientId, 'k', { signal });
+    await fthOrchestrator.findAccessKeyByName(fthClientId, 'k', undefined, { signal });
 
     expect(mockFthClient.listAccessKeys).toHaveBeenCalledWith(fthClientId, { signal });
   });
