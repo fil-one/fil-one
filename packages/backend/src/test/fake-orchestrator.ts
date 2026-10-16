@@ -6,6 +6,7 @@ import type {
   TenantInfo,
 } from '../lib/service-orchestrator.ts';
 import { S3Region, type TenantStatus } from '@filone/shared';
+import { delegateIamMethods, FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 
 export interface FakeOrchestrator {
   id: string;
@@ -27,6 +28,11 @@ export interface FakeOrchestratorOpts {
   status?: TenantStatus;
   /** Region reported by the orchestrator. Defaults to `eu-west-1`. */
   region?: S3Region;
+  /**
+   * Add the bucket-policy and member methods: `true` for a fresh
+   * {@link FakeIamOrchestrator}, or one the test seeded.
+   */
+  iam?: true | FakeIamOrchestrator;
   /** Storage series returned by `getTenantUsageMetrics`. Defaults to empty. */
   storage?: StorageUsageSample[];
   /** Egress series returned by `getTenantUsageMetrics`. Defaults to empty. */
@@ -53,10 +59,12 @@ export interface FakeOrchestratorOpts {
 export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): FakeOrchestrator {
   const { ready = true, status = 'active', region = S3Region.EuWest1, failUsage = false } = opts;
   const regionDown = () => vi.fn().mockRejectedValue(new Error('region down'));
+  const iam = opts.iam === true ? new FakeIamOrchestrator() : opts.iam;
 
   return {
     id,
     region,
+    ...(iam ? delegateIamMethods(iam) : {}),
     isTenantReady: vi.fn((orgProfile?: { pk?: { S?: string } }) => {
       const orgId = orgProfile?.pk?.S?.replace('ORG#', '');
       return ready && orgId ? tenantFor(id, orgId) : null;

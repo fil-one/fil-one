@@ -251,20 +251,37 @@ describe('ensureTenantReady', () => {
     });
   });
 
-  it('requests only s3:* actions from the contract enum for the console key', async () => {
+  it('requests the bucket-policy actions but no bucket-configuration actions for the console key', async () => {
     stubHappyPath();
 
     await ensureTenantReady(deps, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).toHaveLength(17);
-    expect(permissions).toContain('s3:ListBucketMultipartUploads');
-    // The contract enum carries no bucket-config actions at all: the reads
-    // classify as ListBucket (fil-one/RFC#30) and there are no writes.
-    expect(permissions).not.toContain('s3:GetBucketVersioning');
-    expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
-    expect(permissions).not.toContain('s3:PutBucketVersioning');
-    expect(permissions).not.toContain('s3:PutBucketObjectLockConfiguration');
+    // Every action in the contract enum. It carries no bucket-configuration
+    // actions: the versioning and object-lock reads classify as ListBucket
+    // (fil-one/RFC#30) and there are no writes.
+    expect(permissions).toStrictEqual([
+      's3:CreateBucket',
+      's3:ListAllMyBuckets',
+      's3:DeleteBucket',
+      's3:GetObject',
+      's3:GetObjectVersion',
+      's3:GetObjectRetention',
+      's3:GetObjectLegalHold',
+      's3:PutObject',
+      's3:PutObjectRetention',
+      's3:PutObjectLegalHold',
+      's3:ListBucket',
+      's3:ListBucketVersions',
+      's3:ListBucketMultipartUploads',
+      's3:ListMultipartUploadParts',
+      's3:AbortMultipartUpload',
+      's3:DeleteObject',
+      's3:DeleteObjectVersion',
+      's3:GetBucketPolicy',
+      's3:PutBucketPolicy',
+      's3:DeleteBucketPolicy',
+    ]);
   });
 
   describe('409 recovery (crash between key creation and SSM write)', () => {

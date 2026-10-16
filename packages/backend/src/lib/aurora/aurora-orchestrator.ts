@@ -252,6 +252,11 @@ export const auroraOrchestrator = {
     keyOpts: IssueAccessKeyOpts,
     opts?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
+    if ('principalId' in keyOpts) {
+      throw new Error(
+        'Aurora supports service keys only; a principal-bound key needs the IAM access model',
+      );
+    }
     const key = await createAuroraAccessKey({
       tenantId,
       keyName: keyOpts.keyName,

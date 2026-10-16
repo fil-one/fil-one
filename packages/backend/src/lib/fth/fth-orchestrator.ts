@@ -311,6 +311,11 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
     keyOpts: IssueAccessKeyOpts,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
+    if ('principalId' in keyOpts) {
+      throw new Error(
+        'FTH supports service keys only; a principal-bound key needs the IAM access model',
+      );
+    }
     const storageUserId = await this.getFthConsoleStorageUserId(tenantId, requestOptions);
 
     const permissions = buildFthPermissions(keyOpts.permissions, keyOpts.granularPermissions);

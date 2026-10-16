@@ -64,11 +64,14 @@ import {
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
+  PrincipalNotFoundError,
 } from '../errors.ts';
-import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
+import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
-import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
+import { FilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
+
+const ALICE = '00000000-0000-0000-0000-00000000000a';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).
@@ -85,8 +88,8 @@ function fail(status: number, message = 'error') {
   return { data: undefined, error: { message }, response: { status } };
 }
 
-function buildOrchestrator(overrides?: { api?: FilOneOrchestratorConfig['api'] }) {
-  return createFilOneOrchestrator({
+function buildOrchestrator(overrides?: Pick<Partial<FilOneOrchestratorConfig>, 'api'>) {
+  return new FilOneOrchestrator({
     id: 'forge',
     region: S3Region.UsEast1,
     stage: 'test',
@@ -121,7 +124,7 @@ beforeEach(() => {
   _resetS3CredentialsCacheForTesting();
 });
 
-describe('createFilOneOrchestrator config', () => {
+describe('FilOneOrchestrator config', () => {
   it('exposes the configured id and region', () => {
     expect(orchestrator.id).toBe('forge');
     expect(orchestrator.region).toBe(S3Region.UsEast1);
@@ -565,6 +568,127 @@ describe('getBucket', () => {
       retentionDuration: 7,
       retentionDurationType: 'd',
     });
+  });
+});
+
+describe('issueAccessKey bound to a principal', () => {
+  const principalKeyCreated = {
+    accessKeyId: 'did:key:z6Mk',
+    name: 'laptop',
+    type: 'principal',
+    principalId: ALICE,
+    secretAccessKey: 'sk-secret',
+    createdAt: '2026-09-16T12:00:00Z',
+    expiresAt: null,
+  };
+
+  it('sends only name, principalId and expiresAt for a principal-bound key', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(principalKeyCreated, 201));
+
+    await orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE });
+
+    const { body } = mockCreateAccessKey.mock.calls[0]![0] as { body: Record<string, unknown> };
+    expect(body).toStrictEqual({ name: 'laptop', principalId: ALICE, expiresAt: null });
+  });
+
+  it('returns the issued key with its principalId', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(principalKeyCreated, 201));
+
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
+    ).resolves.toStrictEqual({
+      id: 'did:key:z6Mk',
+      accessKeyId: 'did:key:z6Mk',
+      accessKeySecret: 'sk-secret',
+      createdAt: '2026-09-16T12:00:00Z',
+      principalId: ALICE,
+    });
+  });
+
+  it('omits principalId when the API answers a service key that carries a principal', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok({ ...principalKeyCreated, type: 'service' }, 201));
+
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', permissions: ['read'] }),
+    ).resolves.toStrictEqual({
+      id: 'did:key:z6Mk',
+      accessKeyId: 'did:key:z6Mk',
+      accessKeySecret: 'sk-secret',
+      createdAt: '2026-09-16T12:00:00Z',
+    });
+  });
+
+  it('throws AccessKeyAlreadyExistsError when the API answers 409', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(fail(409, 'name conflict'));
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
+    ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
+  });
+});
+
+describe('issueAccessKey 422 classification', () => {
+  function failWith422(message: string, code: string) {
+    return { data: undefined, error: { message, code }, response: { status: 422 } };
+  }
+
+  it('throws PrincipalNotFoundError on a 422 with code UnknownPrincipal, whatever the message', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(failWith422('no such member', 'UnknownPrincipal'));
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
+    ).rejects.toBeInstanceOf(PrincipalNotFoundError);
+  });
+
+  it('throws AccessKeyValidationError on a 422 with any other code', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(
+      failWith422(
+        'a principal-bound access key takes no permissions or buckets',
+        'PrincipalScopedAccessKey',
+      ),
+    );
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
+    ).rejects.toBeInstanceOf(AccessKeyValidationError);
+  });
+});
+
+describe('issueAccessKey with a mixed shape', () => {
+  it.each([
+    ['permissions', ['read']],
+    ['granularPermissions', ['s3:GetObject']],
+    ['buckets', ['photos']],
+    ['bucketScope', 'all'],
+  ])(
+    'throws AccessKeyValidationError without calling the API when a principal-bound key also carries %s',
+    async (field, value) => {
+      mockCreateAccessKey.mockResolvedValue(
+        ok(
+          {
+            accessKeyId: 'k',
+            name: 'laptop',
+            type: 'principal',
+            principal: ALICE,
+            secretAccessKey: 's',
+            createdAt: 'now',
+          },
+          201,
+        ),
+      );
+      const principalKeyWithServiceFields = {
+        keyName: 'laptop',
+        principalId: ALICE,
+        [field]: value,
+      };
+      await expect(
+        orchestrator.issueAccessKey(tenantId, principalKeyWithServiceFields),
+      ).rejects.toBeInstanceOf(AccessKeyValidationError);
+      expect(mockCreateAccessKey).not.toHaveBeenCalled();
+    },
+  );
+
+  it('IssueAccessKeyOpts rejects permissions on a principal-bound key at compile time', () => {
+    // @ts-expect-error a principal-bound key carries no permissions of its own
+    const opts: IssueAccessKeyOpts = { keyName: 'k', principalId: ALICE, permissions: ['read'] };
+    expect(opts).toBeDefined();
   });
 });
 

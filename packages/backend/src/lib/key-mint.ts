@@ -18,7 +18,7 @@ import { RevocationNotRecordedError, revokeAccessKey } from './key-revocation.ts
 import { cancelledLabels, creatorRoleStillMintsCheck } from './membership-changes.ts';
 import { resolveMembership } from './org-membership.ts';
 import { ResponseBuilder } from './response-builder.ts';
-import type { ServiceOrchestrator } from './service-orchestrator.ts';
+import type { RegionOrchestrator } from './service-orchestrator.ts';
 
 /**
  * The half of a mint that happens after the vendor has answered.
@@ -48,7 +48,7 @@ export interface MintedKey {
   accessKeyId: string;
   keyName: string;
   region: S3Region;
-  orchestrator: ServiceOrchestrator;
+  orchestrator: RegionOrchestrator;
   tenantId: string;
 }
 

@@ -28,7 +28,7 @@ import { listOrgAccessKeys } from '../lib/member-keys.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
-import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import type { IssuedAccessKey, RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import {
@@ -270,7 +270,7 @@ interface MintAttempt {
   tenantId: string;
   keyName: string;
   region: S3Region;
-  orchestrator: ServiceOrchestrator;
+  orchestrator: RegionOrchestrator;
   attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
   /** The intent this attempt already wrote — every exit here closes it. */
   mint: AuditCorrelation<'key.created'>;

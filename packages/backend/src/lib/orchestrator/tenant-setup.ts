@@ -1,5 +1,5 @@
 // Tenant setup for Management API backed orchestrators. Owned by
-// createFilOneOrchestrator().ensureTenantReady but kept in a separate
+// FilOneOrchestrator.ensureTenantReady but kept in a separate
 // module, mirroring fth-tenant-setup.ts / aurora-tenant-setup.ts.
 //
 // The Management API contract makes this much simpler than Aurora's state
@@ -32,8 +32,8 @@ import {
 export const CONSOLE_KEY_NAME = 'filone-console';
 
 // The contract-legal maximum: every action in the Management API's
-// AccessKeyPermission enum. The console key drives bucket create, list and
-// the two bucket-configuration reads for the console, so it holds all of it.
+// AccessKeyPermission enum. The console key holds every action the console
+// performs for a tenant.
 const CONSOLE_KEY_PERMISSIONS = [
   's3:CreateBucket',
   's3:ListAllMyBuckets',
@@ -52,6 +52,10 @@ const CONSOLE_KEY_PERMISSIONS = [
   's3:AbortMultipartUpload',
   's3:DeleteObject',
   's3:DeleteObjectVersion',
+  // Bucket policies are read and written over S3 with this key (fil-one/RFC#30).
+  's3:GetBucketPolicy',
+  's3:PutBucketPolicy',
+  's3:DeleteBucketPolicy',
 ] as const;
 
 const dynamo = getDynamoClient();
