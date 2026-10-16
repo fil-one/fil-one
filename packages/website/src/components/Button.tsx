@@ -4,6 +4,7 @@ import { clsx } from 'clsx';
 
 import { BaseLink, type BaseLinkProps } from './BaseLink';
 import { Icon as IconComponent, type IconProps } from './Icon';
+import { Spinner } from './Spinner';
 
 export type ButtonVariant = 'primary' | 'ghost' | 'tertiary' | 'destructive' | 'warning';
 export type ButtonSize = 'sm' | 'md' | 'lg';
@@ -24,12 +25,20 @@ export type ButtonProps = {
    */
   externalIcon?: boolean;
   size?: ButtonSize;
+  /**
+   * The action is in flight. The button stops taking clicks but keeps its
+   * variant's colour, because the grey disabled look says "you can't do this",
+   * which is the opposite of what is happening. A spinner takes the icon's place.
+   */
+  loading?: boolean;
+  /** What the spinner announces while `loading`, e.g. "Deleting bucket". */
+  loadingLabel?: string;
   children: React.ReactNode;
 } & React.ComponentPropsWithoutRef<'button'>;
 
 type ButtonInnerProps = Pick<
   ButtonProps,
-  'children' | 'icon' | 'iconPosition' | 'iconSize' | 'size'
+  'children' | 'icon' | 'iconPosition' | 'iconSize' | 'size' | 'loading' | 'loadingLabel'
 > & {
   isExternalLink?: boolean;
 };
@@ -69,6 +78,8 @@ export function Button({
   href,
   externalIcon = true,
   size = 'md',
+  loading = false,
+  loadingLabel = 'Loading',
   id,
   ...rest
 }: ButtonProps) {
@@ -78,13 +89,27 @@ export function Button({
     sizeClasses[size],
     icon && iconPosition === 'left' && 'button--icon-left',
     icon && iconPosition === 'right' && 'button--icon-right',
+    loading && 'button--loading',
     className,
   );
 
-  if (typeof href === 'undefined' || disabled) {
+  if (typeof href === 'undefined' || disabled || loading) {
     return (
-      <button id={id} className={classes} disabled={disabled} {...rest}>
-        <ButtonInner icon={icon} iconPosition={iconPosition} iconSize={iconSize} size={size}>
+      <button
+        id={id}
+        className={classes}
+        disabled={disabled || loading}
+        aria-busy={loading || undefined}
+        {...rest}
+      >
+        <ButtonInner
+          icon={icon}
+          iconPosition={iconPosition}
+          iconSize={iconSize}
+          size={size}
+          loading={loading}
+          loadingLabel={loadingLabel}
+        >
           {children}
         </ButtonInner>
       </button>
@@ -121,19 +146,30 @@ function ButtonInner({
   children,
   isExternalLink,
   size = 'md',
+  loading,
+  loadingLabel = 'Loading',
 }: ButtonInnerProps) {
   const defaultIconSize = iconSizes[size];
-  const iconEl = Icon && (
+  const glyphSize = iconSize ?? defaultIconSize;
+  const iconEl = loading ? (
     <span className="button-custom-icon">
-      <IconComponent component={Icon} size={iconSize ?? defaultIconSize} />
+      <Spinner ariaLabel={loadingLabel} size={glyphSize} colorClassName="text-current" />
     </span>
+  ) : (
+    Icon && (
+      <span className="button-custom-icon">
+        <IconComponent component={Icon} size={glyphSize} />
+      </span>
+    )
   );
+  // A spinner with no icon to stand in for sits before the label.
+  const spinnerFirst = loading && (!Icon || iconPosition === 'left');
 
   return (
     <>
-      {iconPosition === 'left' && iconEl}
+      {(spinnerFirst || (!loading && iconPosition === 'left')) && iconEl}
       <span>{children}</span>
-      {iconPosition === 'right' && iconEl}
+      {!spinnerFirst && iconPosition === 'right' && iconEl}
       {isExternalLink && (
         <span className="button-arrow-icon">
           <IconComponent component={ArrowUpRightIcon} size={defaultIconSize} />

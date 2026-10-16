@@ -6,10 +6,14 @@
 // consumes the queue one event per invocation. An error fails the delivery,
 // and SQS retries it before parking it in the dead-letter queue. The handlers
 // tolerate running twice (conditional writes, superseded checks, and a status
-// sync that probes before it updates).
+// sync that probes before it updates). Each handled event is recorded beside
+// the webhook's mark, which is how a test knows the worker is done with it.
 
+import { PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import type { SQSEvent } from 'aws-lambda';
 import Stripe from 'stripe';
+import { Resource } from 'sst';
 import {
   PAID_GRACE_DAYS,
   SubscriptionStatus,
@@ -22,11 +26,8 @@ import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.ts';
-import {
-  invoiceSubscriptionId,
-  invoiceSubscriptionMetadata,
-  subscriptionSuperseded,
-} from '../lib/billing-identity.ts';
+import { subscriptionSuperseded } from '../lib/billing-identity.ts';
+import { getDynamoClient } from '../lib/ddb-client.ts';
 import { getStripeClient } from '../lib/stripe-client.ts';
 import { updateSubscriptionByUser } from '../lib/subscription-store.ts';
 import {
@@ -41,7 +42,32 @@ export async function handler(event: SQSEvent): Promise<void> {
   // One message per invocation (batch size 1), so an error escaping this
   // handler returns exactly the failed event to the queue.
   for (const record of event.Records) {
-    await processStripeEvent(JSON.parse(record.body) as Stripe.Event);
+    const stripeEvent = JSON.parse(record.body) as Stripe.Event;
+    await processStripeEvent(stripeEvent);
+    await recordEventHandled(stripeEvent);
+  }
+}
+
+// A sibling of the webhook's WEBHOOK#<id>/EVENT mark rather than a stamp on it:
+// the webhook writes the mark after the enqueue, so a fast worker can finish
+// first, and the mark's put would erase a stamp. A failed write is logged, not
+// thrown: the billing work is done, and a retry would only run it again.
+async function recordEventHandled(stripeEvent: Stripe.Event): Promise<void> {
+  try {
+    await getDynamoClient().send(
+      new PutItemCommand({
+        TableName: Resource.BillingTable.name,
+        Item: marshall({
+          pk: `WEBHOOK#${stripeEvent.id}`,
+          sk: 'HANDLED',
+          eventType: stripeEvent.type,
+          handledAt: new Date().toISOString(),
+          ttl: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days, as the mark
+        }),
+      }),
+    );
+  } catch (err) {
+    console.error('[stripe-webhook] Failed to record event handled:', stripeEvent.id, err);
   }
 }
 
@@ -50,7 +76,7 @@ async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
       const subscription = stripeEvent.data.object as Stripe.Subscription;
-      await handleSubscriptionUpdate(subscription);
+      await handleSubscriptionUpdate(subscription, stripeEvent.data.previous_attributes?.status);
       return;
     }
     case 'customer.subscription.deleted': {
@@ -75,12 +101,12 @@ async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
     }
     case 'invoice.payment_succeeded': {
       const invoice = stripeEvent.data.object as Stripe.Invoice;
-      await handlePaymentSucceeded(invoice);
+      handlePaymentSucceeded(invoice);
       return;
     }
     case 'invoice.payment_failed': {
       const invoice = stripeEvent.data.object as Stripe.Invoice;
-      await handlePaymentFailed(invoice);
+      handlePaymentFailed(invoice);
       return;
     }
     case 'invoice.finalized': {
@@ -219,7 +245,10 @@ async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
 
-async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Promise<void> {
+async function handleSubscriptionUpdate(
+  subscription: Stripe.Subscription,
+  previousStatus: Stripe.Subscription.Status | undefined,
+): Promise<void> {
   const customerId = getCustomerIdString(subscription.customer);
   const mappedStatus = mapStripeStatus(subscription.status);
 
@@ -246,6 +275,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Prom
       subscription,
       mappedStatus,
       orgId: eventOrgId,
+      previousStatus,
     });
     return;
   }
@@ -274,6 +304,7 @@ async function handleSubscriptionUpdate(subscription: Stripe.Subscription): Prom
     subscription,
     mappedStatus,
     orgId: resolveOrgId(subscription.metadata, customer.metadata),
+    previousStatus,
   });
 }
 
@@ -282,6 +313,7 @@ interface UpdateBillingRecordParams {
   subscription: Stripe.Subscription;
   mappedStatus: SubscriptionStatus;
   orgId: string | undefined;
+  previousStatus: Stripe.Subscription.Status | undefined;
 }
 
 async function updateBillingRecord({
@@ -289,6 +321,7 @@ async function updateBillingRecord({
   subscription,
   mappedStatus,
   orgId,
+  previousStatus,
 }: UpdateBillingRecordParams): Promise<void> {
   const backfill = orgIdBackfill(orgId);
   await updateSubscriptionByUser(
@@ -307,9 +340,17 @@ async function updateBillingRecord({
         ':now': { S: new Date().toISOString() },
         ...backfill.values,
       },
+      // A late event for the subscription Stripe ended may not revive the row;
+      // an event for a new subscription id, after reactivation, still writes.
+      ConditionExpression: 'attribute_not_exists(canceledAt) OR subscriptionId <> :subId',
       guardAgainstScrub: { caller: 'subscription.updated' },
     },
   );
+
+  // Emitted once the delivery can no longer fail, so a retried event counts once.
+  if (previousStatus === 'past_due' && subscription.status === 'active') {
+    emitDunningEscalation({ stage: 'recovered', reason: 'past_due', attemptCount: 0 });
+  }
 }
 
 async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Promise<void> {
@@ -407,121 +448,17 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   });
 }
 
-async function handlePaymentSucceeded(invoice: Stripe.Invoice): Promise<void> {
+// Invoice events only report metrics. Stripe bills a metered subscription's
+// last period after it ends the subscription, so an invoice says nothing about
+// whether a subscription is live; the row's status follows the
+// customer.subscription.* events.
+function handlePaymentSucceeded(invoice: Stripe.Invoice): void {
   if (!invoice.customer) return;
-  const stripe = getStripeClient();
-  const customerId = getCustomerIdString(invoice.customer);
-  const customer = await stripe.customers.retrieve(customerId);
-  if ('deleted' in customer && customer.deleted) return;
-
-  const userId = customer.metadata?.userId;
-  if (!userId) return;
-
-  // The invoice's own subscription snapshot answers first, for the reason every
-  // subscription path prefers it: a customer can outlive an org, and the
-  // subscription that generated this invoice cannot.
-  const orgId = resolveOrgId(invoiceSubscriptionMetadata(invoice), customer.metadata);
-
-  // A success is destructive in the other direction: on the shared org row, a
-  // late invoice from a replaced subscription would mark the org active and
-  // re-enable its tenants while the authoritative subscription is past due.
-  if (
-    await subscriptionSuperseded({
-      source: 'invoice.payment_succeeded',
-      userId,
-      orgId,
-      subscriptionId: invoiceSubscriptionId(invoice),
-    })
-  ) {
-    return;
-  }
-
-  const backfill = orgIdBackfill(orgId);
-  const updateResult = await updateSubscriptionByUser(
-    { userId, orgId },
-    {
-      UpdateExpression: `SET subscriptionStatus = :active, lastPaymentAt = :now, updatedAt = :now${backfill.clause} REMOVE gracePeriodEndsAt, lastPaymentFailedAt, canceledAt`,
-      ExpressionAttributeValues: {
-        ':active': { S: SubscriptionStatus.Active },
-        ':now': { S: new Date().toISOString() },
-        ...backfill.values,
-      },
-      ReturnValues: 'ALL_OLD',
-      guardAgainstScrub: { caller: 'invoice.paid' },
-    },
-  );
-
-  // The prior status comes from the row the guard reads, so a recovery is
-  // reported off the record that governs access.
-  const priorStatus = updateResult.previous?.subscriptionStatus?.S;
-  if (
-    priorStatus === SubscriptionStatus.PastDue ||
-    priorStatus === SubscriptionStatus.GracePeriod
-  ) {
-    emitDunningEscalation({
-      stage: 'recovered',
-      reason: priorStatus,
-      attemptCount: invoice.attempt_count ?? 0,
-    });
-  }
-
-  // Re-enable the tenant on every orchestrator if recovering from
-  // PastDue/GracePeriod. A failure fails the delivery, so SQS retries the event
-  // and parks it in the DLQ once retries are spent. A refused write means the
-  // teardown owns this account: the tenant it disabled stays disabled.
-  if (orgId && !updateResult.refused) {
-    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'active'));
-    console.log('[stripe-webhook] Tenant re-activated', { userId, orgId });
-  }
-
-  // Emitted once the delivery can no longer fail, so a retried event counts once.
   emitInvoicePaid();
 }
 
-async function handlePaymentFailed(invoice: Stripe.Invoice): Promise<void> {
+function handlePaymentFailed(invoice: Stripe.Invoice): void {
   if (!invoice.customer) return;
-  const stripe = getStripeClient();
-  const customerId = getCustomerIdString(invoice.customer);
-  const customer = await stripe.customers.retrieve(customerId);
-  if ('deleted' in customer && customer.deleted) return;
-
-  const userId = customer.metadata?.userId;
-  if (!userId) return;
-
-  // Set PastDue but do NOT start grace period — Stripe Smart Retries will
-  // continue attempting payment. Grace period only begins when Stripe cancels
-  // the subscription after all retries are exhausted.
-  const now = new Date().toISOString();
-  // The invoice's own subscription snapshot answers first, for the reason every
-  // subscription path prefers it: a customer can outlive an org, and the
-  // subscription that generated this invoice cannot.
-  const orgId = resolveOrgId(invoiceSubscriptionMetadata(invoice), customer.metadata);
-  if (
-    await subscriptionSuperseded({
-      source: 'invoice.payment_failed',
-      userId,
-      orgId,
-      subscriptionId: invoiceSubscriptionId(invoice),
-    })
-  ) {
-    return;
-  }
-
-  const backfill = orgIdBackfill(orgId);
-  await updateSubscriptionByUser(
-    { userId, orgId },
-    {
-      UpdateExpression: `SET subscriptionStatus = :status, lastPaymentFailedAt = :failedAt, updatedAt = :now${backfill.clause}`,
-      ExpressionAttributeValues: {
-        ':status': { S: SubscriptionStatus.PastDue },
-        ':failedAt': { S: now },
-        ':now': { S: now },
-        ...backfill.values,
-      },
-      guardAgainstScrub: { caller: 'invoice.payment_failed' },
-    },
-  );
-
   const attemptCount = invoice.attempt_count ?? 0;
   emitDunningEscalation({
     stage: attemptCount <= 1 ? 'entered' : 'retry',

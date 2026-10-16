@@ -1,10 +1,11 @@
 import { useState } from 'react';
 
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import { expect, userEvent, within } from 'storybook/test';
 
 import type { ListBucketsResponse } from '@filone/shared';
-import { S3_REGION, type S3Region } from '@filone/shared';
+import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
 
 import { queryKeys } from '../lib/query-client';
 import { useAccessKeyForm } from '../lib/use-access-key-form';
@@ -28,14 +29,6 @@ const mockBuckets: ListBucketsResponse = {
   ],
 };
 
-function createSeededQueryClient() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
-  });
-  client.setQueryData(queryKeys.buckets, mockBuckets);
-  return client;
-}
-
 const meta: Meta<typeof AccessKeyFormFields> = {
   title: 'Components/AccessKeyFormFields',
   component: AccessKeyFormFields,
@@ -47,13 +40,15 @@ type Story = StoryObj<typeof AccessKeyFormFields>;
 type StoryContentProps = {
   pinnedBucket?: string;
   showRegionSelector?: boolean;
+  initialRegion?: S3Region;
 };
 
 function AccessKeyFormFieldsStoryContent({
   pinnedBucket,
   showRegionSelector = true,
+  initialRegion = S3_REGION,
 }: StoryContentProps) {
-  const [region, setRegion] = useState<S3Region>(S3_REGION);
+  const [region, setRegion] = useState<S3Region>(initialRegion);
   const form = useAccessKeyForm({
     defaultBucket: pinnedBucket,
     region,
@@ -70,14 +65,17 @@ function AccessKeyFormFieldsStoryContent({
   );
 }
 
+// The buckets go into the preview's client, which already holds the story's
+// role; a client of its own would lose it. Seeded before the first render and
+// never stale, since no server answers a refetch.
 function AccessKeyFormFieldsWrapper(props: StoryContentProps) {
-  const [queryClient] = useState(createSeededQueryClient);
+  const queryClient = useQueryClient();
+  useState(() => {
+    queryClient.setQueryDefaults(queryKeys.buckets, { staleTime: Infinity });
+    queryClient.setQueryData(queryKeys.buckets, mockBuckets);
+  });
 
-  return (
-    <QueryClientProvider client={queryClient}>
-      <AccessKeyFormFieldsStoryContent {...props} />
-    </QueryClientProvider>
-  );
+  return <AccessKeyFormFieldsStoryContent {...props} />;
 }
 
 export const Default: Story = {
@@ -90,4 +88,30 @@ export const WithPinnedBucket: Story = {
 
 export const WithoutRegionSelector: Story = {
   render: () => <AccessKeyFormFieldsWrapper showRegionSelector={false} />,
+};
+
+export const PersonalKeyOnIamRegion: Story = {
+  render: () => <AccessKeyFormFieldsWrapper initialRegion={S3Region.UsEast9} />,
+  play: async ({ canvasElement }) => {
+    await expect(await within(canvasElement).findByText('What kind of key?')).toBeVisible();
+  },
+};
+
+export const ServiceKeyOnIamRegion: Story = {
+  render: () => <AccessKeyFormFieldsWrapper initialRegion={S3Region.UsEast9} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByLabelText(/Service key/));
+    await expect(await canvas.findByTestId('permission-read')).toBeVisible();
+  },
+};
+
+export const MemberOnIamRegion: Story = {
+  parameters: { role: OrgRole.Member },
+  render: () => <AccessKeyFormFieldsWrapper initialRegion={S3Region.UsEast9} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByText('Key name');
+    await expect(canvas.queryByText('What kind of key?')).toBeNull();
+  },
 };

@@ -1,28 +1,31 @@
 import { describe, it, beforeAll, afterAll, expect } from 'vitest';
 import {
-  createTestCustomer,
   attachValidCard,
-  seedBillingRecord,
-  createAndPayInvoice,
+  createSubscription,
+  createTestCustomer,
   deleteBillingRecord,
+  getBillingRecord,
   getStripeClient,
   pollForBillingStatusChange,
   pollForPaymentMethod,
-  getBillingRecord,
+  seedBillingRecord,
   testOrgId,
 } from './helpers.js';
 
-describe('Invoice Creation (invoice.payment_succeeded)', () => {
+describe('Reactivation after cancellation (customer.subscription.created)', () => {
   let userId: string;
   let cusId: string;
+  let paymentMethodId: string;
 
   beforeAll(async () => {
-    userId = `test-ic-${crypto.randomUUID()}`;
+    userId = `test-rac-${crypto.randomUUID()}`;
     cusId = await createTestCustomer(userId);
-    await seedBillingRecord(userId, cusId, 'past_due', {
-      lastPaymentFailedAt: { S: '2024-01-01T00:00:00Z' },
+    await seedBillingRecord(userId, cusId, 'grace_period', {
+      subscriptionId: { S: 'any-ended-subscription' },
+      canceledAt: { S: new Date().toISOString() },
+      gracePeriodEndsAt: { S: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() },
     });
-    const paymentMethodId = await attachValidCard(cusId);
+    paymentMethodId = await attachValidCard(cusId);
     await pollForPaymentMethod({ userId, paymentMethodId });
   });
 
@@ -31,25 +34,27 @@ describe('Invoice Creation (invoice.payment_succeeded)', () => {
     await deleteBillingRecord(userId);
   });
 
-  it('should set status to active and clear failure fields', async () => {
-    await createAndPayInvoice(cusId);
+  it("activates the new subscription and clears the ended one's grace fields", async () => {
+    const subId = await createSubscription({ userId, customerId: cusId, paymentMethodId });
     await pollForBillingStatusChange({
       userId,
       expectedStatus: 'active',
-      fromStatus: 'past_due',
+      fromStatus: 'grace_period',
     });
-    const record = await getBillingRecord(userId);
-    expect(record).toStrictEqual({
+
+    expect(await getBillingRecord(userId)).toStrictEqual({
       pk: { S: `ORG#${testOrgId(userId)}` },
       sk: { S: 'SUBSCRIPTION' },
       orgId: { S: testOrgId(userId) },
       userId: { S: userId },
       stripeCustomerId: { S: cusId },
+      subscriptionId: { S: subId },
       subscriptionStatus: { S: 'active' },
+      currentPeriodStart: { S: expect.any(String) },
+      currentPeriodEnd: { S: expect.any(String) },
       updatedAt: { S: expect.any(String) },
-      lastPaymentAt: { S: expect.any(String) },
       paymentMethodBrand: { S: 'visa' },
-      paymentMethodId: { S: expect.any(String) },
+      paymentMethodId: { S: paymentMethodId },
       paymentMethodLast4: { S: '4242' },
       paymentMethodExpYear: { N: expect.any(String) },
       paymentMethodExpMonth: { N: expect.any(String) },

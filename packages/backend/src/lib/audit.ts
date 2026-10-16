@@ -114,6 +114,11 @@ export const AuditSubjects = {
   user: (userId: string): AuditSubject => `user:${userId}`,
   invite: (inviteId: string): AuditSubject => `invite:${inviteId}`,
   /**
+   * A bucket, by region and name: bucket names are unique within a region's
+   * tenant and nowhere else, so the region is part of what identifies one.
+   */
+  bucket: (region: string, bucketName: string): AuditSubject => `bucket:${region}/${bucketName}`,
+  /**
    * Kind-aware, because for an S3 access key the id IS the `AKIA…` access key
    * id, and PROHIBITED_AUDIT_CONTENT forbids the log holding that in full — the
    * details of the very same events carry only {@link auditKeyIdSuffix}. The

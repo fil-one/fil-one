@@ -44,7 +44,6 @@ const SKELETON_COLUMNS: SkeletonColumn[] = [
   { label: 'Buckets', className: 'hidden lg:table-cell' },
   { label: 'Permissions', className: 'hidden md:table-cell' },
   { label: 'Status', className: 'hidden sm:table-cell' },
-  { label: 'Last Used', className: 'hidden md:table-cell' },
   {},
 ];
 

@@ -127,6 +127,26 @@ describe('OrgSwitcherMenu', () => {
     ]);
   });
 
+  it('draws no divider under Billing when nothing sits below it', () => {
+    renderMenu({
+      orgsBeta: false,
+      memberships: [{ orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner }],
+    });
+
+    fireEvent.click(screen.getByTestId('org-switcher-button'));
+
+    expect(screen.getByText('Billing')).toBeInTheDocument();
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+  });
+
+  it('divides the org pages from the switcher', () => {
+    renderMenu({ orgsBeta: false });
+
+    fireEvent.click(screen.getByTestId('org-switcher-button'));
+
+    expect(screen.getByRole('separator')).toBeInTheDocument();
+  });
+
   it('opens the create-organization dialog from its own action', () => {
     renderMenu();
 

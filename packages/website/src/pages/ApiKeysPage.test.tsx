@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
-import type { AccessKey } from '@filone/shared';
+import type { ServiceAccessKey } from '@filone/shared';
 
 const mockApiRequest = vi.fn();
 const mockGetUsage = vi.fn(() => Promise.resolve({ tenantStatus: 'active' }));
@@ -22,12 +22,16 @@ import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function key(over: Partial<AccessKey> = {}): AccessKey {
+function key(over: Partial<ServiceAccessKey> = {}): ServiceAccessKey {
   return {
+    type: 'service',
     id: 'key-1',
     keyName: 'my key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
@@ -36,7 +40,7 @@ function key(over: Partial<AccessKey> = {}): AccessKey {
     permissions: ['read', 'list'],
     bucketScope: 'all',
     region: S3Region.UsEast1,
-    createdBy: 'user-1',
+    createdBy: USER_1,
     ...over,
   };
 }
@@ -127,7 +131,7 @@ describe('ApiKeysPage — who may revoke', () => {
 
   it('gives a Member the action on their own key and not a colleague’s', async () => {
     mockApiRequest.mockResolvedValue({
-      keys: [key(), key({ id: 'key-2', keyName: 'theirs', createdBy: 'user-2' })],
+      keys: [key(), key({ id: 'key-2', keyName: 'theirs', createdBy: USER_2 })],
     });
 
     renderPage(OrgRole.Member);
@@ -241,6 +245,19 @@ describe('ApiKeysPage — rotating a key', () => {
     });
 
     renderPage(OrgRole.Admin);
+    await openRowMenu();
+
+    expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+  });
+
+  it('hides the action on an expired key', async () => {
+    // The rotate route refuses an expired key; the remedy is a new one.
+    mockApiRequest.mockResolvedValue({
+      keys: [key({ status: 'expired', expiresAt: '2026-06-01' })],
+    });
+
+    renderPage(OrgRole.Owner);
     await openRowMenu();
 
     expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();

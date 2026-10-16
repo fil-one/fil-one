@@ -58,3 +58,18 @@ export const CustomLabels: Story = {
     );
   },
 };
+
+// The confirm never settles, so clicking it holds the dialog in its loading
+// state: the button keeps its red and shows a spinner beside the label.
+export const Confirming: Story = {
+  render: () => (
+    <ConfirmDialog
+      open
+      onClose={() => {}}
+      onConfirm={() => new Promise<void>(() => {})}
+      title="Delete bucket"
+      description="This bucket will be permanently deleted. The bucket must be empty: delete its objects and object versions first."
+      confirmLabel="Delete bucket"
+    />
+  ),
+};

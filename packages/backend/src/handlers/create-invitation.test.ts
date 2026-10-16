@@ -429,6 +429,17 @@ describe('POST /api/org/invitations handler', () => {
     expect(result).toMatchObject({ statusCode: 201 });
   });
 
+  it('accepts a verified @fil.org caller who holds no beta row', async () => {
+    // The default allowlist row is keyed to INVITER_EMAIL, so it does not match.
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: MOCK_SUB, email: 'any-person@fil.org', email_verified: true },
+    });
+
+    const result = await handler(inviteEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 201 });
+  });
+
   it('refuses once the org holds as many pending invitations as it may', async () => {
     stubPendingInvitations(MAX_PENDING_INVITATIONS_PER_ORG);
 

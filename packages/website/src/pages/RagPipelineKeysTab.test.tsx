@@ -11,6 +11,9 @@ import { queryKeys } from '../lib/query-client.js';
 import { RagApiKeysTab } from './RagPipelineKeysTab.js';
 import type { RagBucket } from '../lib/rag-bucket-api.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 // ---------------------------------------------------------------------------
 // Mocks — API client boundary
 // ---------------------------------------------------------------------------
@@ -31,7 +34,7 @@ vi.mock('../lib/rag-api-keys-api.js', () => ({
 
 const TOKEN = 'sk_rag_0123456789abcdefghijklmnopqrstuvwxyzABCDEF';
 
-// `seedPermissions` writes userId 'user-1', so this key is the caller's own —
+// `seedPermissions` writes userId USER_1, so this key is the caller's own —
 // which is what a Member's `keys.manage_own` reaches.
 const KEY: RagApiKey = {
   id: 'key-1',
@@ -39,7 +42,7 @@ const KEY: RagApiKey = {
   keyPrefix: 'sk_rag_AbC12',
   bucketScope: 'all',
   createdAt: '2026-07-01T00:00:00Z',
-  createdBy: 'user-1',
+  createdBy: USER_1,
 };
 
 /** A key somebody else minted: visible to `keys.manage_all`, not revocable below it. */
@@ -47,7 +50,7 @@ const OTHERS_KEY: RagApiKey = {
   ...KEY,
   id: 'key-2',
   keyName: 'someone elses key',
-  createdBy: 'user-2',
+  createdBy: USER_2,
 };
 
 function bucket(over: Partial<RagBucket> = {}): RagBucket {

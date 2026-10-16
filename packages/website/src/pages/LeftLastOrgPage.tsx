@@ -53,7 +53,7 @@ export function LeftLastOrgPage({ email }: LeftLastOrgPageProps) {
       <Button
         href="/create-organization"
         variant="primary"
-        className="mt-6 w-full justify-center py-3.5"
+        className="mt-6 w-full justify-center h-12"
       >
         Create an organization
       </Button>

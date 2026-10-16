@@ -10,10 +10,10 @@ import { BucketAccessTab } from './BucketAccessTab';
 const mockKeys: AccessKey[] = [
   {
     id: '1',
+    type: 'service',
     keyName: 'Production API Key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
     createdAt: '2026-01-15T10:00:00Z',
-    lastUsedAt: '2026-04-08T14:30:00Z',
     status: 'active',
     permissions: ['read', 'write', 'list'],
     bucketScope: 'specific',
@@ -23,6 +23,7 @@ const mockKeys: AccessKey[] = [
   },
   {
     id: '2',
+    type: 'service',
     keyName: 'Read-Only Backup',
     accessKeyId: 'ACCESS_KEY_09876EXAMPL',
     createdAt: '2026-02-20T08:00:00Z',

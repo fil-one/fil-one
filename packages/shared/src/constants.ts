@@ -118,29 +118,35 @@ export function supportsBucketManagement(region: S3Region): boolean {
 /**
  * How a backend decides what a credential may do.
  *
- * `scoped-keys`: the org is a tenant and an access key carries its own
+ * `service-keys`: the org is a tenant and an access key carries its own
  * permission set and bucket list, stamped at creation and unchangeable
  * afterwards. The member's role caps what a key may carry, and a role narrowing
  * revokes the keys the holder could no longer mint.
  *
  * `iam`: each member is a principal at the storage system, an access key
  * belongs to a member, and the key's authority is the member's as evaluated at
- * request time. No region declares it yet.
+ * request time.
  */
-export type AccessModel = 'scoped-keys' | 'iam';
+export type AccessModel = 'service-keys' | 'iam';
 
 /**
- * The access model a region's backend serves. Every region is `scoped-keys`
- * today: Aurora and FTH cannot model a principal, and the Forge integration
- * issues flat-permission keys through the Management API, which is the same
- * shape. A Forge region moves to `iam` when its Hilt network implements the
- * principal-and-policy contract.
+ * The access model of the orchestrator serving a region: the Forge orchestrator
+ * serves bucket policies and members, while Aurora and FTH cannot model a
+ * principal.
  *
  * Mirrored here rather than read off the orchestrator so the console can decide
  * without one in hand.
  */
-export function getRegionAccessModel(_region: S3Region): AccessModel {
-  return 'scoped-keys';
+export function getRegionAccessModel(region: S3Region): AccessModel {
+  return region === S3Region.EuCentral3 || region === S3Region.UsEast9 ? 'iam' : 'service-keys';
+}
+
+/**
+ * Whether the orchestrator behind a region serves the `iam` access model:
+ * buckets carry policies, and each member is a principal a policy can name.
+ */
+export function supportsIamMethods(region: S3Region): boolean {
+  return getRegionAccessModel(region) === 'iam';
 }
 
 /**

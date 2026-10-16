@@ -36,7 +36,7 @@ function RoleBadge({ role, className }: { role: OrgRole; className?: string }) {
  * the live region below only reads the new text out, without moving them to it.
  */
 const PANEL_SHELL_CLASSES =
-  'w-full max-w-[380px] rounded-xl border border-zinc-200 bg-white p-8 text-center shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]';
+  'w-full max-w-[380px] rounded-xl border border-zinc-200 bg-white p-8 text-center shadow-auth-card';
 
 function Panel({
   title,

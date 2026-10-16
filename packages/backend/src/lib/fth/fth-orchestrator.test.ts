@@ -56,7 +56,7 @@ import type { FthManagementClient } from './fth-management-client.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 
 import { createFthOrchestrator } from './fth-orchestrator.ts';
-import type { IssueAccessKeyOpts, ServiceOrchestrator } from '../service-orchestrator.ts';
+import type { IssueAccessKeyOpts, LegacyServiceOrchestrator } from '../service-orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -70,7 +70,7 @@ function profileItem(attrs: Record<string, string>) {
 
 // A fresh instance per test replaces a cache reset: the console storage-user
 // cache lives on the instance.
-let fthOrchestrator: ServiceOrchestrator;
+let fthOrchestrator: LegacyServiceOrchestrator;
 
 beforeEach(() => {
   ssmMock.reset();
@@ -610,6 +610,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     );
 
     expect(result).toEqual({
+      type: 'service',
       id: 'AKIAFTH',
       accessKeyId: 'AKIAFTH',
       accessKeySecret: 'sk-secret',
@@ -1140,6 +1141,64 @@ describe('fthOrchestrator.getTenantUsageMetrics', () => {
     );
   });
 
+  it('splits a 1d range over 90 days at UTC midnight and keeps the later chunk on a shared day', async () => {
+    mockGetClientMetricsTimeseries
+      .mockResolvedValueOnce({
+        points: [
+          { ts: '2026-01-01T00:00:00Z', usage_avg_bytes: 1, object_count_avg: 1, egress_bytes: 10 },
+          // The boundary day as a zero-length sliver of the first chunk.
+          { ts: '2026-04-01T00:00:00Z', usage_avg_bytes: 0, object_count_avg: 0, egress_bytes: 0 },
+        ],
+      })
+      .mockResolvedValueOnce({
+        points: [
+          { ts: '2026-04-01T00:00:00Z', usage_avg_bytes: 2, object_count_avg: 2, egress_bytes: 20 },
+          { ts: '2026-05-30T00:00:00Z', usage_avg_bytes: 3, object_count_avg: 3, egress_bytes: 30 },
+        ],
+      });
+
+    const result = await fthOrchestrator.getTenantUsageMetrics(
+      fthClientId,
+      { from: '2026-01-01T07:02:05.000Z', to: '2026-05-31T00:00:00.000Z' },
+      { signal },
+    );
+
+    expect(mockGetClientMetricsTimeseries.mock.calls).toEqual([
+      [
+        fthClientId,
+        { from: '2026-01-01T07:02:05.000Z', to: '2026-04-01T00:00:00.000Z', interval: '1d' },
+        { signal },
+      ],
+      [
+        fthClientId,
+        { from: '2026-04-01T00:00:00.000Z', to: '2026-05-31T00:00:00.000Z', interval: '1d' },
+        { signal },
+      ],
+    ]);
+    expect(result).toEqual({
+      storage: [
+        { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 1, objectCount: 1 },
+        { timestamp: '2026-04-01T00:00:00.000Z', bytesUsed: 2, objectCount: 2 },
+        { timestamp: '2026-05-30T00:00:00.000Z', bytesUsed: 3, objectCount: 3 },
+      ],
+      egress: [
+        { timestamp: '2026-01-01T00:00:00.000Z', bytesUsed: 10 },
+        { timestamp: '2026-04-01T00:00:00.000Z', bytesUsed: 20 },
+        { timestamp: '2026-05-30T00:00:00.000Z', bytesUsed: 30 },
+      ],
+    });
+  });
+
+  it('does not split ranges for intervals other than 1d', async () => {
+    const from = '2026-01-01T00:00:00.000Z';
+    const to = '2026-05-31T00:00:00.000Z';
+    await fthOrchestrator.getTenantUsageMetrics(fthClientId, { from, to, interval: '1h' });
+
+    expect(mockGetClientMetricsTimeseries.mock.calls).toEqual([
+      [fthClientId, { from, to, interval: '1h' }, undefined],
+    ]);
+  });
+
   it('maps points to normalized storage and egress shapes', async () => {
     mockGetClientMetricsTimeseries.mockResolvedValue({
       points: [
@@ -1386,8 +1445,10 @@ describe('fthOrchestrator signal forwarding', () => {
       fthOrchestrator.createBucket(fthClientId, { bucketName: 'b' }, { signal }),
     deleteBucket: (signal: AbortSignal) =>
       fthOrchestrator.deleteBucket(fthClientId, 'b', { signal }),
-    listBuckets: (signal: AbortSignal) => fthOrchestrator.listBuckets(fthClientId, { signal }),
-    getBucket: (signal: AbortSignal) => fthOrchestrator.getBucket(fthClientId, 'b', { signal }),
+    listBuckets: (signal: AbortSignal) =>
+      fthOrchestrator.listBuckets(fthClientId, undefined, { signal }),
+    getBucket: (signal: AbortSignal) =>
+      fthOrchestrator.getBucket(fthClientId, 'b', undefined, { signal }),
   };
 
   for (const [method, invoke] of Object.entries(credentialLookups)) {
@@ -1422,7 +1483,7 @@ describe('fthOrchestrator signal forwarding', () => {
   it('listBuckets forwards the signal to S3 ListBuckets', async () => {
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
 
-    await fthOrchestrator.listBuckets(fthClientId, { signal });
+    await fthOrchestrator.listBuckets(fthClientId, undefined, { signal });
 
     expect(sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand))).toEqual({
       abortSignal: signal,
@@ -1446,7 +1507,7 @@ describe('fthOrchestrator signal forwarding', () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    await fthOrchestrator.getBucket(fthClientId, 'b', { signal });
+    await fthOrchestrator.getBucket(fthClientId, 'b', undefined, { signal });
 
     const sent = [
       sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand)),
@@ -1491,7 +1552,7 @@ describe('fthOrchestrator signal forwarding', () => {
   it('findAccessKeyByName forwards the signal to listAccessKeys', async () => {
     mockFthClient.listAccessKeys.mockResolvedValue([]);
 
-    await fthOrchestrator.findAccessKeyByName(fthClientId, 'k', { signal });
+    await fthOrchestrator.findAccessKeyByName(fthClientId, 'k', undefined, { signal });
 
     expect(mockFthClient.listAccessKeys).toHaveBeenCalledWith(fthClientId, { signal });
   });
