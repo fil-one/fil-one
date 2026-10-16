@@ -28,7 +28,7 @@ export async function saveBillingRecord(
 
   await updateSubscription(owner, {
     UpdateExpression:
-      'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodStart = :periodStart, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt',
+      'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodStart = :periodStart, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt, canceledAt, gracePeriodEndsAt',
     ExpressionAttributeValues: {
       ':subId': { S: subscription.id },
       ':status': { S: mappedStatus },
