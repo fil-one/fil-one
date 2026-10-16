@@ -144,10 +144,10 @@ export interface CreateBucketResponse {
  * nor the Management API carries a creation date for a single bucket. The list
  * carries it, because a listing does.
  */
-export type BucketProperties = Omit<Bucket, 'createdAt'>;
+export type BucketDetails = Omit<Bucket, 'createdAt'>;
 
 export interface GetBucketResponse {
-  bucket: BucketProperties;
+  bucket: BucketDetails;
 }
 
 export interface DeleteBucketRequest {

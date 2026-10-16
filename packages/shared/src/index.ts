@@ -265,7 +265,7 @@ export type {
 
 export type {
   Bucket,
-  BucketProperties,
+  BucketDetails,
   ListBucketsResponse,
   ListBucketsQuery,
   BucketSortKey,
