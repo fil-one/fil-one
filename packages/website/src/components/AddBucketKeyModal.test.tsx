@@ -66,4 +66,14 @@ describe('AddBucketKeyModal — on an iam region', () => {
     await screen.findByText('What can this key do?');
     expect(screen.queryByText(POLICY_SIDEBAR_HEADING)).not.toBeInTheDocument();
   });
+
+  it('returns to a personal key after Cancel', async () => {
+    renderModal();
+    fireEvent.click(await screen.findByLabelText(/Service key/));
+    await screen.findByText('What can this key do?');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByText(POLICY_SIDEBAR_HEADING)).toBeInTheDocument();
+    expect(screen.queryByText('What can this key do?')).not.toBeInTheDocument();
+  });
 });

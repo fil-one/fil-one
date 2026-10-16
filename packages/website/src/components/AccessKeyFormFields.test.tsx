@@ -62,6 +62,14 @@ describe('AccessKeyFormFields — reserved key name', () => {
   });
 });
 
+describe('AccessKeyFormFields — on a region outside iam', () => {
+  it('hides the key-type choice from an Owner', async () => {
+    renderForm(() => {});
+    expect(await screen.findByText('What can this key do?')).toBeInTheDocument();
+    expect(screen.queryByText('What kind of key?')).not.toBeInTheDocument();
+  });
+});
+
 describe('AccessKeyFormFields — on a region serving the iam access model', () => {
   const PERSONAL_KEY_NOTE =
     "This key acts as you. What it can reach is decided by each bucket's policy.";
