@@ -218,7 +218,7 @@ export function DashboardPage() {
             variant="ghost"
             size="sm"
             icon={PlusIcon}
-            href="/buckets"
+            href="/buckets/create"
           >
             New bucket
           </Button>
@@ -480,7 +480,7 @@ export function DashboardPage() {
                 id="dashboard-create-bucket-button"
                 variant="primary"
                 icon={PlusIcon}
-                href="/buckets"
+                href="/buckets/create"
               >
                 Create bucket
               </Button>
