@@ -53,6 +53,15 @@ vi.mock('./metrics.ts', () => ({
   instrumentClient: vi.fn(),
 }));
 
+// putBucketPolicy adds If-None-Match through command middleware, which the S3
+// client mock never runs, so the header can only be checked in the arguments
+// putBucketPolicy is called with.
+const { mockPutBucketPolicy } = vi.hoisted(() => ({ mockPutBucketPolicy: vi.fn() }));
+vi.mock('../s3-bucket-operations.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../s3-bucket-operations.ts')>()),
+  putBucketPolicy: (...args: unknown[]) => mockPutBucketPolicy(...args),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
 const s3Mock = mockClient(S3Client);
@@ -64,8 +73,11 @@ import {
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
+  PolicyConflictError,
+  PolicyValidationError,
   PrincipalNotFoundError,
 } from '../errors.ts';
+import { grantGetObjectToUser } from '../../test/bucket-policy-fixture.ts';
 import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
@@ -383,6 +395,74 @@ describe('getS3ClientContext', () => {
 
 describe('createBucket', () => {
   beforeEach(stubS3Credentials);
+
+  it('writes the policy after CreateBucket and before PutBucketVersioning', async () => {
+    const callOrder: string[] = [];
+    s3Mock.on(CreateBucketCommand).callsFake(() => callOrder.push('create'));
+    s3Mock.on(PutBucketVersioningCommand).callsFake(() => callOrder.push('versioning'));
+    mockPutBucketPolicy.mockImplementation(async () => {
+      callOrder.push('policy');
+      return { etag: '"e1"' };
+    });
+
+    await orchestrator.createBucket(tenantId, {
+      bucketName: 'my-bucket',
+      versioning: true,
+      policy: grantGetObjectToUser,
+    });
+
+    expect(callOrder).toStrictEqual(['create', 'policy', 'versioning']);
+  });
+
+  it('writes the first policy with If-None-Match *', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    mockPutBucketPolicy.mockResolvedValue({ etag: '"e1"' });
+
+    await orchestrator.createBucket(tenantId, {
+      bucketName: 'my-bucket',
+      policy: grantGetObjectToUser,
+    });
+
+    expect(mockPutBucketPolicy.mock.calls).toStrictEqual([
+      [expect.any(S3Client), 'my-bucket', grantGetObjectToUser, { ifNoneMatch: '*' }],
+    ]);
+  });
+
+  it('retries the first policy write after a PolicyConflictError', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    mockPutBucketPolicy
+      .mockRejectedValueOnce(new PolicyConflictError())
+      .mockResolvedValue({ etag: '"e1"' });
+
+    await orchestrator.createBucket(tenantId, {
+      bucketName: 'my-bucket',
+      policy: grantGetObjectToUser,
+    });
+
+    expect(mockPutBucketPolicy).toHaveBeenCalledTimes(2);
+  });
+
+  it('passes a PolicyValidationError from the policy write through unwrapped', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    const err = new PolicyValidationError('unknown principal');
+    mockPutBucketPolicy.mockRejectedValue(err);
+
+    // The handler answers 400 only for a PolicyValidationError.
+    await expect(
+      orchestrator.createBucket(tenantId, {
+        bucketName: 'my-bucket',
+        policy: grantGetObjectToUser,
+      }),
+    ).rejects.toBe(err);
+  });
+
+  it('does not write a policy when the create has no policy', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+
+    await orchestrator.createBucket(tenantId, { bucketName: 'my-bucket' });
+
+    expect(mockPutBucketPolicy).not.toHaveBeenCalled();
+  });
 
   it('issues a CreateBucketCommand for the given bucket name', async () => {
     s3Mock.on(CreateBucketCommand).resolves({});

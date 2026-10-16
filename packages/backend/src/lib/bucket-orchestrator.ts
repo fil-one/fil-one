@@ -1,4 +1,4 @@
-import type { RetentionDurationType, RetentionMode, S3Region } from '@filone/shared';
+import type { BucketPolicy, RetentionDurationType, RetentionMode, S3Region } from '@filone/shared';
 import type { S3ClientContext } from './s3-client.ts';
 import type { OrchestratorRequestOptions } from './service-orchestrator.ts';
 
@@ -42,6 +42,11 @@ export interface CreateBucketArgs {
   bucketName: string;
   versioning?: boolean;
   lock?: boolean;
+  /**
+   * The policy the bucket starts with, on a region serving the `iam` access
+   * model. Never set on a `service-keys` region.
+   */
+  policy?: BucketPolicy;
   retention?: {
     enabled: boolean;
     mode: RetentionMode;
