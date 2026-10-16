@@ -26,17 +26,26 @@ import { Button } from './Button';
 import { CopyButton } from './CopyButton';
 import { IconButton } from './IconButton';
 import { Table } from './Table/Table';
-import { formatDate } from '../lib/time.js';
+import { formatCalendarDate, formatDate } from '../lib/time.js';
 
-function StatusBadge({ status }: { status: AccessKey['status'] }) {
-  return status === 'active' ? (
-    <Badge color="green" dot size="sm" weight="medium">
-      Active
-    </Badge>
-  ) : (
-    <Badge color="grey" dot size="sm" weight="medium">
-      Inactive
-    </Badge>
+/** Active, or Expired with the date it stopped working. */
+function KeyStatus({ accessKey }: { accessKey: AccessKey }) {
+  if (accessKey.status === 'active') {
+    return (
+      <Badge color="green" dot size="sm" weight="medium">
+        Active
+      </Badge>
+    );
+  }
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      <Badge color="grey" dot size="sm" weight="medium">
+        Expired
+      </Badge>
+      {accessKey.expiresAt && (
+        <p className="text-xs text-zinc-500">{formatCalendarDate(accessKey.expiresAt)}</p>
+      )}
+    </div>
   );
 }
 
@@ -356,7 +365,6 @@ export function AccessKeysTable({
           {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
           {showCreatedBy && <Table.Head className="hidden lg:table-cell">Created by</Table.Head>}
           <Table.Head className="hidden sm:table-cell">Status</Table.Head>
-          <Table.Head className="hidden md:table-cell">Last Used</Table.Head>
           {showActions && (
             <Table.Head>
               <span className="sr-only">Actions</span>
@@ -375,9 +383,9 @@ export function AccessKeysTable({
                 <CopyButton value={key.accessKeyId} />
               </div>
               {/* Type and status shown inline on small screens */}
-              <div className="mt-1 flex gap-1 sm:hidden">
+              <div className="mt-1 flex items-start gap-1 sm:hidden">
                 <KeyTypeBadge type={key.type} />
-                <StatusBadge status={key.status} />
+                <KeyStatus accessKey={key} />
               </div>
             </Table.Cell>
 
@@ -455,12 +463,7 @@ export function AccessKeysTable({
 
             {/* Status */}
             <Table.Cell className="hidden sm:table-cell">
-              <StatusBadge status={key.status} />
-            </Table.Cell>
-
-            {/* Last Used */}
-            <Table.Cell className="hidden md:table-cell text-xs text-zinc-500">
-              {key.lastUsedAt ? formatDate(key.lastUsedAt) : 'Never'}
+              <KeyStatus accessKey={key} />
             </Table.Cell>
 
             {/* Actions */}

@@ -15,6 +15,7 @@ import {
 } from '@filone/shared';
 import type { ErrorResponse, KeyRetentionResult, RotateAccessKeyResponse } from '@filone/shared';
 import { Resource } from 'sst';
+import { isAccessKeyExpired } from '../lib/access-key-inventory.ts';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
@@ -145,7 +146,7 @@ async function prepareRotation(
   const retention = canRoleRotateKey(membership?.role ?? NO_ROLE, stored);
   if (!retention.retained) return refusedRotation(retention);
 
-  if (hasExpired(stored.expiresAt)) {
+  if (isAccessKeyExpired(stored.expiresAt)) {
     return new ResponseBuilder()
       .status(400)
       .body<ErrorResponse>({
@@ -437,12 +438,6 @@ function canRoleRotateKey(role: string, stored: StoredKey): KeyRetentionResult {
     granularPermissions: stored.granularPermissions,
     region: stored.region,
   });
-}
-
-/** Whether the key's own expiry date has already passed, in UTC days. */
-function hasExpired(expiresAt: string | undefined): boolean {
-  if (!expiresAt) return false;
-  return expiresAt < new Date().toISOString().slice(0, 10);
 }
 
 /**
