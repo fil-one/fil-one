@@ -5,7 +5,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, PlanId, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import type { BillingInfo, ErrorResponse } from '@filone/shared';
 import type Stripe from 'stripe';
-import { getBillingSecrets, getStripeClient } from '../lib/stripe-client.ts';
+import { getStripeClient } from '../lib/stripe-client.ts';
 import {
   readSubscription,
   updateSubscription,
@@ -148,23 +148,26 @@ function describePrice(price: StripePriceDetails | undefined): {
 } {
   return {
     monthlyMinimumCents: deriveMonthlyMinimumCents(price),
-    planName: isSelfServePrice(price) ? undefined : price?.product_name,
+    planName: price?.plan_display_name,
     pricePerTbCents: derivePricePerTbCents(price),
   };
 }
 
 /**
- * Whether this is the self-serve Pay-as-you-go price everyone signs up on.
+ * The plan name a customer may read, from the product's `display_name`
+ * metadata. Set it on a negotiated plan's product (a "Business" plan, say).
  *
- * Its Stripe product is named for internal bookkeeping ("Fil ONE Storage
- * (GB)"), not for a customer to read, so it must not stand in for the plan
- * name the console already gives that price ("Pay as you go" from `planId`,
- * see `planTitle()` in packages/website/src/lib/billing-view.ts). Only a
- * genuinely negotiated price — one Stripe was told a real plan name for —
- * should override that.
+ * A product's own name is never used: the self-serve product's is internal
+ * bookkeeping ("Fil ONE Storage (GB)"), and it must not stand in for the name
+ * the console already gives that plan ("Pay as you go" from `planId`, see
+ * `planTitle()` in packages/website/src/lib/billing-view.ts). Requiring the
+ * opt-in keeps every self-serve price unnamed, grandfathered ones included,
+ * without a list of price ids to maintain. A negotiated product without the
+ * metadata shows as "Pay as you go" until someone sets it.
  */
-function isSelfServePrice(price: StripePriceDetails | undefined): boolean {
-  return price?.id === getBillingSecrets().STRIPE_PRICE_ID;
+function getPlanDisplayName(product: Stripe.Price['product']): string | undefined {
+  if (typeof product !== 'object' || !product || product.deleted) return undefined;
+  return product.metadata?.display_name || undefined;
 }
 
 /**
@@ -308,7 +311,8 @@ async function resolveLivePrice(
   if (!livePrice) return undefined;
 
   const price = toStripePriceDetails(livePrice);
-  if (price.id !== billingRecord.stripePrice?.id) {
+  const cached = billingRecord.stripePrice;
+  if (price.id !== cached?.id || price.plan_display_name !== cached.plan_display_name) {
     await cacheStripePrice(price, owner);
   }
   return price;
@@ -362,15 +366,16 @@ function amountToCents(
  * Keeps only the fields that are immutable on a Stripe price, so the cached
  * snapshot can never drift from Stripe. Mutable fields (`nickname`, `active`,
  * `metadata`, `lookup_key`) are dropped: we refresh the cache only when the
- * price id changes, which would leave any mutable value we stored stale.
+ * price id changes, which would leave any mutable value we stored stale. The
+ * plan display name is the exception, and `resolveLivePrice` also refreshes
+ * the cache when it changes.
  */
 function toStripePriceDetails(price: Stripe.Price): StripePriceDetails {
+  const planDisplayName = getPlanDisplayName(price.product);
   return {
     id: price.id,
     product: typeof price.product === 'string' ? price.product : price.product?.id,
-    ...(typeof price.product === 'object' && price.product && 'name' in price.product
-      ? { product_name: price.product.name }
-      : {}),
+    ...(planDisplayName ? { plan_display_name: planDisplayName } : {}),
     currency: price.currency,
     billing_scheme: price.billing_scheme,
     tiers_mode: price.tiers_mode,
