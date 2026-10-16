@@ -6,6 +6,7 @@ import {
   type ModelStorageMetricsSample,
 } from '@filone/aurora-backoffice-client';
 import { createBackofficeClient } from './aurora-backoffice.ts';
+import { dedupeByTimestamp, splitTimeRange } from '../time-range.ts';
 
 export type { ModelOperationMetricsSample, ModelStorageMetricsSample };
 
@@ -16,41 +17,6 @@ export type { ModelOperationMetricsSample, ModelStorageMetricsSample };
 // timestamp absorbs any overlap at range boundaries.
 const MAX_AURORA_QUERY_RANGE_DAYS = 40;
 const MAX_AURORA_QUERY_RANGE_MS = MAX_AURORA_QUERY_RANGE_DAYS * 24 * 60 * 60 * 1000;
-
-function splitTimeRange(fromIso: string, toIso: string): Array<{ from: string; to: string }> {
-  const fromMs = Date.parse(fromIso);
-  const toMs = Date.parse(toIso);
-  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
-    return [{ from: fromIso, to: toIso }];
-  }
-  if (toMs - fromMs <= MAX_AURORA_QUERY_RANGE_MS) {
-    return [{ from: fromIso, to: toIso }];
-  }
-  const ranges: Array<{ from: string; to: string }> = [];
-  let cursor = fromMs;
-  while (cursor < toMs) {
-    const next = Math.min(cursor + MAX_AURORA_QUERY_RANGE_MS, toMs);
-    ranges.push({ from: new Date(cursor).toISOString(), to: new Date(next).toISOString() });
-    cursor = next;
-  }
-  return ranges;
-}
-
-function dedupeByTimestamp<T extends { timestamp?: string }>(samples: T[]): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const sample of samples) {
-    const key = sample.timestamp;
-    if (key === undefined) {
-      out.push(sample);
-      continue;
-    }
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(sample);
-  }
-  return out;
-}
 
 export interface GetStorageSamplesOptions {
   tenantId: string;
@@ -102,7 +68,7 @@ export async function getStorageSamples({
   window = '1h',
   signal,
 }: GetStorageSamplesOptions): Promise<ModelStorageMetricsSample[]> {
-  const ranges = splitTimeRange(from, to);
+  const ranges = splitTimeRange(from, to, MAX_AURORA_QUERY_RANGE_MS);
   if (ranges.length === 1) {
     return fetchStorageSamplesRange({ tenantId, from, to, window, signal });
   }
@@ -209,7 +175,7 @@ export async function getOperationsSamples({
   window = '24h',
   signal,
 }: GetOperationsSamplesOptions): Promise<ModelOperationMetricsSample[]> {
-  const ranges = splitTimeRange(from, to);
+  const ranges = splitTimeRange(from, to, MAX_AURORA_QUERY_RANGE_MS);
   if (ranges.length === 1) {
     return fetchOperationsSamplesRange({ tenantId, from, to, window, signal });
   }

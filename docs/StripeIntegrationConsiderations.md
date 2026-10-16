@@ -290,17 +290,17 @@ but does not itself reconcile.
 
 ## Webhook Events to Handle
 
-| Event                                  | Action                                      |
-| -------------------------------------- | ------------------------------------------- |
-| `customer.subscription.created`        | Record subscription, start usage tracking   |
-| `customer.subscription.trial_will_end` | Notify customer (3 days before)             |
-| `customer.subscription.updated`        | Handle plan changes, payment method updates |
-| `customer.subscription.deleted`        | Stop tracking, begin data retention policy  |
-| `invoice.creating`                     | **Report metered usage to Stripe**          |
-| `invoice.payment_succeeded`            | Record payment, update status               |
-| `invoice.payment_failed`               | Dunning flow                                |
-| `charge.dispute.created`               | Flag account, potentially suspend           |
-| `radar.early_fraud_warning`            | Flag account for review                     |
+| Event                                  | Action                                     |
+| -------------------------------------- | ------------------------------------------ |
+| `customer.subscription.created`        | Record subscription, start usage tracking  |
+| `customer.subscription.trial_will_end` | Notify customer (3 days before)            |
+| `customer.subscription.updated`        | Record status changes, plan changes        |
+| `customer.subscription.deleted`        | Stop tracking, begin data retention policy |
+| `invoice.creating`                     | **Report metered usage to Stripe**         |
+| `invoice.payment_succeeded`            | Metrics only, never the status             |
+| `invoice.payment_failed`               | Dunning metrics only, never the status     |
+| `charge.dispute.created`               | Flag account, potentially suspend          |
+| `radar.early_fraud_warning`            | Flag account for review                    |
 
 Webhook security: verify signatures, idempotency layer (webhooks can be delivered multiple times), async processing via DB queue or SQS.
 
