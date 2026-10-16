@@ -51,6 +51,7 @@ import type {
 } from '../service-orchestrator.ts';
 import { TENANT_DELETE_RETRY } from '../service-orchestrator.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
+import { canMemberAccessBucket, filterBucketsByMemberAccess } from './member-access.ts';
 import { normalizeStatus } from './metrics-mapping.ts';
 import type { S3ClientContext } from '../s3-client.ts';
 import { createS3Client } from '../s3-client.ts';
@@ -66,6 +67,7 @@ import {
   putBucketPolicy as s3PutBucketPolicy,
   deleteBucketPolicy as s3DeleteBucketPolicy,
 } from '../s3-bucket-operations.ts';
+import { isAccessDeniedError, isNoSuchBucketError } from '../s3-errors.ts';
 import { getConsoleS3Credentials } from '../s3-credentials.ts';
 import {
   deleteTenantsByTenantId,
@@ -323,34 +325,19 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     await s3DeleteBucket(s3, bucketName, requestOptions);
   }
 
-  /**
-   * The tenant's buckets, or one member's when the caller names a member.
-   *
-   * The console filters because the data plane does not: every principal holds
-   * `s3:ListAllMyBuckets`, so the gateway lists the whole tenant (fil-one/RFC#30),
-   * even to a key bound to the member. The accessible set comes from the storage
-   * system's own evaluation, so it agrees with its last policy write.
-   *
-   * A bucket carrying no policy is accessible to unscoped callers alone, who
-   * name no member and so are never filtered here. The console writes a policy
-   * on every bucket it creates; one that arrives without it, or loses it, is
-   * visible to an Owner or an Admin and to nobody else.
-   */
+  /** The tenant's buckets, or one member's; see {@link filterBucketsByMemberAccess}. */
   async listBuckets(
     tenantId: string,
     memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]> {
-    if (!memberId) return this.listTenantBuckets(tenantId, requestOptions);
-    // One promise, so a failed access lookup rejects the whole leg and the
-    // caller's fan-out reports the region as unavailable. Answering unfiltered
-    // would hand the member every bucket name in the tenant.
-    const [buckets, access] = await Promise.all([
-      this.listTenantBuckets(tenantId, requestOptions),
-      this.resolveMemberAccess(tenantId, memberId, requestOptions),
-    ]);
-    const accessible = new Set(access.map((entry) => entry.bucketName));
-    return buckets.filter((bucket) => accessible.has(bucket.bucketName));
+    const buckets = this.listTenantBuckets(tenantId, requestOptions);
+    return memberId
+      ? filterBucketsByMemberAccess(
+          buckets,
+          this.resolveMemberAccess(tenantId, memberId, requestOptions),
+        )
+      : buckets;
   }
 
   private async listTenantBuckets(
@@ -373,26 +360,46 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     }));
   }
 
+  /**
+   * One bucket's details, or null when the tenant has no such bucket or the
+   * named member cannot access it.
+   *
+   * Existence comes from the bucket-addressed reads rather than a tenant-wide
+   * listing, which names every bucket in the tenant whether or not the caller
+   * can open it, and costs a call per bucket in the tenant. The console signs
+   * with the tenant's key, which every bucket answers, so a member's access is
+   * settled first from the storage system's own evaluation of their policies.
+   * A bucket outside them answers exactly like a bucket that does not exist.
+   */
   async getBucket(
     tenantId: string,
     bucketName: string,
+    memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
+    const userId = memberId;
+    if (userId && !(await canMemberAccessBucket(this, tenantId, userId, bucketName))) return null;
     const ctx = await this.getS3ClientContext(tenantId, requestOptions);
     const s3 = createS3Client(ctx);
-    const { buckets } = await s3ListBuckets(s3, requestOptions);
-    const match = buckets.find((b) => b.name === bucketName);
-    if (!match) return null;
 
-    const [versioning, lock] = await Promise.all([
-      getBucketVersioning(s3, bucketName, requestOptions),
-      getBucketObjectLock(s3, bucketName, requestOptions),
-    ]);
+    let versioning: boolean;
+    let lock: Awaited<ReturnType<typeof getBucketObjectLock>>;
+    try {
+      [versioning, lock] = await Promise.all([
+        getBucketVersioning(s3, bucketName, requestOptions),
+        getBucketObjectLock(s3, bucketName, requestOptions),
+      ]);
+    } catch (err) {
+      if (isNoSuchBucketError(err)) return null;
+      // The console signs with the tenant credential, which holds every action
+      // on the tenant's own buckets, so a denial means another tenant's bucket.
+      if (isAccessDeniedError(err)) return null;
+      throw err;
+    }
 
     return {
       bucketName,
       region: this.region,
-      createdAt: match.createdAt,
       isPublic: false,
       versioning,
       encrypted: true,

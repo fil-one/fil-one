@@ -1284,6 +1284,9 @@ export default $config({
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
         timeout: '30 seconds',
       },
+      // Removing a member drops their principal on every ready `iam` region.
+      // Needs the orchestrator environment to reach those regions at all.
+      'remove-member': { extraEnv: orchestratorEnv },
 
       // ── RAG ────────────────────────────────────────────────────────
       // RAG query playground (FIL-554): embed the question, vector-search the

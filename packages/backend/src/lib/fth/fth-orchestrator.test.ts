@@ -1447,7 +1447,8 @@ describe('fthOrchestrator signal forwarding', () => {
       fthOrchestrator.deleteBucket(fthClientId, 'b', { signal }),
     listBuckets: (signal: AbortSignal) =>
       fthOrchestrator.listBuckets(fthClientId, undefined, { signal }),
-    getBucket: (signal: AbortSignal) => fthOrchestrator.getBucket(fthClientId, 'b', { signal }),
+    getBucket: (signal: AbortSignal) =>
+      fthOrchestrator.getBucket(fthClientId, 'b', undefined, { signal }),
   };
 
   for (const [method, invoke] of Object.entries(credentialLookups)) {
@@ -1506,7 +1507,7 @@ describe('fthOrchestrator signal forwarding', () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    await fthOrchestrator.getBucket(fthClientId, 'b', { signal });
+    await fthOrchestrator.getBucket(fthClientId, 'b', undefined, { signal });
 
     const sent = [
       sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand)),

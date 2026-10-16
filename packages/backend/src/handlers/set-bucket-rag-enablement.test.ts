@@ -48,16 +48,24 @@ process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './set-bucket-rag-enablement.ts';
 import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
-import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
-import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
+import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
+import {
+  fakeOrchestrator,
+  stubMemberScopedGetBucket,
+  tenantFor,
+  type FakeOrchestrator,
+} from '../test/fake-orchestrator.ts';
+import { ApiErrorCode, OrgRole, S3Region, type PolicyAction } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
+
+const USER_1 = '00000000-0000-0000-0000-000000000001';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'dev@fil.org', emailVerified: true };
+const USER_INFO = { userId: USER_1, orgId: 'org-1', email: 'dev@fil.org', emailVerified: true };
 
 const BUCKET = {
   bucketName: 'my-bucket',
@@ -282,4 +290,71 @@ describe('set-bucket-rag-enablement permissions', () => {
     expect(result.statusCode).toBe(403);
     expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.NOT_A_MEMBER);
   });
+});
+
+describe('set-bucket-rag-enablement member scope on an iam region', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetEnablement.mockResolvedValue(undefined);
+    mockSetEnablement.mockImplementation(async () => record());
+    mockIsOrgDeleting.mockResolvedValue(false);
+  });
+
+  /** An iam orchestrator whose policy on my-bucket grants user-1 `actions`. */
+  function buildIamOrchestratorGrantingOnMyBucket(actions: PolicyAction[]): FakeOrchestrator {
+    const iam = new FakeIamOrchestrator();
+    iam.seedPrincipal(tenantFor('forge', 'org-1'), USER_1);
+    iam.seedPolicy(tenantFor('forge', 'org-1'), 'my-bucket', {
+      Statement: [{ Effect: 'Allow', Principal: [USER_1], Action: actions }],
+    });
+    const orchestrator = fakeOrchestrator('forge', {
+      bucket: BUCKET,
+      iam,
+      region: S3Region.UsEast9,
+    });
+    stubMemberScopedGetBucket(orchestrator, iam, BUCKET);
+    return orchestrator;
+  }
+
+  // The indexer lists and reads every object with the tenant key.
+  it.each([
+    ['s3:ListBucket but not s3:GetObject', ['s3:ListBucket']],
+    ['s3:GetObject but not s3:ListBucket', ['s3:GetObject']],
+  ] as const)('refuses a Member whose policy grants %s', async (_grant, actions) => {
+    orch = buildIamOrchestratorGrantingOnMyBucket([...actions]);
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+
+    const result = await baseHandler(event({ enabled: true }, OrgRole.Member));
+
+    expect(result.statusCode).toBe(403);
+    expect(mockSetEnablement).not.toHaveBeenCalled();
+  });
+
+  it('lets a Member whose policy grants listing and reading turn indexing on', async () => {
+    orch = buildIamOrchestratorGrantingOnMyBucket(['s3:ListBucket', 's3:GetObject']);
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+
+    const result = await baseHandler(event({ enabled: true }, OrgRole.Member));
+
+    expect(result.statusCode).toBe(200);
+    expect(mockSetEnablement).toHaveBeenCalledWith({
+      bucketName: 'my-bucket',
+      orgId: 'org-1',
+      enabled: true,
+      existing: undefined,
+      region: S3Region.EuWest1,
+    });
+  });
+
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'lets an %s turn indexing on where no policy names them',
+    async (role) => {
+      orch = buildIamOrchestratorGrantingOnMyBucket(['s3:PutObject']);
+      mockGetOrchestratorForRegion.mockReturnValue(orch);
+
+      const result = await baseHandler(event({ enabled: true }, role));
+
+      expect(result.statusCode).toBe(200);
+    },
+  );
 });

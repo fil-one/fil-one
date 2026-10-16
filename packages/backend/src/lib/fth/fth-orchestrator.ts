@@ -280,6 +280,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
   async getBucket(
     tenantId: string,
     bucketName: string,
+    _memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
     const ctx = await this.getS3ClientContext(tenantId, requestOptions);
@@ -469,7 +470,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
     // the bucket. A snapshot miss alone can't distinguish "not owned" from
     // "owned but absent from the current breakdown" (e.g. an empty bucket), so
     // confirm existence before reading metrics.
-    const bucket = await this.getBucket(tenantId, bucketName, requestOptions);
+    const bucket = await this.getBucket(tenantId, bucketName, undefined, requestOptions);
     if (!bucket) throw new BucketNotFoundError(bucketName);
 
     // FTH has no per-bucket time series; the current-snapshot `by_bucket`
