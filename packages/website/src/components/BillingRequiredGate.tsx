@@ -7,7 +7,6 @@ import { AddPaymentDialog } from './billing/AddPaymentDialog.js';
 import { ContactSalesDialog } from './billing/ContactSalesDialog.js';
 import { Button } from './Button.js';
 import { EmptyStateCard } from './EmptyStateCard.js';
-import { Spinner } from './Spinner.js';
 import { textButtonClassName } from './text-button.js';
 import { useBillingData, useBillingFlows } from '../lib/use-billing.js';
 import { useHasPermission } from '../lib/use-permissions.js';
@@ -94,19 +93,12 @@ export function BillingRequiredGate() {
             size="md"
             // Until `GET /api/billing` answers: it may be claiming a trial, and
             // a setup intent racing it could mint a second Stripe customer.
-            disabled={startingPayment || !billing}
+            disabled={!billing}
+            loading={startingPayment}
+            loadingLabel="Starting checkout"
             onClick={() => void handleAddPaymentMethod()}
           >
-            {/* Button's own inner wraps `children` in a single `<span>`, so
-                without a flex container of our own the Spinner (a `<div>`,
-                block by default) breaks onto its own line above the label
-                instead of sitting beside it. */}
-            <span className="inline-flex items-center gap-2">
-              {startingPayment && (
-                <Spinner ariaLabel="Starting checkout" size={14} colorClassName="text-current" />
-              )}
-              Add payment method
-            </span>
+            Add payment method
           </Button>
         )}
       </EmptyStateCard>

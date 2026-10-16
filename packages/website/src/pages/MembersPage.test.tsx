@@ -9,6 +9,12 @@ import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { MembersRoster } from './MembersPage.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+const USER_3 = '00000000-0000-0000-0000-000000000003';
+const USER_4 = '00000000-0000-0000-0000-000000000004';
+const USER_5 = '00000000-0000-0000-0000-000000000005';
+
 // ---------------------------------------------------------------------------
 // Mocks — API client boundary
 // ---------------------------------------------------------------------------
@@ -54,9 +60,9 @@ const NO_KEYS_AT_RISK = {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-// `seedPermissions` writes userId 'user-1', so this is the caller's own row.
+// `seedPermissions` writes userId USER_1, so this is the caller's own row.
 const OWNER: MemberSummary = {
-  userId: 'user-1',
+  userId: USER_1,
   role: OrgRole.Owner,
   name: 'Ada Lovelace',
   email: 'ada@example.com',
@@ -66,17 +72,17 @@ const OWNER: MemberSummary = {
 
 /** A member the profile row has learned an address for, but no name. */
 const ADMIN: MemberSummary = {
-  userId: 'user-2',
+  userId: USER_2,
   role: OrgRole.Admin,
   email: 'grace@example.com',
   joinedAt: '2026-02-01T00:00:00Z',
   source: 'invitation',
-  invitedBy: 'user-1',
+  invitedBy: USER_1,
 };
 
 /** The common case today: an id and a role, and nothing else. */
 const PLAIN: MemberSummary = {
-  userId: 'user-3',
+  userId: USER_3,
   role: OrgRole.Member,
   joinedAt: '2026-03-01T00:00:00Z',
 };
@@ -179,7 +185,7 @@ describe('MembersPage', () => {
     expect(screen.getByText('grace@example.com')).toBeInTheDocument();
     // Neither: the row still identifies somebody, by the id it always has.
     expect(screen.getByText('Unnamed member')).toBeInTheDocument();
-    expect(screen.getByText('user-3')).toBeInTheDocument();
+    expect(screen.getByText(USER_3)).toBeInTheDocument();
 
     // The count moved to the tab that names this panel, so the roster itself
     // only answers for its rows. `OrganizationPage.test.tsx` covers the count.
@@ -228,7 +234,7 @@ describe('MembersPage', () => {
 
   it('changes an ordinary role without a confirmation', async () => {
     mockUpdateRole.mockResolvedValue({
-      userId: 'user-3',
+      userId: USER_3,
       role: OrgRole.Admin,
       previousRole: OrgRole.Member,
     });
@@ -238,13 +244,13 @@ describe('MembersPage', () => {
       target: { value: OrgRole.Admin },
     });
 
-    await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith('user-3', OrgRole.Admin));
+    await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith(USER_3, OrgRole.Admin));
     expect(screen.queryByTestId('confirm-dialog')).not.toBeInTheDocument();
   });
 
   it('asks before handing somebody the Owner role', async () => {
     mockUpdateRole.mockResolvedValue({
-      userId: 'user-2',
+      userId: USER_2,
       role: OrgRole.Owner,
       previousRole: OrgRole.Admin,
     });
@@ -258,7 +264,7 @@ describe('MembersPage', () => {
     expect(mockUpdateRole).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Make owner' }));
-    await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith('user-2', OrgRole.Owner));
+    await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith(USER_2, OrgRole.Owner));
   });
 
   it('removes a member after confirmation', async () => {
@@ -273,12 +279,12 @@ describe('MembersPage', () => {
     expect(screen.getByText(/every access key they created is revoked/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove member' }));
-    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('user-2'));
+    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith(USER_2));
   });
 
   it('asks before the caller changes their own role', async () => {
     mockUpdateRole.mockResolvedValue({
-      userId: 'user-1',
+      userId: USER_1,
       role: OrgRole.Admin,
       previousRole: OrgRole.Owner,
     });
@@ -294,7 +300,7 @@ describe('MembersPage', () => {
     expect(mockUpdateRole).not.toHaveBeenCalled();
 
     await confirmNarrowing();
-    await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith('user-1', OrgRole.Admin));
+    await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith(USER_1, OrgRole.Admin));
   });
 
   it('names the members page the caller is about to lose', async () => {
@@ -475,7 +481,7 @@ describe('the role-narrowing confirmation', () => {
     expect(
       screen.getByText(/1 key in this organization has no recorded owner and is not affected\./),
     ).toBeInTheDocument();
-    expect(mockRoleChangePreview).toHaveBeenCalledWith('user-2', OrgRole.Member);
+    expect(mockRoleChangePreview).toHaveBeenCalledWith(USER_2, OrgRole.Member);
     expect(mockUpdateRole).not.toHaveBeenCalled();
   });
 
@@ -512,7 +518,7 @@ describe('the role-narrowing confirmation', () => {
 
   it('closes once the change lands', async () => {
     mockUpdateRole.mockResolvedValue({
-      userId: 'user-2',
+      userId: USER_2,
       role: OrgRole.Member,
       previousRole: OrgRole.Admin,
     });
@@ -591,7 +597,7 @@ describe('the role-narrowing confirmation', () => {
     // and copy that switches to the third person mid-fade is the dialog talking
     // about somebody else.
     mockUpdateRole.mockResolvedValue({
-      userId: 'user-1',
+      userId: USER_1,
       role: OrgRole.Admin,
       previousRole: OrgRole.Owner,
     });
@@ -612,10 +618,10 @@ describe('the role-narrowing confirmation', () => {
     // windows, so an admin coming back to Access keys would otherwise see
     // credentials that no longer exist.
     mockUpdateRole.mockResolvedValue({
-      userId: 'user-2',
+      userId: USER_2,
       role: OrgRole.Member,
       previousRole: OrgRole.Admin,
-      revokedKeys: [
+      keysRevoked: [
         {
           id: 'key-1',
           keyName: 'nightly backup',
@@ -647,7 +653,7 @@ describe('the role-narrowing confirmation', () => {
     mockUpdateRole.mockRejectedValue(
       Object.assign(new Error('That member’s role changed while you were editing it.'), {
         status: 409,
-        revokedKeys: [
+        keysRevoked: [
           {
             id: 'key-1',
             keyName: 'nightly backup',
@@ -672,7 +678,7 @@ describe('the role-narrowing confirmation', () => {
   it('still offers the change when the preview cannot be read', async () => {
     mockRoleChangePreview.mockRejectedValue(apiError('Preview unavailable', 503));
     mockUpdateRole.mockResolvedValue({
-      userId: 'user-2',
+      userId: USER_2,
       role: OrgRole.Member,
       previousRole: OrgRole.Admin,
     });
@@ -684,7 +690,7 @@ describe('the role-narrowing confirmation', () => {
 
     expect(await screen.findByText('The affected keys could not be listed')).toBeInTheDocument();
     await confirmNarrowing();
-    await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith('user-2', OrgRole.Member));
+    await waitFor(() => expect(mockUpdateRole).toHaveBeenCalledWith(USER_2, OrgRole.Member));
   });
 });
 
@@ -747,7 +753,7 @@ describe('MembersPage — a removal that revoked keys', () => {
   it('names the keys a removal revoked, and drops the views that listed them', async () => {
     // The admin doing this is not the key holder, so the toast is the only
     // place they learn which credentials the removal destroyed.
-    mockRemove.mockResolvedValue({ revokedKeys: [REVOKED_KEY] });
+    mockRemove.mockResolvedValue({ keysRevoked: [REVOKED_KEY] });
     const { client } = renderPage();
     const invalidate = vi.spyOn(client, 'invalidateQueries');
 
@@ -782,7 +788,7 @@ describe('MembersPage — a removal that revoked keys', () => {
     mockRemove.mockRejectedValue(
       Object.assign(new Error('That person is no longer on this roster.'), {
         status: 404,
-        revokedKeys: [REVOKED_KEY],
+        keysRevoked: [REVOKED_KEY],
       }),
     );
     renderPage();
@@ -846,7 +852,7 @@ describe('MembersPage — transferring the owner seat', () => {
 
     expect(await screen.findByText('One of your access keys is revoked')).toBeInTheDocument();
     expect(screen.getByText(/compliance writer/)).toBeInTheDocument();
-    expect(mockRoleChangePreview).toHaveBeenCalledWith('user-1', OrgRole.Admin);
+    expect(mockRoleChangePreview).toHaveBeenCalledWith(USER_1, OrgRole.Admin);
   });
 
   it('will not transfer before the preview has answered', async () => {
@@ -897,8 +903,8 @@ describe('MembersPage — transferring the owner seat', () => {
 
     fireEvent.click(confirm);
     await waitFor(() =>
-      expect(mockTransfer).toHaveBeenCalledWith('user-2', {
-        stepUpAction: 'transfer-ownership:user-2',
+      expect(mockTransfer).toHaveBeenCalledWith(USER_2, {
+        stepUpAction: `transfer-ownership:${USER_2}`,
       }),
     );
   });
@@ -946,7 +952,7 @@ describe('MembersPage — transferring the owner seat', () => {
     mockTransfer.mockRejectedValue(
       Object.assign(new Error('The owner seat moved while you were transferring it.'), {
         status: 409,
-        revokedKeys: [REVOKED_KEY],
+        keysRevoked: [REVOKED_KEY],
       }),
     );
     renderPage();
@@ -970,7 +976,7 @@ describe('MembersPage — transferring the owner seat', () => {
           { ...PLAIN, role: OrgRole.ReadOnly },
         ],
       });
-      return { userId: 'user-2', previousOwnerUserId: 'user-1' };
+      return { userId: USER_2, previousOwnerUserId: USER_1 };
     });
     renderPage();
 
@@ -986,7 +992,7 @@ describe('MembersPage — transferring the owner seat', () => {
   });
 
   it('closes the dialog once the seat has changed hands', async () => {
-    mockTransfer.mockResolvedValue({ userId: 'user-2', previousOwnerUserId: 'user-1' });
+    mockTransfer.mockResolvedValue({ userId: USER_2, previousOwnerUserId: USER_1 });
     renderPage();
 
     await chooseRowAction('grace@example.com', 'Transfer ownership');
@@ -1001,7 +1007,7 @@ describe('MembersPage — transferring the owner seat', () => {
   it('ignores a resumed action naming somebody the caller cannot transfer to', async () => {
     // A trip through Auth0 takes as long as the caller takes, and the roster it
     // comes back to is the one that decides.
-    window.history.replaceState(null, '', '/members?action=transfer-ownership:user-2');
+    window.history.replaceState(null, '', `/members?action=transfer-ownership:${USER_2}`);
     renderPage(OrgRole.Owner, [OWNER, { ...ADMIN, role: OrgRole.Owner }, PLAIN]);
 
     await screen.findByText('Ada Lovelace');
@@ -1009,7 +1015,7 @@ describe('MembersPage — transferring the owner seat', () => {
   });
 
   it('ignores a resumed action naming the caller themselves', async () => {
-    window.history.replaceState(null, '', '/members?action=transfer-ownership:user-1');
+    window.history.replaceState(null, '', `/members?action=transfer-ownership:${USER_1}`);
     renderPage();
 
     await screen.findByText('Ada Lovelace');
@@ -1017,7 +1023,7 @@ describe('MembersPage — transferring the owner seat', () => {
   });
 
   it('does not reopen a resumed transfer the roster has already answered', async () => {
-    window.history.replaceState(null, '', '/members?action=transfer-ownership:user-2');
+    window.history.replaceState(null, '', `/members?action=transfer-ownership:${USER_2}`);
     const { client } = renderPage(OrgRole.Owner, [OWNER, PLAIN]);
 
     await screen.findByText('Ada Lovelace');
@@ -1037,7 +1043,7 @@ describe('MembersPage — transferring the owner seat', () => {
   it('reopens the dialog on the member a step-up round trip was about', async () => {
     // The step-up stash carries an action and a return path and nothing else,
     // so the target rides in the action name and comes back on the URL.
-    window.history.replaceState(null, '', '/members?action=transfer-ownership:user-2');
+    window.history.replaceState(null, '', `/members?action=transfer-ownership:${USER_2}`);
     renderPage();
 
     expect(await screen.findByTestId('transfer-dialog')).toBeInTheDocument();
@@ -1068,8 +1074,8 @@ const LONG_ROSTER: MemberSummary[] = [
   OWNER,
   ADMIN,
   PLAIN,
-  { userId: 'user-4', role: OrgRole.Member, name: 'Grete Hermann' },
-  { userId: 'user-5', role: OrgRole.ReadOnly, email: 'katherine@example.com' },
+  { userId: USER_4, role: OrgRole.Member, name: 'Grete Hermann' },
+  { userId: USER_5, role: OrgRole.ReadOnly, email: 'katherine@example.com' },
 ];
 
 function searchBox() {
@@ -1106,8 +1112,8 @@ describe('MembersPage search and role filter', () => {
     expect(screen.getByText('1 of 5')).toBeInTheDocument();
 
     // The row with neither a name nor an email is reachable by its id.
-    fireEvent.change(searchBox(), { target: { value: 'user-3' } });
-    expect(screen.getByText('user-3')).toBeInTheDocument();
+    fireEvent.change(searchBox(), { target: { value: USER_3 } });
+    expect(screen.getByText(USER_3)).toBeInTheDocument();
     expect(screen.queryByText('Ada Lovelace')).toBeNull();
   });
 

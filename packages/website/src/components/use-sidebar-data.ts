@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { SubscriptionStatus, getUsageLimits } from '@filone/shared';
+import type { Subscription } from '@filone/shared';
 import { getBilling, getMe, getUsage } from '../lib/api.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { useHasPermission } from '../lib/use-permissions.js';
@@ -30,29 +31,22 @@ export function useSidebarData() {
   });
 
   const displayName = me?.name || me?.email || 'User';
-  const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
-  const isPastDue = billing?.subscription.status === SubscriptionStatus.PastDue;
-  const isActivePaid = billing?.subscription.status === SubscriptionStatus.Active;
-  const isInactive = billing?.subscription.status === SubscriptionStatus.Inactive;
-  const trialDays =
-    isTrialing && billing?.subscription.trialEndsAt
-      ? daysUntil(billing.subscription.trialEndsAt)
-      : null;
-  const trialEndsLabel = billing?.subscription.trialEndsAt
-    ? `Expires ${formatDateTime(billing.subscription.trialEndsAt)}`
-    : undefined;
-  const graceDays = billing?.subscription.gracePeriodEndsAt
-    ? daysUntil(billing.subscription.gracePeriodEndsAt)
-    : null;
-  const graceEndsLabel = billing?.subscription.gracePeriodEndsAt
-    ? `Expires ${formatDateTime(billing.subscription.gracePeriodEndsAt)}`
-    : undefined;
+  const {
+    isTrialing,
+    isPastDue,
+    isActivePaid,
+    isInactive,
+    trialDays,
+    trialEndsLabel,
+    graceDays,
+    graceEndsLabel,
+  } = getSubscriptionFacts(billing?.subscription);
   // `getUsageLimits(false)` is the free-tier allowance, which is the right
   // answer for a trial and a lie for anyone whose plan the console cannot read:
   // a Member on pay-as-you-go would have seen a meter filling toward 1 TB.
   // Without billing there is no limit to measure against, so the meters show
   // usage and drop the denominator.
-  const limits = getUsageLimits(!!isActivePaid);
+  const limits = getUsageLimits(isActivePaid);
   const storageUsed = usage?.storage.usedBytes ?? 0;
   const egressUsed = usage?.egress.usedBytes ?? 0;
   const limitsKnown = billing !== undefined;
@@ -82,5 +76,22 @@ export function useSidebarData() {
     egressPct,
     /** Whether a meter has a denominator to show. False hides the limit. */
     limitsKnown,
+  };
+}
+
+function getSubscriptionFacts(subscription: Subscription | undefined) {
+  const status = subscription?.status;
+  const trialEndsAt = subscription?.trialEndsAt;
+  const gracePeriodEndsAt = subscription?.gracePeriodEndsAt;
+  const isTrialing = status === SubscriptionStatus.Trialing;
+  return {
+    isTrialing,
+    isPastDue: status === SubscriptionStatus.PastDue,
+    isActivePaid: status === SubscriptionStatus.Active,
+    isInactive: status === SubscriptionStatus.Inactive,
+    trialDays: isTrialing && trialEndsAt ? daysUntil(trialEndsAt) : null,
+    trialEndsLabel: trialEndsAt ? `Expires ${formatDateTime(trialEndsAt)}` : undefined,
+    graceDays: gracePeriodEndsAt ? daysUntil(gracePeriodEndsAt) : null,
+    graceEndsLabel: gracePeriodEndsAt ? `Expires ${formatDateTime(gracePeriodEndsAt)}` : undefined,
   };
 }

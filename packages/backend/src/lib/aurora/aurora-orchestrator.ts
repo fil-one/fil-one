@@ -1,4 +1,4 @@
-// Aurora-backed ServiceOrchestrator. Delegates to the existing per-call modules
+// Aurora-backed LegacyServiceOrchestrator. Delegates to the existing per-call modules
 // (aurora-tenant-setup for the lazy setup state machine, aurora-portal for
 // bucket and access-key ops) and looks up SSM-cached S3 credentials directly.
 //
@@ -25,15 +25,18 @@ import {
   findAuroraAccessKeyByName,
 } from '../aurora/aurora-portal.ts';
 import {
-  getOperationsSamples,
-  getStorageSamples,
   getTenantStatus as getAuroraTenantStatusApi,
   mapFromModelsTenantStatus,
   mapToModelsTenantStatus,
   updateTenantStatus as updateAuroraTenantStatusApi,
-  getBucketStorageSamples,
   getTenantInfo,
+  deleteAuroraTenant,
 } from '../aurora/aurora-backoffice.ts';
+import {
+  getBucketStorageSamples,
+  getOperationsSamples,
+  getStorageSamples,
+} from './aurora-backoffice-metrics.ts';
 import { isOrgSetupComplete } from '../org-setup-status.ts';
 import type { OrgProfileItem } from '../org-profile.ts';
 import { getConsoleS3Credentials, _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
@@ -47,7 +50,7 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   OrchestratorRequestOptions,
-  ServiceOrchestrator,
+  LegacyServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
   TenantInfo,
@@ -60,6 +63,14 @@ export const _resetSsmCacheForTesting = () => _resetS3CredentialsCacheForTesting
 
 function getStage(): string {
   return process.env.FILONE_STAGE!;
+}
+
+/**
+ * Aurora serves tenant DELETE on its dev backoffice only; sst.config.ts sets the
+ * flag on every stage except production. Read per call so tests can flip it.
+ */
+function isTenantDeleteEnabled(): boolean {
+  return process.env.AURORA_TENANT_DELETE_ENABLED === 'true';
 }
 
 /** Object-lock and retention fields off a portal single-bucket response. */
@@ -80,7 +91,6 @@ function toBucketProtection(data: BucketBucketResponse): BucketProtection {
 export const auroraOrchestrator = {
   id: 'aurora',
   region: S3Region.EuWest1 as S3RegionType,
-  accessModel: 'scoped-keys',
 
   async ensureTenantReady(
     orgId: string,
@@ -122,8 +132,11 @@ export const auroraOrchestrator = {
           allowMissing: true,
           signal: opts?.signal,
         });
-        // TODO(FIL-919): delete the tenant once Aurora's Backoffice API exposes a
-        // DELETE. Until then buckets and objects survive the teardown.
+        // Disabling first cuts access even when Aurora refuses the DELETE (409:
+        // component setup incomplete, or another update in progress).
+        if (isTenantDeleteEnabled()) {
+          await deleteAuroraTenant({ tenantId, signal: opts?.signal });
+        }
       },
       { ...TENANT_DELETE_RETRY, signal: opts?.signal },
     );
@@ -171,7 +184,11 @@ export const auroraOrchestrator = {
     await deleteAuroraBucket({ tenantId, bucketName, signal: opts?.signal });
   },
 
-  async listBuckets(tenantId: string, opts?: OrchestratorRequestOptions): Promise<BucketSummary[]> {
+  async listBuckets(
+    tenantId: string,
+    _memberId?: string,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<BucketSummary[]> {
     const client = await createPortalClient(tenantId, { signal: opts?.signal });
     const { data, error } = await listBuckets({
       client,
@@ -200,6 +217,7 @@ export const auroraOrchestrator = {
   async getBucket(
     tenantId: string,
     bucketName: string,
+    _memberId?: string,
     opts?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
     const client = await createPortalClient(tenantId, { signal: opts?.signal });
@@ -239,6 +257,11 @@ export const auroraOrchestrator = {
     keyOpts: IssueAccessKeyOpts,
     opts?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
+    if ('principalId' in keyOpts) {
+      throw new Error(
+        'Aurora supports service keys only; a principal-bound key needs the IAM access model',
+      );
+    }
     const key = await createAuroraAccessKey({
       tenantId,
       keyName: keyOpts.keyName,
@@ -249,6 +272,7 @@ export const auroraOrchestrator = {
       signal: opts?.signal,
     });
     return {
+      type: 'service',
       id: key.id,
       accessKeyId: key.accessKeyId,
       accessKeySecret: key.accessKeySecret,
@@ -256,7 +280,12 @@ export const auroraOrchestrator = {
     };
   },
 
-  async findAccessKeyByName(tenantId: string, keyName: string, opts?: OrchestratorRequestOptions) {
+  async findAccessKeyByName(
+    tenantId: string,
+    keyName: string,
+    _principalId?: string,
+    opts?: OrchestratorRequestOptions,
+  ) {
     return findAuroraAccessKeyByName({ tenantId, keyName, signal: opts?.signal });
   },
 
@@ -319,11 +348,12 @@ export const auroraOrchestrator = {
 
   async getTenantInfo(tenantId: string, opts?: OrchestratorRequestOptions): Promise<TenantInfo> {
     const info = await getTenantInfo({ tenantId, signal: opts?.signal });
+    const limits = info.components?.s3?.properties?.limits;
     return {
       bucketCount: info.bucketCount ?? 0,
-      bucketLimit: info.bucketQuantityLimit ?? 100,
+      bucketLimit: limits?.bucketQuantityLimit ?? 100,
       keyCount: info.keyCount ?? 0,
-      accessKeyLimit: info.accessKeyQuantityLimit ?? 300,
+      accessKeyLimit: limits?.accessKeyQuantityLimit ?? 300,
       status: mapFromModelsTenantStatus(info.status),
     };
   },
@@ -337,7 +367,7 @@ export const auroraOrchestrator = {
     // getBucketStorageSamples queries Aurora metrics globally by bucket name, so
     // gate it behind a tenant-scoped ownership check: only the owning tenant's
     // Portal client resolves the bucket (404 -> null otherwise).
-    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName, opts);
+    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName, undefined, opts);
     if (!bucket) throw new BucketNotFoundError(bucketName);
     const auroraInterval = mapIntervalToAuroraWindow(metricsOpts.interval ?? '1d');
 
@@ -357,7 +387,7 @@ export const auroraOrchestrator = {
         objectCount: s.objectCount ?? 0,
       }));
   },
-} satisfies ServiceOrchestrator;
+} satisfies LegacyServiceOrchestrator;
 
 // Aurora's metrics API only accepts windows in m/h units, so the
 // orchestrator-agnostic '1d' value is translated before it hits the wire.

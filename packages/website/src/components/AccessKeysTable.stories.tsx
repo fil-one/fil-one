@@ -16,6 +16,7 @@ type Story = StoryObj<typeof AccessKeysTable>;
 const mockKeys: AccessKey[] = [
   {
     id: '1',
+    type: 'service',
     keyName: 'Production API Key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
     createdAt: '2026-01-15T10:00:00Z',
@@ -27,6 +28,7 @@ const mockKeys: AccessKey[] = [
   },
   {
     id: '2',
+    type: 'service',
     keyName: 'Backup Read-Only',
     accessKeyId: 'ACCESS_KEY_09876EXAMPL',
     createdAt: '2026-02-20T08:00:00Z',
@@ -38,6 +40,7 @@ const mockKeys: AccessKey[] = [
   },
   {
     id: '3',
+    type: 'service',
     keyName: 'Deprecated Key',
     accessKeyId: 'ACCESS_KEY_00000EXAMPL',
     createdAt: '2025-06-01T12:00:00Z',
@@ -52,6 +55,7 @@ const mockKeys: AccessKey[] = [
 const keysWithBucketPermissions: AccessKey[] = [
   {
     id: '10',
+    type: 'service',
     keyName: 'Full Access Key',
     accessKeyId: 'ACCESS_KEY_FULL0EXAMPL',
     createdAt: '2026-03-10T10:00:00Z',
@@ -73,6 +77,7 @@ const keysWithBucketPermissions: AccessKey[] = [
   },
   {
     id: '11',
+    type: 'service',
     keyName: 'Bucket Info Reader',
     accessKeyId: 'ACCESS_KEY_INFO0EXAMPL',
     createdAt: '2026-03-12T09:00:00Z',
@@ -93,6 +98,28 @@ export const Default: Story = {
 export const WithBucketPermissions: Story = {
   args: {
     keys: keysWithBucketPermissions,
+    showBuckets: true,
+    showPermissions: true,
+  },
+};
+
+/** An `iam` region's list: a personal key bound to its holder beside a service key. */
+export const WithPrincipalKey: Story = {
+  args: {
+    keys: [
+      {
+        id: '20',
+        type: 'principal',
+        principalId: 'user-1',
+        keyName: 'Laptop',
+        accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
+        createdAt: '2026-09-16T12:00:00Z',
+        status: 'active',
+        region: S3Region.UsEast9,
+      },
+      { ...mockKeys[0], region: S3Region.UsEast9 },
+    ],
+    showRegion: true,
     showBuckets: true,
     showPermissions: true,
   },
@@ -173,8 +200,8 @@ export const EmptyWithoutKeyCreation: Story = {
 
 /**
  * A shared org, where the column says whose key each one is — the question an
- * operator asks after removing somebody, since removal does not revoke keys
- * (FIL-1021). Key 3 predates attribution and carries no `createdBy`. Key 1 was
+ * operator asks after removing somebody, since removal does not revoke service
+ * keys (FIL-1021). Key 3 predates attribution and carries no `createdBy`. Key 1 was
  * rotated by somebody other than its owner, which the column says beneath them.
  */
 export const WithCreators: Story = {

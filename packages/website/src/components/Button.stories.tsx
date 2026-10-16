@@ -18,6 +18,7 @@ const meta: Meta<typeof Button> = {
     size: { control: 'select', options: ['sm', 'md', 'lg'] },
     iconPosition: { control: 'select', options: ['left', 'right'] },
     iconSize: { control: 'number' },
+    loading: { control: 'boolean' },
   },
 };
 
@@ -55,6 +56,10 @@ const labels: Record<ButtonVariant, string> = {
   tertiary: 'Learn more',
   destructive: 'Delete',
   warning: 'Upgrade',
+};
+
+export const Loading: Story = {
+  args: { variant: 'destructive', children: 'Delete bucket', loading: true },
 };
 
 export const AllVariants: Story = {
@@ -108,6 +113,15 @@ export const AllVariants: Story = {
             <div className="flex items-center gap-3">
               {(['sm', 'md', 'lg'] as ButtonSize[]).map((size) => (
                 <Button key={size} variant={variant} size={size} disabled>
+                  {labels[variant]}
+                </Button>
+              ))}
+            </div>
+
+            {/* Loading: the variant's colour stays, a spinner takes the icon's place */}
+            <div className="flex items-center gap-3">
+              {(['sm', 'md', 'lg'] as ButtonSize[]).map((size) => (
+                <Button key={size} variant={variant} size={size} loading>
                   {labels[variant]}
                 </Button>
               ))}

@@ -24,10 +24,7 @@ export function AuthCard({ children, footer, className }: AuthCardProps) {
       <Card
         padding="none"
         shadow={false}
-        className={clsx(
-          'w-full max-w-[380px] p-8 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]',
-          className,
-        )}
+        className={clsx('w-full max-w-[380px] p-8 shadow-auth-card', className)}
       >
         <img src="/fil-one-logo.svg" alt="Fil One" className="mb-8 h-5 w-auto" />
         {children}

@@ -1,9 +1,11 @@
 import { describe, it, beforeAll, afterAll, expect } from 'vitest';
 import {
+  createTestClock,
   createTestCustomer,
+  createPastDueSubscription,
+  attachDecliningCard,
   attachValidCard,
   seedBillingRecord,
-  createAndPayInvoice,
   deleteBillingRecord,
   getStripeClient,
   pollForBillingStatusChange,
@@ -12,48 +14,57 @@ import {
   testOrgId,
 } from './helpers.js';
 
-describe('Past Due Recovery (invoice.payment_succeeded with canceledAt)', () => {
+describe('Past Due Recovery (customer.subscription.updated to active)', () => {
   let userId: string;
   let cusId: string;
+  let clockId: string;
+  let subId: string;
 
   beforeAll(async () => {
     userId = `test-pdr-${crypto.randomUUID()}`;
-    cusId = await createTestCustomer(userId);
+    clockId = await createTestClock('past-due-recovery');
+    cusId = await createTestCustomer(userId, clockId);
+    await seedBillingRecord(userId, cusId, 'active');
+    const decliningId = await attachDecliningCard(cusId);
+    await pollForPaymentMethod({ userId, paymentMethodId: decliningId });
 
-    const canceledAt = new Date().toISOString();
-    await seedBillingRecord(userId, cusId, 'past_due', {
-      lastPaymentFailedAt: { S: '2024-01-01T00:00:00Z' },
-      canceledAt: { S: canceledAt },
+    subId = await createPastDueSubscription({
+      userId,
+      customerId: cusId,
+      clockId,
+      paymentMethodId: decliningId,
     });
-
-    const paymentMethodId = await attachValidCard(cusId);
-    await pollForPaymentMethod({ userId, paymentMethodId });
-  });
+    await pollForBillingStatusChange({ userId, expectedStatus: 'past_due', fromStatus: 'active' });
+  }, 420_000);
 
   afterAll(async () => {
-    await getStripeClient().customers.del(cusId);
+    // Deleting the clock deletes its customer and subscriptions with it.
+    await getStripeClient().testHelpers.testClocks.del(clockId);
     await deleteBillingRecord(userId);
   });
 
-  it('should restore status to active and clear all failure/cancel fields', async () => {
-    await createAndPayInvoice(cusId);
-    await pollForBillingStatusChange({
-      userId,
-      expectedStatus: 'active',
-      fromStatus: 'past_due',
-    });
-    const record = await getBillingRecord(userId);
-    expect(record).toStrictEqual({
+  it('restores active once the open renewal is paid with a working card', async () => {
+    const stripe = getStripeClient();
+    const paymentMethodId = await attachValidCard(cusId);
+    await pollForPaymentMethod({ userId, paymentMethodId });
+    const { latest_invoice: invoiceId } = await stripe.subscriptions.retrieve(subId);
+    if (typeof invoiceId !== 'string') throw new Error(`No open invoice on ${subId}`);
+    await stripe.invoices.pay(invoiceId, { payment_method: paymentMethodId });
+
+    await pollForBillingStatusChange({ userId, expectedStatus: 'active', fromStatus: 'past_due' });
+    expect(await getBillingRecord(userId)).toStrictEqual({
       pk: { S: `ORG#${testOrgId(userId)}` },
       sk: { S: 'SUBSCRIPTION' },
       orgId: { S: testOrgId(userId) },
       userId: { S: userId },
       stripeCustomerId: { S: cusId },
+      subscriptionId: { S: subId },
       subscriptionStatus: { S: 'active' },
+      currentPeriodStart: { S: expect.any(String) },
+      currentPeriodEnd: { S: expect.any(String) },
       updatedAt: { S: expect.any(String) },
-      lastPaymentAt: { S: expect.any(String) },
       paymentMethodBrand: { S: 'visa' },
-      paymentMethodId: { S: expect.any(String) },
+      paymentMethodId: { S: paymentMethodId },
       paymentMethodLast4: { S: '4242' },
       paymentMethodExpYear: { N: expect.any(String) },
       paymentMethodExpMonth: { N: expect.any(String) },

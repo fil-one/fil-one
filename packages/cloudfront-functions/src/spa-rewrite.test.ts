@@ -136,13 +136,21 @@ describe('SPA CloudFront rewrite', () => {
   // Anything actually in the bucket has to survive the classifier, whatever a
   // build adds to it. `public/` is copied to the bucket root; `dist/` is the
   // built site and is only present after `pnpm build`.
-  const bucketObjects = [
-    ...objectPaths(new URL('../../website/public/', import.meta.url)),
-    ...objectPaths(new URL('../../website/dist/', import.meta.url)),
-  ];
+  const publicObjects = objectPaths(new URL('../../website/public/', import.meta.url));
+  const distObjects = objectPaths(new URL('../../website/dist/', import.meta.url));
+  const bucketObjects = [...publicObjects, ...distObjects];
 
   it('has bucket objects to check', () => {
     expect(bucketObjects.length).toBeGreaterThan(0);
+  });
+
+  // Locally the build is optional. In CI a missing build would quietly shrink
+  // the cases below to the files in `public/`.
+  it.skipIf(!process.env.CI)('finds the website build in website/dist/ when running in CI', () => {
+    expect(
+      distObjects,
+      'website/dist/ is missing or empty; run `pnpm build` before the cloudfront-functions tests',
+    ).not.toHaveLength(0);
   });
 
   it.each([...new Set(bucketObjects)])('passes bucket object %s through untouched', (uri) => {

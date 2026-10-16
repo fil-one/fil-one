@@ -69,6 +69,11 @@
   --tracking-tight: -1%;
 
   --shadow-xs: 0px 1px 2px 0px rgba(20, 24, 31, 0.03);
+  /* The card on the auth screens. Matches the box-shadow that
+     docs/auth0/universal-login-template.liquid sets on Auth0's hosted card, so
+     the console's auth screens and Auth0's read as one surface: change both
+     together. DESIGN.md §9 names it as an exception. */
+  --shadow-auth-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
 }
 
 @theme inline {

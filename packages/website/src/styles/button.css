@@ -6,6 +6,12 @@
       @apply cursor-not-allowed;
     }
 
+    /* Loading is disabled for clicks only: it keeps the variant's colours (every
+       variant's disabled rule below skips it) and reads as busy, not refused. */
+    &.button--loading {
+      @apply cursor-progress;
+    }
+
     /* default = md. Height comes from the shared control token so a button
        lines up with an Input or Select beside it; padding sets only the
        horizontal inset, matching the Input of the same size. */
@@ -63,7 +69,7 @@
         }
       }
 
-      &:disabled {
+      &:disabled:not(.button--loading) {
         @apply bg-zinc-300 text-zinc-500;
       }
     }
@@ -85,7 +91,7 @@
         }
       }
 
-      &:disabled {
+      &:disabled:not(.button--loading) {
         @apply bg-zinc-300 text-zinc-500;
       }
     }
@@ -107,7 +113,7 @@
         }
       }
 
-      &:disabled {
+      &:disabled:not(.button--loading) {
         @apply bg-zinc-300 text-zinc-500;
       }
     }
@@ -130,7 +136,7 @@
         }
       }
 
-      &:disabled {
+      &:disabled:not(.button--loading) {
         @apply text-zinc-400;
       }
     }
@@ -157,7 +163,7 @@
         }
       }
 
-      &:disabled {
+      &:disabled:not(.button--loading) {
         @apply text-zinc-400;
 
         .button-custom-icon {

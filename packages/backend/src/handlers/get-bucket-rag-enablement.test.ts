@@ -36,17 +36,26 @@ vi.mock('../lib/bucket-rag-enablement.ts', async () => {
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './get-bucket-rag-enablement.ts';
-import { buildEvent } from '../test/lambda-test-utilities.ts';
-import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
-import { S3_REGION, S3Region } from '@filone/shared';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
+import { policyOf, statement } from '../test/policy-statements.ts';
+import {
+  fakeOrchestrator,
+  stubMemberScopedGetBucket,
+  tenantFor,
+  type FakeOrchestrator,
+} from '../test/fake-orchestrator.ts';
+import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
+
+const USER_1 = '00000000-0000-0000-0000-000000000001';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1', email: 'dev@fil.org', emailVerified: true };
+const USER_INFO = { userId: USER_1, orgId: 'org-1', email: 'dev@fil.org', emailVerified: true };
 
 const BUCKET = {
   bucketName: 'my-bucket',
@@ -238,4 +247,43 @@ describe('get-bucket-rag-enablement baseHandler', () => {
     await baseHandler(event({ region: S3Region.UsEast1 }));
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.UsEast1);
   });
+});
+
+describe('get-bucket-rag-enablement member scope on an iam region', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetEnablement.mockResolvedValue(enablementRecord());
+    const iam = new FakeIamOrchestrator();
+    iam.seedPrincipal(tenantFor('forge', 'org-1'), USER_1);
+    iam.seedPolicy(
+      tenantFor('forge', 'org-1'),
+      'other-bucket',
+      policyOf(statement('other-bucket', 'Allow', [USER_1], ['s3:GetObject'])),
+    );
+    orch = fakeOrchestrator('forge', { bucket: BUCKET, iam });
+    stubMemberScopedGetBucket(orch, iam, BUCKET);
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+  });
+
+  function eventAs(role: OrgRole): AuthenticatedEvent {
+    const e = event();
+    e.requestContext.userInfo.membership = membershipFor('org-1', USER_1, role);
+    return e;
+  }
+
+  it('returns 404 for a Member whose policies do not grant the bucket', async () => {
+    const result = await baseHandler(eventAs(OrgRole.Member));
+
+    expect(result).toMatchObject({ statusCode: 404 });
+    expect(JSON.parse(result.body!)).toStrictEqual({ message: 'Bucket not found' });
+  });
+
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'returns 200 for an %s on a bucket no policy grants them',
+    async (role) => {
+      const result = await baseHandler(eventAs(role));
+
+      expect(result.statusCode).toBe(200);
+    },
+  );
 });

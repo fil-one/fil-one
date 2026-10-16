@@ -15,19 +15,20 @@ import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
 import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
+import { BucketPolicyTab } from '../components/BucketPolicyTab';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
 import type {
-  Bucket,
+  BucketDetails,
   ListObjectVersionsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
   BucketAnalyticsResponse,
 } from '@filone/shared';
+import { supportsIamMethods } from '../lib/access-model.js';
 import { apiRequest } from '../lib/api.js';
-import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
@@ -75,7 +76,7 @@ function displayObjectCount(
 async function fetchObjectListing(
   region: S3Region,
   bucketName: string,
-  bucket: Bucket | null,
+  bucket: BucketDetails | null,
 ): Promise<ListObjectVersionsResponse> {
   if (bucket?.versioning) {
     const { items } = await batchPresign(region, [
@@ -131,7 +132,7 @@ function BucketOverview({
   region,
   bytesUsed,
 }: {
-  bucket: Bucket | null;
+  bucket: BucketDetails | null;
   region: S3Region;
   bytesUsed: number | undefined;
 }) {
@@ -143,8 +144,6 @@ function BucketOverview({
         <span className="text-zinc-700">{region}</span>
         <span className="mx-2 text-zinc-400">&bull;</span>
         <span className="text-xs text-zinc-500">{formatStorage(bytesUsed)} used</span>
-        <span className="mx-2 text-zinc-400">&bull;</span>
-        <span className="text-xs text-zinc-500">Created {formatDateTime(bucket.createdAt)}</span>
       </p>
       {/* Responsive rather than a fixed three columns: at 375px three columns
           crushed the cards, and with four of them the fourth was orphaned at a
@@ -264,7 +263,7 @@ function BucketErrorState({
   return (
     <div className="px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
-      <div className="mt-4">
+      <div className="mt-4" data-testid="bucket-error">
         <Alert variant="red" description={error?.message ?? fallback} />
       </div>
     </div>
@@ -327,6 +326,62 @@ function ObjectsPanel({
 // Component
 // ---------------------------------------------------------------------------
 
+/**
+ * The action bar beside the bucket heading. Both actions are hidden while the
+ * bucket is empty: the empty state carries the sole upload CTA then, so two
+ * identical primary actions never compete, and there is nothing to empty. Each
+ * also goes with its permission: emptying the bucket is a bulk
+ * `objects.delete`, uploading is `objects.write`, and a role holding neither
+ * gets no action bar at all. The cloud glyph leads the label, echoing that
+ * empty state's icon.
+ */
+export function BucketHeaderActions({
+  bucketName,
+  region,
+  hasObjects,
+  mayDelete,
+  mayUpload,
+  totalObjectCount,
+  onEmptied,
+  onUpload,
+}: {
+  bucketName: string;
+  region: S3Region;
+  hasObjects: boolean;
+  mayDelete: boolean;
+  mayUpload: boolean;
+  totalObjectCount: number | undefined;
+  onEmptied: () => void;
+  onUpload: () => void;
+}) {
+  if (!hasObjects || !(mayDelete || mayUpload)) return null;
+  return (
+    <div className="flex items-center gap-2">
+      {mayDelete && (
+        <EmptyBucketAction
+          bucketName={bucketName}
+          region={region}
+          totalObjectCount={totalObjectCount}
+          onFinished={onEmptied}
+        />
+      )}
+      {mayUpload && (
+        <Button
+          id="upload-object-button"
+          variant="primary"
+          size="sm"
+          icon={CloudArrowUpIcon}
+          iconSize={18}
+          iconPosition="left"
+          onClick={onUpload}
+        >
+          Upload object
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
@@ -342,6 +397,11 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const mayDelete = useHasPermission('objects.delete');
   const { mayList: mayListKeys } = useKeyActionScope();
   const mayCreateKeys = useHasPermission('keys.create');
+  // The policy tab exists where a policy can: a region serving the `iam`
+  // access model, for a role that may edit one. Reading takes the same
+  // permission as editing, so the tab is absent rather than read-only.
+  const isPolicyTabVisible =
+    useHasPermission('buckets.policy_manage') && supportsIamMethods(region);
 
   const setCurrentPrefix = useCallback(
     (newPrefix: string) => {
@@ -429,47 +489,25 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
 
       <div className="mt-4 mb-2 flex items-center justify-between">
-        <Heading tag="h1" size="xl">
+        <Heading id="bucket-detail-heading" tag="h1" size="xl">
           {bucketName}
         </Heading>
-        {/* Both hidden while the bucket is empty: the empty state carries the
-            sole upload CTA then, so two identical primary actions never compete,
-            and there is nothing to empty. Each also goes with its permission:
-            emptying the bucket is a bulk `objects.delete`, uploading is
-            `objects.write`, and a role holding neither gets no action bar at
-            all. The cloud glyph leads the label, echoing that empty state's
-            icon. */}
-        {versions.length > 0 && (mayDelete || mayUpload) && (
-          <div className="flex items-center gap-2">
-            {mayDelete && (
-              <EmptyBucketAction
-                bucketName={bucketName}
-                region={region}
-                totalObjectCount={analyticsData?.objectCount}
-                onFinished={refreshAfterBulkDelete}
-              />
-            )}
-            {mayUpload && (
-              <Button
-                id="upload-object-button"
-                variant="primary"
-                size="sm"
-                icon={CloudArrowUpIcon}
-                iconSize={18}
-                iconPosition="left"
-                onClick={() =>
-                  void navigate({
-                    to: '/buckets/$bucketName/upload',
-                    params: { bucketName },
-                    search: { region },
-                  })
-                }
-              >
-                Upload object
-              </Button>
-            )}
-          </div>
-        )}
+        <BucketHeaderActions
+          bucketName={bucketName}
+          region={region}
+          hasObjects={versions.length > 0}
+          mayDelete={mayDelete}
+          mayUpload={mayUpload}
+          totalObjectCount={analyticsData?.objectCount}
+          onEmptied={refreshAfterBulkDelete}
+          onUpload={() =>
+            void navigate({
+              to: '/buckets/$bucketName/upload',
+              params: { bucketName },
+              search: { region },
+            })
+          }
+        />
       </div>
 
       {bucketQuery.isPending ? (
@@ -502,6 +540,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               API Keys
             </Tab>
           )}
+          {/* Headless UI pairs tabs to panels by order, so this and its panel
+              below sit behind the identical condition. */}
+          {isPolicyTabVisible && <Tab testId="bucket-policy-tab">Policy</Tab>}
         </TabList>
 
         <TabPanels>
@@ -534,6 +575,11 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
                 accessKeysErrorMessage={accessKeysQuery.error?.message}
                 onCreateOpen={() => setAddKeyOpen(true)}
               />
+            </TabPanel>
+          )}
+          {isPolicyTabVisible && (
+            <TabPanel>
+              <BucketPolicyTab bucketName={bucketName} region={region} />
             </TabPanel>
           )}
         </TabPanels>
