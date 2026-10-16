@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { ServiceAccessKey } from '@filone/shared';
+import type { AccessKey, ServiceAccessKey } from '@filone/shared';
 import { AccessKeysTable } from './AccessKeysTable.js';
 import { ToastProvider } from './Toast/ToastProvider';
 
@@ -36,6 +36,61 @@ describe('AccessKeysTable — bucket-info permissions', () => {
     const keys = [makeKey({ permissions: ['read', 'write'] })];
     renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
     expect(screen.queryByTestId('permission-badge-bucket-info')).not.toBeInTheDocument();
+  });
+});
+
+describe('AccessKeysTable — a principal-bound key', () => {
+  const keys: AccessKey[] = [
+    {
+      id: '1',
+      type: 'principal',
+      principalId: 'user-1',
+      keyName: 'Test Key',
+      accessKeyId: 'ACCESS_KEY_12345EXAMPL',
+      createdAt: '2026-01-15T10:00:00Z',
+      status: 'active',
+    },
+  ];
+
+  it('shows Follows bucket policy in Permissions for a principal key', () => {
+    renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
+    expect(screen.getByTestId('permission-badge-follows-bucket-policy')).toHaveTextContent(
+      'Follows bucket policy',
+    );
+  });
+
+  it('shows Per bucket policy in Buckets for a principal key', () => {
+    renderWithProviders(<AccessKeysTable keys={keys} showBuckets />);
+    expect(screen.getByText('Per bucket policy')).toBeInTheDocument();
+    expect(screen.queryByText('All Buckets')).not.toBeInTheDocument();
+  });
+});
+
+describe('AccessKeysTable — the key type', () => {
+  const principalKey: AccessKey = {
+    id: '2',
+    type: 'principal',
+    principalId: 'user-1',
+    keyName: 'Laptop',
+    accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
+    createdAt: '2026-01-15T10:00:00Z',
+    status: 'active',
+  };
+
+  // The badge renders twice: in its column and inline under the name on small screens.
+  it.each([
+    ['service', 'Service', makeKey({})],
+    ['principal', 'Personal', principalKey],
+  ] as const)('labels a %s key %s', (type, label, key) => {
+    const { container } = renderWithProviders(<AccessKeysTable keys={[key]} />);
+    const badges = [...container.querySelectorAll('[data-key-type]')].map((badge) => [
+      badge.getAttribute('data-key-type'),
+      badge.textContent,
+    ]);
+    expect(badges).toEqual([
+      [type, label],
+      [type, label],
+    ]);
   });
 });
 

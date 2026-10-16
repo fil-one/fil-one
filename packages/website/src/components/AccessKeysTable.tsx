@@ -40,6 +40,19 @@ function StatusBadge({ status }: { status: AccessKey['status'] }) {
   );
 }
 
+const KEY_TYPE_LABELS: Record<AccessKey['type'], string> = {
+  principal: 'Personal',
+  service: 'Service',
+};
+
+function KeyTypeBadge({ type }: { type: AccessKey['type'] }) {
+  return (
+    <Badge color="grey" size="sm" data-key-type={type}>
+      {KEY_TYPE_LABELS[type]}
+    </Badge>
+  );
+}
+
 function PermissionBadges({
   permissions,
   granularPermissions,
@@ -337,6 +350,7 @@ export function AccessKeysTable({
       <Table.Header>
         <Table.Row>
           <Table.Head>Name</Table.Head>
+          <Table.Head className="hidden sm:table-cell">Type</Table.Head>
           {showRegion && <Table.Head className="hidden md:table-cell">Region</Table.Head>}
           {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
           {showPermissions && <Table.Head className="hidden md:table-cell">Permissions</Table.Head>}
@@ -360,10 +374,15 @@ export function AccessKeysTable({
                 <p className="font-mono text-xs text-zinc-500">{key.accessKeyId}</p>
                 <CopyButton value={key.accessKeyId} />
               </div>
-              {/* Status shown inline on small screens */}
-              <div className="mt-1 sm:hidden">
+              {/* Type and status shown inline on small screens */}
+              <div className="mt-1 flex gap-1 sm:hidden">
+                <KeyTypeBadge type={key.type} />
                 <StatusBadge status={key.status} />
               </div>
+            </Table.Cell>
+
+            <Table.Cell className="hidden sm:table-cell">
+              <KeyTypeBadge type={key.type} />
             </Table.Cell>
 
             {/* Region — access keys are region-scoped */}
@@ -383,7 +402,15 @@ export function AccessKeysTable({
             {showBuckets && (
               <Table.Cell className="hidden lg:table-cell">
                 <div className="flex flex-wrap gap-1">
-                  {key.type === 'principal' ? null : key.bucketScope === 'all' ? (
+                  {key.type === 'principal' ? (
+                    <Badge
+                      color="grey"
+                      size="sm"
+                      description="Buckets whose policy grants this key's owner access."
+                    >
+                      Per bucket policy
+                    </Badge>
+                  ) : key.bucketScope === 'all' ? (
                     <Badge color="grey" size="sm">
                       All Buckets
                     </Badge>
@@ -398,10 +425,20 @@ export function AccessKeysTable({
               </Table.Cell>
             )}
 
-            {/* Permissions */}
+            {/* Permissions. A principal-bound key carries none of its own: what
+                it may do follows the bucket policies naming its holder. */}
             {showPermissions && (
               <Table.Cell className="hidden md:table-cell">
-                {key.type === 'service' && (
+                {key.type === 'principal' ? (
+                  <Badge
+                    color="grey"
+                    size="sm"
+                    data-testid="permission-badge-follows-bucket-policy"
+                    description="This key inherits the policy of every bucket it touches."
+                  >
+                    Follows bucket policy
+                  </Badge>
+                ) : (
                   <PermissionBadges
                     permissions={key.permissions ?? []}
                     granularPermissions={key.granularPermissions ?? []}

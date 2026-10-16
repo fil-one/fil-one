@@ -103,6 +103,28 @@ export const WithBucketPermissions: Story = {
   },
 };
 
+/** An `iam` region's list: a personal key bound to its holder beside a service key. */
+export const WithPrincipalKey: Story = {
+  args: {
+    keys: [
+      {
+        id: '20',
+        type: 'principal',
+        principalId: 'user-1',
+        keyName: 'Laptop',
+        accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
+        createdAt: '2026-09-16T12:00:00Z',
+        status: 'active',
+        region: S3Region.UsEast9,
+      },
+      { ...mockKeys[0], region: S3Region.UsEast9 },
+    ],
+    showRegion: true,
+    showBuckets: true,
+    showPermissions: true,
+  },
+};
+
 export const Empty: Story = {
   args: {
     keys: [],
@@ -178,8 +200,8 @@ export const EmptyWithoutKeyCreation: Story = {
 
 /**
  * A shared org, where the column says whose key each one is — the question an
- * operator asks after removing somebody, since removal does not revoke keys
- * (FIL-1021). Key 3 predates attribution and carries no `createdBy`. Key 1 was
+ * operator asks after removing somebody, since removal does not revoke service
+ * keys (FIL-1021). Key 3 predates attribution and carries no `createdBy`. Key 1 was
  * rotated by somebody other than its owner, which the column says beneath them.
  */
 export const WithCreators: Story = {
