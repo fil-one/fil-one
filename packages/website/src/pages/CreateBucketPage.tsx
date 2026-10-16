@@ -30,13 +30,12 @@ import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { FormField } from '../components/FormField';
-import { Overline } from '../components/Overline';
+import { InfoAside } from '../components/InfoAside';
 import { Input } from '../components/Input';
 import { RegionSelect } from '../components/RegionSelect';
 import { useAvailableRegions } from '../lib/use-available-regions.js';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
-import { SlowOperationIndicator } from '../components/SlowOperationIndicator';
 import { useToast } from '../components/Toast';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
@@ -342,40 +341,25 @@ export function CreateBucketPage() {
               variant="primary"
               size="lg"
               disabled={!canSubmit}
+              loading={creating}
+              loadingLabel="Creating bucket"
               onClick={handleSubmit}
             >
-              {creating
-                ? 'Creating...'
-                : createKeyToggled
-                  ? 'Create bucket and API key'
-                  : 'Create bucket'}
+              {createKeyToggled ? 'Create bucket and API key' : 'Create bucket'}
             </Button>
-            <SlowOperationIndicator isLoading={creating} operation="Creating bucket" />
           </div>
         </Card>
 
-        {/* Right: Info sidebar */}
-        <div className="sticky top-0 w-60 shrink-0 self-start pt-1">
-          <Overline>Included by default</Overline>
-
-          <div className="mt-3 flex flex-col">
-            {/* Encryption */}
-            <div className="flex flex-col gap-0.5 py-3">
-              <span className="text-sm font-medium text-zinc-900">Encryption</span>
-              <p className="text-xs leading-relaxed text-zinc-500">
-                All data is encrypted at rest.
-              </p>
-            </div>
-
-            {/* Private */}
-            <div className="flex flex-col gap-0.5 border-t border-zinc-200/60 py-3">
-              <span className="text-sm font-medium text-zinc-900">Private</span>
-              <p className="text-xs leading-relaxed text-zinc-500">
-                All buckets are private. Access requires an API key.
-              </p>
-            </div>
-          </div>
-        </div>
+        <InfoAside
+          title="Included by default"
+          items={[
+            { title: 'Encryption', description: 'All data is encrypted at rest.' },
+            {
+              title: 'Private',
+              description: 'All buckets are private. Access requires an API key.',
+            },
+          ]}
+        />
       </div>
 
       {/* Save credentials modal */}
