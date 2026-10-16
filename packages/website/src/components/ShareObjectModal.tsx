@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowClockwiseIcon, LinkIcon } from '@phosphor-icons/react/dist/ssr';
 import { clsx } from 'clsx';
 import type { S3Region } from '@filone/shared';
@@ -50,25 +50,32 @@ export function ShareObjectModal({
 
   const { generatePresignedUrl, generatingUrl } = useObjectActions({ bucketName, region });
 
+  // Counts the times the dialog has closed. A caller can keep one modal mounted
+  // and reopen it for another object, so a link that arrives after a close
+  // belongs to an earlier object and must not be shown.
+  const closeCount = useRef(0);
+
   useEffect(() => {
     if (!open) {
+      closeCount.current += 1;
       setSelected(DEFAULT_OPTION);
       setGenerated(null);
     }
   }, [open]);
 
   async function handleGenerate(option: ExpiryOption) {
+    const closeCountAtRequest = closeCount.current;
     const result = await generatePresignedUrl(objectKey, {
       versionId,
       expiresIn: option.seconds,
     });
-    if (result) {
+    if (result && closeCount.current === closeCountAtRequest) {
       setSelected(option);
       setGenerated(result);
     }
   }
 
-  const description = 'Anyone with this link can access the object — no API key required.';
+  const description = 'Anyone with this link can access the object. No API key required.';
 
   if (generated) {
     return (

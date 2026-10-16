@@ -7,6 +7,7 @@ import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { Alert } from './Alert';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
+import { ShareObjectModal } from './ShareObjectModal';
 import { EmptyStateCard } from './EmptyStateCard';
 import { Table } from './Table/Table';
 import { FolderRow, ObjectEntryRows } from './ObjectBrowserRows';
@@ -17,6 +18,7 @@ import type { BrowseEntry } from '../lib/object-grouping.js';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
 import type { ObjectSelection, SelectableVersion } from '../lib/object-selection.js';
 import { descendantSelectionIds, useObjectSelection } from '../lib/object-selection.js';
+import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 
 export { countObjects } from '../lib/object-grouping.js';
 
@@ -264,6 +266,26 @@ export type ObjectBrowserProps = {
   totalObjectCount?: number;
 };
 
+/** The share dialog a row's Share button opens, and whether the plan allows it. */
+function useRowShare() {
+  const canShare = useCanShareObjects();
+  // The target outlives `open` so the modal keeps its object while it fades
+  // out; the modal resets its own state on close.
+  const [target, setTarget] = useState<{ key: string; versionId?: string }>({ key: '' });
+  const [open, setOpen] = useState(false);
+  return {
+    canShare,
+    open,
+    target,
+    request: (key: string, versionId: string) => {
+      // An unversioned bucket's rows carry '', which means "the object", not a version.
+      setTarget({ key, versionId: versionId || undefined });
+      setOpen(true);
+    },
+    close: () => setOpen(false),
+  };
+}
+
 export function ObjectBrowser({
   bucketName,
   region,
@@ -285,6 +307,7 @@ export function ObjectBrowser({
     versionId?: string;
   } | null>(null);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const share = useRowShare();
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const selection = useObjectSelection(versions);
   const selectedCount = selection.selected.size;
@@ -305,6 +328,8 @@ export function ObjectBrowser({
   const rowActions: RowActions = {
     downloading,
     onDownload,
+    canShare: share.canShare,
+    onShare: share.request,
     // Without a delete handler no row renders the control, so nothing reaches
     // the confirmation dialog below either.
     ...(onDelete && { onRequestDelete: requestDelete }),
@@ -381,6 +406,15 @@ export function ObjectBrowser({
           listingTruncated={listingTruncated}
         />
       )}
+
+      <ShareObjectModal
+        open={share.open}
+        onClose={share.close}
+        bucketName={bucketName}
+        region={region}
+        objectKey={share.target.key}
+        versionId={share.target.versionId}
+      />
 
       <ConfirmDialog
         open={confirmDelete !== null}

@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { OrgRole, POLICY_VERSION, S3Region, buildStatement } from '@filone/shared';
+import {
+  OrgRole,
+  POLICY_VERSION,
+  PlanId,
+  S3Region,
+  SubscriptionStatus,
+  buildStatement,
+} from '@filone/shared';
 
 import { seedPermissions } from '../lib/test-permissions.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -23,10 +30,15 @@ const { OBJECT_KEY } = vi.hoisted(() => ({ OBJECT_KEY: 'README.md' }));
 vi.mock('../lib/api.js', async () => ({
   ...(await vi.importActual<typeof import('../lib/api.js')>('../lib/api.js')),
   apiRequest: (...a: unknown[]) => mockApiRequest(...a),
+  // Each row's Share control reads the plan; a never-settling read leaves it at
+  // its "not known yet" state, which is not what these tests are about.
+  getBilling: () => mockGetBilling(),
   // The policy client reads the ETag header, so it sends through sendApiRequest
   // and gets a Response back.
   sendApiRequest: (...a: unknown[]) => mockSendApiRequest(...a),
 }));
+
+const mockGetBilling = vi.fn(() => new Promise(() => {}));
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
@@ -40,6 +52,8 @@ vi.mock('../lib/use-object-actions.js', () => ({
     deleteObject: vi.fn(),
     deleteObjects: vi.fn(),
     downloadObject: vi.fn(),
+    generatePresignedUrl: vi.fn(),
+    generatingUrl: false,
     deleting: null,
     downloading: null,
   }),
@@ -320,5 +334,38 @@ describe('BucketDetailPage — the object controls', () => {
     expect(screen.queryByRole('button', { name: `Delete ${OBJECT_KEY}` })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Empty bucket' })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+});
+
+describe('BucketDetailPage — sharing from a row', () => {
+  // A Member cannot read billing, so the plan is unknown and Share is offered:
+  // the presign endpoint applies the plan rule itself.
+  it('opens the share dialog for the row it was clicked on', async () => {
+    renderPage(OrgRole.Member);
+
+    fireEvent.click(await screen.findByRole('button', { name: `Share ${OBJECT_KEY}` }));
+
+    expect(await screen.findByTestId('share-object-modal')).toBeInTheDocument();
+  });
+
+  it('keeps Share visible but disabled while the plan is a trial', async () => {
+    mockGetBilling.mockResolvedValueOnce({
+      subscription: { planId: PlanId.FreeTrial, status: SubscriptionStatus.Trialing },
+    });
+    renderPage(OrgRole.Owner);
+
+    const share = await screen.findByRole('button', { name: `Share ${OBJECT_KEY}` });
+    await waitFor(() => expect(mockGetBilling).toHaveBeenCalled());
+    expect(share).toBeDisabled();
+  });
+
+  it('enables Share once the plan is paid', async () => {
+    mockGetBilling.mockResolvedValueOnce({
+      subscription: { planId: PlanId.PayAsYouGo, status: SubscriptionStatus.Active },
+    });
+    renderPage(OrgRole.Owner);
+
+    const share = await screen.findByRole('button', { name: `Share ${OBJECT_KEY}` });
+    await waitFor(() => expect(share).toBeEnabled());
   });
 });
