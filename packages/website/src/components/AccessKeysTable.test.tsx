@@ -1,15 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { AccessKey } from '@filone/shared';
+import type { ServiceAccessKey } from '@filone/shared';
 import { AccessKeysTable } from './AccessKeysTable.js';
 import { ToastProvider } from './Toast/ToastProvider';
+
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<ToastProvider>{ui}</ToastProvider>);
 }
 
-function makeKey(overrides: Partial<AccessKey>): AccessKey {
+function makeKey(overrides: Partial<ServiceAccessKey>): ServiceAccessKey {
   return {
+    type: 'service',
     id: '1',
     keyName: 'Test Key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
@@ -118,13 +122,13 @@ describe('AccessKeysTable — the row menu', () => {
 
 describe('AccessKeysTable — who rotated a key', () => {
   const names = (userId: string) =>
-    userId === 'user-1' ? { name: 'Ada Lovelace' } : { name: 'Grace Hopper' };
+    userId === USER_1 ? { name: 'Ada Lovelace' } : { name: 'Grace Hopper' };
 
   it('names the rotator beneath the owner', () => {
     renderWithProviders(
       <AccessKeysTable
         keys={[
-          makeKey({ createdBy: 'user-1', rotatedBy: 'user-2', rotatedAt: '2026-09-11T10:00:00Z' }),
+          makeKey({ createdBy: USER_1, rotatedBy: USER_2, rotatedAt: '2026-09-11T10:00:00Z' }),
         ]}
         creatorFor={names}
       />,
@@ -136,7 +140,7 @@ describe('AccessKeysTable — who rotated a key', () => {
 
   it('shows the column for a rotated key that names no owner', () => {
     renderWithProviders(
-      <AccessKeysTable keys={[makeKey({ rotatedBy: 'user-2' })]} creatorFor={names} />,
+      <AccessKeysTable keys={[makeKey({ rotatedBy: USER_2 })]} creatorFor={names} />,
     );
 
     expect(screen.getByText('Created by')).toBeInTheDocument();

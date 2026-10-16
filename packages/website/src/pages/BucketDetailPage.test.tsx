@@ -66,6 +66,8 @@ vi.mock('../lib/aurora-s3.js', () => ({
 
 import { BucketDetailPage } from './BucketDetailPage.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -75,6 +77,7 @@ const REGION = S3Region.EuWest1;
 
 const ACCESS_KEY = {
   id: 'key-1',
+  type: 'service',
   keyName: 'ci key',
   accessKeyId: 'AKIAOWN',
   createdAt: '2026-01-01T00:00:00Z',
@@ -83,7 +86,7 @@ const ACCESS_KEY = {
   bucketScope: 'all',
   region: REGION,
   expiresAt: null,
-  createdBy: 'user-1',
+  createdBy: USER_1,
 };
 
 /** Route each of the page's reads by its path; the object listing is stubbed out. */

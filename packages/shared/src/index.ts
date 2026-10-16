@@ -15,6 +15,7 @@ export {
   isSupportedRegion,
   supportsBucketManagement,
   getRegionAccessModel,
+  supportsIamMethods,
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
@@ -114,6 +115,7 @@ export type {
   ListMembersResponse,
   MemberSummary,
   AccessKeySummary,
+  PolicySyncReport,
   RemoveMemberResponse,
   RoleChangePreviewResponse,
   UpdateMemberRoleFailure,
@@ -174,6 +176,8 @@ export type {
   AuditPhaseFields,
   AuditSinglePhase,
   AuditSubject,
+  BucketPolicyChangeTrigger,
+  BucketPolicyEventDetails,
   CommittableAuditEvent,
   StandaloneAuditEvent,
   TwoPhaseAuditEvent,
@@ -204,7 +208,7 @@ export type {
   ExcessKeyPermission,
   AccessKeyRevocationReason,
   KeyRetentionResult,
-  AccessKeyPermissions,
+  ServiceKeyGrant,
 } from './access-key-permissions.ts';
 
 export { ROUTE_MANIFEST } from './route-manifest.ts';
@@ -216,6 +220,36 @@ export type {
 } from './route-manifest.ts';
 export { ApiErrorCode } from './api/coreInterfaces.ts';
 export type { ErrorResponse } from './api/coreInterfaces.ts';
+
+export {
+  POLICY_ACTIONS,
+  POLICY_ACTION_WILDCARD,
+  POLICY_ACTION_GROUPS,
+  POLICY_ACTION_GROUP_LABELS,
+  POLICY_ACTION_LABELS,
+  POLICY_EFFECTS,
+  POLICY_WILDCARD_PRINCIPAL,
+  RETENTION_WRITE_ACTIONS,
+  CREATOR_ACTIONS,
+  BucketPolicySchema,
+  PolicyStatementSchema,
+  PutBucketPolicyRequestSchema,
+  hasNewRetentionGrants,
+  getCreatorBucketPolicy,
+  getEffectiveActions,
+  getPolicyActionsInGroup,
+} from './api/bucket-policies.ts';
+export type {
+  BucketPolicy,
+  GetBucketPolicyResponse,
+  MemberBucketAccess,
+  PolicyAction,
+  PolicyActionGroup,
+  PolicyActionOrWildcard,
+  PolicyEffect,
+  PolicyStatement,
+  PutBucketPolicyRequest,
+} from './api/bucket-policies.ts';
 export {
   DELETION_CODE_LENGTH,
   DELETION_CODE_TTL_MINUTES,
@@ -333,6 +367,7 @@ export {
   RESERVED_KEY_NAME_PREFIX,
   isReservedKeyName,
   CreateAccessKeySchema,
+  CreatePrincipalAccessKeySchema,
 } from './api/access-keys.ts';
 export type {
   AccessKeyStatus,
@@ -343,11 +378,14 @@ export type {
   BucketInfoPermission,
   GranularPermission,
   AccessKey,
+  ServiceAccessKey,
+  PrincipalAccessKey,
   ListAccessKeysResponse,
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
   RotateAccessKeyResponse,
   DeleteAccessKeyRequest,
+  CreatePrincipalAccessKeyRequest,
 } from './api/access-keys.ts';
 
 export {

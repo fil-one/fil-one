@@ -147,6 +147,7 @@ async function prepareRotation(
   const retention = canRetainAccessKey(membership?.role ?? NO_ROLE, {
     permissions,
     granularPermissions: stored.granularPermissions,
+    region: stored.region,
   });
   if (!retention.retained) return refusedRotation(retention);
 

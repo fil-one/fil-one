@@ -81,19 +81,21 @@ export interface UpdateMemberRoleResponse {
    * the preview offered: the commit revokes from a fresh read, so this can name
    * a key minted since the preview and omit one revoked since.
    */
-  revokedKeys?: AccessKeySummary[];
+  keysRevoked?: AccessKeySummary[];
+  /** The bucket policies the change rewrote, per `iam` region. Absent when no region serves `iam`. */
+  policySyncReports?: PolicySyncReport[];
 }
 
 /**
  * A role change that stopped partway.
  *
- * The keys named in `revokedKeys` are gone whatever the role now says, so the
+ * The keys named in `keysRevoked` are gone whatever the role now says, so the
  * console reports them rather than treating the whole request as a no-op. The
  * retry is the same PATCH, which finds fewer keys.
  */
 export interface UpdateMemberRoleFailure {
   message: string;
-  revokedKeys: AccessKeySummary[];
+  keysRevoked: AccessKeySummary[];
   /** The keys a vendor refused, when that is what stopped the change. */
   failedKeys?: AccessKeySummary[];
 }
@@ -112,7 +114,22 @@ export interface RemoveMemberResponse {
    * The access keys the removal revoked, named only when there were any, so a
    * removal of somebody holding none reads as the empty answer it is.
    */
-  revokedKeys?: AccessKeySummary[];
+  keysRevoked?: AccessKeySummary[];
+}
+
+/**
+ * What a role change reached at one `iam` region's bucket policies.
+ *
+ * Owners and Admins reach every bucket only because the console names them on
+ * every bucket's policy, so a promotion or demotion rewrites one policy per
+ * bucket in the region. That cannot be atomic: the report says which buckets
+ * took the new roster and which did not, and the retry is the same request.
+ */
+export interface PolicySyncReport {
+  region: S3Region;
+  bucketsUpdated: number;
+  /** The buckets whose policy could not be written, by name. */
+  bucketsFailed: string[];
 }
 
 /**
@@ -161,5 +178,5 @@ export interface TransferOwnershipResponse {
    * `privileged.grant`, so a key carrying one outlives the authority that
    * minted it. Named here because the holder is the person reading this.
    */
-  revokedKeys?: AccessKeySummary[];
+  keysRevoked?: AccessKeySummary[];
 }

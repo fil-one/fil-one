@@ -1,4 +1,4 @@
-// Aurora-backed ServiceOrchestrator. Delegates to the existing per-call modules
+// Aurora-backed LegacyServiceOrchestrator. Delegates to the existing per-call modules
 // (aurora-tenant-setup for the lazy setup state machine, aurora-portal for
 // bucket and access-key ops) and looks up SSM-cached S3 credentials directly.
 //
@@ -50,7 +50,7 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   OrchestratorRequestOptions,
-  ServiceOrchestrator,
+  LegacyServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
   TenantInfo,
@@ -91,7 +91,6 @@ function toBucketProtection(data: BucketBucketResponse): BucketProtection {
 export const auroraOrchestrator = {
   id: 'aurora',
   region: S3Region.EuWest1 as S3RegionType,
-  accessModel: 'scoped-keys',
 
   async ensureTenantReady(
     orgId: string,
@@ -372,7 +371,7 @@ export const auroraOrchestrator = {
         objectCount: s.objectCount ?? 0,
       }));
   },
-} satisfies ServiceOrchestrator;
+} satisfies LegacyServiceOrchestrator;
 
 // Aurora's metrics API only accepts windows in m/h units, so the
 // orchestrator-agnostic '1d' value is translated before it hits the wire.
