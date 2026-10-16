@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
   allow,
-  bindToBucket,
+  buildBucketPolicy,
   buildCreatorStatement,
   grantAllToOwner,
   chooseStatementMenuAction,
@@ -59,7 +59,7 @@ test.afterAll(async () => {
 const getStoredStatements = () => [buildCreatorStatement(ownerId)];
 
 async function putPolicyAs(api: ConsoleApi, statements: UnboundStatement[], etag?: string) {
-  const res = await api.putPolicy(bucket, { policy: bindToBucket(bucket, statements), etag });
+  const res = await api.putPolicy(bucket, { policy: buildBucketPolicy(bucket, statements), etag });
   // A write that succeeds answers 204 with no body.
   const text = await res.text();
   return {
@@ -108,7 +108,7 @@ test.describe('through the API', () => {
     const statement = [ownerAll, allow([memberId], ['s3:ListBucket'], 'team')];
     expect(await putPolicyAs(admin, statement, etag)).toEqual({ status: 204, code: undefined });
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-      toCanonicalPolicy(bindToBucket(bucket, statement)),
+      toCanonicalPolicy(buildBucketPolicy(bucket, statement)),
     );
   });
 
@@ -129,7 +129,7 @@ test.describe('through the API', () => {
       await putPolicyAs(admin, getStoredStatements(), (await admin.readPolicy(bucket)).etag),
     ).toEqual({ status: 204, code: undefined });
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-      toCanonicalPolicy(bindToBucket(bucket, getStoredStatements())),
+      toCanonicalPolicy(buildBucketPolicy(bucket, getStoredStatements())),
     );
   });
 
@@ -171,7 +171,7 @@ test.describe('through the API', () => {
   test('P7. an admin writing without a precondition meets the same cap', async () => {
     const before = await owner.readPolicy(bucket);
     const res = await admin.putPolicy(bucket, {
-      policy: bindToBucket(bucket, [
+      policy: buildBucketPolicy(bucket, [
         ...getStoredStatements(),
         allow([memberId], ['s3:PutObjectRetention']),
       ]),
@@ -242,7 +242,7 @@ test.describe('in the editor', () => {
 
       expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
         toCanonicalPolicy(
-          bindToBucket(bucket, [
+          buildBucketPolicy(bucket, [
             ...getStoredStatements(),
             allow([memberId], ['s3:PutObjectRetention']),
           ]),

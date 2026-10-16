@@ -163,7 +163,10 @@ export class ConsoleApi {
     statements: readonly UnboundStatement[],
   ): Promise<string> {
     const { etag } = await this.readPolicy(bucket);
-    const res = await this.putPolicy(bucket, { policy: bindToBucket(bucket, statements), etag });
+    const res = await this.putPolicy(bucket, {
+      policy: buildBucketPolicy(bucket, statements),
+      etag,
+    });
     expect(res.status(), await res.text()).toBe(204);
     return res.headers().etag!;
   }
@@ -272,22 +275,28 @@ export const deleteObject = (s3: S3Client, bucket: string, key: string) =>
 
 /**
  * A statement before it names the bucket it is written to. The builders below
- * make these from member ids; {@link bindToBucket} fills in Resource once the
+ * make these from member ids; {@link buildBucketPolicy} fills in Resource once the
  * bucket is known.
  */
 export type UnboundStatement = Omit<PolicyStatement, 'Resource'>;
 
 /** The statement with the Resource its actions need on `bucket`. */
-export function bindStatement(bucket: string, statement: UnboundStatement): PolicyStatement {
+export function bindStatementToBucket(
+  bucket: string,
+  statement: UnboundStatement,
+): PolicyStatement {
   return { ...statement, Resource: getStatementResources(bucket, statement.Action) };
 }
 
 /** The document the statements make on `bucket`. */
-export function bindToBucket(
+export function buildBucketPolicy(
   bucket: string,
   statements: readonly UnboundStatement[],
 ): BucketPolicy {
-  return { Version: POLICY_VERSION, Statement: statements.map((st) => bindStatement(bucket, st)) };
+  return {
+    Version: POLICY_VERSION,
+    Statement: statements.map((st) => bindStatementToBucket(bucket, st)),
+  };
 }
 
 /** The statement a new bucket carries: its creator, with every action but the retention writes. */
@@ -297,7 +306,7 @@ export function buildCreatorStatement(creatorId: string): UnboundStatement {
 
 /** What a new bucket carries, whoever created it. */
 export function buildCreatorPolicy(bucket: string, creatorId: string): BucketPolicy {
-  return bindToBucket(bucket, [buildCreatorStatement(creatorId)]);
+  return buildBucketPolicy(bucket, [buildCreatorStatement(creatorId)]);
 }
 
 /** Every action for the owner under an ordinary Sid: what most cases start their policy from. */
@@ -343,7 +352,7 @@ export async function emptyAndDeleteBucket(
   ) {
     return; // Already gone.
   }
-  const policy = bindToBucket(bucket, [grantAllToOwner(ownerId)]);
+  const policy = buildBucketPolicy(bucket, [grantAllToOwner(ownerId)]);
   const etag = current.ok() ? current.headers().etag : undefined;
   const put = await owner.putPolicy(bucket, { policy, etag });
   expect(put.status(), await put.text()).toBe(204);

@@ -2,8 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
   allow,
-  bindStatement,
-  bindToBucket,
+  bindStatementToBucket,
+  buildBucketPolicy,
   buildCreatorStatement,
   grantAllToOwner,
   chooseStatementMenuAction,
@@ -124,7 +124,7 @@ test('U2. the creator statement can be renamed like any other', async ({ page })
   await savePolicy(page);
   expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
     toCanonicalPolicy(
-      bindToBucket(bucket, [{ ...buildCreatorStatement(ownerId), Sid: 'owner-all' }]),
+      buildBucketPolicy(bucket, [{ ...buildCreatorStatement(ownerId), Sid: 'owner-all' }]),
     ),
   );
 });
@@ -142,7 +142,7 @@ test('U3. an allow added in the tab grants the member', async ({ page }) => {
 
   expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
     toCanonicalPolicy(
-      bindToBucket(bucket, [
+      buildBucketPolicy(bucket, [
         buildCreatorStatement(ownerId),
         allow([memberId], ['s3:ListBucket', 's3:GetObject'], 'member-read'),
       ]),
@@ -167,7 +167,10 @@ test('U4. editing a statement widens the grant', async ({ page }) => {
   expect(
     (await owner.readPolicy(bucket)).policy.Statement.find((st) => st.Sid === 'member-read'),
   ).toEqual(
-    bindStatement(bucket, allow([memberId], ['s3:ListBucket', 's3:PutObject'], 'member-read')),
+    bindStatementToBucket(
+      bucket,
+      allow([memberId], ['s3:ListBucket', 's3:PutObject'], 'member-read'),
+    ),
   );
   expect(
     await getS3Outcome(
@@ -187,7 +190,7 @@ test('U5. removing a statement takes its grant away', async ({ page }) => {
   await savePolicy(page);
 
   expect((await owner.readPolicy(bucket)).policy).toEqual(
-    bindToBucket(bucket, [grantAllToOwner(ownerId)]),
+    buildBucketPolicy(bucket, [grantAllToOwner(ownerId)]),
   );
   expect(
     await getS3Outcome(listObjects(await createS3ClientWithNewKey(member, createdKeys), bucket)),
@@ -208,7 +211,7 @@ test('U6. a deny for everyone warns, locks the owner out, and can be undone', as
 
   expect(
     (await owner.readPolicy(bucket)).policy.Statement.find((st) => st.Sid === 'lockdown'),
-  ).toEqual(bindStatement(bucket, deny('*', ['s3:*'], 'lockdown')));
+  ).toEqual(bindStatementToBucket(bucket, deny('*', ['s3:*'], 'lockdown')));
   expect(
     await getS3Outcome(listObjects(await createS3ClientWithNewKey(owner, createdKeys), bucket)),
   ).toBe('404 NoSuchBucket');
@@ -233,7 +236,7 @@ test('U7. a statement may take a name starting with filone-', async ({ page }) =
 
   expect(
     (await owner.readPolicy(bucket)).policy.Statement.find((st) => st.Sid === 'filone-x'),
-  ).toEqual(bindStatement(bucket, allow([memberId], ['s3:ListBucket'], 'filone-x')));
+  ).toEqual(bindStatementToBucket(bucket, allow([memberId], ['s3:ListBucket'], 'filone-x')));
 });
 
 test('U8. a statement needs a principal and an action', async ({ page }) => {
@@ -261,7 +264,7 @@ test('U9. all actions covers every action and saves as s3:*', async ({ page }) =
   // The stored order is the storage system's own; the new statement is the
   // unnamed one.
   expect((await owner.readPolicy(bucket)).policy.Statement.find((st) => !st.Sid)).toEqual(
-    bindStatement(bucket, allow([memberId], ['s3:*'])),
+    bindStatementToBucket(bucket, allow([memberId], ['s3:*'])),
   );
 });
 
@@ -306,7 +309,7 @@ test("U11. a save after another writer's change shows the conflict, and reload s
   await page.locator('#policy-save-button').click();
   await expect(page.getByTestId('policy-conflict')).toBeVisible();
   expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-    toCanonicalPolicy(bindToBucket(bucket, theirs)),
+    toCanonicalPolicy(buildBucketPolicy(bucket, theirs)),
   );
 
   await page.locator('#policy-reload-button').click();
@@ -338,6 +341,6 @@ test('U13. the first statement on a bucket with no policy creates one', async ({
   await savePolicy(page);
 
   expect((await owner.readPolicy(bucket)).policy).toEqual(
-    bindToBucket(bucket, [allow([ownerId], ['s3:*'])]),
+    buildBucketPolicy(bucket, [allow([ownerId], ['s3:*'])]),
   );
 });

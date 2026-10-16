@@ -8,7 +8,7 @@ import {
 } from '../destructive/invite.util.ts';
 import {
   allow,
-  bindToBucket,
+  buildBucketPolicy,
   buildCreatorPolicy,
   grantAllToOwner,
   createS3Client,
@@ -120,7 +120,7 @@ test('B2a. removing a member takes their keys and every statement naming them', 
   expect(keysRevoked.map((k: { id: string }) => k.id).sort(byId)).toEqual(leaverKeyIds);
 
   expect(toCanonicalPolicy((await owner.readPolicy(leaverBucket)).policy)).toEqual(
-    toCanonicalPolicy(bindToBucket(leaverBucket, [grantAllToOwner(ownerId)])),
+    toCanonicalPolicy(buildBucketPolicy(leaverBucket, [grantAllToOwner(ownerId)])),
   );
   expect(await getS3Outcome(listObjects(createS3Client(key), leaverBucket))).toBe(
     '403 InvalidAccessKeyId',
@@ -130,7 +130,7 @@ test('B2a. removing a member takes their keys and every statement naming them', 
 test('B2b. a policy naming a removed member is refused', async () => {
   const { etag } = await owner.readPolicy(leaverBucket);
   const writeNamingRemovedMember = await owner.putPolicy(leaverBucket, {
-    policy: bindToBucket(leaverBucket, [
+    policy: buildBucketPolicy(leaverBucket, [
       grantAllToOwner(ownerId),
       allow([leaverId], ['s3:ListBucket']),
     ]),

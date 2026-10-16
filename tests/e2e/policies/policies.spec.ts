@@ -10,7 +10,7 @@ import type { PolicyAction } from '@filone/shared';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
   allow,
-  bindToBucket,
+  buildBucketPolicy,
   buildCreatorPolicy,
   grantAllToOwner,
   createS3ClientWithNewKey,
@@ -163,7 +163,7 @@ test('8. a write under a stale If-Match is refused with 412 POLICY_CONFLICT', as
   ]);
   const before = await owner.readPolicy(seededBucket);
   const res = await owner.putPolicy(seededBucket, {
-    policy: bindToBucket(seededBucket, [grantAllToOwner(ownerId)]),
+    policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
     etag: stale,
   });
   expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
@@ -172,7 +172,7 @@ test('8. a write under a stale If-Match is refused with 412 POLICY_CONFLICT', as
 
 test('9. creating a policy under If-None-Match: * where one exists is refused with 412 POLICY_CONFLICT', async () => {
   const res = await owner.putPolicy(seededBucket, {
-    policy: bindToBucket(seededBucket, [grantAllToOwner(ownerId)]),
+    policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
   });
   expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
 });
@@ -196,7 +196,7 @@ for (const [title, statements] of refusedPolicies) {
   test(title, async () => {
     const { etag } = await owner.readPolicy(seededBucket);
     const res = await owner.putPolicy(seededBucket, {
-      policy: bindToBucket(seededBucket, statements),
+      policy: buildBucketPolicy(seededBucket, statements),
       etag,
     });
     const body = await res.text();
@@ -215,7 +215,7 @@ test('11. a statement may take any Sid', async () => {
   ];
   await owner.replaceStatements(secondSeededBucket, statements);
   expect(toCanonicalPolicy((await owner.readPolicy(secondSeededBucket)).policy)).toEqual(
-    toCanonicalPolicy(bindToBucket(secondSeededBucket, statements)),
+    toCanonicalPolicy(buildBucketPolicy(secondSeededBucket, statements)),
   );
   await owner.replaceStatements(secondSeededBucket, [grantAllToOwner(ownerId)]);
 });
@@ -225,7 +225,7 @@ test('12. a member cannot read or write a policy', async () => {
     (await member.fetchPolicyResponse(seededBucket)).status(),
     (
       await member.putPolicy(seededBucket, {
-        policy: bindToBucket(seededBucket, [allow([memberId], ['s3:*'])]),
+        policy: buildBucketPolicy(seededBucket, [allow([memberId], ['s3:*'])]),
       })
     ).status(),
   ];
@@ -264,7 +264,7 @@ test('14a. deleting the policy leaves the bucket to service keys alone', async (
 
 test('14b. a write without a precondition creates a policy where none exists', async () => {
   const created = await owner.putPolicy(secondSeededBucket, {
-    policy: bindToBucket(secondSeededBucket, [grantAllToOwner(ownerId)]),
+    policy: buildBucketPolicy(secondSeededBucket, [grantAllToOwner(ownerId)]),
     unconditional: true,
   });
   expect([created.status(), created.headers().etag]).toEqual([204, expect.any(String)]);

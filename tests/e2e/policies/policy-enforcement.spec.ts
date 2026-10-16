@@ -18,7 +18,7 @@ import { test, expect } from '@playwright/test';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
   allow,
-  bindToBucket,
+  buildBucketPolicy,
   grantAllToOwner,
   createS3ClientWithNewKey,
   deleteObject,
@@ -299,7 +299,7 @@ test.describe('C. policy writes', () => {
     const { etag } = await owner.readPolicy(bucket);
     const write = (sid: string) =>
       owner.putPolicy(bucket, {
-        policy: bindToBucket(bucket, [
+        policy: buildBucketPolicy(bucket, [
           grantAllToOwner(ownerId),
           allow([memberId], ['s3:ListBucket'], sid),
         ]),
@@ -336,7 +336,7 @@ test.describe('C. policy writes', () => {
     test(title, async () => {
       const { etag } = await owner.readPolicy(bucket);
       const res = await owner.putPolicy(bucket, {
-        policy: bindToBucket(bucket, [grantAllToOwner(ownerId), statement]),
+        policy: buildBucketPolicy(bucket, [grantAllToOwner(ownerId), statement]),
         etag,
       });
       const body = await res.text();
@@ -355,7 +355,7 @@ test.describe('C. policy writes', () => {
     ]);
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
       toCanonicalPolicy(
-        bindToBucket(bucket, [
+        buildBucketPolicy(bucket, [
           grantAllToOwner(ownerId),
           allow([memberId, ownerId], ['s3:ListBucket'], 'repeat'),
         ]),

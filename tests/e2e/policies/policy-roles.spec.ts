@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
 import {
   allow,
-  bindToBucket,
+  buildBucketPolicy,
   buildCreatorPolicy,
   grantAllToOwner,
   createS3ClientWithNewKey,
@@ -236,7 +236,7 @@ test("R8. the first policy is the server's own, whatever a creator sends", async
     const created = await apiByRole[role].send('POST', '/buckets', {
       bucketName: bucket,
       region: REGION,
-      policy: bindToBucket(bucket, [allow('*', ['s3:*'], 'mine')]),
+      policy: buildBucketPolicy(bucket, [allow('*', ['s3:*'], 'mine')]),
     });
     if (created.status() === 201) buckets.push(bucket);
     results.push([
