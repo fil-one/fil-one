@@ -56,7 +56,7 @@ import type { FthManagementClient } from './fth-management-client.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 
 import { createFthOrchestrator } from './fth-orchestrator.ts';
-import type { IssueAccessKeyOpts, ServiceOrchestrator } from '../service-orchestrator.ts';
+import type { IssueAccessKeyOpts, LegacyServiceOrchestrator } from '../service-orchestrator.ts';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 const fthClientId = '42';
@@ -70,7 +70,7 @@ function profileItem(attrs: Record<string, string>) {
 
 // A fresh instance per test replaces a cache reset: the console storage-user
 // cache lives on the instance.
-let fthOrchestrator: ServiceOrchestrator;
+let fthOrchestrator: LegacyServiceOrchestrator;
 
 beforeEach(() => {
   ssmMock.reset();
@@ -610,6 +610,7 @@ describe('fthOrchestrator.issueAccessKey', () => {
     );
 
     expect(result).toEqual({
+      type: 'service',
       id: 'AKIAFTH',
       accessKeyId: 'AKIAFTH',
       accessKeySecret: 'sk-secret',
@@ -1444,8 +1445,10 @@ describe('fthOrchestrator signal forwarding', () => {
       fthOrchestrator.createBucket(fthClientId, { bucketName: 'b' }, { signal }),
     deleteBucket: (signal: AbortSignal) =>
       fthOrchestrator.deleteBucket(fthClientId, 'b', { signal }),
-    listBuckets: (signal: AbortSignal) => fthOrchestrator.listBuckets(fthClientId, { signal }),
-    getBucket: (signal: AbortSignal) => fthOrchestrator.getBucket(fthClientId, 'b', { signal }),
+    listBuckets: (signal: AbortSignal) =>
+      fthOrchestrator.listBuckets(fthClientId, undefined, { signal }),
+    getBucket: (signal: AbortSignal) =>
+      fthOrchestrator.getBucket(fthClientId, 'b', undefined, { signal }),
   };
 
   for (const [method, invoke] of Object.entries(credentialLookups)) {
@@ -1480,7 +1483,7 @@ describe('fthOrchestrator signal forwarding', () => {
   it('listBuckets forwards the signal to S3 ListBuckets', async () => {
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
 
-    await fthOrchestrator.listBuckets(fthClientId, { signal });
+    await fthOrchestrator.listBuckets(fthClientId, undefined, { signal });
 
     expect(sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand))).toEqual({
       abortSignal: signal,
@@ -1504,7 +1507,7 @@ describe('fthOrchestrator signal forwarding', () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    await fthOrchestrator.getBucket(fthClientId, 'b', { signal });
+    await fthOrchestrator.getBucket(fthClientId, 'b', undefined, { signal });
 
     const sent = [
       sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand)),
@@ -1549,7 +1552,7 @@ describe('fthOrchestrator signal forwarding', () => {
   it('findAccessKeyByName forwards the signal to listAccessKeys', async () => {
     mockFthClient.listAccessKeys.mockResolvedValue([]);
 
-    await fthOrchestrator.findAccessKeyByName(fthClientId, 'k', { signal });
+    await fthOrchestrator.findAccessKeyByName(fthClientId, 'k', undefined, { signal });
 
     expect(mockFthClient.listAccessKeys).toHaveBeenCalledWith(fthClientId, { signal });
   });

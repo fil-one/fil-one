@@ -1,19 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 
 import type {
+  AccessKey,
   AccessKeyBucketScope,
   AccessKeyPermission,
+  CreateAccessKeyRequest,
   CreateAccessKeyResponse,
+  CreatePrincipalAccessKeyRequest,
   GranularPermission,
   S3Region,
 } from '@filone/shared';
 import {
   CreateAccessKeySchema,
+  CreatePrincipalAccessKeySchema,
   GRANULAR_PERMISSION_MAP,
   isBucketPermission,
   isObjectPermission,
   supportsBucketManagement,
 } from '@filone/shared';
+import { supportsIamMethods } from './access-model.js';
 import { createAccessKey } from './api.js';
 import { expiresAtFromForm } from './time.js';
 import type { ExpirationOption } from '../components/AccessKeyExpirationFields.js';
@@ -57,6 +62,7 @@ export function useAccessKeyForm({
   );
   const [expiration, setExpiration] = useState<ExpirationOption>('never');
   const [customDate, setCustomDate] = useState<string | null>(null);
+  const [chosenKeyType, setKeyType] = useState<AccessKey['type']>('principal');
   const [creating, setCreating] = useState(false);
 
   const prevRegionRef = useRef(region);
@@ -70,16 +76,22 @@ export function useAccessKeyForm({
     }
   }, [region]);
 
-  const candidatePayload = {
-    keyName: keyName.trim(),
+  // On an `iam` region a key is personal unless the caller chooses a service
+  // key. Every other region takes only service keys.
+  const isOnIamRegion = supportsIamMethods(region);
+  const keyType = isOnIamRegion ? chosenKeyType : 'service';
+  const expiresAt = expiresAtFromForm(expiration, customDate);
+  const request = buildCreateKeyRequest(keyType, {
+    keyName,
     permissions,
-    granularPermissions: granularPermissions.length > 0 ? granularPermissions : undefined,
+    granularPermissions,
     bucketScope,
-    buckets: bucketScope === 'specific' ? selectedBuckets : undefined,
+    selectedBuckets,
     region,
-    expiresAt: expiresAtFromForm(expiration, customDate),
-  };
-  const canSubmit = !creating && CreateAccessKeySchema.safeParse(candidatePayload).success;
+    expiresAt,
+  });
+  const schema = keyType === 'principal' ? CreatePrincipalAccessKeySchema : CreateAccessKeySchema;
+  const canSubmit = !creating && schema.safeParse(request).success;
 
   function handlePermissionsChange(newPermissions: AccessKeyPermission[]) {
     setPermissions(newPermissions);
@@ -98,20 +110,13 @@ export function useAccessKeyForm({
     setSelectedBuckets(defaultBucket ? [defaultBucket] : []);
     setExpiration('never');
     setCustomDate(null);
+    setKeyType('principal');
     setCreating(false);
   }
 
   const createKeyMutation = useMutation({
-    mutationFn: (body: {
-      keyName: string;
-      permissions: AccessKeyPermission[];
-      granularPermissions?: GranularPermission[];
-      bucketScope: AccessKeyBucketScope;
-      buckets?: string[];
-      region: S3Region;
-      expiresAt?: string | null;
-    }) => {
-      const parsed = CreateAccessKeySchema.safeParse(body);
+    mutationFn: (body: CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest) => {
+      const parsed = schema.safeParse(body);
       if (!parsed.success) {
         throw new Error(parsed.error.issues[0].message);
       }
@@ -133,7 +138,7 @@ export function useAccessKeyForm({
 
   function handleSubmit(e?: { preventDefault(): void }) {
     e?.preventDefault();
-    createKeyMutation.mutate(candidatePayload);
+    createKeyMutation.mutate(request);
   }
 
   return {
@@ -151,10 +156,45 @@ export function useAccessKeyForm({
     setExpiration,
     customDate,
     setCustomDate,
-    expiresAt: candidatePayload.expiresAt,
+    expiresAt,
+    isOnIamRegion,
+    /** Always `'service'` outside an `iam` region. */
+    keyType,
+    setKeyType,
+    /** The request as it would be sent, for a caller that submits it alongside another write. */
+    request,
+    /** The schema that validates `request`. */
+    schema,
     creating,
     canSubmit,
     handleSubmit,
     reset,
+  };
+}
+
+function buildCreateKeyRequest(
+  keyType: AccessKey['type'],
+  fields: {
+    keyName: string;
+    permissions: AccessKeyPermission[];
+    granularPermissions: GranularPermission[];
+    bucketScope: AccessKeyBucketScope;
+    selectedBuckets: string[];
+    region: S3Region;
+    expiresAt: string | null;
+  },
+): CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest {
+  const keyName = fields.keyName.trim();
+  const { region, expiresAt } = fields;
+  if (keyType === 'principal') return { keyName, region, expiresAt };
+  return {
+    keyName,
+    permissions: fields.permissions,
+    granularPermissions:
+      fields.granularPermissions.length > 0 ? fields.granularPermissions : undefined,
+    bucketScope: fields.bucketScope,
+    buckets: fields.bucketScope === 'specific' ? fields.selectedBuckets : undefined,
+    region,
+    expiresAt,
   };
 }

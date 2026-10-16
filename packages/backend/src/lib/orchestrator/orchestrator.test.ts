@@ -4,6 +4,7 @@ import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import {
   S3Client,
+  NoSuchBucket,
   CreateBucketCommand,
   DeleteBucketCommand,
   ListBucketsCommand,
@@ -11,6 +12,7 @@ import {
   PutObjectLockConfigurationCommand,
   GetBucketVersioningCommand,
   GetObjectLockConfigurationCommand,
+  S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { S3Region } from '@filone/shared';
 import type { Client } from '@filone/orchestrator-client';
@@ -34,6 +36,7 @@ const mockDeleteAccessKey = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockDeleteTenant = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetTenantMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
 const mockGetBucketMetrics = vi.fn((_o: Record<string, unknown>) => ({}));
+const mockGetPrincipalAccess = vi.fn((_o: Record<string, unknown>) => ({}));
 
 vi.mock('@filone/orchestrator-client', () => ({
   createClient: (config: Record<string, unknown>) => mockCreateClient(config),
@@ -47,10 +50,21 @@ vi.mock('@filone/orchestrator-client', () => ({
   getTenantsByTenantIdMetrics: (o: Record<string, unknown>) => mockGetTenantMetrics(o),
   getTenantsByTenantIdBucketsByBucketNameMetrics: (o: Record<string, unknown>) =>
     mockGetBucketMetrics(o),
+  getTenantsByTenantIdPrincipalsByPrincipalIdAccess: (o: Record<string, unknown>) =>
+    mockGetPrincipalAccess(o),
 }));
 
 vi.mock('./metrics.ts', () => ({
   instrumentClient: vi.fn(),
+}));
+
+// putBucketPolicy adds If-None-Match through command middleware, which the S3
+// client mock never runs, so the header can only be checked in the arguments
+// putBucketPolicy is called with.
+const { mockPutBucketPolicy } = vi.hoisted(() => ({ mockPutBucketPolicy: vi.fn() }));
+vi.mock('../s3-bucket-operations.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../s3-bucket-operations.ts')>()),
+  putBucketPolicy: (...args: unknown[]) => mockPutBucketPolicy(...args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -58,17 +72,26 @@ const ssmMock = mockClient(SSMClient);
 const s3Mock = mockClient(S3Client);
 
 import {
+  PolicyPublishError,
   AccessKeyAlreadyExistsError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
+  PolicyConflictError,
+  PolicyValidationError,
+  PrincipalNotFoundError,
 } from '../errors.ts';
-import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
+import { grantGetObjectToUser } from '../../test/bucket-policy-fixture.ts';
+import type { IssueAccessKeyOpts, OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import { _resetS3CredentialsCacheForTesting } from '../s3-credentials.ts';
 import { instrumentClient } from './metrics.ts';
-import { createFilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
+import { FilOneOrchestrator, type FilOneOrchestratorConfig } from './orchestrator.ts';
+
+// Distinct from the tenant id below, which is the same UUID as the org.
+const USER_1 = '00000000-0000-0000-0000-000000000101';
+const ALICE = '00000000-0000-0000-0000-00000000000a';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
 // tenantId === orgId for Management API orchestrators (client-supplied UUID).
@@ -85,8 +108,8 @@ function fail(status: number, message = 'error') {
   return { data: undefined, error: { message }, response: { status } };
 }
 
-function buildOrchestrator(overrides?: { api?: FilOneOrchestratorConfig['api'] }) {
-  return createFilOneOrchestrator({
+function buildOrchestrator(overrides?: Pick<Partial<FilOneOrchestratorConfig>, 'api'>) {
+  return new FilOneOrchestrator({
     id: 'forge',
     region: S3Region.UsEast1,
     stage: 'test',
@@ -121,7 +144,7 @@ beforeEach(() => {
   _resetS3CredentialsCacheForTesting();
 });
 
-describe('createFilOneOrchestrator config', () => {
+describe('FilOneOrchestrator config', () => {
   it('exposes the configured id and region', () => {
     expect(orchestrator.id).toBe('forge');
     expect(orchestrator.region).toBe(S3Region.UsEast1);
@@ -381,6 +404,74 @@ describe('getS3ClientContext', () => {
 describe('createBucket', () => {
   beforeEach(stubS3Credentials);
 
+  it('writes the policy after CreateBucket and before PutBucketVersioning', async () => {
+    const callOrder: string[] = [];
+    s3Mock.on(CreateBucketCommand).callsFake(() => callOrder.push('create'));
+    s3Mock.on(PutBucketVersioningCommand).callsFake(() => callOrder.push('versioning'));
+    mockPutBucketPolicy.mockImplementation(async () => {
+      callOrder.push('policy');
+      return { etag: '"e1"' };
+    });
+
+    await orchestrator.createBucket(tenantId, {
+      bucketName: 'my-bucket',
+      versioning: true,
+      policy: grantGetObjectToUser,
+    });
+
+    expect(callOrder).toStrictEqual(['create', 'policy', 'versioning']);
+  });
+
+  it('writes the first policy with If-None-Match *', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    mockPutBucketPolicy.mockResolvedValue({ etag: '"e1"' });
+
+    await orchestrator.createBucket(tenantId, {
+      bucketName: 'my-bucket',
+      policy: grantGetObjectToUser,
+    });
+
+    expect(mockPutBucketPolicy.mock.calls).toStrictEqual([
+      [expect.any(S3Client), 'my-bucket', grantGetObjectToUser, { ifNoneMatch: '*' }],
+    ]);
+  });
+
+  it('retries the first policy write after a PolicyConflictError', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    mockPutBucketPolicy
+      .mockRejectedValueOnce(new PolicyConflictError())
+      .mockResolvedValue({ etag: '"e1"' });
+
+    await orchestrator.createBucket(tenantId, {
+      bucketName: 'my-bucket',
+      policy: grantGetObjectToUser,
+    });
+
+    expect(mockPutBucketPolicy).toHaveBeenCalledTimes(2);
+  });
+
+  it('passes a PolicyValidationError from the policy write through unwrapped', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+    const err = new PolicyValidationError('unknown principal');
+    mockPutBucketPolicy.mockRejectedValue(err);
+
+    // The handler answers 400 only for a PolicyValidationError.
+    await expect(
+      orchestrator.createBucket(tenantId, {
+        bucketName: 'my-bucket',
+        policy: grantGetObjectToUser,
+      }),
+    ).rejects.toBe(err);
+  });
+
+  it('does not write a policy when the create has no policy', async () => {
+    s3Mock.on(CreateBucketCommand).resolves({});
+
+    await orchestrator.createBucket(tenantId, { bucketName: 'my-bucket' });
+
+    expect(mockPutBucketPolicy).not.toHaveBeenCalled();
+  });
+
   it('issues a CreateBucketCommand for the given bucket name', async () => {
     s3Mock.on(CreateBucketCommand).resolves({});
 
@@ -505,6 +596,20 @@ describe('deleteBucket', () => {
   });
 });
 
+const MEMBER_ID = 'user-1';
+
+// Two buckets exist in the tenant; the gateway returns both whatever key
+// signs, because every principal holds `s3:ListAllMyBuckets`.
+function stubTenantListing() {
+  stubS3Credentials();
+  s3Mock.on(ListBucketsCommand).resolves({
+    Buckets: [
+      { Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') },
+      { Name: 'backups', CreationDate: new Date('2026-01-02T00:00:00Z') },
+    ],
+  });
+}
+
 describe('listBuckets', () => {
   it('maps S3 gateway buckets to summaries without a per-bucket versioning read', async () => {
     stubS3Credentials();
@@ -530,19 +635,217 @@ describe('listBuckets', () => {
   });
 });
 
+describe('listBuckets for a member', () => {
+  const buildAccessResponse = (...bucketNames: string[]) => ({
+    data: { buckets: bucketNames.map((name) => ({ name, actions: ['s3:ListBucket'] })) },
+    error: undefined,
+    response: { status: 200 },
+  });
+
+  it('returns only the buckets the access lookup lists for the member', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
+
+    const result = await orchestrator.listBuckets(tenantId, MEMBER_ID);
+
+    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos']);
+  });
+
+  it('looks up access for the named member in the tenant', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
+
+    await orchestrator.listBuckets(tenantId, MEMBER_ID);
+
+    expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId, principalId: MEMBER_ID } }),
+    );
+  });
+
+  it('returns every tenant bucket without an access lookup when no member is named', async () => {
+    stubTenantListing();
+
+    // Tenant-wide callers omit the member and must keep seeing every bucket.
+    const result = await orchestrator.listBuckets(tenantId);
+
+    expect(result.map((b) => b.bucketName)).toStrictEqual(['photos', 'backups']);
+    expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the access lookup fails', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(fail(400));
+
+    // The caller's fan-out turns this into an unavailable region. Returning the
+    // tenant listing here would hand the member every bucket name it holds.
+    await expect(orchestrator.listBuckets(tenantId, MEMBER_ID)).rejects.toThrow(
+      new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),
+    );
+  });
+
+  it('rejects as a transient failure when the storage system answers 503', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(fail(503));
+
+    await expect(orchestrator.listBuckets(tenantId, MEMBER_ID)).rejects.toBeInstanceOf(
+      PolicyPublishError,
+    );
+  });
+
+  it('returns no buckets when the member can access none', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse());
+
+    await expect(orchestrator.listBuckets(tenantId, MEMBER_ID)).resolves.toStrictEqual([]);
+  });
+
+  it('forwards the signal to the access lookup as well as S3', async () => {
+    stubTenantListing();
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
+    const signal = new AbortController().signal;
+
+    await orchestrator.listBuckets(tenantId, MEMBER_ID, { signal });
+
+    expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+    // aws-sdk-client-mock types `args` as `[command]`, but the call carries the send options too.
+    const [listCall] = s3Mock.commandCalls(ListBucketsCommand) as Array<{ args: unknown[] }>;
+    expect(listCall.args[1]).toStrictEqual({ abortSignal: signal });
+  });
+
+  it('calls the access lookup before S3 answers the bucket listing', async () => {
+    stubS3Credentials();
+    let accessLookupCallsWhenS3Listed: number | undefined;
+    s3Mock.on(ListBucketsCommand).callsFake(() => {
+      accessLookupCallsWhenS3Listed = mockGetPrincipalAccess.mock.calls.length;
+      return { Buckets: [{ Name: 'photos', CreationDate: new Date('2026-01-01T00:00:00Z') }] };
+    });
+    mockGetPrincipalAccess.mockReturnValue(buildAccessResponse('photos'));
+
+    await orchestrator.listBuckets(tenantId, MEMBER_ID);
+
+    expect(accessLookupCallsWhenS3Listed).toBe(1);
+  });
+});
+
+describe('getBucket for a member', () => {
+  const respondWithAccessibleBuckets = (...names: string[]) => ({
+    data: { buckets: names.map((name) => ({ name, actions: ['s3:ListBucket'] })) },
+    error: undefined,
+    response: { status: 200 },
+  });
+
+  beforeEach(() => {
+    stubS3Credentials();
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
+  });
+
+  it("returns details when the Member's access includes the bucket", async () => {
+    mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
+
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).resolves.toMatchObject({
+      bucketName: 'bucket-a',
+    });
+  });
+
+  it('looks up access for the named member', async () => {
+    mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
+
+    await orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID);
+
+    expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId, principalId: MEMBER_ID } }),
+    );
+  });
+
+  it("returns null without S3 reads when the Member's access omits the bucket", async () => {
+    mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('other'));
+
+    // The tenant's key would answer for the bucket, so the refusal comes from
+    // the member's policies, and it reads exactly like a missing bucket.
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).resolves.toBeNull();
+    expect(s3Mock.calls()).toHaveLength(0);
+  });
+
+  it('reads unscoped when no member is named', async () => {
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a')).resolves.toMatchObject({
+      bucketName: 'bucket-a',
+    });
+    expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects rather than reading when the access lookup fails', async () => {
+    mockGetPrincipalAccess.mockReturnValue(fail(400));
+
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).rejects.toThrow(
+      new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),
+    );
+    expect(s3Mock.calls()).toHaveLength(0);
+  });
+});
+
 describe('getBucket', () => {
   beforeEach(stubS3Credentials);
 
-  it('returns null when the bucket is not in the tenant listing', async () => {
-    s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
+  const buildNoSuchBucketError = () =>
+    new NoSuchBucket({ message: 'The specified bucket does not exist', $metadata: {} });
+
+  it('does not call ListBuckets when both bucket reads succeed', async () => {
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
+
+    const result = await orchestrator.getBucket(tenantId, 'bucket-a');
+
+    // A tenant listing names every bucket in the tenant whether or not the
+    // caller can open it, so the bucket-addressed reads settle existence.
+    expect(result).toMatchObject({ bucketName: 'bucket-a', versioning: true });
+    expect(s3Mock.commandCalls(ListBucketsCommand)).toHaveLength(0);
+  });
+
+  it('returns null when the versioning read says the bucket is not there', async () => {
+    s3Mock.on(GetBucketVersioningCommand).rejects(buildNoSuchBucketError());
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
     await expect(orchestrator.getBucket(tenantId, 'missing')).resolves.toBeNull();
   });
 
-  it('returns details including object-lock state', async () => {
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [{ Name: 'bucket-a', CreationDate: new Date('2026-01-01T00:00:00Z') }],
+  it('returns null when the object-lock read says the bucket is not there', async () => {
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(buildNoSuchBucketError());
+
+    await expect(orchestrator.getBucket(tenantId, 'missing')).resolves.toBeNull();
+  });
+
+  const buildAccessDeniedError = () =>
+    new S3ServiceException({
+      name: 'AccessDenied',
+      $fault: 'client',
+      message: 'Access Denied',
+      $metadata: { httpStatusCode: 403 },
     });
+
+  it("returns null for another tenant's bucket, which the gateway answers AccessDenied", async () => {
+    s3Mock.on(GetBucketVersioningCommand).rejects(buildAccessDeniedError());
+    s3Mock.on(GetObjectLockConfigurationCommand).rejects(buildAccessDeniedError());
+
+    await expect(orchestrator.getBucket(tenantId, 'someone-elses')).resolves.toBeNull();
+    expect(s3Mock.commandCalls(ListBucketsCommand)).toHaveLength(0);
+  });
+
+  it('keeps object lock off for a bucket that simply has no configuration', async () => {
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock
+      .on(GetObjectLockConfigurationCommand)
+      .rejects(
+        Object.assign(new Error('no config'), { name: 'ObjectLockConfigurationNotFoundError' }),
+      );
+
+    await expect(orchestrator.getBucket(tenantId, 'bucket-a')).resolves.toMatchObject({
+      objectLockEnabled: false,
+    });
+  });
+
+  it('returns details including object-lock state', async () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({
       ObjectLockConfiguration: {
@@ -553,10 +856,10 @@ describe('getBucket', () => {
 
     const result = await orchestrator.getBucket(tenantId, 'bucket-a');
 
+    // No createdAt: S3 carries no creation date for a single bucket.
     expect(result).toEqual({
       bucketName: 'bucket-a',
       region: S3Region.UsEast1,
-      createdAt: '2026-01-01T00:00:00.000Z',
       isPublic: false,
       versioning: true,
       encrypted: true,
@@ -568,11 +871,135 @@ describe('getBucket', () => {
   });
 });
 
+describe('issueAccessKey bound to a principal', () => {
+  const principalKeyCreated = {
+    accessKeyId: 'did:key:z6Mk',
+    name: 'laptop',
+    type: 'principal',
+    principalId: ALICE,
+    secretAccessKey: 'sk-secret',
+    createdAt: '2026-09-16T12:00:00Z',
+    expiresAt: null,
+  };
+
+  it('sends only name, principalId and expiresAt for a principal-bound key', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(principalKeyCreated, 201));
+
+    await orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE });
+
+    const { body } = mockCreateAccessKey.mock.calls[0]![0] as { body: Record<string, unknown> };
+    expect(body).toStrictEqual({ name: 'laptop', principalId: ALICE, expiresAt: null });
+  });
+
+  it('returns the issued key with its principalId', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(principalKeyCreated, 201));
+
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
+    ).resolves.toStrictEqual({
+      type: 'principal',
+      id: 'did:key:z6Mk',
+      accessKeyId: 'did:key:z6Mk',
+      accessKeySecret: 'sk-secret',
+      createdAt: '2026-09-16T12:00:00Z',
+      principalId: ALICE,
+    });
+  });
+
+  it('omits principalId when the API answers a service key that carries a principal', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok({ ...principalKeyCreated, type: 'service' }, 201));
+
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', permissions: ['read'] }),
+    ).resolves.toStrictEqual({
+      type: 'service',
+      id: 'did:key:z6Mk',
+      accessKeyId: 'did:key:z6Mk',
+      accessKeySecret: 'sk-secret',
+      createdAt: '2026-09-16T12:00:00Z',
+    });
+  });
+
+  it('throws AccessKeyAlreadyExistsError when the API answers 409', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(fail(409, 'name conflict'));
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
+    ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
+  });
+});
+
+describe('issueAccessKey 422 classification', () => {
+  function failWith422(message: string, code: string) {
+    return { data: undefined, error: { message, code }, response: { status: 422 } };
+  }
+
+  it('throws PrincipalNotFoundError on a 422 with code UnknownPrincipal, whatever the message', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(failWith422('no such member', 'UnknownPrincipal'));
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
+    ).rejects.toBeInstanceOf(PrincipalNotFoundError);
+  });
+
+  it('throws AccessKeyValidationError on a 422 with any other code', async () => {
+    mockCreateAccessKey.mockResolvedValueOnce(
+      failWith422(
+        'a principal-bound access key takes no permissions or buckets',
+        'PrincipalScopedAccessKey',
+      ),
+    );
+    await expect(
+      orchestrator.issueAccessKey(tenantId, { keyName: 'laptop', principalId: ALICE }),
+    ).rejects.toBeInstanceOf(AccessKeyValidationError);
+  });
+});
+
+describe('issueAccessKey with a mixed shape', () => {
+  it.each([
+    ['permissions', ['read']],
+    ['granularPermissions', ['s3:GetObject']],
+    ['buckets', ['photos']],
+    ['bucketScope', 'all'],
+  ])(
+    'throws AccessKeyValidationError without calling the API when a principal-bound key also carries %s',
+    async (field, value) => {
+      mockCreateAccessKey.mockResolvedValue(
+        ok(
+          {
+            accessKeyId: 'k',
+            name: 'laptop',
+            type: 'principal',
+            principal: ALICE,
+            secretAccessKey: 's',
+            createdAt: 'now',
+          },
+          201,
+        ),
+      );
+      const principalKeyWithServiceFields = {
+        keyName: 'laptop',
+        principalId: ALICE,
+        [field]: value,
+      };
+      await expect(
+        orchestrator.issueAccessKey(tenantId, principalKeyWithServiceFields),
+      ).rejects.toBeInstanceOf(AccessKeyValidationError);
+      expect(mockCreateAccessKey).not.toHaveBeenCalled();
+    },
+  );
+
+  it('IssueAccessKeyOpts rejects permissions on a principal-bound key at compile time', () => {
+    // @ts-expect-error a principal-bound key carries no permissions of its own
+    const opts: IssueAccessKeyOpts = { keyName: 'k', principalId: ALICE, permissions: ['read'] };
+    expect(opts).toBeDefined();
+  });
+});
+
 describe('issueAccessKey', () => {
   const createdKey = {
     accessKeyId: 'AKIAFORGE',
     secretAccessKey: 'sk-secret',
     name: 'My Key',
+    type: 'service',
     permissions: [],
     buckets: [],
     createdAt: '2026-03-10T00:00:00Z',
@@ -587,6 +1014,7 @@ describe('issueAccessKey', () => {
     });
 
     expect(result).toEqual({
+      type: 'service',
       id: 'AKIAFORGE',
       accessKeyId: 'AKIAFORGE',
       accessKeySecret: 'sk-secret',
@@ -610,6 +1038,28 @@ describe('issueAccessKey', () => {
         throwOnError: false,
       }),
     );
+  });
+
+  it('grants the multipart actions with read, write and list', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
+
+    await orchestrator.issueAccessKey(tenantId, {
+      keyName: 'My Key',
+      permissions: ['read', 'write', 'list'],
+    });
+
+    const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
+    // Parity with FTH_BASE_PERMISSIONS (fth-orchestrator.ts): the console's
+    // read/write/list promise multipart support, so service keys get it too.
+    expect(permissions).toStrictEqual([
+      's3:ListAllMyBuckets',
+      's3:GetObject',
+      's3:ListBucket',
+      's3:ListMultipartUploadParts',
+      's3:PutObject',
+      's3:AbortMultipartUpload',
+      's3:ListBucketMultipartUploads',
+    ]);
   });
 
   it('maps granular permissions and bucket scopes', async () => {
@@ -699,10 +1149,17 @@ describe('findAccessKeyByName', () => {
     mockListAccessKeys.mockResolvedValue(
       ok({
         items: [
-          { accessKeyId: 'AK1', name: 'other', createdAt: '2026-01-01T00:00:00Z', permissions: [] },
+          {
+            accessKeyId: 'AK1',
+            name: 'other',
+            type: 'service',
+            createdAt: '2026-01-01T00:00:00Z',
+            permissions: [],
+          },
           {
             accessKeyId: 'AK2',
             name: 'target',
+            type: 'service',
             createdAt: '2026-01-02T00:00:00Z',
             permissions: [],
           },
@@ -721,6 +1178,47 @@ describe('findAccessKeyByName', () => {
     mockListAccessKeys.mockResolvedValue(ok({ items: [] }));
 
     await expect(orchestrator.findAccessKeyByName(tenantId, 'target')).resolves.toBeUndefined();
+  });
+
+  it('passes over a principal-bound key of the same name when no principal is given', async () => {
+    // The Management API scopes names per kind and leaves list order unspecified,
+    // so a service-key lookup must not pick up a principal-bound key of that name.
+    mockListAccessKeys.mockResolvedValue(
+      ok({
+        items: [
+          {
+            accessKeyId: 'AK1',
+            name: 'target',
+            type: 'principal',
+            principalId: USER_1,
+            createdAt: '2026-01-01T00:00:00Z',
+          },
+          {
+            accessKeyId: 'AK2',
+            name: 'target',
+            type: 'service',
+            createdAt: '2026-01-02T00:00:00Z',
+            permissions: [],
+          },
+        ],
+      }),
+    );
+
+    await expect(orchestrator.findAccessKeyByName(tenantId, 'target')).resolves.toEqual({
+      id: 'AK2',
+      accessKeyId: 'AK2',
+      createdAt: '2026-01-02T00:00:00Z',
+    });
+  });
+
+  it("looks only among a principal's keys when given one", async () => {
+    mockListAccessKeys.mockResolvedValue(ok({ items: [] }));
+
+    await orchestrator.findAccessKeyByName(tenantId, 'target', USER_1);
+
+    expect(mockListAccessKeys).toHaveBeenCalledWith(
+      expect.objectContaining({ path: { tenantId }, query: { principalId: USER_1 } }),
+    );
   });
 });
 
@@ -951,7 +1449,15 @@ describe('signal forwarding', () => {
       name: 'issueAccessKey',
       run: (requestOptions) => {
         mockCreateAccessKey.mockResolvedValue(
-          ok({ accessKeyId: 'AK', secretAccessKey: 'SK', createdAt: '2026-01-01T00:00:00Z' }, 201),
+          ok(
+            {
+              accessKeyId: 'AK',
+              type: 'service',
+              secretAccessKey: 'SK',
+              createdAt: '2026-01-01T00:00:00Z',
+            },
+            201,
+          ),
         );
         return orchestrator.issueAccessKey(
           tenantId,
@@ -965,7 +1471,7 @@ describe('signal forwarding', () => {
       name: 'findAccessKeyByName',
       run: (requestOptions) => {
         mockListAccessKeys.mockResolvedValue(ok({ items: [] }));
-        return orchestrator.findAccessKeyByName(tenantId, 'k', requestOptions);
+        return orchestrator.findAccessKeyByName(tenantId, 'k', undefined, requestOptions);
       },
       mocks: [mockListAccessKeys],
     },
@@ -1023,7 +1529,7 @@ describe('signal forwarding', () => {
   it('listBuckets forwards the signal to S3 ListBuckets', async () => {
     s3Mock.on(ListBucketsCommand).resolves({ Buckets: [] });
 
-    await orchestrator.listBuckets(tenantId, { signal });
+    await orchestrator.listBuckets(tenantId, undefined, { signal });
 
     expect(sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand))).toEqual({
       abortSignal: signal,
@@ -1040,25 +1546,17 @@ describe('signal forwarding', () => {
     });
   });
 
-  it('getBucket forwards the signal to the list and both per-bucket reads', async () => {
-    s3Mock.on(ListBucketsCommand).resolves({
-      Buckets: [{ Name: 'b', CreationDate: new Date('2026-01-01T00:00:00Z') }],
-    });
+  it('getBucket forwards the signal to both per-bucket reads', async () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    await orchestrator.getBucket(tenantId, 'b', { signal });
+    await orchestrator.getBucket(tenantId, 'b', undefined, { signal });
 
     const sent = [
-      sendOptionsOf(s3Mock.commandCalls(ListBucketsCommand)),
       sendOptionsOf(s3Mock.commandCalls(GetBucketVersioningCommand)),
       sendOptionsOf(s3Mock.commandCalls(GetObjectLockConfigurationCommand)),
     ];
-    expect(sent).toEqual([
-      { abortSignal: signal },
-      { abortSignal: signal },
-      { abortSignal: signal },
-    ]);
+    expect(sent).toEqual([{ abortSignal: signal }, { abortSignal: signal }]);
   });
 
   it('createBucket forwards the signal to CreateBucket and both configuration calls', async () => {

@@ -2,23 +2,27 @@ import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { ApiErrorCode, NO_ROLE, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
+import { ApiErrorCode, NO_ROLE, auditKeyIdSuffix } from '@filone/shared';
 import type {
-  AccessKeyPermissions,
   AuditActor,
   ErrorResponse,
   ExcessKeyPermission,
   S3Region,
+  ServiceKeyGrant,
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { accessKeyMintSeqItem } from './access-key-mint-seq.ts';
 import type { AuditCorrelation } from './audit.ts';
 import type { AccessKeyRecord } from './dynamo-records.ts';
 import { RevocationNotRecordedError, revokeAccessKey } from './key-revocation.ts';
-import { cancelledLabels, creatorRoleStillMintsCheck } from './membership-changes.ts';
+import {
+  canRoleHoldKey,
+  cancelledLabels,
+  creatorRoleStillMintsCheck,
+} from './membership-changes.ts';
 import { resolveMembership } from './org-membership.ts';
 import { ResponseBuilder } from './response-builder.ts';
-import type { ServiceOrchestrator } from './service-orchestrator.ts';
+import type { RegionOrchestrator } from './service-orchestrator.ts';
 
 /**
  * The half of a mint that happens after the vendor has answered.
@@ -48,7 +52,7 @@ export interface MintedKey {
   accessKeyId: string;
   keyName: string;
   region: S3Region;
-  orchestrator: ServiceOrchestrator;
+  orchestrator: RegionOrchestrator;
   tenantId: string;
 }
 
@@ -63,8 +67,12 @@ export interface MintedKey {
 export interface KeyMinter {
   orgId: string;
   userId: string;
-  /** The permissions the key would carry. */
-  key: AccessKeyPermissions;
+  /**
+   * A principal-bound key carries no authority of its own, so any role holding
+   * `keys.create` may hold it. A service key carries its grant, and the role
+   * must cover that grant.
+   */
+  key: { type: 'principal' } | { type: 'service'; grant: ServiceKeyGrant };
 }
 
 /**
@@ -259,7 +267,7 @@ export async function discardRecordedKey({
  */
 export async function keyExceedsCurrentRole({ orgId, userId, key }: KeyMinter): Promise<boolean> {
   const current = (await resolveMembership(orgId, userId))?.role ?? NO_ROLE;
-  return !canRetainAccessKey(current, key).retained;
+  return !canRoleHoldKey(current, key);
 }
 
 /**

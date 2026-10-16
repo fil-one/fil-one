@@ -37,10 +37,16 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => ({
     id: region === 'us-east-1' ? 'fth' : 'aurora',
     region,
-    accessModel: 'scoped-keys',
     isTenantReady: () => `tenant:${region}`,
     deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
   }),
+}));
+
+// The principal removal on `iam` regions, stubbed so the suite can assert its
+// place in the order and what its refusal does; its own suite covers the call.
+const mockRemoveMemberPrincipal = vi.fn(async (_args: unknown) => {});
+vi.mock('../lib/member-principals.ts', () => ({
+  removeMemberPrincipal: (args: unknown) => mockRemoveMemberPrincipal(args),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -53,6 +59,7 @@ process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
 
 import { handler } from './remove-member.ts';
+import { IamRegionRefusedError } from '../lib/errors.ts';
 import { OrgKeys } from '../lib/org-membership.ts';
 import { inviteExpiresAt } from '../lib/invitations.ts';
 import {
@@ -457,7 +464,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     const result = await handler(removeEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 409 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
   });
 
   it('records the removal with no secret in it', async () => {
@@ -773,7 +780,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     ]);
     // The admin doing this is not the key holder, so the response is the only
     // place they learn which credentials the removal destroyed.
-    expect(body(result).revokedKeys.map((key: AccessKeySummary) => key.keyName)).toStrictEqual([
+    expect(body(result).keysRevoked.map((key: AccessKeySummary) => key.keyName)).toStrictEqual([
       'key 0',
       'key 1',
     ]);
@@ -835,7 +842,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     const result = await handler(removeEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 502 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
   });
 
   it('removes the member even when the pass after it cannot finish', async () => {
@@ -891,7 +898,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     const result = await handler(removeEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 409 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
   });
 
   it('records the removal with the ids of the keys that went', async () => {
@@ -1095,5 +1102,99 @@ describe('DELETE /api/org/members/{userId} handler', () => {
       expect(result).toMatchObject({ statusCode: 409 });
       expect(body(result).message).toContain(`An access key was created for ${TARGET_EMAIL}`);
     });
+  });
+});
+
+describe('the principal on iam regions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mockJwtVerify.mockResolvedValue({
+      payload: { sub: MOCK_SUB, email: EMAIL, email_verified: true },
+    });
+    ddbMock.on(GetItemCommand).resolves({});
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    ddbMock
+      .on(GetItemCommand, {
+        TableName: 'UserInfoTable',
+        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+      })
+      .resolves({
+        Item: {
+          pk: { S: `SUB#${MOCK_SUB}` },
+          sk: { S: 'IDENTITY' },
+          userId: { S: USER_ID },
+          orgId: { S: ORG_ID },
+        },
+      });
+    mockRemoveMemberPrincipal.mockResolvedValue(undefined);
+    callerHolds(OrgRole.Owner);
+    targetHolds(OrgRole.Member);
+  });
+
+  it('removes the principal before writing the membership transaction', async () => {
+    const order: string[] = [];
+    mockRemoveMemberPrincipal.mockImplementation(async () => {
+      order.push('principal');
+    });
+    ddbMock.on(TransactWriteItemsCommand).callsFake(() => {
+      order.push('transaction');
+      return {};
+    });
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(order).toStrictEqual(['principal', 'transaction']);
+    expect(mockRemoveMemberPrincipal.mock.calls).toStrictEqual([
+      [{ orgProfile: undefined, userId: TARGET_ID }],
+    ]);
+  });
+
+  it('resolves the iam regions from a consistent read of the org profile', async () => {
+    const profileKey = { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'PROFILE' } };
+    // A replica that has not seen the tenant id written moments ago.
+    ddbMock.on(GetItemCommand, { TableName: 'UserInfoTable', Key: profileKey }).resolves({});
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable', Key: profileKey, ConsistentRead: true })
+      .resolves({ Item: { ...profileKey, forgeDevTenantId: { S: 'tenant-fresh' } } });
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    await handler(removeEvent(), buildContext());
+
+    expect(mockRemoveMemberPrincipal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orgProfile: expect.objectContaining({ forgeDevTenantId: { S: 'tenant-fresh' } }),
+      }),
+    );
+  });
+
+  it('leaves the member in the org when a region refuses to remove the principal', async () => {
+    mockRemoveMemberPrincipal.mockRejectedValue(
+      new IamRegionRefusedError('remove', [S3Region.UsEast9]),
+    );
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 502 });
+    expect(body(result)).toStrictEqual({
+      message: 'We could not remove the member from this organization. Please try again.',
+    });
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('answers 500 with the member still in the org when the commit fails after the principal is gone', async () => {
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('dynamo down'));
+
+    const result = await handler(removeEvent(), buildContext());
+
+    // The principal is gone at the storage system and the rows stay; the same
+    // DELETE again succeeds, since a principal already removed answers 204.
+    expect(result).toMatchObject({ statusCode: 500 });
+    expect(mockRemoveMemberPrincipal).toHaveBeenCalledTimes(1);
   });
 });

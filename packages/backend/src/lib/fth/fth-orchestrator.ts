@@ -1,4 +1,4 @@
-// Fortilyx (FTH) backed ServiceOrchestrator.
+// Fortilyx (FTH) backed LegacyServiceOrchestrator.
 //
 // The interface methods are intentionally split into two layers:
 //   - control-plane (ensureTenantReady, isTenantReady, issueAccessKey, ...)
@@ -37,7 +37,7 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   OrchestratorRequestOptions,
-  ServiceOrchestrator,
+  LegacyServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
   TenantInfo,
@@ -78,7 +78,7 @@ const FTH_1D_CHUNK_MS = 90 * 24 * 60 * 60 * 1000;
 // partially configured (which would surface as a dead-end BucketConfigurationError).
 const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
-export function createFthOrchestrator(client: FthManagementClient): ServiceOrchestrator {
+export function createFthOrchestrator(client: FthManagementClient): LegacyServiceOrchestrator {
   return new FthOrchestrator(client);
 }
 
@@ -97,10 +97,9 @@ export function createInstrumentedFthClient(): FthManagementClient {
 // The max-lines-per-function lint rule caps a function at 100 lines and the
 // orchestrator methods together run well past that, so they live on a class.
 // Callers only ever see createFthOrchestrator(client).
-class FthOrchestrator implements ServiceOrchestrator {
+class FthOrchestrator implements LegacyServiceOrchestrator {
   readonly id = 'fth';
   readonly region = S3Region.UsEast1;
-  readonly accessModel = 'scoped-keys';
 
   private readonly client: FthManagementClient;
 
@@ -258,6 +257,7 @@ class FthOrchestrator implements ServiceOrchestrator {
 
   async listBuckets(
     tenantId: string,
+    _memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]> {
     // Versioning and object-lock both cost a GetBucket*/GetObjectLockConfiguration
@@ -280,6 +280,7 @@ class FthOrchestrator implements ServiceOrchestrator {
   async getBucket(
     tenantId: string,
     bucketName: string,
+    _memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
     const ctx = await this.getS3ClientContext(tenantId, requestOptions);
@@ -312,6 +313,11 @@ class FthOrchestrator implements ServiceOrchestrator {
     keyOpts: IssueAccessKeyOpts,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
+    if ('principalId' in keyOpts) {
+      throw new Error(
+        'FTH supports service keys only; a principal-bound key needs the IAM access model',
+      );
+    }
     const storageUserId = await this.getFthConsoleStorageUserId(tenantId, requestOptions);
 
     const permissions = buildFthPermissions(keyOpts.permissions, keyOpts.granularPermissions);
@@ -342,6 +348,7 @@ class FthOrchestrator implements ServiceOrchestrator {
       );
 
       return {
+        type: 'service',
         id: accessKey.accessKeyId,
         accessKeyId: accessKey.accessKeyId,
         accessKeySecret: accessKey.secretAccessKey,
@@ -367,6 +374,7 @@ class FthOrchestrator implements ServiceOrchestrator {
   async findAccessKeyByName(
     tenantId: string,
     keyName: string,
+    _principalId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ) {
     const keys = await this.client.listAccessKeys(tenantId, requestOptions);
@@ -462,7 +470,7 @@ class FthOrchestrator implements ServiceOrchestrator {
     // the bucket. A snapshot miss alone can't distinguish "not owned" from
     // "owned but absent from the current breakdown" (e.g. an empty bucket), so
     // confirm existence before reading metrics.
-    const bucket = await this.getBucket(tenantId, bucketName, requestOptions);
+    const bucket = await this.getBucket(tenantId, bucketName, undefined, requestOptions);
     if (!bucket) throw new BucketNotFoundError(bucketName);
 
     // FTH has no per-bucket time series; the current-snapshot `by_bucket`

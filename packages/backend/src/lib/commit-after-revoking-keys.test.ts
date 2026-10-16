@@ -27,8 +27,10 @@ import { AuditSubjects, userActor } from './audit.ts';
 import { commitAfterRevokingKeys } from './commit-after-revoking-keys.ts';
 import type { AccessKeyToRevoke } from './member-keys.ts';
 
+const ADMIN_1 = '00000000-0000-0000-0000-0000000000a1';
+
 const ORG_ID = 'org-1';
-const MEMBER_ID = 'member-1';
+const MEMBER_ID = '00000000-0000-0000-0000-0000000000b1';
 const ITEMS: TransactWriteItem[] = [
   { Put: { TableName: 'UserInfoTable', Item: { pk: { S: `USER#${MEMBER_ID}` } } } },
 ];
@@ -72,7 +74,7 @@ function commit(overrides: Record<string, unknown> = {}) {
     fence: { userId: MEMBER_ID, mintSeq: undefined },
     orgId: ORG_ID,
     orgProfile: undefined,
-    actor: userActor({ userId: 'admin-1' }),
+    actor: userActor({ userId: ADMIN_1 }),
     trigger: 'role_narrowing',
     auditEventType: 'member.role_changed',
     subject: AuditSubjects.user(MEMBER_ID),
@@ -154,7 +156,7 @@ describe('commitAfterRevokingKeys', () => {
 
   it('answers the fence itself, so the caller cannot mistake it for its own item', async () => {
     // A key was minted after the listing. The keys already revoked went before
-    // it did, so they ride the arm the caller has to answer.
+    // it did, so they ride the result the caller has to answer.
     ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(ITEMS.length, ITEMS.length + 2));
 
     expect(await commit()).toStrictEqual({ keyMinted: REVOKED });

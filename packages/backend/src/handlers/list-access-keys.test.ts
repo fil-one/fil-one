@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
-import { OrgRole } from '@filone/shared';
+import { OrgRole, S3Region } from '@filone/shared';
+import { USER_ID, grantGetObjectToUser } from '../test/bucket-policy-fixture.ts';
+import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
+import { fakeOrchestrator, fakeOrgProfile, tenantFor } from '../test/fake-orchestrator.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -14,6 +17,20 @@ vi.mock('sst', () => ({
   },
 }));
 
+// One region serves the `iam` access model, through the in-memory fake; a
+// bucket-filtered listing there asks the bucket's policy about principal keys.
+const IAM_REGION = S3Region.UsEast9;
+const iamFake = new FakeIamOrchestrator();
+const iamOrchestrator = fakeOrchestrator('forgeDev', { region: IAM_REGION, iam: iamFake });
+const legacyOrchestrator = fakeOrchestrator('aurora');
+vi.mock('../lib/service-orchestrator-registry.ts', () => ({
+  getOrchestratorForRegion: (region: string) =>
+    region === IAM_REGION ? iamOrchestrator : legacyOrchestrator,
+}));
+vi.mock('../lib/org-profile.ts', () => ({
+  getOrgProfile: async (orgId: string) => fakeOrgProfile(orgId),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 process.env.FILONE_STAGE = 'test';
@@ -21,11 +38,14 @@ process.env.FILONE_STAGE = 'test';
 import { baseHandler } from './list-access-keys.ts';
 import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
 function ddbItem(overrides: {
   id: string;
@@ -43,6 +63,7 @@ function ddbItem(overrides: {
   recovered?: boolean;
   rotatedBy?: string;
   rotatedAt?: string;
+  principalId?: string;
 }) {
   const item: Record<string, AttributeValue> = {
     pk: { S: `ORG#${USER_INFO.orgId}` },
@@ -56,6 +77,7 @@ function ddbItem(overrides: {
   if (overrides.recovered) item.recovered = { BOOL: true };
   if (overrides.rotatedBy) item.rotatedBy = { S: overrides.rotatedBy };
   if (overrides.rotatedAt) item.rotatedAt = { S: overrides.rotatedAt };
+  if (overrides.principalId) item.principalId = { S: overrides.principalId };
   if (overrides.permissions) item.permissions = { L: overrides.permissions.map((p) => ({ S: p })) };
   if (overrides.granularPermissions)
     item.granularPermissions = { L: overrides.granularPermissions.map((g) => ({ S: g })) };
@@ -99,6 +121,7 @@ describe('list-access-keys baseHandler', () => {
       keys: [
         {
           id: 'key-1',
+          type: 'service',
           keyName: 'Production',
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
@@ -109,6 +132,38 @@ describe('list-access-keys baseHandler', () => {
           expiresAt: null,
         },
       ],
+    });
+  });
+
+  it('lists a principal-bound key with its principal and no permission set', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        ddbItem({
+          id: 'key-9',
+          keyName: 'laptop',
+          accessKeyId: 'did:key:z9',
+          createdAt: '2026-09-16T00:00:00Z',
+          region: 'us-east-9',
+          createdBy: 'user-1',
+          principalId: 'user-1',
+        }),
+      ],
+    });
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const [listed] = JSON.parse(result.body!).keys;
+    expect(listed).toStrictEqual({
+      id: 'key-9',
+      type: 'principal',
+      keyName: 'laptop',
+      accessKeyId: 'did:key:z9',
+      createdAt: '2026-09-16T00:00:00Z',
+      status: 'active',
+      region: 'us-east-9',
+      expiresAt: null,
+      createdBy: 'user-1',
+      principalId: 'user-1',
     });
   });
 
@@ -301,7 +356,8 @@ describe('list-access-keys baseHandler', () => {
     expect(input).toStrictEqual({
       TableName: 'UserInfoTable',
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      FilterExpression: '(bucketScope = :all OR contains(buckets, :bucket))',
+      FilterExpression:
+        '(bucketScope = :all OR contains(buckets, :bucket) OR attribute_exists(principalId))',
       ExpressionAttributeValues: {
         ':pk': { S: 'ORG#org-1' },
         ':skPrefix': { S: 'ACCESSKEY#' },
@@ -382,7 +438,8 @@ describe('list-access-keys baseHandler', () => {
     expect(input).toStrictEqual({
       TableName: 'UserInfoTable',
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      FilterExpression: '(bucketScope = :all OR contains(buckets, :bucket)) AND #region = :region',
+      FilterExpression:
+        '(bucketScope = :all OR contains(buckets, :bucket) OR attribute_exists(principalId)) AND #region = :region',
       ExpressionAttributeNames: { '#region': 'region' },
       ExpressionAttributeValues: {
         ':pk': { S: 'ORG#org-1' },
@@ -442,6 +499,7 @@ describe('list-access-keys baseHandler', () => {
       keys: [
         {
           id: 'key-1',
+          type: 'service',
           keyName: 'All Access',
           accessKeyId: 'AKIA1111',
           createdAt: '2026-01-01T00:00:00Z',
@@ -453,6 +511,7 @@ describe('list-access-keys baseHandler', () => {
         },
         {
           id: 'key-2',
+          type: 'service',
           keyName: 'Scoped',
           accessKeyId: 'AKIA2222',
           createdAt: '2026-02-01T00:00:00Z',
@@ -529,7 +588,7 @@ describe('who sees which keys', () => {
     keyName: 'Theirs',
     accessKeyId: 'AKIAOTHER',
     createdAt: '2026-01-02T00:00:00Z',
-    createdBy: 'user-2',
+    createdBy: USER_2,
   });
   // Minted before attribution shipped: it names no creator, so nobody can claim
   // it as their own.
@@ -584,7 +643,7 @@ describe('who sees which keys', () => {
           accessKeyId: 'AKIAROTATED',
           createdAt: '2026-09-11T10:00:00.000Z',
           createdBy: USER_INFO.userId,
-          rotatedBy: 'user-2',
+          rotatedBy: USER_2,
           rotatedAt: '2026-09-11T10:00:00.000Z',
         }),
       ],
@@ -595,7 +654,7 @@ describe('who sees which keys', () => {
 
     expect(key).toMatchObject({
       createdBy: USER_INFO.userId,
-      rotatedBy: 'user-2',
+      rotatedBy: USER_2,
       rotatedAt: '2026-09-11T10:00:00.000Z',
     });
   });
@@ -606,10 +665,96 @@ describe('who sees which keys', () => {
 
     expect(keys.map((key) => key.createdBy)).toStrictEqual([
       USER_INFO.userId,
-      'user-2',
+      USER_2,
       // An unattributed row carries no creator rather than a made-up one.
       undefined,
       USER_INFO.userId,
     ]);
+  });
+
+  describe('a bucket filter on a region serving the iam access model', () => {
+    const TENANT_ID = tenantFor('forgeDev', USER_INFO.orgId);
+    const BUCKET = 'photos';
+
+    function buildPrincipalKeyRow(id: string, principalId: string) {
+      return ddbItem({
+        id,
+        keyName: `key ${id}`,
+        accessKeyId: `did:key:${id}`,
+        createdAt: '2026-09-16T00:00:00Z',
+        region: IAM_REGION,
+        createdBy: principalId,
+        principalId,
+      });
+    }
+
+    const serviceKeyRow = ddbItem({
+      id: 'service-1',
+      keyName: 'CI',
+      accessKeyId: 'AKIA1111',
+      createdAt: '2026-01-01T00:00:00Z',
+      permissions: ['read'],
+      bucketScope: 'all',
+      region: IAM_REGION,
+    });
+
+    async function listKeyIdsForBucket(): Promise<string[]> {
+      const result = await baseHandler(
+        buildEvent({
+          userInfo: USER_INFO,
+          queryStringParameters: { bucket: BUCKET, region: IAM_REGION },
+        }),
+      );
+      return JSON.parse(result.body!).keys.map((key: { id: string }) => key.id);
+    }
+
+    beforeEach(() => {
+      iamFake.policies.clear();
+      iamFake.calls.length = 0;
+    });
+
+    it('lists a principal-bound key when the bucket policy gives its principal any action', async () => {
+      // A member who can see the bucket can act on it with their
+      // principal-bound key, so that key belongs in the bucket's list.
+      iamFake.seedPolicy(TENANT_ID, BUCKET, grantGetObjectToUser);
+      ddbMock.on(QueryCommand).resolves({ Items: [buildPrincipalKeyRow('key-1', USER_ID)] });
+
+      expect(await listKeyIdsForBucket()).toStrictEqual(['key-1']);
+    });
+
+    it('leaves out a principal-bound key the bucket policy gives nothing', async () => {
+      iamFake.seedPolicy(TENANT_ID, BUCKET, grantGetObjectToUser);
+      ddbMock.on(QueryCommand).resolves({
+        Items: [buildPrincipalKeyRow('key-1', USER_ID), buildPrincipalKeyRow('key-2', 'user-2')],
+      });
+
+      expect(await listKeyIdsForBucket()).toStrictEqual(['key-1']);
+    });
+
+    it('keeps a service key whose stored scope covers the bucket', async () => {
+      iamFake.seedPolicy(TENANT_ID, BUCKET, grantGetObjectToUser);
+      ddbMock.on(QueryCommand).resolves({
+        Items: [serviceKeyRow, buildPrincipalKeyRow('key-2', 'user-2')],
+      });
+
+      expect(await listKeyIdsForBucket()).toStrictEqual(['service-1']);
+    });
+
+    it('reads the bucket policy once per request', async () => {
+      iamFake.seedPolicy(TENANT_ID, BUCKET, grantGetObjectToUser);
+      ddbMock.on(QueryCommand).resolves({
+        Items: [buildPrincipalKeyRow('key-1', USER_ID), buildPrincipalKeyRow('key-2', 'user-2')],
+      });
+
+      await listKeyIdsForBucket();
+
+      expect(iamFake.calls.map((call) => call.method)).toStrictEqual(['getBucketPolicy']);
+    });
+
+    it('lists no principal-bound key for a bucket with no policy', async () => {
+      ddbMock.on(QueryCommand).resolves({ Items: [buildPrincipalKeyRow('key-1', USER_ID)] });
+
+      expect(await listKeyIdsForBucket()).toStrictEqual([]);
+    });
   });
 });
