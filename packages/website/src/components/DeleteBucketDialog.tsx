@@ -86,11 +86,17 @@ export function DeleteBucketDialog({
               Go to bucket
             </Button>
           ) : (
-            <ConfirmButton
-              disabled={checking || deleting}
-              deleting={deleting}
+            <Button
+              id="delete-bucket-confirm-button"
+              variant="destructive"
+              className="flex-1"
+              disabled={checking}
+              loading={deleting}
+              loadingLabel="Deleting bucket"
               onClick={() => void handleConfirm()}
-            />
+            >
+              Delete bucket
+            </Button>
           )}
         </div>
       </ModalFooter>
@@ -129,35 +135,5 @@ function DialogDescription({ contents }: { contents: BucketContents }) {
         ? 'Delete its objects and object versions before deleting the bucket. You can empty it from the bucket page.'
         : 'This bucket will be permanently deleted.'}
     </p>
-  );
-}
-
-function ConfirmButton({
-  disabled,
-  deleting,
-  onClick,
-}: {
-  disabled: boolean;
-  deleting: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      id="delete-bucket-confirm-button"
-      variant="destructive"
-      className="flex-1"
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {/* Button wraps its children in a plain span, so the spinner's
-          block-level root would sit above the label. This row keeps them side
-          by side, and text-current keeps the arc the label's colour. */}
-      <span className="inline-flex items-center gap-2">
-        {deleting && (
-          <Spinner ariaLabel="Deleting bucket" size={14} colorClassName="text-current" />
-        )}
-        Delete bucket
-      </span>
-    </Button>
   );
 }
