@@ -20,7 +20,7 @@ End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run agains
 unset AWS_PROFILE
 eval "$(floci env)"
 export AWS_REGION=us-east-1 LOCAL=true BASE_URL=https://localhost:5173
-pnpm exec sst shell --stage local -- pnpm exec playwright test --project=policies
+SST_STAGE=local pnpm test:e2e:policies
 ```
 
 ## Remote stage
@@ -29,7 +29,7 @@ The same suite runs against staging. Register the five accounts against the stag
 
 ```bash
 export AWS_REGION=us-east-2 BASE_URL=https://staging.fil.one
-pnpm exec sst shell --stage staging -- pnpm exec playwright test --project=policies
+SST_STAGE=staging pnpm test:e2e:policies
 ```
 
 `E2E_POLICY_REGION` and `E2E_POLICY_S3_ENDPOINT` override the region and the S3 endpoint; by default a remote stage uses `eu-central-3` and the endpoint `getS3Endpoint` derives for it. The staging Forge network has to run Hilt and Ingot with the policy operations. In CI, `e2e-staging.yaml` runs the project when the `E2E_POLICY_*` secrets are set.
