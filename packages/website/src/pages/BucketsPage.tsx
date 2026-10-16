@@ -159,9 +159,6 @@ export function BucketsPage() {
             search: { region: region as S3Region },
           });
         }}
-        title="Delete bucket"
-        description="This bucket will be permanently deleted. The bucket must be empty: delete its objects and object versions first."
-        confirmLabel="Delete bucket"
       />
     </PageLayout>
   );
