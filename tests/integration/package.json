@@ -12,7 +12,7 @@
     "@aws-sdk/util-dynamodb": "^3.996.9",
     "@filone/shared": "workspace:*",
     "sst": "^4.17.2",
-    "stripe": "^22.0.2"
+    "stripe": "^23.0.0"
   },
   "devDependencies": {
     "vitest": "^5.0.3"
