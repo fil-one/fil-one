@@ -61,6 +61,24 @@ describe('PolicyStatementCard', () => {
     ]);
   });
 
+  it.each([
+    ['read', 's3:GetObject', 'bg-brand-50'],
+    ['list', 's3:ListBucket', 'bg-brand-50'],
+    ['write', 's3:PutObject', 'bg-amber-50'],
+    ['delete', 's3:DeleteObject', 'bg-red-50'],
+    ['protect', 's3:GetObjectRetention', 'bg-red-50'],
+  ] as const)('colours the %s group badge by risk', (group, action, colourClass) => {
+    renderCard({ ...allowTeam, Action: [action] });
+
+    expect(screen.getByTestId(`policy-actions-${group}`)).toHaveClass(colourClass);
+  });
+
+  it('colours the All actions badge red', () => {
+    renderCard({ ...allowTeam, Action: ['s3:*'] });
+
+    expect(screen.getByText('All actions')).toHaveClass('bg-red-50');
+  });
+
   it('titles a statement with no Sid "Statement N" by its 1-based position', () => {
     renderCard({ ...allowTeam, Sid: undefined }, { index: 2 });
 
@@ -110,35 +128,29 @@ describe('PolicyStatementCard', () => {
     expect(screen.queryByTestId(/^policy-actions-/)).not.toBeInTheDocument();
   });
 
-  it('shows no edit or remove button without onEdit and onRemove', () => {
+  it('shows no actions menu without actions', () => {
     renderCard(allowTeam);
 
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('calls onEdit when the Edit button is clicked', () => {
+  it('calls onEdit when Edit statement is chosen from the actions menu', () => {
     const onEdit = vi.fn();
-    renderCard(allowTeam, { onEdit });
+    renderCard(allowTeam, { actions: { onEdit, onRemove: () => {} } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Edit team' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit statement' }));
 
     expect(onEdit).toHaveBeenCalledTimes(1);
   });
 
-  it('calls onRemove when the Remove button is clicked', () => {
+  it('calls onRemove when Remove statement is chosen from the actions menu', () => {
     const onRemove = vi.fn();
-    renderCard(allowTeam, { onRemove });
+    renderCard(allowTeam, { actions: { onEdit: () => {}, onRemove } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove team' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for team' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove statement' }));
 
     expect(onRemove).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows only the Edit button when only onEdit is given', () => {
-    renderCard(allowTeam, { onEdit: () => {} });
-
-    expect(
-      screen.getAllByRole('button').map((button) => button.getAttribute('aria-label')),
-    ).toStrictEqual(['Edit team']);
   });
 });

@@ -1,5 +1,5 @@
 import { PencilSimpleIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
-import type { PolicyActionOrWildcard, PolicyStatement } from '@filone/shared';
+import type { PolicyActionGroup, PolicyActionOrWildcard, PolicyStatement } from '@filone/shared';
 import {
   POLICY_ACTION_GROUPS,
   POLICY_ACTION_GROUP_LABELS,
@@ -9,9 +9,9 @@ import {
   getPolicyActionsInGroup,
 } from '@filone/shared';
 
-import { Badge } from './Badge.js';
+import { Badge, type BadgeColor } from './Badge.js';
 import { Card } from './Card.js';
-import { IconButton } from './IconButton.js';
+import { RowActionsMenu } from './RowActionsMenu.js';
 
 /** How many members a statement names before the rest fold into one badge. */
 const MAX_MEMBER_BADGES = 3;
@@ -21,14 +21,27 @@ export function getStatementTitle(statement: Pick<PolicyStatement, 'Sid'>, index
   return statement.Sid ?? `Statement ${index + 1}`;
 }
 
+/**
+ * Badge colour by risk. Reading and listing change nothing, writing can
+ * overwrite objects, deleting can lose them, and changing data protection can
+ * lift or lock retention.
+ */
+const ACTION_GROUP_BADGE_COLORS: Record<PolicyActionGroup, BadgeColor> = {
+  read: 'blue',
+  list: 'blue',
+  write: 'amber',
+  delete: 'red',
+  protect: 'red',
+};
+
 export type PolicyStatementCardProps = {
   statement: PolicyStatement;
   /** Position in the policy, for the title of a statement with no `Sid`. */
   index: number;
   /** A member's display name; `undefined` shows as "Unknown member". */
   getMemberName: (userId: string) => string | undefined;
-  onEdit?: () => void;
-  onRemove?: () => void;
+  /** The Edit and Remove items of the card's menu; absent on a read-only card. */
+  actions?: { onEdit: () => void; onRemove: () => void };
 };
 
 /**
@@ -40,8 +53,7 @@ export function PolicyStatementCard({
   statement,
   index,
   getMemberName,
-  onEdit,
-  onRemove,
+  actions,
 }: PolicyStatementCardProps) {
   const title = getStatementTitle(statement, index);
   return (
@@ -52,26 +64,20 @@ export function PolicyStatementCard({
             {statement.Effect}
           </Badge>
           <span className="text-ui font-medium text-zinc-900">{title}</span>
-          {(onEdit || onRemove) && (
-            <div className="ml-auto flex items-center gap-1">
-              {onEdit && (
-                <IconButton
-                  icon={PencilSimpleIcon}
-                  size="sm"
-                  aria-label={`Edit ${title}`}
-                  tooltip="Edit statement"
-                  onClick={onEdit}
-                />
-              )}
-              {onRemove && (
-                <IconButton
-                  icon={TrashIcon}
-                  size="sm"
-                  aria-label={`Remove ${title}`}
-                  tooltip="Remove statement"
-                  onClick={onRemove}
-                />
-              )}
+          {actions && (
+            <div className="ml-auto">
+              <RowActionsMenu
+                aria-label={`Actions for ${title}`}
+                actions={[
+                  { label: 'Edit statement', icon: PencilSimpleIcon, onSelect: actions.onEdit },
+                  {
+                    label: 'Remove statement',
+                    icon: TrashIcon,
+                    destructive: true,
+                    onSelect: actions.onRemove,
+                  },
+                ]}
+              />
             </div>
           )}
         </div>
@@ -181,7 +187,7 @@ function PrincipalBadges({
 function ActionBadges({ actions }: { actions: PolicyStatement['Action'] }) {
   if (actions.includes(POLICY_ACTION_WILDCARD)) {
     return (
-      <Badge color="blue" size="sm">
+      <Badge color="red" size="sm">
         All actions
       </Badge>
     );
@@ -197,7 +203,7 @@ function ActionBadges({ actions }: { actions: PolicyStatement['Action'] }) {
         return (
           <Badge
             key={group}
-            color="blue"
+            color={ACTION_GROUP_BADGE_COLORS[group]}
             size="sm"
             data-testid={`policy-actions-${group}`}
             description={

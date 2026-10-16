@@ -30,16 +30,21 @@ export function buildLongRoster(size: number): MemberSummary[] {
 }
 
 /**
- * Seeds the member list in the story's query client. Without the staleTime
- * the seed is refetched on mount and the story shows the request failing.
+ * Seeds one query in the story's query client. Without the staleTime the seed
+ * is refetched on mount and the story shows the request failing.
  */
-export function withMembers(members: MemberSummary[]): Decorator {
+export function withQueryData(queryKey: readonly unknown[], data: unknown): Decorator {
   return (Story) => {
     const client = useQueryClient();
-    client.setQueryDefaults(queryKeys.members, { staleTime: Infinity });
-    client.setQueryData(queryKeys.members, { members });
+    client.setQueryDefaults(queryKey, { staleTime: Infinity });
+    client.setQueryData(queryKey, data);
     return <Story />;
   };
+}
+
+/** Seeds the member list the picker and the policy tab read. */
+export function withMembers(members: MemberSummary[]): Decorator {
+  return withQueryData(queryKeys.members, { members });
 }
 
 /**

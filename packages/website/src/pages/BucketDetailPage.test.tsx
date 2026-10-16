@@ -15,12 +15,17 @@ import { ToastProvider } from '../components/Toast/ToastProvider.js';
 // ---------------------------------------------------------------------------
 
 const mockApiRequest = vi.fn();
+const mockSendApiRequest = vi.fn();
 
 /** The single object the listing returns; hoisted so a mock factory can name it. */
 const { OBJECT_KEY } = vi.hoisted(() => ({ OBJECT_KEY: 'README.md' }));
 
-vi.mock('../lib/api.js', () => ({
+vi.mock('../lib/api.js', async () => ({
+  ...(await vi.importActual<typeof import('../lib/api.js')>('../lib/api.js')),
   apiRequest: (...a: unknown[]) => mockApiRequest(...a),
+  // The policy client reads the ETag header, so it sends through sendApiRequest
+  // and gets a Response back.
+  sendApiRequest: (...a: unknown[]) => mockSendApiRequest(...a),
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -47,6 +52,11 @@ vi.mock('../components/AddBucketKeyModal', () => ({
   AddBucketKeyModal: ({ open }: { open: boolean }) =>
     open ? <div data-testid="add-bucket-key-modal" /> : null,
 }));
+
+// The policy tab exists only on a region serving the `iam` access model; the
+// suite about it flips this on, every other suite runs against `service-keys`.
+const mockSupportsIamMethods = vi.fn(() => false);
+vi.mock('../lib/access-model.js', () => ({ supportsIamMethods: () => mockSupportsIamMethods() }));
 
 vi.mock('../lib/use-presign.js', () => ({
   batchPresign: () => Promise.resolve({ items: [{ url: 'https://s3.test/list', method: 'GET' }] }),
@@ -89,9 +99,17 @@ const ACCESS_KEY = {
   createdBy: USER_1,
 };
 
+const grantAllActionsToUser1 = {
+  policy: {
+    Statement: [{ Sid: 'team', Effect: 'Allow', Principal: ['user-1'], Action: ['s3:*'] }],
+  },
+};
+
 /** Route each of the page's reads by its path; the object listing is stubbed out. */
 function respond(path: string) {
   if (path.startsWith('/access-keys')) return Promise.resolve({ keys: [ACCESS_KEY] });
+  if (path.includes('/policy')) return Promise.resolve(grantAllActionsToUser1);
+  if (path.startsWith('/org/members')) return Promise.resolve({ members: [] });
   if (path.includes('/analytics')) {
     return Promise.resolve({ objectCount: 0, bytesUsed: 0 });
   }
@@ -115,7 +133,48 @@ function renderPage(role: OrgRole = OrgRole.Owner) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockSupportsIamMethods.mockReturnValue(false);
   mockApiRequest.mockImplementation((path: string) => respond(path));
+  mockSendApiRequest.mockImplementation(
+    async (path: string) =>
+      new Response(JSON.stringify(await respond(path)), { headers: { ETag: '"v1"' } }),
+  );
+});
+
+describe('BucketDetailPage — the policy tab', () => {
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'shows the Policy tab to %s on an iam region',
+    async (role) => {
+      mockSupportsIamMethods.mockReturnValue(true);
+      renderPage(role);
+
+      expect(await screen.findByTestId('bucket-policy-tab')).toBeInTheDocument();
+    },
+  );
+
+  it("renders the bucket's policy in the Policy tab", async () => {
+    mockSupportsIamMethods.mockReturnValue(true);
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByTestId('bucket-policy-tab'));
+
+    expect(await screen.findByText('team')).toBeInTheDocument();
+  });
+
+  it.each([OrgRole.Member, OrgRole.ReadOnly])('hides the Policy tab from %s', async (role) => {
+    mockSupportsIamMethods.mockReturnValue(true);
+    renderPage(role);
+
+    await screen.findByTestId('bucket-objects-tab');
+    expect(screen.queryByTestId('bucket-policy-tab')).not.toBeInTheDocument();
+  });
+
+  it('hides the Policy tab on a service-keys region even from an Owner', async () => {
+    renderPage(OrgRole.Owner);
+
+    await screen.findByTestId('bucket-objects-tab');
+    expect(screen.queryByTestId('bucket-policy-tab')).not.toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -119,6 +119,8 @@ describe('usePolicyDraft', () => {
       statements: [grantGetObjectToPrincipalA],
       hasUnsavedEdits: true,
       isStale: true,
+      // A save sends the ETag the edits were made against, so the server refuses it.
+      etag: readWriteSnapshot.etag,
     });
   });
 
