@@ -93,7 +93,6 @@ function AccessKeysTab({
         showRegion
         showBuckets
         showPermissions
-        showCreated
         onDelete={onDelete}
         onBulkDelete={onBulkDelete}
         canDelete={canRevoke}

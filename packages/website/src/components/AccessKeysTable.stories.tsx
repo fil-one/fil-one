@@ -228,7 +228,7 @@ export const Selectable: Story = {
   },
 };
 
-/** A key scoped to far more buckets than fit inline — the overflow popover's own scroll. */
+/** A key scoped to far more buckets than fit inline: two names, then a count. */
 export const WithManyBuckets: Story = {
   args: {
     keys: [
@@ -238,6 +238,71 @@ export const WithManyBuckets: Story = {
           { length: 30 },
           (_, i) => `data-pipeline-${String(i + 1).padStart(2, '0')}`,
         ),
+      },
+    ],
+    showBuckets: true,
+  },
+};
+
+/** A long name and a long access key ID truncate instead of widening the Name column. */
+export const WithLongNameAndId: Story = {
+  args: {
+    keys: [
+      {
+        ...backupKey,
+        keyName: 'nightly-backup-pipeline-for-the-analytics-warehouse-eu',
+        accessKeyId: 'z6MkfD2e6PQLZGVzi7FQAYfSCQYwnB97AD8PdWuEDTXZnwEd',
+      },
+      mockKeys[0],
+    ],
+    showRegion: true,
+    showBuckets: true,
+    showPermissions: true,
+  },
+};
+
+/** Keys carrying more than the object permissions, as a busy account has them. */
+export const WithManyPermissions: Story = {
+  args: {
+    keys: [
+      {
+        ...backupKey,
+        keyName: 'new-key',
+        permissions: ['read', 'write', 'list', 'delete', 'CreateBucket', 'DeleteBucket'],
+        granularPermissions: ['GetObjectVersion', 'PutObjectRetention', 'DeleteObjectVersion'],
+        buckets: ['fgrc-ltda', 'filipa-1'],
+      },
+      {
+        ...backupKey,
+        id: '3',
+        keyName: 'production',
+        permissions: ['read', 'write', 'list', 'GetBucketVersioning'],
+        granularPermissions: ['GetObjectVersion', 'GetObjectRetention'],
+        bucketScope: 'all',
+        region: S3Region.EuWest1,
+      },
+    ],
+    showRegion: true,
+    showBuckets: true,
+    showPermissions: true,
+    onBulkDelete: () => Promise.resolve(),
+    onDelete: () => Promise.resolve(),
+  },
+};
+
+/** Bucket names too long for the column: the names truncate and the count stays visible. */
+export const WithLongBucketNames: Story = {
+  args: {
+    keys: [
+      {
+        ...backupKey,
+        buckets: ['analytics-warehouse-nightly-exports-eu-central', 'archives', 'backups'],
+      },
+      {
+        ...backupKey,
+        id: '3',
+        keyName: 'single-long-bucket',
+        buckets: ['customer-uploads-production-eu-west-1-primary-store'],
       },
     ],
     showBuckets: true,

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { AccessKey, ServiceAccessKey } from '@filone/shared';
 import { AccessKeysTable } from './AccessKeysTable.js';
@@ -33,23 +33,112 @@ describe('AccessKeysTable — permission detail', () => {
     expect(screen.getByTestId('permission-badge-details')).toBeInTheDocument();
   });
 
+  it('counts every permission past the object ones and names the total for a screen reader', () => {
+    const keys = [
+      makeKey({
+        permissions: ['read', 'write', 'GetBucketVersioning', 'CreateBucket'],
+        granularPermissions: ['GetObjectVersion'],
+      }),
+    ];
+    renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
+
+    expect(screen.getByTestId('permission-badge-details')).toMatchObject({
+      textContent: '+3',
+      ariaLabel: 'Show all 5 permissions',
+    });
+  });
+
   it('drops the details trigger when the key carries only object permissions', () => {
     const keys = [makeKey({ permissions: ['read', 'write'] })];
     renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
     expect(screen.queryByTestId('permission-badge-details')).not.toBeInTheDocument();
   });
 
-  it('opens the permissions drawer on the bucket-info permission granted', () => {
+  it('opens the details drawer on the bucket-info permission granted', () => {
     const keys = [makeKey({ permissions: ['read', 'GetBucketVersioning'] })];
     renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
 
     fireEvent.click(screen.getByTestId('permission-badge-details'));
 
-    expect(screen.getByTestId('access-key-permissions-drawer')).toBeInTheDocument();
     expect(
-      screen.getByTestId('access-key-permissions-drawer-section-bucket-management'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Read bucket versioning')).toBeInTheDocument();
+      screen.getByTestId('access-key-details-drawer-section-bucket-management'),
+    ).toHaveTextContent('Read bucket versioning');
+  });
+});
+
+describe('AccessKeysTable — the details drawer', () => {
+  const scopedKey = makeKey({
+    keyName: 'any-key',
+    bucketScope: 'specific',
+    buckets: ['bucket-a', 'bucket-b', 'bucket-c', 'bucket-d'],
+  });
+
+  it('opens with every bucket listed when the row is clicked', () => {
+    renderWithProviders(<AccessKeysTable keys={[scopedKey]} />);
+
+    fireEvent.click(screen.getByTestId('access-key-row'));
+
+    expect(
+      [...screen.getByTestId('access-key-details-buckets').querySelectorAll('li')].map(
+        (item) => item.textContent,
+      ),
+    ).toStrictEqual(['bucket-a', 'bucket-b', 'bucket-c', 'bucket-d']);
+  });
+
+  it('opens from the key name button, for a keyboard or screen reader', () => {
+    renderWithProviders(<AccessKeysTable keys={[scopedKey]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'any-key' }));
+
+    expect(screen.getByRole('dialog', { name: 'Details for any-key' })).toBeInTheDocument();
+  });
+
+  it('stays closed when the row click lands on its checkbox', () => {
+    renderWithProviders(<AccessKeysTable keys={[scopedKey]} onBulkDelete={async () => {}} />);
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select any-key' }));
+
+    expect(screen.queryByTestId('access-key-details-drawer')).not.toBeInTheDocument();
+  });
+
+  it('says a principal key follows bucket policy in place of a permission list', () => {
+    const principalKey: AccessKey = {
+      id: '2',
+      type: 'principal',
+      principalId: 'any-user',
+      keyName: 'any-personal-key',
+      accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
+      createdAt: '2026-01-15T10:00:00Z',
+      status: 'active',
+    };
+    renderWithProviders(<AccessKeysTable keys={[principalKey]} />);
+
+    fireEvent.click(screen.getByTestId('access-key-row'));
+
+    expect(
+      screen.getByTestId('access-key-details-drawer-section-follows-bucket-policy'),
+    ).toHaveTextContent("Each bucket's policy decides what it can reach.");
+  });
+
+  it('runs Delete key for the open key and closes the drawer', () => {
+    const onDelete = vi.fn(async () => {});
+    renderWithProviders(<AccessKeysTable keys={[scopedKey]} onDelete={onDelete} />);
+
+    fireEvent.click(screen.getByTestId('access-key-row'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete key' }));
+
+    expect({
+      deleted: onDelete.mock.calls,
+      drawerOpen: screen.queryByTestId('access-key-details-drawer') !== null,
+    }).toStrictEqual({ deleted: [[scopedKey.id]], drawerOpen: false });
+  });
+
+  it('offers no actions in the drawer when the caller may neither rotate nor delete', () => {
+    renderWithProviders(<AccessKeysTable keys={[scopedKey]} />);
+
+    fireEvent.click(screen.getByTestId('access-key-row'));
+
+    expect(screen.queryByTestId('access-key-details-drawer-footer')).not.toBeInTheDocument();
   });
 });
 
@@ -76,7 +165,28 @@ describe('AccessKeysTable — a principal-bound key', () => {
   it('shows Per bucket policy in Buckets for a principal key', () => {
     renderWithProviders(<AccessKeysTable keys={keys} showBuckets />);
     expect(screen.getByText('Per bucket policy')).toBeInTheDocument();
-    expect(screen.queryByText('All Buckets')).not.toBeInTheDocument();
+    expect(screen.queryByText('All buckets')).not.toBeInTheDocument();
+  });
+});
+
+describe('AccessKeysTable — the Buckets column', () => {
+  it('lists the first two bucket names and counts the rest', () => {
+    const key = makeKey({
+      bucketScope: 'specific',
+      buckets: ['bucket-a', 'bucket-b', 'bucket-c', 'bucket-d'],
+    });
+    renderWithProviders(<AccessKeysTable keys={[key]} showBuckets />);
+
+    // The flex gap, not a space character, separates the parts on screen.
+    expect(
+      [...screen.getByTestId('bucket-summary').children].map((part) => part.textContent),
+    ).toStrictEqual(['bucket-a', ',', 'bucket-b', '+2']);
+  });
+
+  it('names the scope in sentence case when the key reaches every bucket', () => {
+    renderWithProviders(<AccessKeysTable keys={[makeKey({ bucketScope: 'all' })]} showBuckets />);
+
+    expect(screen.getByText('All buckets')).toBeInTheDocument();
   });
 });
 
@@ -91,20 +201,22 @@ describe('AccessKeysTable — the key type', () => {
     status: 'active',
   };
 
-  // The badge renders twice: in its column and inline under the name on small screens.
-  it.each([
-    ['service', 'Service', makeKey({})],
-    ['principal', 'Personal', principalKey],
-  ] as const)('labels a %s key %s', (type, label, key) => {
-    const { container } = renderWithProviders(<AccessKeysTable keys={[key]} />);
+  const serviceKey = makeKey({ id: '1', keyName: 'Backups' });
+
+  it('labels a principal key Personal beside its name and leaves a service key unlabelled', () => {
+    const { container } = renderWithProviders(
+      <AccessKeysTable keys={[serviceKey, principalKey]} />,
+    );
     const badges = [...container.querySelectorAll('[data-key-type]')].map((badge) => [
-      badge.getAttribute('data-key-type'),
+      badge.closest('[data-testid="access-key-row"]')?.getAttribute('data-access-key-id'),
       badge.textContent,
     ]);
-    expect(badges).toEqual([
-      [type, label],
-      [type, label],
-    ]);
+    expect(badges).toStrictEqual([[principalKey.accessKeyId, 'Personal']]);
+  });
+
+  it('has no Type column, the type riding in the Name column instead', () => {
+    renderWithProviders(<AccessKeysTable keys={[serviceKey, principalKey]} />);
+    expect(screen.queryByRole('columnheader', { name: 'Type' })).not.toBeInTheDocument();
   });
 });
 

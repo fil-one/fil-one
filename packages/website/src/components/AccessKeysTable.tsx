@@ -10,149 +10,24 @@ import {
 
 import { IconBox } from './IconBox';
 
-import type { AccessKey, ServiceAccessKey } from '@filone/shared';
-import { isBucketInfoPermission, isBucketPermission } from '@filone/shared';
+import type { AccessKey } from '@filone/shared';
+import { getRegionLabel } from '@filone/shared';
 
-import { AccessKeyPermissionsDrawer } from './AccessKeyPermissionsDrawer';
-import { Badge } from './Badge';
+import {
+  BucketSummary,
+  FollowsBucketPolicy,
+  KeyStatus,
+  KeyTypeBadge,
+  PermissionBadges,
+} from './AccessKeyCells';
+import { AccessKeyDetailsDrawer } from './AccessKeyDetailsDrawer';
 import { Button } from './Button';
 import { Checkbox } from './Checkbox';
 import { CopyButton } from './CopyButton';
 import { IconButton } from './IconButton';
-import { OverflowBadge } from './OverflowBadge';
+import { RegionFlag } from './RegionFlag';
 import { Table } from './Table/Table';
-import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
-import { formatCalendarDate, formatDate } from '../lib/time.js';
-
-/** Active, or Expired with the date it stopped working. */
-function KeyStatus({ accessKey }: { accessKey: AccessKey }) {
-  if (accessKey.status === 'active') {
-    return (
-      <Badge color="green" dot size="sm" weight="medium">
-        Active
-      </Badge>
-    );
-  }
-  return (
-    <div className="flex flex-col items-start gap-0.5">
-      <Badge color="grey" dot size="sm" weight="medium">
-        Expired
-      </Badge>
-      {accessKey.expiresAt && (
-        <p className="text-xs text-zinc-500">{formatCalendarDate(accessKey.expiresAt)}</p>
-      )}
-    </div>
-  );
-}
-
-const KEY_TYPE_LABELS: Record<AccessKey['type'], string> = {
-  principal: 'Personal',
-  service: 'Service',
-};
-
-function KeyTypeBadge({ type }: { type: AccessKey['type'] }) {
-  return (
-    <Badge color="grey" size="sm" data-key-type={type}>
-      {KEY_TYPE_LABELS[type]}
-    </Badge>
-  );
-}
-
-/**
- * The object permissions as plain, static facts — scannable across many rows
- * at once, nothing to click, nothing to guess about. Whatever else the key
- * carries (data-protection extras, bucket management, bucket info) is real
- * detail that a chip has no room to be honest about, so one "+N" opens the
- * drawer instead of trying to cram it in here too.
- */
-function PermissionBadges({
-  accessKey,
-  onShowDetails,
-}: {
-  accessKey: ServiceAccessKey;
-  onShowDetails: () => void;
-}) {
-  // PERMISSION_OPTIONS' order, not the array's — same reason the drawer uses
-  // it: Read/Write/List/Delete read in a fixed order everywhere else.
-  const permissions = accessKey.permissions ?? [];
-  const objectPermissions = PERMISSION_OPTIONS.filter((o) => permissions.includes(o.value));
-  const bucketManagement = permissions.filter(isBucketPermission);
-  const bucketInfo = permissions.filter(isBucketInfoPermission);
-  const extraCount =
-    (accessKey.granularPermissions?.length ?? 0) + bucketManagement.length + bucketInfo.length;
-
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      {objectPermissions.map((option) => (
-        <Badge
-          key={option.value}
-          color="blue"
-          size="sm"
-          data-testid={`permission-badge-${option.value}`}
-        >
-          {option.label}
-        </Badge>
-      ))}
-      {extraCount > 0 && (
-        <button
-          type="button"
-          data-testid="permission-badge-details"
-          onClick={onShowDetails}
-          className="cursor-pointer rounded-full focus-visible:brand-outline focus-visible:outline-offset-1"
-        >
-          <Badge color="grey" size="sm">
-            +{extraCount} more
-          </Badge>
-        </button>
-      )}
-    </div>
-  );
-}
-
-const BUCKET_BADGES_INLINE_MAX = 3;
-
-function BucketBadges({
-  scope,
-  buckets,
-}: {
-  scope: ServiceAccessKey['bucketScope'];
-  buckets: string[];
-}) {
-  if (scope === 'all') {
-    return (
-      <Badge color="grey" size="sm">
-        All Buckets
-      </Badge>
-    );
-  }
-
-  if (buckets.length === 0) {
-    return <span className="text-zinc-400">-</span>;
-  }
-
-  // Small overflows fit inline for free — collapsing behind a "+1" would cost
-  // a click to save no space at all. Only fall back to the popover once there
-  // is genuinely more than a glance can take in.
-  const shown = buckets.slice(0, BUCKET_BADGES_INLINE_MAX);
-  const rest = buckets.slice(BUCKET_BADGES_INLINE_MAX);
-
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      {shown.map((bucket) => (
-        <Badge key={bucket} color="grey" size="sm">
-          {bucket}
-        </Badge>
-      ))}
-      {rest.length > 0 && (
-        <OverflowBadge
-          label={`+${rest.length}`}
-          testId="bucket-badge-overflow"
-          sections={[{ items: rest.map((b) => ({ key: b, label: b })) }]}
-        />
-      )}
-    </div>
-  );
-}
+import { formatDate } from '../lib/time.js';
 
 /**
  * The owner, and beneath them whoever last reissued the credential.
@@ -279,7 +154,6 @@ export type AccessKeysTableProps = {
   showRegion?: boolean;
   showBuckets?: boolean;
   showPermissions?: boolean;
-  showCreated?: boolean;
   /**
    * Who minted each key, resolved from a user id. Passed only when the org has
    * somebody else in it: a column reading the same name on every row is noise
@@ -314,6 +188,135 @@ export type AccessKeysTableProps = {
   emptyTitle?: string;
   emptyDescription?: string;
 };
+
+/** The key's name and access key ID, plus its status below `sm`. */
+function KeyNameCell({ accessKey: key, onOpen }: { accessKey: AccessKey; onOpen: () => void }) {
+  return (
+    // `w-0` holds the column to its content, so the table's spare width goes to
+    // the columns beside it rather than opening a gap after the copy button.
+    <Table.Cell className="w-0">
+      {/* Capped at the width of a standard 20-character access key ID, so a
+          longer name or ID truncates instead of widening the column; `title`
+          and the copy button keep the full value. */}
+      <div className="max-w-48">
+        {/* The row opens the drawer on a click anywhere, but a row is not a
+            control: this button is how a keyboard or screen reader gets there. */}
+        {/* Held to the text's 16px line, so the taller badge centres on it
+            instead of making a personal key's row taller than its neighbours. */}
+        <div className="flex h-4 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onOpen}
+            title={key.keyName}
+            className="min-w-0 cursor-pointer truncate rounded-sm text-left text-xs font-medium text-zinc-900 hover:underline focus-visible:brand-outline"
+          >
+            {key.keyName}
+          </button>
+          {/* Only the exception is labelled: a service key is the default (the
+              only kind outside an `iam` region), so a badge on every row would
+              say nothing. The drawer names the type of every key. */}
+          {key.type === 'principal' && (
+            <span className="shrink-0">
+              <KeyTypeBadge type={key.type} />
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <p className="truncate font-mono text-xs text-zinc-500" title={key.accessKeyId}>
+            {key.accessKeyId}
+          </p>
+          <CopyButton value={key.accessKeyId} />
+        </div>
+      </div>
+      {/* Status shown inline on small screens */}
+      <div className="mt-1 sm:hidden">
+        <KeyStatus accessKey={key} />
+      </div>
+    </Table.Cell>
+  );
+}
+
+/** Which optional columns the table shows; the header and every row agree on it. */
+interface KeysTableColumns {
+  showRegion: boolean;
+  showBuckets: boolean;
+  showPermissions: boolean;
+  showCreatedBy: boolean;
+  showActions: boolean;
+}
+
+function KeysTableHeader({
+  columns,
+  selection,
+}: {
+  columns: KeysTableColumns;
+  /** Omitted when the table offers no bulk actions, which drops the checkbox column. */
+  selection?: { allSelected: boolean; toggleAll: () => void };
+}) {
+  return (
+    <Table.Header>
+      <Table.Row>
+        {selection && (
+          <Table.Head className="w-0 !pr-0">
+            <Checkbox
+              checked={selection.allSelected}
+              onChange={selection.toggleAll}
+              aria-label="Select all keys"
+            />
+          </Table.Head>
+        )}
+        <Table.Head>Name</Table.Head>
+        {columns.showRegion && <Table.Head className="hidden md:table-cell">Region</Table.Head>}
+        {columns.showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
+        {columns.showPermissions && (
+          <Table.Head className="hidden md:table-cell">Permissions</Table.Head>
+        )}
+        {columns.showCreatedBy && (
+          <Table.Head className="hidden lg:table-cell">Created by</Table.Head>
+        )}
+        <Table.Head className="hidden sm:table-cell">Status</Table.Head>
+        {columns.showActions && (
+          <Table.Head>
+            <span className="sr-only">Actions</span>
+          </Table.Head>
+        )}
+      </Table.Row>
+    </Table.Header>
+  );
+}
+
+/**
+ * Whether a click on a row landed on one of its own controls (the checkbox, the
+ * copy button, the action menu), which must do their own job rather than open
+ * the drawer as well.
+ */
+function isFromRowControl(target: EventTarget): boolean {
+  return (
+    target instanceof Element && target.closest('button, a, input, [role="checkbox"]') !== null
+  );
+}
+
+/** The row's actions, closing the drawer before each runs so its dialog is not stacked under it. */
+function closingFirst(
+  actions: { onRotate?: () => void; onDelete?: () => void },
+  close: () => void,
+): { onRotate?: () => void; onDelete?: () => void } {
+  const { onRotate, onDelete } = actions;
+  return {
+    onRotate:
+      onRotate &&
+      (() => {
+        close();
+        onRotate();
+      }),
+    onDelete:
+      onDelete &&
+      (() => {
+        close();
+        onDelete();
+      }),
+  };
+}
 
 /** Which rows are checked, dropping any whose key has gone (after a delete, say). */
 function useKeySelection(keys: AccessKey[]) {
@@ -350,7 +353,6 @@ export function AccessKeysTable({
   showRegion = false,
   showBuckets = false,
   showPermissions = false,
-  showCreated = false,
   creatorFor,
   onDelete,
   onBulkDelete,
@@ -382,7 +384,7 @@ export function AccessKeysTable({
 
   const selectable = Boolean(onBulkDelete);
   const { selected, allSelected, toggleAll, toggleOne, clearSelection } = useKeySelection(keys);
-  const [detailKey, setDetailKey] = useState<ServiceAccessKey | null>(null);
+  const [detailKey, setDetailKey] = useState<AccessKey | null>(null);
 
   if (keys.length === 0) {
     return (
@@ -420,30 +422,16 @@ export function AccessKeysTable({
         </div>
       )}
       <Table>
-        <Table.Header>
-          <Table.Row>
-            {selectable && (
-              <Table.Head className="w-0 !pr-0">
-                <Checkbox checked={allSelected} onChange={toggleAll} aria-label="Select all keys" />
-              </Table.Head>
-            )}
-            <Table.Head>Name</Table.Head>
-            <Table.Head className="hidden sm:table-cell">Type</Table.Head>
-            {showRegion && <Table.Head className="hidden md:table-cell">Region</Table.Head>}
-            {showBuckets && <Table.Head className="hidden lg:table-cell">Buckets</Table.Head>}
-            {showPermissions && (
-              <Table.Head className="hidden md:table-cell">Permissions</Table.Head>
-            )}
-            {showCreatedBy && <Table.Head className="hidden lg:table-cell">Created by</Table.Head>}
-            <Table.Head className="hidden sm:table-cell">Status</Table.Head>
-            {showCreated && <Table.Head className="hidden lg:table-cell">Created</Table.Head>}
-            {showActions && (
-              <Table.Head>
-                <span className="sr-only">Actions</span>
-              </Table.Head>
-            )}
-          </Table.Row>
-        </Table.Header>
+        <KeysTableHeader
+          columns={{
+            showRegion,
+            showBuckets,
+            showPermissions,
+            showCreatedBy,
+            showActions,
+          }}
+          selection={selectable ? { allSelected, toggleAll } : undefined}
+        />
         <Table.Body>
           {keys.map((key) => {
             const isSelected = selected.has(key.id);
@@ -452,7 +440,11 @@ export function AccessKeysTable({
                 key={key.id}
                 data-testid="access-key-row"
                 data-access-key-id={key.accessKeyId}
-                className={isSelected ? 'bg-brand-50/40' : undefined}
+                selected={isSelected}
+                className="cursor-pointer"
+                onClick={(event) => {
+                  if (!isFromRowControl(event.target)) setDetailKey(key);
+                }}
               >
                 {selectable && (
                   <Table.Cell className="w-0 !pr-0">
@@ -465,45 +457,29 @@ export function AccessKeysTable({
                 )}
 
                 {/* Name + Access Key ID */}
-                <Table.Cell>
-                  <p className="text-xs font-medium text-zinc-900">{key.keyName}</p>
-                  <div className="flex items-center gap-1">
-                    <p className="font-mono text-xs text-zinc-500">{key.accessKeyId}</p>
-                    <CopyButton value={key.accessKeyId} />
-                  </div>
-                  {/* Type and status shown inline on small screens */}
-                  <div className="mt-1 flex items-start gap-1 sm:hidden">
-                    <KeyTypeBadge type={key.type} />
-                    <KeyStatus accessKey={key} />
-                  </div>
-                </Table.Cell>
+                <KeyNameCell accessKey={key} onOpen={() => setDetailKey(key)} />
 
-                <Table.Cell className="hidden sm:table-cell">
-                  <KeyTypeBadge type={key.type} />
-                </Table.Cell>
-
-                {/* Region — the code a caller configures their SDK with, not
-                    the marketing name: this table is for a technical audience. */}
+                {/* Region, laid out as the buckets table lays it out */}
                 {showRegion && (
-                  <Table.Cell className="hidden font-mono text-xs text-zinc-500 md:table-cell">
-                    {key.region ?? '—'}
+                  <Table.Cell className="hidden text-xs md:table-cell">
+                    {key.region ? (
+                      <div className="flex items-center gap-2.5">
+                        <RegionFlag region={key.region} />
+                        <div>
+                          <p className="font-medium text-zinc-900">{getRegionLabel(key.region)}</p>
+                          <p className="text-zinc-500">{key.region}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-zinc-400">-</span>
+                    )}
                   </Table.Cell>
                 )}
 
                 {/* Buckets */}
                 {showBuckets && (
                   <Table.Cell className="hidden lg:table-cell">
-                    {key.type === 'principal' ? (
-                      <Badge
-                        color="grey"
-                        size="sm"
-                        description="Buckets whose policy grants this key's owner access."
-                      >
-                        Per bucket policy
-                      </Badge>
-                    ) : (
-                      <BucketBadges scope={key.bucketScope} buckets={key.buckets ?? []} />
-                    )}
+                    <BucketSummary accessKey={key} />
                   </Table.Cell>
                 )}
 
@@ -512,14 +488,7 @@ export function AccessKeysTable({
                 {showPermissions && (
                   <Table.Cell className="hidden md:table-cell">
                     {key.type === 'principal' ? (
-                      <Badge
-                        color="grey"
-                        size="sm"
-                        data-testid="permission-badge-follows-bucket-policy"
-                        description="This key inherits the policy of every bucket it touches."
-                      >
-                        Follows bucket policy
-                      </Badge>
+                      <FollowsBucketPolicy />
                     ) : (
                       <PermissionBadges accessKey={key} onShowDetails={() => setDetailKey(key)} />
                     )}
@@ -537,13 +506,6 @@ export function AccessKeysTable({
                   <KeyStatus accessKey={key} />
                 </Table.Cell>
 
-                {/* Created */}
-                {showCreated && (
-                  <Table.Cell className="hidden text-xs text-zinc-500 lg:table-cell">
-                    {formatDate(key.createdAt)}
-                  </Table.Cell>
-                )}
-
                 {/* Actions */}
                 {showActions && (
                   <Table.Cell className="text-right">
@@ -556,7 +518,12 @@ export function AccessKeysTable({
         </Table.Body>
       </Table>
       {detailKey && (
-        <AccessKeyPermissionsDrawer accessKey={detailKey} onClose={() => setDetailKey(null)} />
+        <AccessKeyDetailsDrawer
+          accessKey={detailKey}
+          creatorFor={creatorFor}
+          onClose={() => setDetailKey(null)}
+          {...closingFirst(actionsFor(detailKey), () => setDetailKey(null))}
+        />
       )}
     </>
   );
