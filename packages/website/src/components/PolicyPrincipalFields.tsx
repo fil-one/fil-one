@@ -50,6 +50,7 @@ export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFields
         <RadioOption
           name="policy-principal"
           value="everyone"
+          testId="policy-principal-everyone"
           checked={isEveryoneSelected}
           onChange={() => onChange(POLICY_WILDCARD_PRINCIPAL)}
         >
@@ -58,6 +59,7 @@ export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFields
         <RadioOption
           name="policy-principal"
           value="specific"
+          testId="policy-principal-specific"
           checked={!isEveryoneSelected}
           onChange={() => onChange([])}
         >
@@ -97,6 +99,7 @@ export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFields
               {members.map((member) => (
                 <MemberRow
                   key={member.userId}
+                  userId={member.userId}
                   label={memberName(member)}
                   detail={roleLabel(member.role)}
                   checked={selectedIds.includes(member.userId)}
@@ -106,6 +109,7 @@ export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFields
               {unknownMemberIds.map((userId) => (
                 <MemberRow
                   key={userId}
+                  userId={userId}
                   label="Unknown member"
                   detail={userId}
                   checked
@@ -121,11 +125,13 @@ export function PolicyPrincipalFields({ value, onChange }: PolicyPrincipalFields
 }
 
 function MemberRow({
+  userId,
   label,
   detail,
   checked,
   onChange,
 }: {
+  userId: string;
   label: string;
   detail: string;
   checked: boolean;
@@ -136,6 +142,8 @@ function MemberRow({
     <div className="flex cursor-pointer items-center gap-2.5 py-1" onClick={onChange}>
       <Checkbox
         aria-label={label}
+        data-testid="policy-principal-member"
+        data-user-id={userId}
         checked={checked}
         onChange={onChange}
         onClick={(e) => e.stopPropagation()}

@@ -71,6 +71,7 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
           <div className="flex items-center gap-2">
             {policy.snapshot && (
               <Button
+                id="policy-remove-button"
                 variant="tertiary"
                 size="sm"
                 disabled={draft.isStale}
@@ -80,6 +81,7 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
               </Button>
             )}
             <Button
+              id="policy-add-statement-button"
               variant="primary"
               size="sm"
               icon={PlusIcon}
@@ -218,32 +220,49 @@ export function LoadedPolicyView({
   return (
     <>
       {(policy.hasConflict || draft.isStale) && (
-        <Alert
-          variant="amber"
-          title="This policy changed elsewhere"
-          description="Someone else saved a new version. Reload the policy, then apply your changes again."
-          action={
-            <Button variant="ghost" size="sm" onClick={() => void reloadPolicy()}>
-              Reload policy
-            </Button>
-          }
-        />
+        <div data-testid="policy-conflict">
+          <Alert
+            variant="amber"
+            title="This policy changed elsewhere"
+            description="Someone else saved a new version. Reload the policy, then apply your changes again."
+            action={
+              <Button
+                id="policy-reload-button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void reloadPolicy()}
+              >
+                Reload policy
+              </Button>
+            }
+          />
+        </div>
       )}
 
       {draft.statements.length === 0 ? (
-        <EmptyStateCard
-          icon={ShieldCheckIcon}
-          title={draft.hasUnsavedEdits ? 'This policy has no statements' : 'No policy yet'}
-          description={
-            draft.hasUnsavedEdits
-              ? 'Saving removes the policy, and only service keys will reach this bucket.'
-              : 'Without a policy, only service keys can reach this bucket. Add a statement to grant members access.'
-          }
+        <div
+          data-testid="policy-empty"
+          data-empty-state={draft.hasUnsavedEdits ? 'all-statements-removed' : 'no-policy'}
         >
-          <Button variant="primary" icon={PlusIcon} onClick={onAdd}>
-            Add statement
-          </Button>
-        </EmptyStateCard>
+          <EmptyStateCard
+            icon={ShieldCheckIcon}
+            title={draft.hasUnsavedEdits ? 'This policy has no statements' : 'No policy yet'}
+            description={
+              draft.hasUnsavedEdits
+                ? 'Saving removes the policy, and only service keys will reach this bucket.'
+                : 'Without a policy, only service keys can reach this bucket. Add a statement to grant members access.'
+            }
+          >
+            <Button
+              id="policy-empty-add-statement-button"
+              variant="primary"
+              icon={PlusIcon}
+              onClick={onAdd}
+            >
+              Add statement
+            </Button>
+          </EmptyStateCard>
+        </div>
       ) : (
         <div className="flex flex-col gap-3">
           {draft.statements.map((statement, index) => (
@@ -262,12 +281,14 @@ export function LoadedPolicyView({
       )}
 
       {draft.statements.some(isDenyForEveryone) && (
-        <Alert
-          variant="amber"
-          assertive={false}
-          title="This policy denies everyone"
-          description="Nobody in the organization can use this bucket while this statement is saved. Only an Owner can edit the policy to undo it."
-        />
+        <div data-testid="policy-denies-everyone">
+          <Alert
+            variant="amber"
+            assertive={false}
+            title="This policy denies everyone"
+            description="Nobody in the organization can use this bucket while this statement is saved. Only an Owner can edit the policy to undo it."
+          />
+        </div>
       )}
 
       {draft.hasUnsavedEdits && (
@@ -275,10 +296,17 @@ export function LoadedPolicyView({
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
             <span className="text-ui text-zinc-700">Unsaved changes</span>
             <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={draft.reset} disabled={policy.isWriting}>
+              <Button
+                id="policy-discard-button"
+                variant="ghost"
+                size="sm"
+                onClick={draft.reset}
+                disabled={policy.isWriting}
+              >
                 Discard changes
               </Button>
               <Button
+                id="policy-save-button"
                 variant="primary"
                 size="sm"
                 onClick={() => void savePolicy()}
