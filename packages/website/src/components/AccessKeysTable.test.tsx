@@ -1,16 +1,20 @@
 import { describe, it, expect } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { AccessKey } from '@filone/shared';
+import type { AccessKey, ServiceAccessKey } from '@filone/shared';
 import { AccessKeysTable } from './AccessKeysTable.js';
 import { ToastProvider } from './Toast/ToastProvider';
 import { formatCalendarDate } from '../lib/time.js';
+
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<ToastProvider>{ui}</ToastProvider>);
 }
 
-function makeKey(overrides: Partial<AccessKey>): AccessKey {
+function makeKey(overrides: Partial<ServiceAccessKey>): ServiceAccessKey {
   return {
+    type: 'service',
     id: '1',
     keyName: 'Test Key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
@@ -33,6 +37,61 @@ describe('AccessKeysTable — bucket-info permissions', () => {
     const keys = [makeKey({ permissions: ['read', 'write'] })];
     renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
     expect(screen.queryByTestId('permission-badge-bucket-info')).not.toBeInTheDocument();
+  });
+});
+
+describe('AccessKeysTable — a principal-bound key', () => {
+  const keys: AccessKey[] = [
+    {
+      id: '1',
+      type: 'principal',
+      principalId: 'user-1',
+      keyName: 'Test Key',
+      accessKeyId: 'ACCESS_KEY_12345EXAMPL',
+      createdAt: '2026-01-15T10:00:00Z',
+      status: 'active',
+    },
+  ];
+
+  it('shows Follows bucket policy in Permissions for a principal key', () => {
+    renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
+    expect(screen.getByTestId('permission-badge-follows-bucket-policy')).toHaveTextContent(
+      'Follows bucket policy',
+    );
+  });
+
+  it('shows Per bucket policy in Buckets for a principal key', () => {
+    renderWithProviders(<AccessKeysTable keys={keys} showBuckets />);
+    expect(screen.getByText('Per bucket policy')).toBeInTheDocument();
+    expect(screen.queryByText('All Buckets')).not.toBeInTheDocument();
+  });
+});
+
+describe('AccessKeysTable — the key type', () => {
+  const principalKey: AccessKey = {
+    id: '2',
+    type: 'principal',
+    principalId: 'user-1',
+    keyName: 'Laptop',
+    accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
+    createdAt: '2026-01-15T10:00:00Z',
+    status: 'active',
+  };
+
+  // The badge renders twice: in its column and inline under the name on small screens.
+  it.each([
+    ['service', 'Service', makeKey({})],
+    ['principal', 'Personal', principalKey],
+  ] as const)('labels a %s key %s', (type, label, key) => {
+    const { container } = renderWithProviders(<AccessKeysTable keys={[key]} />);
+    const badges = [...container.querySelectorAll('[data-key-type]')].map((badge) => [
+      badge.getAttribute('data-key-type'),
+      badge.textContent,
+    ]);
+    expect(badges).toEqual([
+      [type, label],
+      [type, label],
+    ]);
   });
 });
 
@@ -119,13 +178,13 @@ describe('AccessKeysTable — the row menu', () => {
 
 describe('AccessKeysTable — who rotated a key', () => {
   const names = (userId: string) =>
-    userId === 'user-1' ? { name: 'Ada Lovelace' } : { name: 'Grace Hopper' };
+    userId === USER_1 ? { name: 'Ada Lovelace' } : { name: 'Grace Hopper' };
 
   it('names the rotator beneath the owner', () => {
     renderWithProviders(
       <AccessKeysTable
         keys={[
-          makeKey({ createdBy: 'user-1', rotatedBy: 'user-2', rotatedAt: '2026-09-11T10:00:00Z' }),
+          makeKey({ createdBy: USER_1, rotatedBy: USER_2, rotatedAt: '2026-09-11T10:00:00Z' }),
         ]}
         creatorFor={names}
       />,
@@ -137,7 +196,7 @@ describe('AccessKeysTable — who rotated a key', () => {
 
   it('shows the column for a rotated key that names no owner', () => {
     renderWithProviders(
-      <AccessKeysTable keys={[makeKey({ rotatedBy: 'user-2' })]} creatorFor={names} />,
+      <AccessKeysTable keys={[makeKey({ rotatedBy: USER_2 })]} creatorFor={names} />,
     );
 
     expect(screen.getByText('Created by')).toBeInTheDocument();

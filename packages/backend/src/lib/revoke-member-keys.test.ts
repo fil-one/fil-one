@@ -10,7 +10,6 @@ vi.mock('./service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: S3Region) => ({
     id: 'aurora',
     region,
-    accessModel: 'scoped-keys',
     isTenantReady: () => (regionsWithoutTenant.includes(region) ? null : `tenant:${region}`),
     deleteAccessKey: vi.fn(),
   }),
@@ -29,8 +28,11 @@ import { RevocationNotRecordedError } from './key-revocation.ts';
 import { revokeMemberKeys } from './revoke-member-keys.ts';
 import type { AccessKeyToRevoke } from './member-keys.ts';
 
+const MEMBER_1 = '00000000-0000-0000-0000-0000000000b1';
+const ADMIN_1 = '00000000-0000-0000-0000-0000000000a1';
+
 const ORG_ID = 'org-1';
-const ACTOR = userActor({ userId: 'admin-1' });
+const ACTOR = userActor({ userId: ADMIN_1 });
 
 function keyToRevoke(id: string, region: S3Region = S3Region.UsEast1): AccessKeyToRevoke {
   return {
@@ -39,7 +41,7 @@ function keyToRevoke(id: string, region: S3Region = S3Region.UsEast1): AccessKey
     accessKeyId: `AKIAEXAMPLE${id}`,
     region,
     createdAt: '2026-02-01T00:00:00.000Z',
-    createdBy: 'member-1',
+    createdBy: MEMBER_1,
     reason: 'exceeds_role',
     excess: [],
   };

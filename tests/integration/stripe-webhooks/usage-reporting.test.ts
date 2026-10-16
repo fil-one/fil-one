@@ -4,7 +4,7 @@ import {
   attachValidCard,
   getStripePriceId,
   getStripeClient,
-  sleep,
+  reportUsage,
   pollTestClockReady,
   deleteBillingRecord,
   testOrgId,
@@ -81,35 +81,7 @@ describe('Usage Reporting (meter events via test clock)', () => {
       (sub as unknown as Record<string, unknown>).current_period_end ??
       null;
 
-    // Resolve the meter event name from the price's linked meter
-    const price = await stripe.prices.retrieve(priceId);
-    const meterId = (price.recurring as unknown as Record<string, string>)?.meter;
-    const meter = await stripe.billing.meters.retrieve(meterId);
-    const meterEventName = meter.event_name;
-
-    // Preflight: Stripe's billing.meterEvents.create rejects events against
-    // inactive meters with a cryptic "No active meter found for event name X"
-    // error. Fail early with actionable guidance instead.
-    if (meter.status !== 'active') {
-      throw new Error(
-        `Stripe Billing Meter "${meterEventName}" (${meterId}) linked to price ` +
-          `${priceId} has status "${meter.status}" — expected "active".\n` +
-          `Check the staging Stripe secrets in 1Password and ensure your stack's ` +
-          `StripePriceId SST secret has the same value.`,
-      );
-    }
-
-    // Send meter event
-    await stripe.billing.meterEvents.create({
-      event_name: meterEventName,
-      payload: {
-        value: '1337',
-        stripe_customer_id: cusId,
-      },
-    });
-
-    // Wait for meter event ingestion
-    await sleep(15 * 1000);
+    await reportUsage(cusId);
 
     // Advance test clock past period end
     const frozenTime = Math.floor(Date.now() / 1000);

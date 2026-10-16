@@ -548,6 +548,7 @@ describe('auroraOrchestrator', () => {
       });
 
       expect(result).toEqual({
+        type: 'service',
         id: 'k1',
         accessKeyId: 'AK1',
         accessKeySecret: 'secret',
@@ -1011,7 +1012,7 @@ describe('auroraOrchestrator signal forwarding', () => {
       name: 'listBuckets',
       run: () => {
         mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
-        return auroraOrchestrator.listBuckets('t', { signal });
+        return auroraOrchestrator.listBuckets('t', undefined, { signal });
       },
       mocks: [mockPortalListBuckets],
     },
@@ -1019,7 +1020,7 @@ describe('auroraOrchestrator signal forwarding', () => {
       name: 'getBucket',
       run: () => {
         mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
-        return auroraOrchestrator.getBucket('t', 'b', { signal });
+        return auroraOrchestrator.getBucket('t', 'b', undefined, { signal });
       },
       mocks: [mockPortalGetBucketInfo],
     },
@@ -1039,7 +1040,7 @@ describe('auroraOrchestrator signal forwarding', () => {
       name: 'findAccessKeyByName',
       run: () => {
         mockFindAuroraAccessKeyByName.mockResolvedValue(undefined);
-        return auroraOrchestrator.findAccessKeyByName('t', 'k', { signal });
+        return auroraOrchestrator.findAccessKeyByName('t', 'k', undefined, { signal });
       },
       mocks: [mockFindAuroraAccessKeyByName],
     },
@@ -1124,11 +1125,11 @@ describe('auroraOrchestrator signal forwarding', () => {
   const portalClientCases: Record<string, () => Promise<unknown>> = {
     listBuckets: () => {
       mockPortalListBuckets.mockResolvedValue({ data: { items: [] }, error: undefined });
-      return auroraOrchestrator.listBuckets('t', { signal });
+      return auroraOrchestrator.listBuckets('t', undefined, { signal });
     },
     getBucket: () => {
       mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
-      return auroraOrchestrator.getBucket('t', 'b', { signal });
+      return auroraOrchestrator.getBucket('t', 'b', undefined, { signal });
     },
   };
 

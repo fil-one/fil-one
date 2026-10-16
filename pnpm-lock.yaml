@@ -18,6 +18,9 @@ importers:
       '@aws-sdk/client-dynamodb':
         specifier: ^3.1149.0
         version: 3.1149.0
+      '@aws-sdk/client-s3':
+        specifier: ^3.1149.0
+        version: 3.1149.0
       '@filone/oxlint-rules':
         specifier: workspace:*
         version: link:packages/oxlint-rules
@@ -190,6 +193,9 @@ importers:
       jose:
         specifier: ^6.2.2
         version: 6.2.2
+      p-map:
+        specifier: ^7.1.1
+        version: 7.1.1
       p-retry:
         specifier: ^8.0.0
         version: 8.0.0
@@ -4175,6 +4181,10 @@ packages:
 
   p-map@7.0.4:
     resolution: {integrity: sha512-tkAQEw8ysMzmkhgw8k+1U/iPhWNhykKnSk4Rd5zLoPJCuJaGRPo6YposrZgaxHKzDHdDWWZvE/Sk7hsL2X/CpQ==}
+    engines: {node: '>=18'}
+
+  p-map@7.1.1:
+    resolution: {integrity: sha512-6Lh3jQPLthYujSrlw6ccWXBGZTkoTCz27Hd92g79LH/kjAbgoEu0t442cCCNbegPSJsA0lwDX8z0bcKtkpA32g==}
     engines: {node: '>=18'}
 
   p-retry@8.0.0:
@@ -8851,6 +8861,8 @@ snapshots:
       p-limit: 3.1.0
 
   p-map@7.0.4: {}
+
+  p-map@7.1.1: {}
 
   p-retry@8.0.0:
     dependencies:

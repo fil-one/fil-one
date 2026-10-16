@@ -1,4 +1,4 @@
-// Aurora-backed ServiceOrchestrator. Delegates to the existing per-call modules
+// Aurora-backed LegacyServiceOrchestrator. Delegates to the existing per-call modules
 // (aurora-tenant-setup for the lazy setup state machine, aurora-portal for
 // bucket and access-key ops) and looks up SSM-cached S3 credentials directly.
 //
@@ -50,7 +50,7 @@ import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
   OrchestratorRequestOptions,
-  ServiceOrchestrator,
+  LegacyServiceOrchestrator,
   TenantStatusProbe,
   StorageUsageSample,
   TenantInfo,
@@ -91,7 +91,6 @@ function toBucketProtection(data: BucketBucketResponse): BucketProtection {
 export const auroraOrchestrator = {
   id: 'aurora',
   region: S3Region.EuWest1 as S3RegionType,
-  accessModel: 'scoped-keys',
 
   async ensureTenantReady(
     orgId: string,
@@ -185,7 +184,11 @@ export const auroraOrchestrator = {
     await deleteAuroraBucket({ tenantId, bucketName, signal: opts?.signal });
   },
 
-  async listBuckets(tenantId: string, opts?: OrchestratorRequestOptions): Promise<BucketSummary[]> {
+  async listBuckets(
+    tenantId: string,
+    _memberId?: string,
+    opts?: OrchestratorRequestOptions,
+  ): Promise<BucketSummary[]> {
     const client = await createPortalClient(tenantId, { signal: opts?.signal });
     const { data, error } = await listBuckets({
       client,
@@ -214,6 +217,7 @@ export const auroraOrchestrator = {
   async getBucket(
     tenantId: string,
     bucketName: string,
+    _memberId?: string,
     opts?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
     const client = await createPortalClient(tenantId, { signal: opts?.signal });
@@ -253,6 +257,11 @@ export const auroraOrchestrator = {
     keyOpts: IssueAccessKeyOpts,
     opts?: OrchestratorRequestOptions,
   ): Promise<IssuedAccessKey> {
+    if ('principalId' in keyOpts) {
+      throw new Error(
+        'Aurora supports service keys only; a principal-bound key needs the IAM access model',
+      );
+    }
     const key = await createAuroraAccessKey({
       tenantId,
       keyName: keyOpts.keyName,
@@ -263,6 +272,7 @@ export const auroraOrchestrator = {
       signal: opts?.signal,
     });
     return {
+      type: 'service',
       id: key.id,
       accessKeyId: key.accessKeyId,
       accessKeySecret: key.accessKeySecret,
@@ -270,7 +280,12 @@ export const auroraOrchestrator = {
     };
   },
 
-  async findAccessKeyByName(tenantId: string, keyName: string, opts?: OrchestratorRequestOptions) {
+  async findAccessKeyByName(
+    tenantId: string,
+    keyName: string,
+    _principalId?: string,
+    opts?: OrchestratorRequestOptions,
+  ) {
     return findAuroraAccessKeyByName({ tenantId, keyName, signal: opts?.signal });
   },
 
@@ -352,7 +367,7 @@ export const auroraOrchestrator = {
     // getBucketStorageSamples queries Aurora metrics globally by bucket name, so
     // gate it behind a tenant-scoped ownership check: only the owning tenant's
     // Portal client resolves the bucket (404 -> null otherwise).
-    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName, opts);
+    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName, undefined, opts);
     if (!bucket) throw new BucketNotFoundError(bucketName);
     const auroraInterval = mapIntervalToAuroraWindow(metricsOpts.interval ?? '1d');
 
@@ -372,7 +387,7 @@ export const auroraOrchestrator = {
         objectCount: s.objectCount ?? 0,
       }));
   },
-} satisfies ServiceOrchestrator;
+} satisfies LegacyServiceOrchestrator;
 
 // Aurora's metrics API only accepts windows in m/h units, so the
 // orchestrator-agnostic '1d' value is translated before it hits the wire.

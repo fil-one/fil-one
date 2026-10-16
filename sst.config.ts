@@ -460,20 +460,21 @@ export default $config({
       cors: {
         allowOrigins: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        // Authorization carries RAG API key bearer tokens (query endpoint);
-        // X-Org-Id names the organization each request operates on. Deployed
-        // stages serve the console and the API from one origin through the
-        // Router, so CORS never applies there — local dev at
+        // Deployed stages serve the console and the API from one origin
+        // through the Router, so CORS never applies there. Local dev at
         // https://localhost:5173 is cross-origin, and a preflight that omitted
-        // X-Org-Id would strip the header before it reached the API. Origins
-        // stay locked to our own domain above.
+        // a header the console sends would strip it before it reached the API.
+        // Origins stay locked to our own domain above.
         allowHeaders: [
           'Content-Type',
           'X-CSRF-Token',
           'X-Requested-With',
           'Authorization',
           'X-Org-Id',
+          'If-Match',
+          'If-None-Match',
         ],
+        exposeHeaders: ['ETag'],
         allowCredentials: true,
         maxAge: '1 day',
       },
@@ -1159,6 +1160,19 @@ export default $config({
       timeout: '30 seconds',
     };
 
+    // A bucket policy write may provision the tenant, which stores its console
+    // S3 key in SSM. Only Forge regions serve bucket policies.
+    const bucketPolicyWriteRoute: RouteInfraConfig = {
+      extraEnv: orchestratorEnv,
+      permissions: [
+        {
+          actions: ['ssm:GetParameter', 'ssm:PutParameter'],
+          resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn],
+        },
+      ],
+      timeout: '30 seconds',
+    };
+
     const ROUTE_INFRA_CONFIGS: Partial<Record<RouteHandler, RouteInfraConfig>> = {
       // ── Buckets and objects ────────────────────────────────────────
       'list-buckets': {
@@ -1211,6 +1225,19 @@ export default $config({
         permissions: bucketReadPermissions,
         extraEnv: orchestratorEnv,
       },
+      // Bucket policies are S3 operations signed with the tenant's console S3
+      // key, which getConsoleS3Credentials reads from SSM. A write may first
+      // provision the tenant (ensureTenantReady), which stores that key. Only
+      // Forge regions carry bucket policies, so only their key parameters.
+      // Dark until a region declares the `iam` access model.
+      'get-bucket-policy': {
+        extraEnv: orchestratorEnv,
+        permissions: [
+          { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
+        ],
+      },
+      'put-bucket-policy': bucketPolicyWriteRoute,
+      'delete-bucket-policy': bucketPolicyWriteRoute,
 
       // ── Keys ───────────────────────────────────────────────────────
       // The RAG API key routes take no entry: they are named bearer tokens
@@ -1257,6 +1284,9 @@ export default $config({
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
         timeout: '30 seconds',
       },
+      // Removing a member drops their principal on every ready `iam` region.
+      // Needs the orchestrator environment to reach those regions at all.
+      'remove-member': { extraEnv: orchestratorEnv },
 
       // ── RAG ────────────────────────────────────────────────────────
       // RAG query playground (FIL-554): embed the question, vector-search the
@@ -1398,8 +1428,15 @@ export default $config({
       // than from the request, since the link goes to somebody else's inbox.
       // OrgLogoBucketName, to check the joined org's logo is one of its uploads.
       'accept-invitation': {
+        // Registers the new member as a principal on each ready iam region.
+        extraEnv: orchestratorEnv,
         extraLink: [orgLogoBucketName],
       },
+      // The only route that sends mail. `SendGridApiKey` exists on staging and
+      // production alone; every other stage sends no email and logs the invitation
+      // by id, never the accept URL, because the URL carries the token.
+      // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
+      // than from the request, since the link goes to somebody else's inbox.
       'create-invitation': {
         extraEnv: { WEBSITE_URL: siteUrl },
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),

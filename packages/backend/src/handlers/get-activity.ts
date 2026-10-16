@@ -8,7 +8,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import { keyScope, withinScope } from '../lib/key-scope.ts';
 import type { KeyScope } from '../lib/key-scope.ts';
-import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -149,7 +149,7 @@ async function fetchBucketActivities(
 
 async function listBucketActivities(
   orgId: string,
-  orchestrator: ServiceOrchestrator,
+  orchestrator: RegionOrchestrator,
   tenantId: string,
 ): Promise<RecentActivity[]> {
   // Swallow per-orchestrator errors so one region's outage still renders the rest.

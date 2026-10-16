@@ -36,6 +36,8 @@ export interface MemberAccessKey {
   createdBy?: string;
   permissions?: AccessKeyRecord['permissions'];
   granularPermissions?: AccessKeyRecord['granularPermissions'];
+  /** Set on a principal-bound key. */
+  principalId?: string;
 }
 
 /** A key the member could no longer mint, and why. */
@@ -123,6 +125,16 @@ export function reviewAccessKeysForRole(
       continue;
     }
     if (accessKey.createdBy !== userId) continue;
+    // A principal-bound key follows the bucket policies, so a role change
+    // keeps it; removal, which leaves no role, revokes it.
+    if (accessKey.principalId) {
+      if (role === NO_ROLE) {
+        review.keysToRevoke.push({ ...accessKey, reason: 'role_cannot_mint', excess: [] });
+      } else {
+        review.retainedKeyCount += 1;
+      }
+      continue;
+    }
 
     const retention = canRetainAccessKey(role, accessKey);
     if (retention.retained) {
@@ -157,8 +169,10 @@ export async function reviewMemberAccessKeysForRole(
  * landing between them is counted by the fence and missing from the list.
  *
  * Removal asks about `NO_ROLE`, the narrowing to nothing: no role is left to
- * mint under, so `canRetainAccessKey` condemns every attributed key. Rows with
- * no recorded creator are outside this rule, as they are outside every other.
+ * mint under, so every attributed key is revoked: a service key because
+ * `canRetainAccessKey` condemns it, a principal-bound key because its member is
+ * gone. Any other role change keeps principal-bound keys. Rows with no recorded
+ * creator are outside this rule, as they are outside every other.
  */
 export async function reviewKeysForRoleChange(
   orgId: string,
@@ -201,5 +215,6 @@ function toMemberAccessKey(record: Partial<AccessKeyRecord>): MemberAccessKey {
     ...(record.createdBy ? { createdBy: record.createdBy } : {}),
     ...(record.permissions ? { permissions: record.permissions } : {}),
     ...(record.granularPermissions ? { granularPermissions: record.granularPermissions } : {}),
+    ...(record.principalId ? { principalId: record.principalId } : {}),
   };
 }
