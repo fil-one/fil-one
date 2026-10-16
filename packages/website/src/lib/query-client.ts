@@ -122,6 +122,10 @@ export const queryKeys = {
     ['access-keys', bucketName, region] as const,
   bucketAnalytics: (bucketName: string, region: S3Region) =>
     ['bucket-analytics', bucketName, region] as const,
+  // Live, unlike the analytics count: read straight from S3 each time the delete
+  // dialog opens, because a stale "empty" or "not empty" sends the user the wrong way.
+  bucketHoldsObjects: (bucketName: string, region: S3Region) =>
+    ['bucket-holds-objects', bucketName, region] as const,
   // A bucket's policy on an `iam` region, with the ETag its next write carries.
   bucketPolicy: (bucketName: string, region: S3Region) =>
     ['bucket-policy', bucketName, region] as const,
