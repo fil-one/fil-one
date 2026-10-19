@@ -14,11 +14,12 @@ export const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
  * that day (UTC), so the instant is the start of the next one: the same rule
  * `isAccessKeyExpired` reads the stored value by, so the table and the storage
  * system stop honouring the key together. The storage system decodes the field
- * as a timestamp and refuses a bare date outright. A value that already is a
- * timestamp passes through unchanged, and no expiry stays `null`.
+ * as a timestamp and refuses a bare date outright. Any other string passes
+ * through unchanged for the storage system to judge, and no expiry stays
+ * `null`.
  */
 export function toAccessKeyExpiryInstant(expiresAt: string | null | undefined): string | null {
-  if (!expiresAt) return null;
+  if (expiresAt == null) return null;
   if (!BARE_DATE.test(expiresAt)) return expiresAt;
   const expiry = new Date(expiresAt);
   // The request schema checks only the shape, so a date that does not exist
@@ -30,5 +31,12 @@ export function toAccessKeyExpiryInstant(expiresAt: string | null | undefined): 
     throw new AccessKeyValidationError(`expiresAt "${expiresAt}" is not a calendar date.`);
   }
   expiry.setUTCDate(expiry.getUTCDate() + 1);
+  // The day after 9999-12-31 prints with a six-digit year, which RFC 3339
+  // has no room for, so the storage system would refuse it as well.
+  if (expiry.getUTCFullYear() > 9999) {
+    throw new AccessKeyValidationError(
+      `expiresAt "${expiresAt}" is past the last representable date.`,
+    );
+  }
   return expiry.toISOString();
 }

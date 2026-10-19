@@ -22,11 +22,17 @@ describe('toAccessKeyExpiryInstant', () => {
     '2026-13-01',
     // February has no 30th.
     '2026-02-30',
-  ])('refuses the well-formed but impossible date %s as a validation error', (date) => {
+    // The day after it has a five-digit year, which RFC 3339 cannot carry.
+    '9999-12-31',
+  ])('refuses the well-formed but unrepresentable date %s as a validation error', (date) => {
     expect(() => toAccessKeyExpiryInstant(date)).toThrow(AccessKeyValidationError);
   });
 
-  it.each([null, undefined, ''])('returns null for no expiry (%s)', (value) => {
+  it.each([null, undefined])('returns null for no expiry (%s)', (value) => {
     expect(toAccessKeyExpiryInstant(value)).toBeNull();
+  });
+
+  it('passes an empty string through for the storage system to refuse', () => {
+    expect(toAccessKeyExpiryInstant('')).toBe('');
   });
 });
