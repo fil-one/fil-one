@@ -31,8 +31,9 @@
 // webhook moved in the meantime is skipped and left for the next run. Repaired
 // rows no longer match, so a second run has nothing to do.
 //
-// Stripe: export a restricted, read-only secret key as STRIPE_API_KEY. The run
-// only retrieves subscriptions. (`sst shell` cannot resolve production, so the
+// Stripe: export a restricted secret key with read access to Subscriptions and
+// Customers as STRIPE_API_KEY. The run only retrieves subscriptions, with their
+// customer expanded. (`sst shell` cannot resolve production, so the
 // stage's linked key is not available here.) DynamoDB: the table name comes from
 // `sst state export`, and every AWS call uses your ambient credentials.
 //
@@ -71,7 +72,9 @@ const STRIPE_DELAY_MS = 50;
 
 const stripeKey = process.env.STRIPE_API_KEY;
 if (!stripeKey) {
-  console.error('Set STRIPE_API_KEY to a restricted, read-only Stripe secret key.');
+  console.error(
+    'Set STRIPE_API_KEY to a restricted Stripe key with read access to Subscriptions and Customers.',
+  );
   process.exit(1);
 }
 
