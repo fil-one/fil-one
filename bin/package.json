@@ -23,7 +23,7 @@
     "@filone/backend": "workspace:*",
     "@filone/rag-shared": "workspace:*",
     "@filone/shared": "workspace:*",
-    "vitest": "^5.0.3",
+    "vitest": "^5.0.5",
     "yaml": "^2.8.3"
   }
 }
