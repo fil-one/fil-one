@@ -20,10 +20,10 @@
 // has already disabled it, so support can decide whether to reach out.
 //
 // A canceled row no longer says what the org was before, so "paid" is read from
-// Stripe: the subscription had a default payment method (Upgrade and
-// reactivation attach one), or it never had a trial. A trial that expires
-// without a card is canceled by Stripe for having no payment method, so it
-// never has one.
+// Stripe: the subscription or its customer has a default card (Upgrade and
+// reactivation attach one to the subscription, the portal to the customer), or
+// the subscription never had a trial. Stripe cancels an expiring trial only
+// when neither has a card.
 //
 // DRY RUN BY DEFAULT. The run prints one line per org and the totals, then
 // writes only with --execute. Each repair is conditioned on the row's status,
@@ -231,12 +231,21 @@ function hasShortGrace(row: Row): boolean {
 }
 
 function wasPaid(subscription: Stripe.Subscription): boolean {
-  return Boolean(subscription.default_payment_method) || !subscription.trial_end;
+  const customer = subscription.customer;
+  const customerCard =
+    typeof customer === 'object' && !customer.deleted
+      ? customer.invoice_settings?.default_payment_method
+      : undefined;
+  return (
+    Boolean(subscription.default_payment_method) || Boolean(customerCard) || !subscription.trial_end
+  );
 }
 
 async function retrieve(subscriptionId: string): Promise<Stripe.Subscription | undefined> {
   try {
-    return await stripe.subscriptions.retrieve(subscriptionId);
+    // The customer comes along for its default card, which a card added in
+    // the portal sets instead of the subscription's.
+    return await stripe.subscriptions.retrieve(subscriptionId, { expand: ['customer'] });
   } catch (error) {
     if (
       error instanceof Stripe.errors.StripeInvalidRequestError &&
