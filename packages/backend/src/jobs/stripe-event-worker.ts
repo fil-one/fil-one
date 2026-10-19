@@ -367,7 +367,7 @@ async function updateBillingRecord({
 // A row that already carries canceledAt was moved into grace by an earlier
 // delivery of this event, so its status no longer says what the org was. Its
 // dates stand.
-async function getGracePeriod(
+async function getGraceWindow(
   subscription: Stripe.Subscription,
   orgId: string | undefined,
   now: Date,
@@ -452,7 +452,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   }
 
   const now = new Date();
-  const { canceledAt, gracePeriodEndsAt } = await getGracePeriod(subscription, orgId, now);
+  const { canceledAt, gracePeriodEndsAt } = await getGraceWindow(subscription, orgId, now);
 
   const backfill = orgIdBackfill(orgId);
   await updateSubscriptionByUser(
