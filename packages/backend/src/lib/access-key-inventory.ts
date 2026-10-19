@@ -6,6 +6,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
 import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION } from './dynamo-records.ts';
 import { withinScope, type KeyScope } from './key-scope.ts';
+import { BARE_DATE } from './access-key-expiry.ts';
 
 /** Narrows a scoped listing to keys touching one bucket, or minted in one region. */
 export interface AccessKeyScopeFilters {
@@ -133,8 +134,6 @@ async function runQuery(
     throw error;
   }
 }
-
-const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Whether a key's expiry has passed. The create route stores a bare

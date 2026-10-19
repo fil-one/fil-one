@@ -1091,6 +1091,21 @@ describe('issueAccessKey', () => {
     );
   });
 
+  it('sends a bare expiry date as the start of the next UTC day', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
+
+    await orchestrator.issueAccessKey(tenantId, {
+      keyName: 'My Key',
+      permissions: ['read'],
+      // The console's date picker sends a calendar date; the storage system
+      // decodes the field as a timestamp.
+      expiresAt: '2026-10-20',
+    });
+
+    const { body } = mockCreateAccessKey.mock.calls[0]![0] as { body: Record<string, unknown> };
+    expect(body).toMatchObject({ expiresAt: '2026-10-21T00:00:00.000Z' });
+  });
+
   it('drops bucket-info permissions the contract enum lacks, with a warning', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
