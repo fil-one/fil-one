@@ -56,7 +56,7 @@ that state, and reconciling it is a decision for a person.
    `main` auto-deploy, so confirm the stage is running a commit that contains it.
    Copying before that PR deploys produces twins that go stale the next time
    Stripe writes.
-2. **The flip is not merged.** `readSubscription`'s `CUSTOMER#` fallback and the
+2. **The flip is not merged.** `getSubscription`'s `CUSTOMER#` fallback and the
    second write in every writer must still be there. Until this run has written
    the org rows, that fallback is the only thing serving every pre-existing
    account; merging the flip first takes their subscription away.

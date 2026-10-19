@@ -10,7 +10,7 @@ import {
 } from '@filone/shared';
 import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.ts';
-import { readSubscription } from '../lib/subscription-store.ts';
+import { getSubscription } from '../lib/subscription-store.ts';
 import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
 import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
@@ -53,7 +53,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 
   // 2. Get the org's billing record, so activating billing acts on the org's
   // Stripe customer rather than one belonging to whoever clicked.
-  const record = await readSubscription(orgId);
+  const record = await getSubscription(orgId);
   const stripeCustomerId = record?.stripeCustomerId;
 
   if (!record) {

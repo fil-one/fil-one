@@ -6,7 +6,7 @@
 // is live. Every destructive writer asks before it applies one.
 
 import { emitSupersededBillingEvent } from './stripe-webhook-metrics.ts';
-import { BILLING_IDENTITY_PROJECTION, readSubscription } from './subscription-store.ts';
+import { BILLING_IDENTITY_PROJECTION, getSubscription } from './subscription-store.ts';
 
 /**
  * Whether the stored row has already moved on from the subscription this event
@@ -36,7 +36,7 @@ export async function subscriptionSuperseded({
   // No org means no row: after the re-key the org id is the key, so there is
   // nothing to compare the event against and nothing the write can reach either.
   if (!subscriptionId || !orgId) return false;
-  const stored = await readSubscription(orgId, {
+  const stored = await getSubscription(orgId, {
     projectionExpression: BILLING_IDENTITY_PROJECTION,
   });
   const storedId = stored?.subscriptionId;
@@ -71,7 +71,7 @@ export async function customerSuperseded({
   orgId: string;
   customerId: string;
 }): Promise<boolean> {
-  const stored = await readSubscription(orgId, {
+  const stored = await getSubscription(orgId, {
     projectionExpression: BILLING_IDENTITY_PROJECTION,
   });
   const storedId = stored?.stripeCustomerId;

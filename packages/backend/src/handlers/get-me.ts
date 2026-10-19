@@ -9,7 +9,7 @@ import { getOrgProfile, orgSummary } from '../lib/org-profile.ts';
 import { summarizeMemberships } from '../lib/org-membership.ts';
 import { hasRagAccess } from '../middleware/rag-access.ts';
 import { hasOrgsBetaAccess } from '../lib/orgs-beta.ts';
-import { readSubscription } from '../lib/subscription-store.ts';
+import { getSubscription } from '../lib/subscription-store.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import {
   getConnectionType,
@@ -27,7 +27,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * because the gate re-reads `/me` right after an activation.
  */
 async function resolveBillingActive(orgId: string): Promise<boolean> {
-  const record = await readSubscription(orgId, { consistentRead: true });
+  const record = await getSubscription(orgId, { consistentRead: true });
   return (
     record?.subscriptionStatus !== undefined &&
     record.subscriptionStatus !== SubscriptionStatus.Inactive

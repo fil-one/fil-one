@@ -35,8 +35,8 @@
     "@filone/shared": "workspace:*"
   },
   "devDependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1149.0",
-    "@aws-sdk/client-s3": "^3.1149.0",
+    "@aws-sdk/client-dynamodb": "^3.1152.0",
+    "@aws-sdk/client-s3": "^3.1152.0",
     "@filone/oxlint-rules": "workspace:*",
     "@playwright/test": "^1.60.0",
     "@pulumi/aws": "^7.23.0",

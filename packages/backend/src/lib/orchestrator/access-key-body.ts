@@ -6,6 +6,7 @@ import type {
 } from '@filone/orchestrator-client';
 import type { IssueAccessKeyOpts } from '../service-orchestrator.ts';
 import { AccessKeyValidationError } from '../errors.ts';
+import { toAccessKeyExpiryInstant } from '../access-key-expiry.ts';
 import { buildPermissions } from './permissions.ts';
 
 /**
@@ -15,7 +16,7 @@ import { buildPermissions } from './permissions.ts';
 export function buildIssueAccessKeyRequestBody(
   keyOpts: IssueAccessKeyOpts,
 ): CreateAccessKeyRequest {
-  const expiresAt = keyOpts.expiresAt ?? null;
+  const expiresAt = toAccessKeyExpiryInstant(keyOpts.expiresAt);
   if ('principalId' in keyOpts) {
     // The type forbids these; a non-literal object can still carry them, and
     // dropping them would mint a key the caller did not ask for. `bucketScope`
