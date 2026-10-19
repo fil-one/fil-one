@@ -521,7 +521,7 @@ describe('buildRevertItem', () => {
 
   it('requires the legacy row to still be the one the store would fall back to', () => {
     // The fallback this delete promises is narrower than "the row exists":
-    // readSubscription refuses a legacy row whose orgId names another org, and
+    // getSubscription refuses a legacy row whose orgId names another org, and
     // serves one carrying no orgId. A revert conditioned on existence alone
     // deletes the org row, prints DELETED, and leaves the account reading as
     // having no subscription at all.

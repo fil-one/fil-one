@@ -31,7 +31,7 @@ import { getDynamoClient } from '../lib/ddb-client.ts';
 import { getStripeClient } from '../lib/stripe-client.ts';
 import {
   GRACE_STATE_PROJECTION,
-  readSubscription,
+  getSubscription,
   updateSubscriptionByUser,
 } from '../lib/subscription-store.ts';
 import {
@@ -375,7 +375,7 @@ async function getGracePeriod(
   // Consistent: an upgrade written a moment earlier has to be what this sees,
   // or a paying org reads as `trialing`.
   const stored = orgId
-    ? await readSubscription(orgId, {
+    ? await getSubscription(orgId, {
         projectionExpression: GRACE_STATE_PROJECTION,
         consistentRead: true,
       })

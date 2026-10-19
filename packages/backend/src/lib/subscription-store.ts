@@ -86,7 +86,7 @@ const dynamo = getDynamoClient();
  * parameter nothing reads would suggest otherwise; the writers take the owner
  * because they stamp it on the row.
  */
-export async function readSubscription(
+export async function getSubscription(
   orgId: string,
   options: ReadOptions = {},
 ): Promise<SubscriptionRecord | undefined> {

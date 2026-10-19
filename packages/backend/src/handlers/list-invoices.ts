@@ -4,7 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListInvoicesResponse, Invoice } from '@filone/shared';
 import type Stripe from 'stripe';
 import { getStripeClient } from '../lib/stripe-client.ts';
-import { readSubscription } from '../lib/subscription-store.ts';
+import { getSubscription } from '../lib/subscription-store.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -39,7 +39,7 @@ export async function baseHandler(
 
   // Invoices belong to the org's Stripe customer, so an Admin reading them
   // reads the org's, not a record of their own that may not exist.
-  const billingRecord = await readSubscription(orgId);
+  const billingRecord = await getSubscription(orgId);
 
   if (!billingRecord?.stripeCustomerId) {
     const response: ListInvoicesResponse = { invoices: [] };
