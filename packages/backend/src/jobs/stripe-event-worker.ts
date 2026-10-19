@@ -371,8 +371,13 @@ async function graceWindow(
   orgId: string | undefined,
   now: Date,
 ): Promise<{ canceledAt: string; gracePeriodEndsAt: string }> {
+  // Consistent: an upgrade written a moment earlier has to be what this sees,
+  // or a paying org reads as `trialing`.
   const stored = orgId
-    ? await readSubscription(orgId, { projectionExpression: GRACE_STATE_PROJECTION })
+    ? await readSubscription(orgId, {
+        projectionExpression: GRACE_STATE_PROJECTION,
+        consistentRead: true,
+      })
     : undefined;
   if (stored?.canceledAt && stored.gracePeriodEndsAt) {
     return { canceledAt: stored.canceledAt, gracePeriodEndsAt: stored.gracePeriodEndsAt };

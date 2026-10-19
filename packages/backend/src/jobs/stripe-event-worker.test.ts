@@ -953,6 +953,20 @@ describe('stripe-event-worker handler', () => {
       },
     );
 
+    it('reads the status it sizes the grace period from consistently', async () => {
+      // An upgrade written a moment earlier must be what the cancellation
+      // sees; a stale `trialing` would cut a paying org to 7 days.
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+
+      await deliver();
+
+      const graceRead = ddbMock
+        .commandCalls(GetItemCommand)
+        .find((c) => c.args[0].input.ProjectionExpression === GRACE_STATE_PROJECTION);
+      expect(graceRead?.args[0].input.ConsistentRead).toBe(true);
+    });
+
     it('falls back to the subscription’s own org when the customer names none', async () => {
       // The subscription's metadata is the more specific answer, and resolving
       // only from the customer defined a cohort of accounts whose cancellation
