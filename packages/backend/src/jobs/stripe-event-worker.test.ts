@@ -60,7 +60,11 @@ const reportMetricMock = vi.mocked(reportMetric);
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler } from './stripe-event-worker.ts';
-import { BILLING_IDENTITY_PROJECTION, MissingOrgIdError } from '../lib/subscription-store.ts';
+import {
+  BILLING_IDENTITY_PROJECTION,
+  GRACE_STATE_PROJECTION,
+  MissingOrgIdError,
+} from '../lib/subscription-store.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -136,6 +140,17 @@ function setupStoredIdentity(identity: { subscriptionId?: string; stripeCustomer
   ddbMock
     .on(GetItemCommand, { ProjectionExpression: BILLING_IDENTITY_PROJECTION })
     .resolves({ Item: marshall(identity) });
+}
+
+/** The row's status and grace fields, which the cancellation reads to size the grace period. */
+function setupStoredGraceState(state: {
+  subscriptionStatus?: string;
+  canceledAt?: string;
+  gracePeriodEndsAt?: string;
+}) {
+  ddbMock
+    .on(GetItemCommand, { ProjectionExpression: GRACE_STATE_PROJECTION })
+    .resolves({ Item: marshall(state) });
 }
 
 function setupDeletedCustomerRetrieve() {
@@ -831,6 +846,7 @@ describe('stripe-event-worker handler', () => {
         mockSubscription({ trial_end: futureTrialEnd }),
       );
       setupCustomerRetrieve();
+      setupStoredGraceState({ subscriptionStatus: SubscriptionStatus.Trialing });
 
       const before = Date.now();
       await deliver();
@@ -845,6 +861,97 @@ describe('stripe-event-worker handler', () => {
       expect(graceDate).toBeGreaterThanOrEqual(before + sevenDays - 5000);
       expect(graceDate).toBeLessThanOrEqual(after + sevenDays + 5000);
     });
+
+    // The row's status when the event is handled says whether the org was
+    // paying. Stripe's is always `canceled` here, and trial_end survives an
+    // upgrade, so neither can.
+    it('gives 7 days when Stripe ends a trialing subscription at trial expiry', async () => {
+      const endedAt = Date.UTC(2026, 9, 1) / 1000;
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({ trial_end: endedAt, ended_at: endedAt }),
+      );
+      setupCustomerRetrieve();
+      setupStoredGraceState({ subscriptionStatus: SubscriptionStatus.Trialing });
+
+      await deliver();
+
+      expect(updateInputs()[0].ExpressionAttributeValues).toMatchObject({
+        ':canceledAt': { S: '2026-10-01T00:00:00.000Z' },
+        ':grace': { S: '2026-10-08T00:00:00.000Z' },
+      });
+    });
+
+    it('gives 7 days when the row is in the grace period its expired trial started', async () => {
+      // The console moves an expired trial into grace before Stripe ends it;
+      // only a cancellation sets canceledAt.
+      const endedAt = Date.UTC(2026, 9, 1) / 1000;
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({ trial_end: endedAt, ended_at: endedAt }),
+      );
+      setupCustomerRetrieve();
+      setupStoredGraceState({
+        subscriptionStatus: SubscriptionStatus.GracePeriod,
+        gracePeriodEndsAt: '2026-10-08T00:00:00.000Z',
+      });
+
+      await deliver();
+
+      expect(updateInputs()[0].ExpressionAttributeValues).toMatchObject({
+        ':canceledAt': { S: '2026-10-01T00:00:00.000Z' },
+        ':grace': { S: '2026-10-08T00:00:00.000Z' },
+      });
+    });
+
+    it.each([SubscriptionStatus.Active, SubscriptionStatus.PastDue])(
+      'gives 30 days when the row is %s, even though the subscription began as a trial',
+      async (subscriptionStatus) => {
+        // Upgrade ends the trial with trial_end: 'now', and Stripe keeps it.
+        const endedAt = Date.UTC(2026, 9, 1) / 1000;
+        setupStripeEvent(
+          'customer.subscription.deleted',
+          mockSubscription({ trial_end: Date.UTC(2026, 8, 1) / 1000, ended_at: endedAt }),
+        );
+        setupCustomerRetrieve();
+        setupStoredGraceState({ subscriptionStatus });
+
+        await deliver();
+
+        expect(updateInputs()[0].ExpressionAttributeValues).toMatchObject({
+          ':canceledAt': { S: '2026-10-01T00:00:00.000Z' },
+          ':grace': { S: '2026-10-31T00:00:00.000Z' },
+        });
+      },
+    );
+
+    it.each([
+      ['a paid', '2026-10-31T00:00:00.000Z'],
+      ['a trial', '2026-10-08T00:00:00.000Z'],
+    ])(
+      'keeps the stored deadline when %s cancellation is redelivered',
+      async (_kind, storedDeadline) => {
+        // The first delivery already moved the row into grace, so its status no
+        // longer says what the org was paying for.
+        setupStripeEvent(
+          'customer.subscription.deleted',
+          mockSubscription({ ended_at: Date.UTC(2026, 9, 1) / 1000 }),
+        );
+        setupCustomerRetrieve();
+        setupStoredGraceState({
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          canceledAt: '2026-10-01T00:00:00.000Z',
+          gracePeriodEndsAt: storedDeadline,
+        });
+
+        await deliver();
+
+        expect(updateInputs()[0].ExpressionAttributeValues).toMatchObject({
+          ':canceledAt': { S: '2026-10-01T00:00:00.000Z' },
+          ':grace': { S: storedDeadline },
+        });
+      },
+    );
 
     it('falls back to the subscription’s own org when the customer names none', async () => {
       // The subscription's metadata is the more specific answer, and resolving

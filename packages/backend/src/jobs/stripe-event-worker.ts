@@ -29,7 +29,11 @@ import {
 import { subscriptionSuperseded } from '../lib/billing-identity.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import { getStripeClient } from '../lib/stripe-client.ts';
-import { updateSubscriptionByUser } from '../lib/subscription-store.ts';
+import {
+  GRACE_STATE_PROJECTION,
+  readSubscription,
+  updateSubscriptionByUser,
+} from '../lib/subscription-store.ts';
 import {
   emitBillingRowMissing,
   emitDunningEscalation,
@@ -353,6 +357,44 @@ async function updateBillingRecord({
   }
 }
 
+// The grace period a cancellation starts. The row's status when the event is
+// handled says whether the org was paying: a trial, or the grace period the
+// console starts when a trial expires, gets 7 days, and every other status 30.
+// Stripe's own status is always `canceled` here, and trial_end survives an
+// upgrade, so neither can tell.
+//
+// A row that already carries canceledAt was moved into grace by an earlier
+// delivery of this event, so its status no longer says what the org was. Its
+// dates stand.
+async function graceWindow(
+  subscription: Stripe.Subscription,
+  orgId: string | undefined,
+  now: Date,
+): Promise<{ canceledAt: string; gracePeriodEndsAt: string }> {
+  const stored = orgId
+    ? await readSubscription(orgId, { projectionExpression: GRACE_STATE_PROJECTION })
+    : undefined;
+  if (stored?.canceledAt && stored.gracePeriodEndsAt) {
+    return { canceledAt: stored.canceledAt, gracePeriodEndsAt: stored.gracePeriodEndsAt };
+  }
+
+  const wasTrialing =
+    stored?.subscriptionStatus === SubscriptionStatus.Trialing ||
+    stored?.subscriptionStatus === SubscriptionStatus.GracePeriod;
+  const graceDays = wasTrialing ? TRIAL_GRACE_DAYS : PAID_GRACE_DAYS;
+
+  // Dated from when Stripe ended the subscription, so a redelivered event
+  // writes the same deadline. Stripe sets ended_at on a deleted subscription;
+  // the clock covers one that arrives without it.
+  const canceledAt = subscription.ended_at ? new Date(subscription.ended_at * 1000) : now;
+  return {
+    canceledAt: canceledAt.toISOString(),
+    gracePeriodEndsAt: new Date(
+      canceledAt.getTime() + graceDays * 24 * 60 * 60 * 1000,
+    ).toISOString(),
+  };
+}
+
 async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Promise<void> {
   const stripe = getStripeClient();
   const customerId = getCustomerIdString(subscription.customer);
@@ -386,17 +428,6 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   const userId = customer.metadata?.userId;
   if (!userId) return;
 
-  const graceDays = subscription.trial_end ? TRIAL_GRACE_DAYS : PAID_GRACE_DAYS;
-
-  // Dated from when Stripe ended the subscription, so a redelivered event
-  // writes the same deadline. Stripe sets ended_at on a deleted subscription;
-  // the clock covers one that arrives without it.
-  const now = new Date();
-  const canceledAt = subscription.ended_at ? new Date(subscription.ended_at * 1000) : now;
-  const gracePeriodEndsAt = new Date(
-    canceledAt.getTime() + graceDays * 24 * 60 * 60 * 1000,
-  ).toISOString();
-
   // Resolved once: the same org id keys the write below and the tenant
   // write-lock after it.
   const orgId = resolveOrgId(subscription.metadata, customer.metadata);
@@ -411,6 +442,9 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
     return;
   }
 
+  const now = new Date();
+  const { canceledAt, gracePeriodEndsAt } = await graceWindow(subscription, orgId, now);
+
   const backfill = orgIdBackfill(orgId);
   await updateSubscriptionByUser(
     { userId, orgId },
@@ -418,7 +452,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
       UpdateExpression: `SET subscriptionStatus = :status, canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.GracePeriod },
-        ':canceledAt': { S: canceledAt.toISOString() },
+        ':canceledAt': { S: canceledAt },
         ':now': { S: now.toISOString() },
         ':grace': { S: gracePeriodEndsAt },
         ...backfill.values,
