@@ -905,7 +905,7 @@ describe('stripe-event-worker handler', () => {
     });
 
     it.each([SubscriptionStatus.Active, SubscriptionStatus.PastDue])(
-      'gives 30 days when the row is %s, even though the subscription began as a trial',
+      'gives 30 days when the row is %s',
       async (subscriptionStatus) => {
         // Upgrade ends the trial with trial_end: 'now', and Stripe keeps it.
         const endedAt = Date.UTC(2026, 9, 1) / 1000;
