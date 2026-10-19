@@ -358,8 +358,9 @@ async function updateBillingRecord({
 }
 
 // The grace period a cancellation starts. The row's status when the event is
-// handled says whether the org was paying: a trial, or the grace period the
-// console starts when a trial expires, gets 7 days, and every other status 30.
+// handled says whether the org was paying: a trial, the grace period the
+// console starts when a trial expires, or the cancellation the enforcer ends it
+// with, gets 7 days, and every other status 30.
 // Stripe's own status is always `canceled` here, and trial_end survives an
 // upgrade, so neither can tell.
 //
@@ -383,9 +384,12 @@ async function graceWindow(
     return { canceledAt: stored.canceledAt, gracePeriodEndsAt: stored.gracePeriodEndsAt };
   }
 
+  // With no canceledAt, a `canceled` row is a trial whose grace the enforcer
+  // already ended, met again when its deletion is redriven late.
   const wasTrialing =
     stored?.subscriptionStatus === SubscriptionStatus.Trialing ||
-    stored?.subscriptionStatus === SubscriptionStatus.GracePeriod;
+    stored?.subscriptionStatus === SubscriptionStatus.GracePeriod ||
+    stored?.subscriptionStatus === SubscriptionStatus.Canceled;
   const graceDays = wasTrialing ? TRIAL_GRACE_DAYS : PAID_GRACE_DAYS;
 
   // Dated from when Stripe ended the subscription, so a redelivered event

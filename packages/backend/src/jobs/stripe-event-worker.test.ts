@@ -967,6 +967,27 @@ describe('stripe-event-worker handler', () => {
       expect(graceRead?.args[0].input.ConsistentRead).toBe(true);
     });
 
+    it('gives 7 days when the enforcer has already canceled the expired trial', async () => {
+      // A trial's deletion redriven after its grace ran out finds the row
+      // `canceled`, with the trial's deadline and no canceledAt.
+      const endedAt = Date.UTC(2026, 9, 1) / 1000;
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({ trial_end: endedAt, ended_at: endedAt }),
+      );
+      setupCustomerRetrieve();
+      setupStoredGraceState({
+        subscriptionStatus: SubscriptionStatus.Canceled,
+        gracePeriodEndsAt: '2026-10-08T00:00:00.000Z',
+      });
+
+      await deliver();
+
+      expect(updateInputs()[0].ExpressionAttributeValues).toMatchObject({
+        ':grace': { S: '2026-10-08T00:00:00.000Z' },
+      });
+    });
+
     it('falls back to the subscription’s own org when the customer names none', async () => {
       // The subscription's metadata is the more specific answer, and resolving
       // only from the customer defined a cohort of accounts whose cancellation
