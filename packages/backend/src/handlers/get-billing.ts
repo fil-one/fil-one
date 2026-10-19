@@ -7,7 +7,7 @@ import type { BillingInfo, ErrorResponse } from '@filone/shared';
 import type Stripe from 'stripe';
 import { getStripeClient } from '../lib/stripe-client.ts';
 import {
-  readSubscription,
+  getSubscription,
   updateSubscription,
   type SubscriptionOwner,
 } from '../lib/subscription-store.ts';
@@ -29,7 +29,7 @@ export async function baseHandler(
 
   // 1. Get the org's billing record — every member sees the org's plan and
   // status, which is what riding the org's subscription means.
-  let billingRecord = (await readSubscription(orgId)) ?? null;
+  let billingRecord = (await getSubscription(orgId)) ?? null;
 
   // 2. This is the dashboard's first call and no subscription guard sits in
   // front of it, so it is where an organic signup's trial gets claimed. Without
@@ -39,7 +39,7 @@ export async function baseHandler(
   if (isTrialClaimable(billingRecord ?? undefined)) {
     const outcome = await claimTrialIfEligible(userInfo);
     if (outcome === 'claimed') {
-      billingRecord = (await readSubscription(orgId, { consistentRead: true })) ?? null;
+      billingRecord = (await getSubscription(orgId, { consistentRead: true })) ?? null;
     } else if (outcome === 'legacy-row') {
       // The claim refused because a pre-re-key `CUSTOMER#` row is still
       // standing: this account has billing the org key cannot see. Reporting

@@ -21,7 +21,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 import {
   assertOneRowPerOrg,
-  readSubscription,
+  getSubscription,
   type ScannedSubscription,
   scannedSubscription,
   scanSubscriptions,
@@ -60,7 +60,7 @@ const SET_STATUS = {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('readSubscription', () => {
+describe('getSubscription', () => {
   beforeEach(() => ddbMock.reset());
 
   it('reads the org’s row and nothing else', async () => {
@@ -70,7 +70,7 @@ describe('readSubscription', () => {
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves(row({ pk: `ORG#${ORG_ID}`, sk: 'SUBSCRIPTION', orgId: ORG_ID, userId: USER_ID }));
 
-    const record = await readSubscription(ORG_ID);
+    const record = await getSubscription(ORG_ID);
 
     expect(record?.orgId).toBe(ORG_ID);
     const reads = ddbMock.commandCalls(GetItemCommand);
@@ -81,7 +81,7 @@ describe('readSubscription', () => {
   it('never reads the caller’s legacy key, even when the org has no row', async () => {
     ddbMock.on(GetItemCommand).resolves({});
 
-    expect(await readSubscription(ORG_ID)).toBeUndefined();
+    expect(await getSubscription(ORG_ID)).toBeUndefined();
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(1);
     expect(ddbMock.commandCalls(GetItemCommand, { Key: LEGACY_KEY })).toHaveLength(0);
   });
@@ -89,7 +89,7 @@ describe('readSubscription', () => {
   it('carries the read options through', async () => {
     ddbMock.on(GetItemCommand).resolves({});
 
-    await readSubscription(ORG_ID, { consistentRead: true, projectionExpression: 'pk' });
+    await getSubscription(ORG_ID, { consistentRead: true, projectionExpression: 'pk' });
 
     expect(ddbMock.commandCalls(GetItemCommand)[0].args[0].input).toMatchObject({
       ConsistentRead: true,
