@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { toAccessKeyExpiryInstant } from './access-key-expiry.ts';
+import { AccessKeyValidationError } from './errors.ts';
 
 describe('toAccessKeyExpiryInstant', () => {
   it.each([
@@ -14,6 +15,15 @@ describe('toAccessKeyExpiryInstant', () => {
 
   it('passes a timestamp through unchanged', () => {
     expect(toAccessKeyExpiryInstant('2027-01-01T12:30:00Z')).toBe('2027-01-01T12:30:00Z');
+  });
+
+  it.each([
+    // A 13th month.
+    '2026-13-01',
+    // February has no 30th.
+    '2026-02-30',
+  ])('refuses the well-formed but impossible date %s as a validation error', (date) => {
+    expect(() => toAccessKeyExpiryInstant(date)).toThrow(AccessKeyValidationError);
   });
 
   it.each([null, undefined, ''])('returns null for no expiry (%s)', (value) => {

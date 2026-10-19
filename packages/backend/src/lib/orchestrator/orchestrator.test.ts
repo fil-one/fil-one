@@ -1106,6 +1106,21 @@ describe('issueAccessKey', () => {
     expect(body).toMatchObject({ expiresAt: '2026-10-21T00:00:00.000Z' });
   });
 
+  it('refuses an impossible expiry date as a validation error without calling the storage system', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
+
+    await expect(
+      orchestrator.issueAccessKey(tenantId, {
+        keyName: 'My Key',
+        permissions: ['read'],
+        // Passes the schema's shape check; there is no 13th month.
+        expiresAt: '2026-13-01',
+      }),
+    ).rejects.toBeInstanceOf(AccessKeyValidationError);
+
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
+  });
+
   it('drops bucket-info permissions the contract enum lacks, with a warning', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
