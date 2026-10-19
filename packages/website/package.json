@@ -26,8 +26,8 @@
     "@tanstack/react-router": "^1.170.44",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.5.0",
     "zod": "^4.3.6"
