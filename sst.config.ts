@@ -1597,6 +1597,20 @@ export default $config({
       function: gracePeriodEnforcer.arn,
     });
 
+    // ── E2E account state (test-only) ───────────────────────────────
+    // Puts an E2E test account into a known state: its billing row and its
+    // tenant status in every region (tests/e2e). It can disable any tenant, so
+    // it is never deployed to production, and the handler refuses to run there.
+    if (!isProduction) {
+      createFn('AccountStateTestHelper', {
+        handler: 'packages/backend/src/jobs/account-state-test-helper.handler',
+        link: [billingTable, userInfoTable, orgTable, ...managementApiTokens],
+        environment: orchestratorEnv,
+        timeout: '120 seconds',
+        memory: '256 MB',
+      });
+    }
+
     // ── RAG indexer (cron → orchestrator → per-org worker) ──────────
     // Keeps each RAG-enabled bucket's vector index in sync with S3 contents via
     // object-level ETag diffing. The worker reads per-tenant S3 keys (SSM +

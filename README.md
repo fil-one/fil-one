@@ -197,6 +197,12 @@ The seed values come from [tests/e2e/billing-reset.ts](tests/e2e/billing-reset.t
 
 The reset writes directly to DynamoDB (mirrors the integration-test pattern in [tests/integration/helpers.ts](tests/integration/helpers.ts)). It does **not** sync with Stripe — the local DB is the source of truth for `subscriptionStatus`, and Stripe state is allowed to drift for these test users.
 
+#### Account state helper Lambda
+
+`AccountStateTestHelper` ([packages/backend/src/jobs/account-state-test-helper.ts](packages/backend/src/jobs/account-state-test-helper.ts)) puts an E2E test account into a known state with one call. It takes `{ userId, state }`, where `state` is `paid`, `unpaid`, `trial` or `disabled`. It writes the subscription status and dates to the account's org billing row, then sets the tenant status in every region the org is provisioned in. `disabled` cancels the subscription and disables the tenants, in the order the grace-period enforcer uses. The other states leave the tenants active. The Lambda returns the org id and each region's sync outcome.
+
+It can disable any account's tenants, so it is deployed to every stage except production, and the handler refuses to run when `FILONE_STAGE` is `production`.
+
 #### How auth works
 
 Each role logs in once via [tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) and the session cookies are persisted to `.auth/<role>.json`. Authenticated specs reuse that storage state instead of going through the Auth0 login UI on every test.
