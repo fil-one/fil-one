@@ -4,7 +4,16 @@ on:
   workflow_call:
 
 jobs:
+  # One job per suite. Each suite logs in as its own accounts, so they run at once.
   e2e:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: main
+            projects: --project=full-chromium --project=smoke
+          - suite: multi-org
+            projects: --project=multi-org
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Every Playwright run against staging shares this group with
@@ -56,7 +65,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps
+        run: pnpm exec playwright install --with-deps chromium
 
       # auth.setup.ts re-seeds BillingTable rows for the test users via direct
       # DynamoDB writes (see tests/e2e/billing-reset.ts). The test:e2e script
@@ -69,13 +78,13 @@ jobs:
           aws-region: us-east-2
 
       - name: Run E2E tests
-        run: pnpm test:e2e
+        run: pnpm test:e2e ${{ matrix.projects }}
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: ${{ !cancelled() }}
         with:
-          name: playwright-report-staging-${{ github.run_id }}
+          name: playwright-report-staging-${{ matrix.suite }}-${{ github.run_id }}
           path: playwright-report/
           retention-days: 14
 
@@ -88,13 +97,13 @@ jobs:
           payload: |
             {
               "channel": "filone-alerts",
-              "text": ${{ toJSON(format('E2E tests failed after staging deploy. Commit: {0} by @{1}. Details: {2}/{3}/actions/runs/{4}', github.sha, github.actor, github.server_url, github.repository, github.run_id)) }},
+              "text": ${{ toJSON(format('E2E tests ({5} suite) failed after staging deploy. Commit: {0} by @{1}. Details: {2}/{3}/actions/runs/{4}', github.sha, github.actor, github.server_url, github.repository, github.run_id, matrix.suite)) }},
               "blocks": [
                 {
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": ${{ toJSON(format(':warning: *E2E tests failed after staging deploy* · <{0}/{1}/actions/runs/{2}|Details>', github.server_url, github.repository, github.run_id)) }}
+                    "text": ${{ toJSON(format(':warning: *E2E tests ({3} suite) failed after staging deploy* · <{0}/{1}/actions/runs/{2}|Details>', github.server_url, github.repository, github.run_id, matrix.suite)) }}
                   }
                 },
                 {

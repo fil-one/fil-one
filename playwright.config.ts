@@ -21,7 +21,9 @@ export default defineConfig({
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
   workers: isCI ? 1 : undefined,
-  reporter: 'html',
+  // Ends the run before the CI job's 30-minute timeout, so the report still uploads.
+  globalTimeout: isCI ? 25 * 60_000 : undefined,
+  reporter: [['list'], ['html']],
   use: {
     baseURL,
     ignoreHTTPSErrors: true,
@@ -40,26 +42,12 @@ export default defineConfig({
       testMatch: /buckets\.setup\.ts/,
       dependencies: ['setup'],
     },
-    // `full-*` projects run both smoke and staging-only suites across all browsers.
+    // The staging-only suites. Smoke runs in its own project below.
     {
       name: 'full-chromium',
       testDir: './tests/e2e',
-      testIgnore: /(multi-org|policies)\//,
+      testIgnore: /(multi-org|policies|smoke)\//,
       use: { ...devices['Desktop Chrome'] },
-      dependencies: ['seed-buckets'],
-    },
-    {
-      name: 'full-firefox',
-      testDir: './tests/e2e',
-      testIgnore: /(multi-org|policies)\//,
-      use: { ...devices['Desktop Firefox'] },
-      dependencies: ['seed-buckets'],
-    },
-    {
-      name: 'full-webkit',
-      testDir: './tests/e2e',
-      testIgnore: /(multi-org|policies)\//,
-      use: { ...devices['Desktop Safari'] },
       dependencies: ['seed-buckets'],
     },
     // The multi-org suite, on its own accounts. Serial: the specs share them.
