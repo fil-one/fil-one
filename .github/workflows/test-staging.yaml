@@ -3,14 +3,19 @@ name: 'Tests [staging]'
 on:
   workflow_call:
 
-concurrency:
-  group: staging-tests
-  cancel-in-progress: false
-
 jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Every Playwright run against staging shares this group with
+    # e2e-staging.yaml: the suites reset the same accounts' BillingTable
+    # rows and org membership, so two overlapping runs break each other.
+    # queue: max keeps a waiting post-deploy run from being dropped when a
+    # nightly run joins the group.
+    concurrency:
+      group: e2e-staging
+      cancel-in-progress: false
+      queue: max
     environment: staging
     permissions:
       id-token: write
@@ -105,6 +110,10 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    concurrency:
+      group: integration-staging
+      cancel-in-progress: false
+      queue: max
     environment: staging
     permissions:
       id-token: write
