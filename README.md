@@ -148,7 +148,7 @@ pnpm exec playwright install --with-deps
 | `E2E_UNPAID_EMAIL` / `E2E_UNPAID_PASSWORD` / `E2E_UNPAID_USER_ID` | Unpaid test user                                      |
 | `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`    | Trial test user                                       |
 
-In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`) so the billing-state reset can write to the staging `BillingTable`. The E2E jobs in both workflows share the `e2e-staging` concurrency group, so only one Playwright run touches staging at a time. The nightly run skips itself while a push to main is still going through the deploy pipeline, because that pipeline's post-deploy run tests the same suite.
+In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`) so the billing-state reset can write to the staging `BillingTable`. The E2E jobs in both workflows share the `e2e-staging` concurrency group, so only one Playwright run touches staging at a time. A nightly or manual run of `e2e-staging.yaml` skips itself while a push to main has reached `deploy-staging` and its post-deploy E2E job has not finished, because that job tests the same suite.
 
 #### Seeded buckets per region
 
