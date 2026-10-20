@@ -16,13 +16,13 @@ jobs:
             projects: --project=multi-org
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Every Playwright run against staging shares this group with
-    # e2e-staging.yaml: the suites reset the same accounts' BillingTable
-    # rows and org membership, so two overlapping runs break each other.
+    # Each suite shares its group with the same suite's job in
+    # e2e-staging.yaml: a suite resets its own accounts' BillingTable rows
+    # and org membership, so two overlapping runs of it break each other.
     # queue: max keeps a waiting post-deploy run from being dropped when a
     # nightly run joins the group.
     concurrency:
-      group: e2e-staging
+      group: e2e-staging-${{ matrix.suite }}
       cancel-in-progress: false
       queue: max
     environment: staging

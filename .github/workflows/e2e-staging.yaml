@@ -25,12 +25,13 @@ jobs:
             projects: --project=policies
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Shared with the e2e job in test-staging.yaml, which runs after each
-    # staging deploy. Both suites reset the same accounts on staging, so
-    # runs wait in line. A waiting nightly run must not cancel a post-deploy
-    # run, hence no cancel-in-progress and queue: max.
+    # One group per suite, shared with the same suite's job in
+    # test-staging.yaml, which runs after each staging deploy. A suite resets
+    # its own accounts on staging, so runs of the same suite wait in line and
+    # different suites run at once. A waiting nightly run must not cancel a
+    # post-deploy run, hence no cancel-in-progress and queue: max.
     concurrency:
-      group: e2e-staging
+      group: e2e-staging-${{ matrix.suite }}
       cancel-in-progress: false
       queue: max
     environment: staging
