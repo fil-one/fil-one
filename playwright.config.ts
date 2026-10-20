@@ -42,12 +42,27 @@ export default defineConfig({
       testMatch: /buckets\.setup\.ts/,
       dependencies: ['setup'],
     },
-    // The staging-only suites. Smoke runs in its own project below.
+    // The staging-only suites, per browser. Smoke runs in its own project below.
+    // CI runs Firefox and WebKit only in the nightly run.
     {
       name: 'full-chromium',
       testDir: './tests/e2e',
       testIgnore: /(multi-org|policies|smoke)\//,
       use: { ...devices['Desktop Chrome'] },
+      dependencies: ['seed-buckets'],
+    },
+    {
+      name: 'full-firefox',
+      testDir: './tests/e2e',
+      testIgnore: /(multi-org|policies|smoke)\//,
+      use: { ...devices['Desktop Firefox'] },
+      dependencies: ['seed-buckets'],
+    },
+    {
+      name: 'full-webkit',
+      testDir: './tests/e2e',
+      testIgnore: /(multi-org|policies|smoke)\//,
+      use: { ...devices['Desktop Safari'] },
       dependencies: ['seed-buckets'],
     },
     // The multi-org suite, on its own accounts. Serial: the specs share them.

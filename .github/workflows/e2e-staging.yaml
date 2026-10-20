@@ -11,27 +11,42 @@ on:
         type: string
 
 jobs:
-  # One job per suite. Each suite logs in as its own accounts, so they run at once.
+  # One job per suite and browser. Jobs that share accounts share a lock.
   e2e:
     strategy:
       fail-fast: false
       matrix:
         include:
           - suite: main
+            lock: main
+            browser: chromium
             projects: --project=full-chromium --project=smoke
+          - suite: main-firefox
+            lock: main
+            browser: firefox
+            projects: --project=full-firefox
+          - suite: main-webkit
+            lock: main
+            browser: webkit
+            projects: --project=full-webkit
           - suite: multi-org
+            lock: multi-org
+            browser: chromium
             projects: --project=multi-org
           - suite: policies
+            lock: policies
+            browser: chromium
             projects: --project=policies
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # One group per suite, shared with the same suite's job in
+    # One group per set of accounts, shared with the same suite's job in
     # test-staging.yaml, which runs after each staging deploy. A suite resets
-    # its own accounts on staging, so runs of the same suite wait in line and
+    # its own accounts on staging, so jobs on the same accounts (the main
+    # suite in each browser, and the post-deploy main run) wait in line, and
     # different suites run at once. A waiting nightly run must not cancel a
     # post-deploy run, hence no cancel-in-progress and queue: max.
     concurrency:
-      group: e2e-staging-${{ matrix.suite }}
+      group: e2e-staging-${{ matrix.lock }}
       cancel-in-progress: false
       queue: max
     environment: staging
@@ -91,7 +106,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
 
       # auth.setup.ts re-seeds BillingTable rows for the test users via direct
       # DynamoDB writes (see tests/e2e/billing-reset.ts). The test:e2e script
