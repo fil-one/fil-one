@@ -14,6 +14,8 @@ jobs:
             projects: --project=full-chromium --project=smoke
           - suite: multi-org
             projects: --project=multi-org
+          - suite: policies
+            projects: --project=policies
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Each suite shares its group with the same suite's job in
@@ -51,6 +53,21 @@ jobs:
       E2E_ORG_FRESH_EMAIL: ${{ secrets.E2E_ORG_FRESH_EMAIL }}
       E2E_ORG_FRESH_PASSWORD: ${{ secrets.E2E_ORG_FRESH_PASSWORD }}
       E2E_ORG_FRESH_AUTH0_ID: ${{ secrets.E2E_ORG_FRESH_AUTH0_ID }}
+      E2E_POLICY_OWNER_EMAIL: ${{ secrets.E2E_POLICY_OWNER_EMAIL }}
+      E2E_POLICY_OWNER_PASSWORD: ${{ secrets.E2E_POLICY_OWNER_PASSWORD }}
+      E2E_POLICY_OWNER_USER_ID: ${{ secrets.E2E_POLICY_OWNER_USER_ID }}
+      E2E_POLICY_ADMIN_EMAIL: ${{ secrets.E2E_POLICY_ADMIN_EMAIL }}
+      E2E_POLICY_ADMIN_PASSWORD: ${{ secrets.E2E_POLICY_ADMIN_PASSWORD }}
+      E2E_POLICY_ADMIN_USER_ID: ${{ secrets.E2E_POLICY_ADMIN_USER_ID }}
+      E2E_POLICY_MEMBER_EMAIL: ${{ secrets.E2E_POLICY_MEMBER_EMAIL }}
+      E2E_POLICY_MEMBER_PASSWORD: ${{ secrets.E2E_POLICY_MEMBER_PASSWORD }}
+      E2E_POLICY_MEMBER_USER_ID: ${{ secrets.E2E_POLICY_MEMBER_USER_ID }}
+      E2E_POLICY_READONLY_EMAIL: ${{ secrets.E2E_POLICY_READONLY_EMAIL }}
+      E2E_POLICY_READONLY_PASSWORD: ${{ secrets.E2E_POLICY_READONLY_PASSWORD }}
+      E2E_POLICY_READONLY_USER_ID: ${{ secrets.E2E_POLICY_READONLY_USER_ID }}
+      E2E_POLICY_LEAVER_EMAIL: ${{ secrets.E2E_POLICY_LEAVER_EMAIL }}
+      E2E_POLICY_LEAVER_PASSWORD: ${{ secrets.E2E_POLICY_LEAVER_PASSWORD }}
+      E2E_POLICY_LEAVER_USER_ID: ${{ secrets.E2E_POLICY_LEAVER_USER_ID }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
