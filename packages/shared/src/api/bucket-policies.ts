@@ -167,8 +167,8 @@ export const POLICY_ACTION_LABELS: Record<
     group: 'tags',
   },
   's3:GetBucketAcl': {
-    label: 'Read access control list',
-    description: "View the bucket's ACL",
+    label: 'Read bucket ACL',
+    description: 'View the access grants recorded on the bucket',
     group: 'bucket',
   },
   's3:GetBucketCORS': {

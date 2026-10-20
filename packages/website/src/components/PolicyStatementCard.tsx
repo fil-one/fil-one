@@ -23,9 +23,9 @@ export function getStatementTitle(statement: Pick<PolicyStatement, 'Sid'>, index
 }
 
 /**
- * Badge colour by risk. Reading and listing change nothing, writing can
- * overwrite objects, deleting can lose them, and changing data protection can
- * lift or lock retention.
+ * Badge colour by risk. Reads change nothing, writing objects or their tags
+ * overwrites them, deleting objects can lose them, and changing data
+ * protection can lift or lock retention.
  */
 const ACTION_GROUP_BADGE_COLORS: Record<PolicyActionGroup, BadgeColor> = {
   read: 'blue',
