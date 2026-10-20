@@ -504,6 +504,69 @@ async function tryValidateAccessToken({
   }
 }
 
+/**
+ * Exchange the refresh token for new tokens and attach the identity they carry.
+ * Returns false when there is no refresh token or the exchange fails, so the
+ * caller can fall back to the existing access token.
+ */
+async function tryRefreshTokens({
+  request,
+  refreshToken,
+  forceRefresh,
+  domain,
+  jwks,
+  issuer,
+  clientId,
+}: {
+  request: AuthMiddlewareRequest;
+  refreshToken: string | undefined;
+  forceRefresh: boolean;
+  domain: string;
+  jwks: ReturnType<typeof createRemoteJWKSet>;
+  issuer: string;
+  clientId: string;
+}): Promise<boolean> {
+  if (!refreshToken) {
+    if (forceRefresh) {
+      console.error(
+        '[auth] forceRefresh requested but no refresh token present, falling back to existing access token',
+      );
+    }
+    return false;
+  }
+
+  const tokens = await exchangeRefreshToken(refreshToken, domain);
+  if (!tokens) {
+    if (forceRefresh) {
+      console.error(
+        '[auth] forceRefresh requested but token exchange failed, falling back to existing access token',
+      );
+    }
+    return false;
+  }
+
+  request.internal.newTokens = tokens;
+  request.internal.refreshToken = tokens.refresh_token;
+  const refreshedPayload = decodeJwt(tokens.access_token);
+  const refreshedSub = refreshedPayload.sub!;
+  const refreshedClaims = await extractIdTokenClaims({
+    idToken: tokens.id_token,
+    jwks,
+    clientId,
+    issuer,
+  });
+  request.internal.idTokenClaims = refreshedClaims;
+  await attachIdentity({
+    event: request.event,
+    sub: refreshedSub,
+    email: refreshedClaims.email,
+    emailVerified: refreshedClaims.emailVerified,
+    name: refreshedClaims.name,
+    picture: refreshedClaims.picture,
+  });
+  return true;
+}
+
 export interface AuthMiddlewareOptions {
   /**
    * Require the user's email to be verified (`email_verified` ID token claim).
@@ -640,7 +703,6 @@ async function completeAuthentication(
   return refusal ? withRefreshedCookies(request, refusal) : undefined;
 }
 
-// eslint-disable-next-line max-lines-per-function
 export function authMiddleware(options: AuthMiddlewareOptions = {}) {
   // Mapped once here rather than at each attachIdentity call site, so no token
   // path can turn a deleted account into a 401 and invite a retry.
@@ -690,62 +752,40 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     };
 
     // Step 1: Validate existing access token (skip if forceRefresh — we need fresh claims)
-    if (accessToken && !forceRefresh) {
-      const ok = await tryValidateAccessToken({
+    const accessTokenValid =
+      accessToken &&
+      !forceRefresh &&
+      (await tryValidateAccessToken({
         ...validateArgs,
         accessToken,
         failureLabel: '[auth] Access token verification failed',
-      });
-      if (ok) return completeAuthentication(request, options);
-    }
+      }));
+    if (accessTokenValid) return completeAuthentication(request, options);
 
     // Step 2: Attempt token refresh (always runs when forceRefresh=1)
-    if (refreshToken) {
-      const tokens = await exchangeRefreshToken(refreshToken, domain);
-      if (tokens) {
-        request.internal.newTokens = tokens;
-        request.internal.refreshToken = tokens.refresh_token;
-        const refreshedPayload = decodeJwt(tokens.access_token);
-        const refreshedSub = refreshedPayload.sub!;
-        const refreshedClaims = await extractIdTokenClaims({
-          idToken: tokens.id_token,
-          jwks,
-          clientId: secrets.AUTH0_CLIENT_ID,
-          issuer,
-        });
-        request.internal.idTokenClaims = refreshedClaims;
-        await attachIdentity({
-          event,
-          sub: refreshedSub,
-          email: refreshedClaims.email,
-          emailVerified: refreshedClaims.emailVerified,
-          name: refreshedClaims.name,
-          picture: refreshedClaims.picture,
-        });
-        return completeAuthentication(request, options);
-      }
-      if (forceRefresh) {
-        console.error(
-          '[auth] forceRefresh requested but token exchange failed, falling back to existing access token',
-        );
-      }
-    } else if (forceRefresh) {
-      console.error(
-        '[auth] forceRefresh requested but no refresh token present, falling back to existing access token',
-      );
-    }
+    const refreshed = await tryRefreshTokens({
+      request,
+      refreshToken,
+      forceRefresh,
+      domain,
+      jwks,
+      issuer,
+      clientId: secrets.AUTH0_CLIENT_ID,
+    });
+    if (refreshed) return completeAuthentication(request, options);
 
     // Fallback: when forceRefresh fails (no refresh token or exchange error), try the existing
     // access token rather than returning 401 — this prevents social-provider misconfigurations
     // or transient refresh failures from locking out users in prod.
-    if (forceRefresh && accessToken) {
-      const ok = await tryValidateAccessToken({
+    const fallbackAccessTokenValid =
+      forceRefresh &&
+      accessToken &&
+      (await tryValidateAccessToken({
         ...validateArgs,
         accessToken,
         failureLabel: '[auth] Fallback access token validation failed',
-      });
-      if (ok) return completeAuthentication(request, options);
-    }
+      }));
+    if (fallbackAccessTokenValid) return completeAuthentication(request, options);
 
     console.warn('[auth] Returning 401 — no valid tokens');
     return unauthorizedResponse();
