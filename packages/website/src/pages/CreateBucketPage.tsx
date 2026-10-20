@@ -45,6 +45,22 @@ function getAdvancedSettingsSummary(settings: {
   return `${new Intl.ListFormat('en', { type: 'conjunction' }).format(enabled)} on`;
 }
 
+/** The create request's body, with retention included only when it is turned on. */
+function buildCreateBucketBody(fields: {
+  bucketName: string;
+  region: S3Region;
+  versioning: boolean;
+  lock: boolean;
+  retention?: { mode: RetentionMode; duration: number; durationType: RetentionDurationType };
+}) {
+  const { retention, ...bucket } = fields;
+  return {
+    ...bucket,
+    bucketName: bucket.bucketName.trim(),
+    ...(retention && { retention: { enabled: true as const, ...retention } }),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -86,46 +102,45 @@ export function CreateBucketPage() {
     return true;
   }
 
+  /** Says what is wrong with the name under the field, and puts the cursor back in it. */
+  function refuseName(message: string) {
+    setBucketNameError(message);
+    bucketNameRef.current?.focus();
+  }
+
+  function reportCreateFailure(err: unknown) {
+    // This route answers 409 only for a name someone already holds, and the fix is in the name field
+    if (errorStatusOf(err) === 409) return refuseName('This name is already taken. Try another.');
+    toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
+  }
+
   async function handleSubmit() {
     // The button stays enabled on an empty form, so the refusal is said where the name goes
-    if (!bucketName.trim()) {
-      setBucketNameError('Enter a bucket name.');
-      bucketNameRef.current?.focus();
-      return;
-    }
+    if (!bucketName.trim()) return refuseName('Enter a bucket name.');
 
-    const bucketBody = {
-      bucketName: bucketName.trim(),
-      region,
-      versioning,
-      lock,
-      ...(retentionEnabled
-        ? {
-            retention: {
-              enabled: true as const,
+    const parsed = CreateBucketSchema.safeParse(
+      buildCreateBucketBody({
+        bucketName,
+        region,
+        versioning,
+        lock,
+        retention: retentionEnabled
+          ? {
               mode: retentionMode,
               duration: retentionDuration,
               durationType: retentionDurationType,
-            },
-          }
-        : {}),
-    };
-
-    const parsed = CreateBucketSchema.safeParse(bucketBody);
+            }
+          : undefined,
+      }),
+    );
     if (!parsed.success) {
-      const msg = parsed.error.issues[0].message;
-      // Show bucketName errors inline; everything else as a toast
-      if (parsed.error.issues[0].path[0] === 'bucketName') {
-        setBucketNameError(msg);
-        bucketNameRef.current?.focus();
-      } else {
-        toast.error(msg);
-      }
-      return;
+      const [issue] = parsed.error.issues;
+      // A name the schema refuses is said under the field; anything else, as a toast
+      if (issue.path[0] === 'bucketName') return refuseName(issue.message);
+      return toast.error(issue.message);
     }
 
     setCreating(true);
-
     let createdBucketName: string;
     try {
       const { bucket } = await apiRequest<CreateBucketResponse>('/buckets', {
@@ -136,12 +151,7 @@ export function CreateBucketPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     } catch (err) {
-      // This route answers 409 only for a name someone already holds, and the fix is in the name field
-      if (errorStatusOf(err) === 409) {
-        setBucketNameError('This name is already taken. Try another.');
-      } else {
-        toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
-      }
+      reportCreateFailure(err);
       setCreating(false);
       return;
     }
