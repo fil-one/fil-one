@@ -32,6 +32,8 @@ const ACTION_GROUP_BADGE_COLORS: Record<PolicyActionGroup, BadgeColor> = {
   list: 'blue',
   write: 'amber',
   delete: 'red',
+  tags: 'amber',
+  bucket: 'blue',
   protect: 'red',
 };
 
