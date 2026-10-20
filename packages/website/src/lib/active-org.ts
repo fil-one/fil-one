@@ -331,6 +331,12 @@ export function switchToOrg(
       if (previousOrgId === null) clearActiveOrgId();
       else setActiveOrgId(previousOrgId);
       setSwitching(false, 'rolledBack');
+      // The `/me` started above is about the org the tab never reached. Kept,
+      // it would name that org over this one's pages for `ME_STALE_TIME`, and
+      // the reconcile in `getMe` cannot catch it: it compares against the org
+      // the request was sent under. A reset drops it, and any mounted reader
+      // fetches again under the restored stash.
+      void queryClient.resetQueries({ queryKey: queryKeys.me });
     }
   })();
 
