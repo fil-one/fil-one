@@ -7,8 +7,9 @@ type SwitchProps = {
   onChange: (checked: boolean) => void;
   disabled?: boolean;
   'data-testid'?: string;
-  'aria-describedby'?: string;
 } & AccessibleControlName;
+// No `aria-describedby`: Headless UI writes its own value over it. Describe a switch by
+// putting it in a Headless UI `Field` beside a `Description`, as `ObjectSettingsFields` does.
 
 export function Switch({ checked, onChange, disabled, ...passthroughProps }: SwitchProps) {
   warnIfUnnamedControl('Switch', passthroughProps.id ?? passthroughProps['aria-label']);

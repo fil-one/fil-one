@@ -1,6 +1,8 @@
+import { Description, Field } from '@headlessui/react';
 import type { RetentionDurationType, RetentionMode } from '@filone/shared';
 import { RETENTION_MAX_DAYS, RETENTION_MAX_YEARS } from '@filone/shared';
 
+import { Badge } from './Badge';
 import { Input } from './Input';
 import { Switch } from './Switch';
 import { RadioOption } from './RadioOption';
@@ -74,75 +76,76 @@ export function ObjectSettingsFields({
 
       <div className="overflow-hidden rounded-lg border border-zinc-200">
         {/* Versioning */}
-        <div className="flex items-center justify-between gap-8 px-3.5 py-3">
+        {/* Each row is a Headless UI Field, so its switch is described by the row's Description
+            elements; Headless UI discards an aria-describedby passed to the switch itself */}
+        <Field className="flex items-center justify-between gap-8 px-3.5 py-3">
           <div className="flex flex-col gap-0.5">
-            <span id="versioning-label" className="text-ui font-medium text-zinc-900">
-              Versioning
-            </span>
-            <span id="versioning-desc" className="text-meta leading-relaxed text-zinc-500">
+            <span className="text-ui font-medium text-zinc-900">Versioning</span>
+            <Description as="span" className="text-meta leading-relaxed text-zinc-500">
               Keep multiple versions of objects for backup, recovery, and tracking changes over
               time.
-            </span>
+            </Description>
           </div>
-          <Switch
-            checked={versioning}
-            onChange={handleVersioningChange}
-            aria-label="Versioning"
-            aria-describedby="versioning-desc"
-          />
-        </div>
+          <Switch checked={versioning} onChange={handleVersioningChange} aria-label="Versioning" />
+        </Field>
 
         {/* Object Lock */}
         <div className="border-t border-zinc-200/60">
-          <div
-            aria-disabled={!versioning}
-            className={`flex items-center justify-between gap-8 px-3.5 py-3 ${!versioning ? 'opacity-40' : ''}`}
-          >
+          {/* An unavailable row stays readable: only its switch shows as disabled, and the
+              badge, a Description too, says what unlocks it */}
+          <Field className="flex items-center justify-between gap-8 px-3.5 py-3">
             <div className="flex flex-col gap-0.5">
-              <span id="lock-label" className="text-ui font-medium text-zinc-900">
-                Object Lock
-              </span>
-              <span id="lock-desc" className="text-meta leading-relaxed text-zinc-500">
-                {!versioning && 'Requires versioning. '}
+              <div className="flex items-center gap-2">
+                <span className="text-ui font-medium text-zinc-900">Object Lock</span>
+                {!versioning && (
+                  <Description as="span" className="flex">
+                    <Badge color="grey" size="xs">
+                      Needs Versioning
+                    </Badge>
+                  </Description>
+                )}
+              </div>
+              <Description as="span" className="text-meta leading-relaxed text-zinc-500">
                 Prevent objects from being deleted or overwritten, for regulatory compliance. Can
                 only be turned on at creation.
-              </span>
+              </Description>
             </div>
             <Switch
               checked={lock}
               onChange={handleLockChange}
               disabled={!versioning}
               aria-label="Object Lock"
-              aria-describedby="lock-desc"
             />
-          </div>
+          </Field>
         </div>
 
         {/* Retention */}
         <div className="border-t border-zinc-200/60">
           <div className="flex flex-col px-3.5 py-3">
-            <div
-              aria-disabled={!lock}
-              className={`flex items-center justify-between gap-8 ${!lock ? 'opacity-40' : ''}`}
-            >
+            <Field className="flex items-center justify-between gap-8">
               <div className="flex flex-col gap-0.5">
-                <span id="retention-label" className="text-ui font-medium text-zinc-900">
-                  Retention
-                </span>
-                <span id="retention-desc" className="text-meta leading-relaxed text-zinc-500">
-                  {!lock && 'Requires Object Lock. '}
+                <div className="flex items-center gap-2">
+                  <span className="text-ui font-medium text-zinc-900">Retention</span>
+                  {!lock && (
+                    <Description as="span" className="flex">
+                      <Badge color="grey" size="xs">
+                        Needs Object Lock
+                      </Badge>
+                    </Description>
+                  )}
+                </div>
+                <Description as="span" className="text-meta leading-relaxed text-zinc-500">
                   Apply a default retention period. Objects cannot be deleted until this period
                   expires.
-                </span>
+                </Description>
               </div>
               <Switch
                 checked={retentionEnabled}
                 onChange={onRetentionEnabledChange}
                 disabled={!lock}
                 aria-label="Retention"
-                aria-describedby="retention-desc"
               />
-            </div>
+            </Field>
 
             {/* Retention details (expanded when enabled) */}
             {retentionEnabled && (
@@ -177,7 +180,7 @@ export function ObjectSettingsFields({
                 </fieldset>
 
                 {/* Lock period */}
-                <div className="flex flex-col gap-1.5">
+                <Field className="flex flex-col gap-1.5">
                   <label
                     htmlFor="lock-period-duration"
                     className="text-xs font-medium text-zinc-900"
@@ -196,7 +199,6 @@ export function ObjectSettingsFields({
                         const val = parseInt(v, 10);
                         if (!isNaN(val)) onRetentionDurationChange(val);
                       }}
-                      aria-describedby="lock-period-hint"
                       className="w-20"
                     />
                     <label htmlFor="lock-period-unit" className="sr-only">
@@ -213,10 +215,10 @@ export function ObjectSettingsFields({
                       </Select>
                     </div>
                   </div>
-                  <span id="lock-period-hint" className="text-meta text-zinc-500">
+                  <Description as="span" className="text-meta text-zinc-500">
                     Objects cannot be deleted until this period expires.
-                  </span>
-                </div>
+                  </Description>
+                </Field>
               </div>
             )}
           </div>
