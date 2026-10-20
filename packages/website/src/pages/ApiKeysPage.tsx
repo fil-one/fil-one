@@ -286,7 +286,12 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
         <label htmlFor="connection-region" className="text-sm font-medium text-zinc-700">
           Region
         </label>
-        <RegionSelect id="connection-region" value={region} onChange={setRegion} />
+        <RegionSelect
+          id="connection-region"
+          value={region}
+          onChange={setRegion}
+          className="max-w-72"
+        />
       </div>
 
       {/* Endpoint + Region card */}

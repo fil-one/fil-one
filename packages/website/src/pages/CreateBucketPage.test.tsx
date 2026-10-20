@@ -145,6 +145,37 @@ describe('CreateBucketPage — a name that is already taken', () => {
     expect(screen.getByText('This name is already taken. Try another.')).toBeInTheDocument();
   });
 
+  it('shows the taken-name error again when the name is edited back to the taken one', async () => {
+    mockApiRequest.mockRejectedValue(takenNameError);
+    renderPage();
+    const field = screen.getByLabelText('Bucket name');
+    fireEvent.change(field, { target: { value: BUCKET } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+    await screen.findByText('This name is already taken. Try another.');
+    fireEvent.change(field, { target: { value: 'any-other-name' } });
+
+    fireEvent.change(field, { target: { value: BUCKET } });
+
+    expect(screen.getByText('This name is already taken. Try another.')).toBeInTheDocument();
+  });
+
+  // Names are unique within a region, so a name taken in one may be free in another.
+  it('clears the taken-name error when another region is picked', async () => {
+    mockApiRequest.mockRejectedValue(takenNameError);
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+    await screen.findByText('This name is already taken. Try another.');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Region/ }));
+    const otherRegion = (await screen.findAllByRole('option')).find(
+      (option) => option.getAttribute('aria-selected') === 'false',
+    );
+    fireEvent.click(otherRegion!);
+
+    expect(screen.queryByText('This name is already taken. Try another.')).not.toBeInTheDocument();
+  });
+
   it('clears the taken-name error once the name is edited', async () => {
     mockApiRequest.mockRejectedValue(takenNameError);
     renderPage();
@@ -159,13 +190,63 @@ describe('CreateBucketPage — a name that is already taken', () => {
 });
 
 describe('CreateBucketPage — an empty name', () => {
-  it('asks for a name in the field and sends nothing when Create bucket is pressed', () => {
+  it('asks for a name under the field when Create bucket is pressed', () => {
     renderPage();
 
     fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
 
     expect(screen.getByText('Enter a bucket name.')).toBeInTheDocument();
+  });
+
+  it('puts the cursor in the name field when Create bucket is pressed', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
     expect(screen.getByLabelText('Bucket name')).toHaveFocus();
+  });
+
+  it('sends no create request when Create bucket is pressed', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
     expect(mockApiRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('CreateBucketPage — a name the format check refuses', () => {
+  it('puts the cursor back in the name field when Create bucket is pressed', () => {
+    renderPage();
+    // Two characters, under the three the format allows.
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: 'ab' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
+    expect(screen.getByLabelText('Bucket name')).toHaveFocus();
+  });
+});
+
+describe('CreateBucketPage — while the bucket is being created', () => {
+  beforeEach(() => {
+    mockApiRequest.mockReturnValue(new Promise(() => {}));
+  });
+
+  it('keeps the name read-only', () => {
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
+    expect(screen.getByLabelText('Bucket name')).toHaveAttribute('readonly');
+  });
+
+  it('disables the region picker', () => {
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
+    expect(screen.getByRole('button', { name: /^Region/ })).toBeDisabled();
   });
 });

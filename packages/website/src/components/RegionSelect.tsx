@@ -14,6 +14,12 @@ type RegionSelectProps = {
   disabled?: boolean;
   /** Matches `Input`'s sizes, so the field lines up with the inputs beside it. */
   size?: Exclude<InputSize, 'sm'>;
+  /**
+   * Width for a picker set in a row beside other content. The default fills its container,
+   * as a form field does; Headless UI renders the listbox with no wrapper element, so the
+   * button itself is what the row lays out.
+   */
+  className?: string;
 };
 
 // The same heights and insets as `Select`, which this replaces for regions.
@@ -47,7 +53,14 @@ function RegionLine({ region, isCodeInColumn }: { region: S3Region; isCodeInColu
  * A listbox rather than a native select, because an `<option>` can hold only
  * text and each region is shown with its flag, as in the buckets table.
  */
-export function RegionSelect({ id, value, onChange, disabled, size = 'md' }: RegionSelectProps) {
+export function RegionSelect({
+  id,
+  value,
+  onChange,
+  disabled,
+  size = 'md',
+  className,
+}: RegionSelectProps) {
   const regions = useAvailableRegions();
   const onlyOne = regions.length === 1;
 
@@ -58,7 +71,7 @@ export function RegionSelect({ id, value, onChange, disabled, size = 'md' }: Reg
       <ListboxButton
         id={id}
         aria-label={`Region, ${formatRegion(value)}`}
-        className={`group relative flex w-full items-center gap-2 rounded-md border border-(--input-border-color) bg-white text-left text-sm ${SIZES[size].control} text-(--color-text-base) transition-colors duration-150 focus-visible:brand-outline data-disabled:cursor-not-allowed data-disabled:bg-zinc-100 data-disabled:text-zinc-400`}
+        className={`group relative flex w-full items-center gap-2 rounded-md border border-(--input-border-color) bg-white text-left text-sm ${SIZES[size].control} text-(--color-text-base) transition-colors duration-150 focus-visible:brand-outline data-disabled:cursor-not-allowed data-disabled:bg-zinc-100 data-disabled:text-zinc-400 ${className ?? ''}`}
       >
         <RegionLine region={value} isCodeInColumn={false} />
         <span

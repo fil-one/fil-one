@@ -21,15 +21,20 @@ const OBJECT_SKELETON_COLUMNS: SkeletonColumn[] = [
  */
 function getEmptyBucketKeyAction({
   accessKeyCount,
+  accessKeysFailed,
   mayCreateKeys,
   onAddKeyOpenChange,
   onShowKeys,
 }: {
   accessKeyCount: number;
+  accessKeysFailed: boolean;
   mayCreateKeys: boolean;
   onAddKeyOpenChange: (open: boolean) => void;
   onShowKeys: () => void;
 }): EmptyBucketKeyAction | undefined {
+  // A list that failed to load says nothing about whether keys exist, and offering a new key
+  // then could mint a duplicate; the Keys tab shows the failure.
+  if (accessKeysFailed) return undefined;
   // Keys exist only for a caller who may list them, which is also what shows the Keys tab
   if (accessKeyCount > 0) return { kind: 'view', onView: onShowKeys };
   if (mayCreateKeys) return { kind: 'create', onCreate: () => onAddKeyOpenChange(true) };
@@ -48,6 +53,8 @@ export function ObjectsPanel({
   mayDelete,
   accessKeyCount,
   accessKeysLoading,
+  accessKeysFailed,
+  permissionsLoading,
   mayCreateKeys,
   onAddKeyOpenChange,
   onShowKeys,
@@ -65,15 +72,19 @@ export function ObjectsPanel({
   mayDelete: boolean;
   accessKeyCount: number;
   accessKeysLoading: boolean;
+  accessKeysFailed: boolean;
+  permissionsLoading: boolean;
   mayCreateKeys: boolean;
   onAddKeyOpenChange: (open: boolean) => void;
   onShowKeys: () => void;
   listingTruncated: boolean;
   totalObjectCount: number | undefined;
 }) {
-  // An empty bucket's next steps depend on its keys, so its empty state waits for the key
-  // list too and appears once, in its final form; a bucket with objects does not wait.
-  if (loading || (browser.versions.length === 0 && accessKeysLoading)) {
+  // An empty bucket's next steps depend on its keys and the caller's permissions, so its
+  // empty state waits for both and appears once, in its final form; a bucket with objects
+  // does not wait.
+  const isEmptyStateUnsettled = accessKeysLoading || permissionsLoading;
+  if (loading || (browser.versions.length === 0 && isEmptyStateUnsettled)) {
     return <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />;
   }
 
@@ -85,6 +96,7 @@ export function ObjectsPanel({
       canUpload={mayUpload}
       keyAction={getEmptyBucketKeyAction({
         accessKeyCount,
+        accessKeysFailed,
         mayCreateKeys,
         onAddKeyOpenChange,
         onShowKeys,

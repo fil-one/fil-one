@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
 import { isRegion, REGIONS, type Region } from './regions.util.ts';
 
-// Bucket names are globally unique across regions and rejected with 409 if
-// taken, so each caller mints a fresh name. We do not delete buckets afterward
+// Bucket names are unique within a region and rejected with 409 if taken
+// there, so each caller mints a fresh name. We do not delete buckets afterward
 // because these specs have no teardown step yet — deletion itself is wired for
 // every region (see packages/backend/src/handlers/delete-bucket.ts), but a
 // bucket must be emptied before it can be deleted.

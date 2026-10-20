@@ -89,16 +89,21 @@ export function CreateBucketPage() {
 
   // Validation
   const [bucketNameError, setBucketNameError] = useState<string | null>(null);
-  // The name the server last refused as taken. The local format check accepts it, so
-  // without this a blur or an edit back to it would clear the refusal.
-  const [takenName, setTakenName] = useState<string | null>(null);
+  // The name the server last refused as taken, and where: names are unique within a region,
+  // so the same name may be free in another. The local format check accepts a taken name,
+  // so without this a blur or an edit back to it would clear the refusal.
+  const [takenBucket, setTakenBucket] = useState<{ name: string; region: S3Region } | null>(null);
 
   // Submit state
   const [creating, setCreating] = useState(false);
   const bucketNameRef = useRef<HTMLElement>(null);
 
-  function validateBucketName(value: string) {
-    if (value.trim() === takenName) {
+  function isTakenName(value: string, forRegion: S3Region = region) {
+    return value.trim() === takenBucket?.name && forRegion === takenBucket.region;
+  }
+
+  function validateBucketName(value: string, forRegion: S3Region = region) {
+    if (isTakenName(value, forRegion)) {
       setBucketNameError(TAKEN_NAME_MESSAGE);
       return false;
     }
@@ -111,6 +116,12 @@ export function CreateBucketPage() {
     return true;
   }
 
+  /** A name taken in one region may be free in the next, so the name is checked again. */
+  function handleRegionChange(next: S3Region) {
+    setRegion(next);
+    if (bucketNameError) validateBucketName(bucketName, next);
+  }
+
   /** Says what is wrong with the name under the field, and puts the cursor back in it. */
   function refuseName(message: string) {
     setBucketNameError(message);
@@ -120,7 +131,7 @@ export function CreateBucketPage() {
   function reportCreateFailure(err: unknown) {
     // This route answers 409 only for a name someone already holds, and the fix is in the name field
     if (errorStatusOf(err) === 409) {
-      setTakenName(bucketName.trim());
+      setTakenBucket({ name: bucketName.trim(), region });
       return refuseName(TAKEN_NAME_MESSAGE);
     }
     toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
@@ -206,7 +217,7 @@ export function CreateBucketPage() {
             <FormField
               htmlFor="bucket-name"
               label="Bucket name"
-              description="3-63 lowercase letters, numbers, or hyphens. Must be globally unique."
+              description="3-63 lowercase letters, numbers, or hyphens. Must be unique in this region."
               error={bucketNameError ?? undefined}
             >
               <Input
@@ -216,7 +227,8 @@ export function CreateBucketPage() {
                 invalid={!!bucketNameError}
                 onChange={(v) => {
                   setBucketName(v);
-                  if (bucketNameError) validateBucketName(v);
+                  // Re-checked while an error shows, and on typing back to a taken name
+                  if (bucketNameError || isTakenName(v)) validateBucketName(v);
                 }}
                 onBlur={() => {
                   if (bucketName.trim()) validateBucketName(bucketName);
@@ -224,6 +236,8 @@ export function CreateBucketPage() {
                 placeholder="my-storage-bucket"
                 autoComplete="off"
                 inputSize="lg"
+                // Fixed while the request is out, so a refusal that comes back names the name sent
+                readOnly={creating}
               />
             </FormField>
 
@@ -233,7 +247,14 @@ export function CreateBucketPage() {
               label="Region"
               description={availableRegions.length === 1 ? 'More regions coming soon.' : undefined}
             >
-              <RegionSelect id="bucket-region" value={region} onChange={setRegion} size="lg" />
+              <RegionSelect
+                id="bucket-region"
+                value={region}
+                onChange={handleRegionChange}
+                size="lg"
+                // The page opens the new bucket in this region once the request answers
+                disabled={creating}
+              />
             </FormField>
 
             {/* Advanced settings */}

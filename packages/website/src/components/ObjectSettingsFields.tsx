@@ -95,11 +95,12 @@ export function ObjectSettingsFields({
               badge, a Description too, says what unlocks it */}
           <Field className="flex items-center justify-between gap-8 px-3.5 py-3">
             <div className="flex flex-col gap-0.5">
-              <div className="flex items-center gap-2">
+              {/* A badge that does not fit drops below the title rather than breaking across lines */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="text-ui font-medium text-zinc-900">Object Lock</span>
                 {!versioning && (
                   <Description as="span" className="flex">
-                    <Badge color="grey" size="xs">
+                    <Badge color="grey" size="xs" className="whitespace-nowrap">
                       Needs Versioning
                     </Badge>
                     {/* Ends the sentence for a screen reader, which reads the badge and the description as one run */}
@@ -126,11 +127,11 @@ export function ObjectSettingsFields({
           <div className="flex flex-col px-3.5 py-3">
             <Field className="flex items-center justify-between gap-8">
               <div className="flex flex-col gap-0.5">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="text-ui font-medium text-zinc-900">Retention</span>
                   {!lock && (
                     <Description as="span" className="flex">
-                      <Badge color="grey" size="xs">
+                      <Badge color="grey" size="xs" className="whitespace-nowrap">
                         Needs Object Lock
                       </Badge>
                       {/* Ends the sentence for a screen reader, which reads the badge and the description as one run */}

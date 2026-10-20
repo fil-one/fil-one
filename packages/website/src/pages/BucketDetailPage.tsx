@@ -31,7 +31,7 @@ import type {
 import { supportsIamMethods } from '../lib/access-model.js';
 import { apiRequest } from '../lib/api.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
-import { useHasPermission } from '../lib/use-permissions.js';
+import { useHasPermission, usePermissions } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
@@ -346,6 +346,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const mayDelete = useHasPermission('objects.delete');
   const { mayList: mayListKeys } = useKeyActionScope();
   const mayCreateKeys = useHasPermission('keys.create');
+  const { isPending: permissionsLoading } = usePermissions();
   // The policy tab exists where a policy can: a region serving the `iam`
   // access model, for a role that may edit one. Reading takes the same
   // permission as editing, so the tab is absent rather than read-only.
@@ -509,6 +510,8 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               mayDelete={mayDelete}
               accessKeyCount={accessKeys.length}
               accessKeysLoading={accessKeysLoading}
+              accessKeysFailed={accessKeysQuery.isError}
+              permissionsLoading={permissionsLoading}
               mayCreateKeys={mayCreateKeys}
               onAddKeyOpenChange={setAddKeyOpen}
               onShowKeys={tabs.showKeysTab}

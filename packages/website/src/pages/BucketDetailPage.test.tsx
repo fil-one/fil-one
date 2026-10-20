@@ -33,12 +33,15 @@ vi.mock('../lib/api.js', async () => ({
   // Each row's Share control reads the plan; a never-settling read leaves it at
   // its "not known yet" state, which is not what these tests are about.
   getBilling: () => mockGetBilling(),
+  // Permissions come seeded; only the test about loading them leaves /me to this.
+  getMe: () => mockGetMe(),
   // The policy client reads the ETag header, so it sends through sendApiRequest
   // and gets a Response back.
   sendApiRequest: (...a: unknown[]) => mockSendApiRequest(...a),
 }));
 
 const mockGetBilling = vi.fn(() => new Promise(() => {}));
+const mockGetMe = vi.fn(() => new Promise(() => {}));
 
 // One object by default, so the table renders a row with its per-row controls
 // and the header actions the empty bucket would otherwise hide from everybody.
@@ -146,9 +149,12 @@ function respond(path: string) {
   });
 }
 
-function renderPage(role: OrgRole = OrgRole.Owner) {
+function renderPage(
+  role: OrgRole = OrgRole.Owner,
+  { arePermissionsKnown = true }: { arePermissionsKnown?: boolean } = {},
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, role);
+  if (arePermissionsKnown) seedPermissions(client, role);
   const view = render(
     <QueryClientProvider client={client}>
       <ToastProvider>
@@ -359,13 +365,45 @@ describe('BucketDetailPage — an empty bucket', () => {
     expect(await screen.findByTestId('add-bucket-key-modal')).toBeInTheDocument();
   });
 
-  it('switches to the API Keys tab, opening no new key, when keys reach the bucket already', async () => {
+  it('switches to the API Keys tab when keys reach the bucket already', async () => {
     renderPage(OrgRole.Owner);
 
     fireEvent.click(await screen.findByRole('button', { name: 'View API keys' }));
 
     expect(screen.getByTestId('bucket-keys-tab')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens no Add key modal from View API keys', async () => {
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View API keys' }));
+
     expect(screen.queryByTestId('add-bucket-key-modal')).not.toBeInTheDocument();
+  });
+
+  // A failed list says nothing about whether keys exist, and a new key could duplicate one.
+  it('offers no key step when the key list fails to load', async () => {
+    mockApiRequest.mockImplementation((path: string) =>
+      path.startsWith('/access-keys')
+        ? Promise.reject(Object.assign(new Error('Service unavailable'), { status: 503 }))
+        : respond(path),
+    );
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('This bucket is empty')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /API key/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps the loading placeholder, not the empty state, until permissions load', async () => {
+    mockGetMe.mockReturnValue(new Promise(() => {}));
+    renderPage(OrgRole.Owner, { arePermissionsKnown: false });
+
+    // The listing has answered once the Objects tab shows its count.
+    expect(
+      await within(screen.getByTestId('bucket-objects-tab')).findByText('0'),
+    ).toBeInTheDocument();
+
+    expect(screen.getByLabelText('Loading objects')).toBeInTheDocument();
   });
 
   // The button sits in the Objects panel, which the switch replaces.

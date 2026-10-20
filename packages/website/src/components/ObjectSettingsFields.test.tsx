@@ -125,21 +125,32 @@ describe('ObjectSettingsFields', () => {
     expect(screen.getByText('Years')).toBeInTheDocument();
   });
 
-  it.each([
+  const UNAVAILABLE_SETTINGS = [
     { setting: 'Object Lock', requirement: 'Needs Versioning', props: { versioning: false } },
     {
       setting: 'Retention',
       requirement: 'Needs Object Lock',
       props: { versioning: true, lock: false },
     },
-  ])(
+  ];
+
+  it.each(UNAVAILABLE_SETTINGS)(
+    'disables the $setting switch while it shows $requirement',
+    ({ setting, props }) => {
+      renderWithDefaults(props);
+
+      expect(screen.getByRole('switch', { name: setting })).toBeDisabled();
+    },
+  );
+
+  it.each(UNAVAILABLE_SETTINGS)(
     'tells a screen reader why $setting is disabled: $requirement',
     ({ setting, requirement, props }) => {
       renderWithDefaults(props);
 
-      const toggle = screen.getByRole('switch', { name: setting });
-      expect(toggle).toBeDisabled();
-      expect(toggle).toHaveAccessibleDescription(expect.stringContaining(`${requirement}.`));
+      expect(screen.getByRole('switch', { name: setting })).toHaveAccessibleDescription(
+        expect.stringContaining(`${requirement}.`),
+      );
     },
   );
 
