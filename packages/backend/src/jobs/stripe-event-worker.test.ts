@@ -200,10 +200,6 @@ const MOCK_AURORA_TENANT_ID = 'aurora-tenant-123';
 // metadata, which is the only place the webhook can learn it.
 const ORG_KEY = { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } };
 
-// The pre-re-key row, which is where a customer created before
-// `metadata.orgId` existed still names its org.
-const LEGACY_KEY = { pk: { S: `CUSTOMER#${MOCK_USER_ID}` }, sk: { S: 'SUBSCRIPTION' } };
-
 function updateInputs() {
   return ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input);
 }
@@ -604,34 +600,6 @@ describe('stripe-event-worker handler', () => {
           }),
         }),
       );
-    });
-
-    it('resolves the org from the billing row when the customer metadata carries none', async () => {
-      // Nothing stamped metadata.orgId onto customers created before it, and
-      // the re-key made no Stripe calls — so without this fallback every
-      // metadata write by the daily usage worker fails and ends up in the DLQ.
-      setupStripeEvent(
-        'customer.updated',
-        mockCustomerObject({ metadata: { userId: MOCK_USER_ID } }),
-      );
-      ddbMock
-        .on(GetItemCommand, { Key: LEGACY_KEY })
-        .resolves({ Item: marshall({ orgId: MOCK_ORG_ID }) });
-
-      await deliver();
-
-      expect(updatedKeys()).toEqual([ORG_KEY]);
-    });
-
-    it('does not read the billing row when the metadata already names the org', async () => {
-      setupStripeEvent('customer.updated', mockCustomerObject());
-
-      await deliver();
-
-      const legacyReads = ddbMock
-        .commandCalls(GetItemCommand)
-        .filter((call) => call.args[0].input.Key?.pk?.S === `CUSTOMER#${MOCK_USER_ID}`);
-      expect(legacyReads).toHaveLength(0);
     });
 
     it('acknowledges a customer no source can resolve to an org', async () => {

@@ -166,8 +166,8 @@ describe('account-deletion-worker', () => {
     });
   });
 
-  // The teardown falls back to the members' legacy billing rows when the org row
-  // names no customer, so it needs the same census the Auth0 step ran on.
+  // The teardown takes the same census the Auth0 step ran on, though it reads
+  // only the org row today.
   it('passes the resolved members to the Stripe teardown', async () => {
     await handler({ orgId: ORG });
 

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
-import { ApiErrorCode, PlanId, SubscriptionStatus } from '@filone/shared';
+import { PlanId, SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -1189,20 +1189,6 @@ describe('get-billing baseHandler', () => {
       },
     );
 
-    it('says billing is unreadable when a pre-re-key CUSTOMER# row is still standing', async () => {
-      // The backfill missed this account, so its billing lives on a key nothing
-      // here reads. "No plan" would invite the user to buy a second
-      // subscription beside the one still billing them.
-      ddbMock.on(GetItemCommand).resolves({});
-      mockClaimTrialIfEligible.mockResolvedValue('legacy-row');
-
-      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
-
-      expect(result.statusCode).toBe(503);
-      expect(JSON.parse(String(result.body)).code).toBe(ApiErrorCode.SUBSCRIPTION_INACTIVE);
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
     it('leaves a record that already holds a subscription alone', async () => {
       ddbMock
         .on(GetItemCommand)
@@ -1267,8 +1253,8 @@ describe('get-billing baseHandler', () => {
   });
 
   it('reports inactive when the caller has only a legacy row', async () => {
-    // A `CUSTOMER#` row the cleanup step has not deleted yet is not
-    // entitlement: nothing reads it, so the org holds no subscription.
+    // A `CUSTOMER#` row the cleanup step missed is not entitlement: nothing
+    // reads it, so the org holds no subscription.
     ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({});
     ddbMock
       .on(GetItemCommand, { Key: LEGACY_KEY })
