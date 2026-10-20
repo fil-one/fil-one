@@ -8,13 +8,13 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1149.0",
-    "@aws-sdk/client-lambda": "^3.1149.0",
-    "@aws-sdk/client-s3": "^3.1149.0",
-    "@aws-sdk/client-sqs": "^3.1149.0",
-    "@aws-sdk/client-ssm": "^3.1149.0",
-    "@aws-sdk/s3-presigned-post": "^3.1149.0",
-    "@aws-sdk/s3-request-presigner": "^3.1149.0",
+    "@aws-sdk/client-dynamodb": "^3.1152.0",
+    "@aws-sdk/client-lambda": "^3.1152.0",
+    "@aws-sdk/client-s3": "^3.1152.0",
+    "@aws-sdk/client-sqs": "^3.1152.0",
+    "@aws-sdk/client-ssm": "^3.1152.0",
+    "@aws-sdk/s3-presigned-post": "^3.1152.0",
+    "@aws-sdk/s3-request-presigner": "^3.1152.0",
     "@aws-sdk/util-dynamodb": "^3.996.9",
     "@filone/aurora-backoffice-client": "workspace:*",
     "@filone/aurora-portal-client": "workspace:*",
@@ -24,7 +24,7 @@
     "@middy/core": "^7.9.2",
     "@middy/http-header-normalizer": "^7.9.2",
     "disposable-domains": "^2.0.1",
-    "jose": "^6.2.2",
+    "jose": "^6.2.12",
     "p-map": "^7.1.1",
     "p-retry": "^8.0.0",
     "psl": "^1.15.0",
@@ -36,9 +36,9 @@
   "devDependencies": {
     "@types/aws-lambda": "^8.10.161",
     "@types/validator": "^13.15.10",
-    "@vitest/coverage-v8": "^5.0.3",
+    "@vitest/coverage-v8": "^5.0.5",
     "aws-sdk-client-mock": "^4.1.0",
     "typescript": "^6.0.3",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.5"
   }
 }

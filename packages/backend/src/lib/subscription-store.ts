@@ -86,7 +86,7 @@ const dynamo = getDynamoClient();
  * parameter nothing reads would suggest otherwise; the writers take the owner
  * because they stamp it on the row.
  */
-export async function readSubscription(
+export async function getSubscription(
   orgId: string,
   options: ReadOptions = {},
 ): Promise<SubscriptionRecord | undefined> {
@@ -105,6 +105,9 @@ export async function readSubscription(
 
 /** The attributes a writer reads to check the row still names the objects its event is about. */
 export const BILLING_IDENTITY_PROJECTION = 'stripeCustomerId, subscriptionId';
+
+/** The attributes a cancellation reads to size the grace period it starts. */
+export const GRACE_STATE_PROJECTION = 'subscriptionStatus, canceledAt, gracePeriodEndsAt';
 
 /**
  * Whether a pre-re-key `CUSTOMER#` row is still standing for this user.

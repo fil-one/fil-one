@@ -8,7 +8,7 @@ import type {
 import { ApiErrorCode, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
-import { readSubscription, updateSubscription } from '../lib/subscription-store.ts';
+import { getSubscription, updateSubscription } from '../lib/subscription-store.ts';
 import { claimTrialIfEligible, isTrialClaimable } from '../lib/trial-claim.ts';
 import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -46,7 +46,7 @@ async function runSubscriptionGuard(
   // otherwise a stale read could falsely block an entitled user. The row is the
   // org's, so a member rides the org's subscription rather than looking for one
   // of their own.
-  const record = await readSubscription(orgId, { consistentRead: true });
+  const record = await getSubscription(orgId, { consistentRead: true });
 
   // No record, or the customer-mapping-only row an abandoned payment modal
   // leaves behind: both leave the trial claim open, and the claim upgrades the

@@ -1,7 +1,7 @@
 import { SubscriptionStatus } from '@filone/shared';
 import { isOrgDeleting, OrgDeletingError } from './org-profile.ts';
 import { getStripeClient, getBillingSecrets } from './stripe-client.ts';
-import { readSubscription, updateSubscription } from './subscription-store.ts';
+import { getSubscription, updateSubscription } from './subscription-store.ts';
 import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.ts';
 
 export interface CreateBillingTrialParams {
@@ -36,7 +36,7 @@ export async function createBillingTrial({
   // abandoned card form. The trial is written onto that row instead, and its
   // Stripe customer is reused rather than a second one created for the same org
   // (two customers for one org is two meters billing the same usage).
-  const existing = await readSubscription(orgId, {
+  const existing = await getSubscription(orgId, {
     consistentRead: true,
     projectionExpression: 'subscriptionStatus, subscriptionId, stripeCustomerId',
   });

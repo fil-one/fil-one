@@ -7,7 +7,7 @@ import type { DeletionMember } from './deletion-record.ts';
 import { reportOrgUsage } from './org-usage-report.ts';
 import { syncTenantStatusInProvisionedRegions } from './region-helpers.ts';
 import { getStripeClient, isStripeResourceMissing } from './stripe-client.ts';
-import { readSubscription, SubscriptionKeys } from './subscription-store.ts';
+import { getSubscription, SubscriptionKeys } from './subscription-store.ts';
 import type { SubscriptionRecord } from './dynamo-records.ts';
 
 const LOG = '[deletion-stripe]';
@@ -49,7 +49,7 @@ export async function tearDownStripe(orgId: string, members: DeletionMember[]): 
 
   // Consistent: the row may have been written moments earlier, and a stale read
   // that missed the customer would leave a live subscription behind.
-  const subscription = await readSubscription(orgId, {
+  const subscription = await getSubscription(orgId, {
     consistentRead: true,
     projectionExpression: TEARDOWN_PROJECTION,
   });
