@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { CloudArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
+import { DatabaseIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
@@ -149,12 +149,13 @@ function EmptyBucketState({
   return (
     <div className="mt-4">
       <EmptyStateCard
-        icon={CloudArrowUpIcon}
-        title="No objects yet"
+        // The sidebar's Buckets icon: it names the thing, and sits evenly over both next steps
+        icon={DatabaseIcon}
+        title="This bucket is empty"
         description={getEmptyBucketDescription(canUpload, keyAction)}
       >
-        {/* Text-only: the cloud tile directly above already speaks "upload",
-            so a glyph on the button here would just repeat it. */}
+        {/* Text-only buttons: the bucket icon above sets the scene, and two labelled
+            actions side by side read more evenly without glyphs of their own. */}
         <div className="flex flex-wrap justify-center gap-2">
           {canUpload && (
             <Button

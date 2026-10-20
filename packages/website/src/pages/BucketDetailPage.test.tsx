@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   OrgRole,
@@ -368,10 +368,26 @@ describe('BucketDetailPage — an empty bucket', () => {
     expect(screen.getByTestId('bucket-keys-tab')).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('keeps the loading placeholder, not the empty state, until the key list answers', async () => {
+    mockApiRequest.mockImplementation((path: string) =>
+      // A key list that never answers.
+      path.startsWith('/access-keys') ? new Promise(() => {}) : respond(path),
+    );
+    renderPage(OrgRole.Owner);
+
+    // The listing has answered once the Objects tab shows its count.
+    expect(
+      await within(screen.getByTestId('bucket-objects-tab')).findByText('0'),
+    ).toBeInTheDocument();
+
+    expect(screen.getByLabelText('Loading objects')).toBeInTheDocument();
+    expect(screen.queryByText('This bucket is empty')).not.toBeInTheDocument();
+  });
+
   it('offers no Create API key to a role without keys.create', async () => {
     renderPage(OrgRole.ReadOnly);
 
-    expect(await screen.findByText('No objects yet')).toBeInTheDocument();
+    expect(await screen.findByText('This bucket is empty')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create API key' })).not.toBeInTheDocument();
   });
 

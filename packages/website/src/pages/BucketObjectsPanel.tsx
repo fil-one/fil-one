@@ -21,22 +21,19 @@ const KEYS_TAB_INDEX = 1;
 
 /**
  * The key step an empty bucket offers: the keys that reach it already, when there are
- * any, else a new one. Nothing while the key list loads, so the step does not flip.
+ * any, else a new one.
  */
 function getEmptyBucketKeyAction({
   accessKeyCount,
-  accessKeysLoading,
   mayCreateKeys,
   onAddKeyOpenChange,
   onTabChange,
 }: {
   accessKeyCount: number;
-  accessKeysLoading: boolean;
   mayCreateKeys: boolean;
   onAddKeyOpenChange: (open: boolean) => void;
   onTabChange: (index: number) => void;
 }): EmptyBucketKeyAction | undefined {
-  if (accessKeysLoading) return undefined;
   if (accessKeyCount > 0) return { kind: 'view', onView: () => onTabChange(KEYS_TAB_INDEX) };
   if (mayCreateKeys) return { kind: 'create', onCreate: () => onAddKeyOpenChange(true) };
   return undefined;
@@ -77,7 +74,9 @@ export function ObjectsPanel({
   listingTruncated: boolean;
   totalObjectCount: number | undefined;
 }) {
-  if (loading) {
+  // An empty bucket's next steps depend on its keys, so its empty state waits for the key
+  // list too and appears once, in its final form; a bucket with objects does not wait.
+  if (loading || (browser.versions.length === 0 && accessKeysLoading)) {
     return <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />;
   }
 
@@ -89,7 +88,6 @@ export function ObjectsPanel({
       canUpload={mayUpload}
       keyAction={getEmptyBucketKeyAction({
         accessKeyCount,
-        accessKeysLoading,
         mayCreateKeys,
         onAddKeyOpenChange,
         onTabChange,
