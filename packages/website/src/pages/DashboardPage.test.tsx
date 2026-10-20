@@ -243,3 +243,15 @@ describe('DashboardPage — trial banner', () => {
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Dashboard' }));
   });
 });
+
+describe('DashboardPage — bucket buttons', () => {
+  // The default activity mock is empty, so the empty activity card renders its button too.
+  it.each(['New bucket', 'Create bucket'])(
+    'opens the create bucket page from the "%s" button',
+    async (name) => {
+      renderPage();
+
+      expect(await screen.findByRole('link', { name })).toHaveAttribute('href', '/buckets/create');
+    },
+  );
+});
