@@ -65,9 +65,9 @@ vi.mock('../lib/query-client.js', () => ({
   // The shell now reads `billing.view` before fetching billing, and the
   // permission hook is a third `/me` reader with its own staleTime.
   ME_STALE_TIME: 10 * 60_000,
-  // A switch clears the cache, and seeds the destination's name, before it
-  // navigates.
-  queryClient: { clear: vi.fn(), setQueryData: vi.fn() },
+  // A switch clears the cache, starts the destination's `/me`, and seeds its
+  // name, before it navigates.
+  queryClient: { clear: vi.fn(), prefetchQuery: vi.fn(async () => {}), setQueryData: vi.fn() },
 }));
 
 vi.mock(import('../lib/time.js'), async (importOriginal) => ({
