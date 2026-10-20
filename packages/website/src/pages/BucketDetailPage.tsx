@@ -291,6 +291,8 @@ function ObjectsPanel({
   objectActions,
   mayUpload,
   mayDelete,
+  mayCreateKeys,
+  onAddKeyOpenChange,
   ...browser
 }: {
   loading: boolean;
@@ -303,6 +305,8 @@ function ObjectsPanel({
   objectActions: ReturnType<typeof useObjectActions>;
   mayUpload: boolean;
   mayDelete: boolean;
+  mayCreateKeys: boolean;
+  onAddKeyOpenChange: (open: boolean) => void;
   listingTruncated: boolean;
   totalObjectCount: number | undefined;
 }) {
@@ -316,6 +320,7 @@ function ObjectsPanel({
       onDownload={objectActions.downloadObject}
       downloading={objectActions.downloading}
       canUpload={mayUpload}
+      onCreateKey={mayCreateKeys ? () => onAddKeyOpenChange(true) : undefined}
       onDelete={mayDelete ? objectActions.deleteObject : undefined}
       onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
     />
@@ -558,6 +563,8 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               objectActions={objectActions}
               mayUpload={mayUpload}
               mayDelete={mayDelete}
+              mayCreateKeys={mayCreateKeys}
+              onAddKeyOpenChange={setAddKeyOpen}
               listingTruncated={isTruncated}
               totalObjectCount={analyticsData?.objectCount}
             />

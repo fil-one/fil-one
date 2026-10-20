@@ -69,11 +69,12 @@ export function ObjectSettingsFields({
 
   return (
     <fieldset className="flex flex-col">
-      <legend className="mb-3 text-xs font-medium text-zinc-900">Object settings</legend>
+      {/* Named for screen readers only: on the page the Advanced settings toggle above already titles it */}
+      <legend className="sr-only">Object settings</legend>
 
       <div className="overflow-hidden rounded-lg border border-zinc-200">
         {/* Versioning */}
-        <div className="flex items-center justify-between px-3.5 py-3">
+        <div className="flex items-center justify-between gap-8 px-3.5 py-3">
           <div className="flex flex-col gap-0.5">
             <span id="versioning-label" className="text-ui font-medium text-zinc-900">
               Versioning
@@ -95,7 +96,7 @@ export function ObjectSettingsFields({
         <div className="border-t border-zinc-200/60">
           <div
             aria-disabled={!versioning}
-            className={`flex items-center justify-between px-3.5 py-3 ${!versioning ? 'opacity-40' : ''}`}
+            className={`flex items-center justify-between gap-8 px-3.5 py-3 ${!versioning ? 'opacity-40' : ''}`}
           >
             <div className="flex flex-col gap-0.5">
               <span id="lock-label" className="text-ui font-medium text-zinc-900">
@@ -103,8 +104,8 @@ export function ObjectSettingsFields({
               </span>
               <span id="lock-desc" className="text-meta leading-relaxed text-zinc-500">
                 {!versioning && 'Requires versioning. '}
-                Prevent objects from being deleted or overwritten. Required for regulatory
-                compliance.
+                Prevent objects from being deleted or overwritten, for regulatory compliance. Can
+                only be turned on at creation.
               </span>
             </div>
             <Switch
@@ -122,7 +123,7 @@ export function ObjectSettingsFields({
           <div className="flex flex-col px-3.5 py-3">
             <div
               aria-disabled={!lock}
-              className={`flex items-center justify-between ${!lock ? 'opacity-40' : ''}`}
+              className={`flex items-center justify-between gap-8 ${!lock ? 'opacity-40' : ''}`}
             >
               <div className="flex flex-col gap-0.5">
                 <span id="retention-label" className="text-ui font-medium text-zinc-900">

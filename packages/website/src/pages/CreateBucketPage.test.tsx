@@ -1,26 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { seedPermissions } from '../lib/test-permissions.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
-import { S3_REGION } from '@filone/shared';
 
 const mockApiRequest = vi.fn();
-const mockCreateAccessKey = vi.fn();
 
 vi.mock('../lib/api.js', async () => ({
   ...(await vi.importActual<typeof import('../lib/api.js')>('../lib/api.js')),
   apiRequest: (...args: unknown[]) => mockApiRequest(...args),
-  createAccessKey: (...args: unknown[]) => mockCreateAccessKey(...args),
 }));
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
 }));
-
-// Every test here is about a region serving the `iam` access model.
-vi.mock('../lib/access-model.js', () => ({ supportsIamMethods: () => true }));
 
 import { CreateBucketPage } from './CreateBucketPage.js';
 
@@ -38,88 +32,104 @@ function renderPage() {
   );
 }
 
-async function renderPageWithKeyNamed() {
-  renderPage();
-  fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
-  fireEvent.click(screen.getByText('Create new key'));
-  fireEvent.change(await screen.findByLabelText('Key name'), { target: { value: 'ci key' } });
+function toggleAdvancedSettings() {
+  fireEvent.click(screen.getByRole('button', { name: /Advanced settings/ }));
 }
 
-async function renderPageWithServiceKeyChosen() {
-  await renderPageWithKeyNamed();
-  fireEvent.click(await screen.findByLabelText(/Service key/));
-  await screen.findByText('What can this key do?');
-}
-
-function uncheckAllPermissions() {
-  for (const box of within(screen.getByTestId('access-key-permissions')).getAllByRole('checkbox')) {
-    if (box.getAttribute('aria-checked') === 'true' || (box as HTMLInputElement).checked)
-      fireEvent.click(box);
-  }
-}
-
-function submit() {
-  fireEvent.click(screen.getByRole('button', { name: 'Create bucket and API key' }));
+function getBucketRequestBody() {
+  const call = mockApiRequest.mock.calls.find(
+    ([path, init]) => path === '/buckets' && init?.method === 'POST',
+  );
+  return call && JSON.parse(call[1].body);
 }
 
 beforeEach(() => {
   mockApiRequest.mockReset();
-  mockCreateAccessKey.mockReset();
   mockApiRequest.mockResolvedValue({ bucket: { bucketName: BUCKET } });
-  mockCreateAccessKey.mockResolvedValue({ accessKeyId: 'AKIA', secretAccessKey: 'secret' });
 });
 
-describe('CreateBucketPage — a service key on an iam region', () => {
-  it('creates the key with its permissions and bucket after the bucket', async () => {
-    await renderPageWithServiceKeyChosen();
-    submit();
+describe('CreateBucketPage — advanced settings', () => {
+  it('hides the object settings until Advanced settings is opened', () => {
+    renderPage();
+    expect(screen.queryByRole('switch', { name: 'Versioning' })).not.toBeInTheDocument();
 
-    await waitFor(() =>
-      expect(mockCreateAccessKey).toHaveBeenCalledWith({
-        keyName: 'ci key',
-        permissions: [
-          'read',
-          'write',
-          'list',
-          'GetBucketVersioning',
-          'GetBucketObjectLockConfiguration',
-        ],
-        bucketScope: 'specific',
-        buckets: [BUCKET],
-        region: S3_REGION,
-        expiresAt: null,
-      }),
+    toggleAdvancedSettings();
+
+    expect(screen.getByRole('button', { name: /Advanced settings/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
     );
-    const bucketCall = mockApiRequest.mock.calls.findIndex(
-      ([path, init]) => path === '/buckets' && init?.method === 'POST',
-    );
-    expect(mockApiRequest.mock.invocationCallOrder[bucketCall]).toBeLessThan(
-      mockCreateAccessKey.mock.invocationCallOrder[0],
-    );
+    expect(screen.getByRole('switch', { name: 'Versioning' })).toBeInTheDocument();
   });
 
-  it('disables Create bucket and API key while a service key has no permissions', async () => {
-    await renderPageWithServiceKeyChosen();
-    uncheckAllPermissions();
-    await screen.findByText('Select at least one permission.');
+  it('keeps versioning on and names it in the summary after Advanced settings is closed', async () => {
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+    toggleAdvancedSettings();
+    fireEvent.click(screen.getByRole('switch', { name: 'Versioning' }));
+    toggleAdvancedSettings();
 
-    expect(screen.getByRole('button', { name: 'Create bucket and API key' })).toBeDisabled();
-    submit();
-    expect(mockApiRequest).not.toHaveBeenCalledWith('/buckets', expect.anything());
+    expect(screen.getByRole('button', { name: /Advanced settings/ })).toHaveTextContent(
+      'Versioning on',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+    await waitFor(() => expect(getBucketRequestBody()).toMatchObject({ versioning: true }));
+  });
+
+  it('creates the bucket with versioning off when Advanced settings is never opened', async () => {
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
+    await waitFor(() =>
+      expect(getBucketRequestBody()).toMatchObject({
+        bucketName: BUCKET,
+        versioning: false,
+        lock: false,
+      }),
+    );
   });
 });
 
-describe('CreateBucketPage — a personal key on an iam region', () => {
-  it('creates a personal key with name and expiry only', async () => {
-    await renderPageWithKeyNamed();
-    submit();
+describe('CreateBucketPage — a name that is already taken', () => {
+  // What apiRequest throws for the backend's 409 on a held name.
+  const takenNameError = Object.assign(new Error(`Bucket "${BUCKET}" already exists`), {
+    status: 409,
+  });
 
-    await waitFor(() =>
-      expect(mockCreateAccessKey).toHaveBeenCalledWith({
-        keyName: 'ci key',
-        region: S3_REGION,
-        expiresAt: null,
-      }),
-    );
+  it('shows the taken name under the name field when the create call answers 409', async () => {
+    mockApiRequest.mockRejectedValue(takenNameError);
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
+    expect(await screen.findByText('This name is already taken. Try another.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Bucket name')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('clears the taken-name error once the name is edited', async () => {
+    mockApiRequest.mockRejectedValue(takenNameError);
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+    await screen.findByText('This name is already taken. Try another.');
+
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: 'any-other-name' } });
+
+    expect(screen.queryByText('This name is already taken. Try another.')).not.toBeInTheDocument();
+  });
+});
+
+describe('CreateBucketPage — an empty name', () => {
+  it('asks for a name in the field and sends nothing when Create bucket is pressed', () => {
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
+    expect(screen.getByText('Enter a bucket name.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Bucket name')).toHaveFocus();
+    expect(mockApiRequest).not.toHaveBeenCalled();
   });
 });

@@ -70,7 +70,8 @@ async function listRegionsWithBucket(page: Page): Promise<Set<Region>> {
 async function createBucket(page: Page, bucketName: string, region: Region): Promise<void> {
   await page.goto('/buckets/create');
   await page.locator('#bucket-name').fill(bucketName);
-  await page.locator('#bucket-region').selectOption(region);
+  await page.locator('#bucket-region').click();
+  await page.locator(`[data-testid="region-option"][data-region="${region}"]`).click();
 
   // Read the API response rather than only asserting the navigation: on failure
   // the page stays on /buckets/create and shows a toast, which would surface as

@@ -100,14 +100,26 @@ function TruncatedListingNotice({
   );
 }
 
+/** The empty state's line, by which of its two next steps the caller may take. */
+function getEmptyBucketDescription(canUpload: boolean, canCreateKey: boolean): string {
+  if (canUpload && canCreateKey) {
+    return 'Upload files here, or create an API key to connect apps and tools';
+  }
+  if (canUpload) return 'Upload your first object to this bucket';
+  if (canCreateKey) return 'Create an API key to connect apps and tools to this bucket';
+  return 'Objects uploaded to this bucket appear here';
+}
+
 function EmptyBucketState({
   bucketName,
   region,
   canUpload,
+  onCreateKey,
 }: {
   bucketName: string;
   region: S3Region;
   canUpload: boolean;
+  onCreateKey?: () => void;
 }) {
   const navigate = useNavigate();
   return (
@@ -115,29 +127,37 @@ function EmptyBucketState({
       <EmptyStateCard
         icon={CloudArrowUpIcon}
         title="No objects yet"
-        description={
-          canUpload
-            ? 'Upload your first object to this bucket'
-            : 'Objects uploaded to this bucket appear here'
-        }
+        description={getEmptyBucketDescription(canUpload, Boolean(onCreateKey))}
       >
         {/* Text-only: the cloud tile directly above already speaks "upload",
             so a glyph on the button here would just repeat it. */}
-        {canUpload && (
-          <Button
-            id="object-browser-upload-button"
-            variant="primary"
-            onClick={() =>
-              void navigate({
-                to: '/buckets/$bucketName/upload',
-                params: { bucketName },
-                search: { region },
-              })
-            }
-          >
-            Upload object
-          </Button>
-        )}
+        <div className="flex flex-wrap justify-center gap-2">
+          {canUpload && (
+            <Button
+              id="object-browser-upload-button"
+              variant="primary"
+              onClick={() =>
+                void navigate({
+                  to: '/buckets/$bucketName/upload',
+                  params: { bucketName },
+                  search: { region },
+                })
+              }
+            >
+              Upload object
+            </Button>
+          )}
+          {/* A new bucket lands here, so this is where the create form's API key step moved to */}
+          {onCreateKey && (
+            <Button
+              id="object-browser-create-key-button"
+              variant={canUpload ? 'ghost' : 'primary'}
+              onClick={onCreateKey}
+            >
+              Create API key
+            </Button>
+          )}
+        </div>
       </EmptyStateCard>
     </div>
   );
@@ -256,6 +276,8 @@ export type ObjectBrowserProps = {
   onBulkDelete?: (targets: ObjectDeleteTarget[]) => Promise<void>;
   /** Whether to offer the upload route. False for a role without `objects.write`. */
   canUpload?: boolean;
+  /** Opens the bucket's Create API key dialog from the empty state. Absent for a role without `keys.create`. */
+  onCreateKey?: () => void;
   /**
    * True when the listing is a partial page. Selection can only ever cover the
    * objects actually loaded, so the browser says so rather than implying that
@@ -298,6 +320,7 @@ export function ObjectBrowser({
   onDelete,
   onBulkDelete,
   canUpload = true,
+  onCreateKey,
   listingTruncated = false,
   totalObjectCount,
 }: ObjectBrowserProps) {
@@ -349,7 +372,14 @@ export function ObjectBrowser({
   };
 
   if (versions.length === 0) {
-    return <EmptyBucketState bucketName={bucketName} region={region} canUpload={canUpload} />;
+    return (
+      <EmptyBucketState
+        bucketName={bucketName}
+        region={region}
+        canUpload={canUpload}
+        onCreateKey={onCreateKey}
+      />
+    );
   }
 
   const groups = groupVersionsByKey(versions);

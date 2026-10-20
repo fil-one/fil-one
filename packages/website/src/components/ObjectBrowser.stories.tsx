@@ -180,6 +180,20 @@ export const Empty: Story = {
   ),
 };
 
+export const EmptyWithCreateKey: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={[]}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      onCreateKey={() => {}}
+    />
+  ),
+};
+
 export const RootListing: Story = {
   render: () => (
     <ObjectBrowserHarness

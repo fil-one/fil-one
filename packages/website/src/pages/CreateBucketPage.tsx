@@ -1,32 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  ArrowLeftIcon,
-  CaretDownIcon,
-  CaretUpIcon,
-  PlusIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { ArrowLeftIcon, CaretRightIcon } from '@phosphor-icons/react/dist/ssr';
 
-import {
-  S3_REGION,
-  CreateBucketSchema,
-  CreateAccessKeySchema,
-  DOCS_URL,
-  getRegionLabel,
-} from '@filone/shared';
+import { S3_REGION, CreateBucketSchema } from '@filone/shared';
 import type {
   CreateBucketResponse,
   RetentionMode,
   RetentionDurationType,
   S3Region,
 } from '@filone/shared';
-import { apiRequest, createAccessKey } from '../lib/api.js';
+import { apiRequest, errorStatusOf } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
 import { Heading } from '../components/Heading/Heading';
 import { Card } from '../components/Card';
-import { AccessKeyFormFields } from '../components/AccessKeyFormFields';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { FormField } from '../components/FormField';
@@ -35,10 +23,27 @@ import { Input } from '../components/Input';
 import { RegionSelect } from '../components/RegionSelect';
 import { useAvailableRegions } from '../lib/use-available-regions.js';
 import { ObjectSettingsFields } from '../components/ObjectSettingsFields';
-import { SaveCredentialsModal } from '../components/SaveCredentialsModal';
 import { SlowOperationIndicator } from '../components/SlowOperationIndicator';
 import { useToast } from '../components/Toast';
-import { useAccessKeyForm } from '../lib/use-access-key-form.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** The line beside the collapsed Advanced settings toggle: what is inside, or what is on. */
+function getAdvancedSettingsSummary(settings: {
+  versioning: boolean;
+  lock: boolean;
+  retentionEnabled: boolean;
+}): string {
+  const enabled = [
+    settings.versioning && 'Versioning',
+    settings.lock && 'Object Lock',
+    settings.retentionEnabled && 'Retention',
+  ].filter((name) => name !== false);
+  if (enabled.length === 0) return 'Versioning, Object Lock, Retention';
+  return `${new Intl.ListFormat('en', { type: 'conjunction' }).format(enabled)} on`;
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -55,7 +60,8 @@ export function CreateBucketPage() {
   const [bucketName, setBucketName] = useState('');
   const [region, setRegion] = useState<S3Region>(S3_REGION);
 
-  // Object settings
+  // Object settings, collapsed under Advanced settings because the defaults suit most buckets
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [versioning, setVersioning] = useState(false);
   const [lock, setLock] = useState(false);
   const [retentionEnabled, setRetentionEnabled] = useState(false);
@@ -63,43 +69,12 @@ export function CreateBucketPage() {
   const [retentionDuration, setRetentionDuration] = useState(15);
   const [retentionDurationType, setRetentionDurationType] = useState<RetentionDurationType>('d');
 
-  // Key section visibility
-  const [createKeyToggled, setCreateKeyToggled] = useState(false);
-
   // Validation
   const [bucketNameError, setBucketNameError] = useState<string | null>(null);
 
   // Submit state
   const [creating, setCreating] = useState(false);
-  const [credentials, setCredentials] = useState<{
-    accessKeyId: string;
-    secretAccessKey: string;
-  } | null>(null);
-
-  const form = useAccessKeyForm({ region, onSuccess: () => {} });
-
-  // When the key section opens, default to specific scope for this bucket
-  useEffect(() => {
-    if (!createKeyToggled) return;
-    form.setBucketScope('specific');
-  }, [createKeyToggled]); // form.setBucketScope is a stable useState setter
-
-  // Track the previous bucket name so we can swap it in selectedBuckets when it changes
-  const prevBucketNameRef = useRef('');
-
-  // When the section opens, seed selectedBuckets with the current name.
-  // When the name changes while open, swap the old name for the new one so that
-  // any other buckets the user has selected are preserved.
-  useEffect(() => {
-    if (!createKeyToggled) return;
-    const prev = prevBucketNameRef.current;
-    const next = bucketName.trim();
-    prevBucketNameRef.current = next;
-    form.setSelectedBuckets((buckets) => {
-      const withoutPrev = prev ? buckets.filter((b) => b !== prev) : buckets;
-      return next ? [...withoutPrev, next] : withoutPrev;
-    });
-  }, [bucketName, createKeyToggled, region]); // form.setSelectedBuckets is a stable useState setter
+  const bucketNameRef = useRef<HTMLElement>(null);
 
   function validateBucketName(value: string) {
     const result = CreateBucketSchema.shape.bucketName.safeParse(value);
@@ -111,9 +86,13 @@ export function CreateBucketPage() {
     return true;
   }
 
-  // eslint-disable-next-line complexity/complexity
   async function handleSubmit() {
-    if (createKeyToggled && form.keyType === 'service' && form.permissions.length === 0) return;
+    // The button stays enabled on an empty form, so the refusal is said where the name goes
+    if (!bucketName.trim()) {
+      setBucketNameError('Enter a bucket name.');
+      bucketNameRef.current?.focus();
+      return;
+    }
 
     const bucketBody = {
       bucketName: bucketName.trim(),
@@ -138,6 +117,7 @@ export function CreateBucketPage() {
       // Show bucketName errors inline; everything else as a toast
       if (parsed.error.issues[0].path[0] === 'bucketName') {
         setBucketNameError(msg);
+        bucketNameRef.current?.focus();
       } else {
         toast.error(msg);
       }
@@ -146,7 +126,6 @@ export function CreateBucketPage() {
 
     setCreating(true);
 
-    // Step 1: Create the bucket
     let createdBucketName: string;
     try {
       const { bucket } = await apiRequest<CreateBucketResponse>('/buckets', {
@@ -157,41 +136,19 @@ export function CreateBucketPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
+      // This route answers 409 only for a name someone already holds, and the fix is in the name field
+      if (errorStatusOf(err) === 409) {
+        setBucketNameError('This name is already taken. Try another.');
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
+      }
       setCreating(false);
       return;
     }
 
-    // Step 2: optionally create an access key
-    if (createKeyToggled) {
-      const parsed = form.schema.safeParse(form.request);
-      if (!parsed.success) {
-        toast.error(parsed.error.issues[0].message);
-        setCreating(false);
-        void navigate({
-          to: '/buckets/$bucketName',
-          params: { bucketName: createdBucketName },
-          search: { region },
-        });
-        return;
-      }
-      try {
-        const keyResponse = await createAccessKey(parsed.data);
-        void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
-        setCredentials({
-          accessKeyId: keyResponse.accessKeyId,
-          secretAccessKey: keyResponse.secretAccessKey,
-        });
-        setCreating(false);
-        return;
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to create access key');
-      }
-    } else {
-      toast.success('Bucket created successfully');
-    }
-
+    toast.success('Bucket created successfully');
     setCreating(false);
+    // The new bucket opens on its empty state, which offers the API key as the next step
     void navigate({
       to: '/buckets/$bucketName',
       params: { bucketName: createdBucketName },
@@ -199,57 +156,39 @@ export function CreateBucketPage() {
     });
   }
 
-  function handleCredentialsDone() {
-    setCredentials(null);
-    void navigate({
-      to: '/buckets/$bucketName',
-      params: { bucketName: bucketName.trim() },
-      search: { region },
-    });
-  }
-
-  const accessKeyNameValid = createKeyToggled
-    ? CreateAccessKeySchema.shape.keyName.safeParse(form.keyName.trim()).success
-    : true;
-
-  const accessKeyFormValid =
-    !createKeyToggled ||
-    (accessKeyNameValid &&
-      (form.keyType === 'principal' ||
-        (form.permissions.length > 0 &&
-          (form.bucketScope !== 'specific' || form.selectedBuckets.length > 0))));
-
-  const canSubmit =
-    bucketName.trim().length > 0 && !bucketNameError && !creating && accessKeyFormValid;
-
   return (
-    <div className="mx-auto flex max-w-[860px] flex-col gap-6 py-12">
+    <div className="mx-auto flex max-w-[860px] flex-col gap-6 px-5 pt-6 pb-12 sm:px-8 lg:px-10 lg:pt-12 xl:px-0">
       {/* Back + header */}
-      <div className="flex items-center gap-4">
-        <IconButton
-          icon={ArrowLeftIcon}
-          aria-label="Back to buckets"
-          onClick={() => navigate({ to: '/buckets' })}
-        />
-        <Heading tag="h1" description="S3-compatible storage on Filecoin">
+      {/* The arrow sits on the title's line, not centred on the title and subtitle together.
+          With room beside the page it hangs in the margin, so the title starts on the card's edge. */}
+      <div className="relative flex items-start gap-4 xl:block">
+        <div className="flex h-7 items-center xl:absolute xl:top-0 xl:right-full xl:mr-4">
+          <IconButton
+            icon={ArrowLeftIcon}
+            aria-label="Back to buckets"
+            onClick={() => navigate({ to: '/buckets' })}
+          />
+        </div>
+        <Heading tag="h1" description="A bucket is a container for your files.">
           Create bucket
         </Heading>
       </div>
 
-      {/* Two-column layout */}
-      <div className="flex gap-10">
+      {/* Two columns once both fit beside the app sidebar; stacked below that */}
+      <div className="flex flex-col gap-6 xl:flex-row xl:gap-10">
         {/* Left: White card with form */}
-        <Card className="w-[520px] shrink-0 overflow-hidden">
+        <Card className="w-full max-w-[520px] shrink-0 overflow-hidden">
           <div className="flex flex-col gap-5">
             {/* Bucket name */}
             <FormField
               htmlFor="bucket-name"
               label="Bucket name"
-              description="3-63 characters. Lowercase letters, numbers, and hyphens only. Must be globally unique."
+              description="3-63 lowercase letters, numbers, or hyphens. Must be globally unique."
               error={bucketNameError ?? undefined}
             >
               <Input
                 id="bucket-name"
+                ref={bucketNameRef}
                 value={bucketName}
                 invalid={!!bucketNameError}
                 onChange={(v) => {
@@ -261,6 +200,7 @@ export function CreateBucketPage() {
                 }}
                 placeholder="my-storage-bucket"
                 autoComplete="off"
+                inputSize="lg"
               />
             </FormField>
 
@@ -270,67 +210,48 @@ export function CreateBucketPage() {
               label="Region"
               description={availableRegions.length === 1 ? 'More regions coming soon.' : undefined}
             >
-              <RegionSelect id="bucket-region" value={region} onChange={setRegion} />
+              <RegionSelect id="bucket-region" value={region} onChange={setRegion} size="lg" />
             </FormField>
 
-            {/* Object settings */}
-            <ObjectSettingsFields
-              versioning={versioning}
-              onVersioningChange={setVersioning}
-              lock={lock}
-              onLockChange={setLock}
-              retentionEnabled={retentionEnabled}
-              onRetentionEnabledChange={setRetentionEnabled}
-              retentionMode={retentionMode}
-              onRetentionModeChange={setRetentionMode}
-              retentionDuration={retentionDuration}
-              onRetentionDurationChange={setRetentionDuration}
-              retentionDurationType={retentionDurationType}
-              onRetentionDurationTypeChange={setRetentionDurationType}
-            />
-
-            {/* API key section */}
+            {/* Advanced settings */}
             <div className="flex flex-col gap-3">
-              <label className="text-xs font-medium text-zinc-900">API key</label>
-
-              {/* Clickable toggle header */}
               <button
                 type="button"
-                id="create-bucket-toggle-key"
-                onClick={() => setCreateKeyToggled(!createKeyToggled)}
-                className="flex w-full items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 text-left hover:bg-zinc-100"
+                id="create-bucket-toggle-advanced"
+                aria-expanded={advancedOpen}
+                aria-controls="create-bucket-advanced-settings"
+                onClick={() => setAdvancedOpen(!advancedOpen)}
+                className="group flex w-full items-center gap-1.5 rounded-md text-left focus-visible:brand-outline"
               >
-                <div className="flex items-center gap-2">
-                  <PlusIcon size={14} className="text-zinc-500" aria-hidden="true" />
-                  <span className="text-sm text-zinc-900">Create new key</span>
-                </div>
-                {createKeyToggled ? (
-                  <CaretUpIcon size={14} className="text-zinc-500" aria-hidden="true" />
-                ) : (
-                  <CaretDownIcon size={14} className="text-zinc-500" aria-hidden="true" />
-                )}
+                <CaretRightIcon
+                  size={12}
+                  aria-hidden="true"
+                  className="shrink-0 text-zinc-500 transition-transform duration-150 group-hover:text-zinc-900 group-aria-expanded:rotate-90 motion-reduce:transition-none"
+                />
+                <span className="shrink-0 text-xs font-medium text-zinc-900">
+                  Advanced settings
+                </span>
+                {/* Only while closed: once open, the switches it summarises are right below */}
+                <span className="ml-auto min-w-0 truncate pl-3 text-meta text-zinc-500 group-aria-expanded:hidden">
+                  {getAdvancedSettingsSummary({ versioning, lock, retentionEnabled })}
+                </span>
               </button>
 
-              {/* Expanded form */}
-              {createKeyToggled && (
-                <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4">
-                  <p className="text-xs leading-relaxed text-zinc-600">
-                    This key will only work with buckets in{' '}
-                    <span className="text-zinc-900">{getRegionLabel(region)}</span>{' '}
-                    <span className="text-zinc-500">{region}</span>.{' '}
-                    <a
-                      href={DOCS_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-medium text-brand-600 hover:underline"
-                    >
-                      Learn more
-                    </a>
-                  </p>
-                  <AccessKeyFormFields
-                    form={form}
-                    pinnedBucket={bucketName.trim() || undefined}
-                    region={region}
+              {advancedOpen && (
+                <div id="create-bucket-advanced-settings">
+                  <ObjectSettingsFields
+                    versioning={versioning}
+                    onVersioningChange={setVersioning}
+                    lock={lock}
+                    onLockChange={setLock}
+                    retentionEnabled={retentionEnabled}
+                    onRetentionEnabledChange={setRetentionEnabled}
+                    retentionMode={retentionMode}
+                    onRetentionModeChange={setRetentionMode}
+                    retentionDuration={retentionDuration}
+                    onRetentionDurationChange={setRetentionDuration}
+                    retentionDurationType={retentionDurationType}
+                    onRetentionDurationTypeChange={setRetentionDurationType}
                   />
                 </div>
               )}
@@ -341,21 +262,18 @@ export function CreateBucketPage() {
               id="create-bucket-submit-button"
               variant="primary"
               size="lg"
-              disabled={!canSubmit}
+              disabled={creating}
               onClick={handleSubmit}
             >
-              {creating
-                ? 'Creating...'
-                : createKeyToggled
-                  ? 'Create bucket and API key'
-                  : 'Create bucket'}
+              {creating ? 'Creating...' : 'Create bucket'}
             </Button>
             <SlowOperationIndicator isLoading={creating} operation="Creating bucket" />
           </div>
         </Card>
 
         {/* Right: Info sidebar */}
-        <div className="sticky top-0 w-60 shrink-0 self-start pt-1">
+        {/* pt-5 lines the overline up with the card's first label, which sits under the card's p-5 */}
+        <div className="w-full max-w-[520px] xl:sticky xl:top-0 xl:w-60 xl:shrink-0 xl:self-start xl:pt-5">
           <Overline>Included by default</Overline>
 
           <div className="mt-3 flex flex-col">
@@ -377,15 +295,6 @@ export function CreateBucketPage() {
           </div>
         </div>
       </div>
-
-      {/* Save credentials modal */}
-      {credentials && (
-        <SaveCredentialsModal
-          open={true}
-          onDone={handleCredentialsDone}
-          credentials={credentials}
-        />
-      )}
     </div>
   );
 }

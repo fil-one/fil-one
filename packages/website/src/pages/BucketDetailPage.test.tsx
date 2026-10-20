@@ -40,6 +40,14 @@ vi.mock('../lib/api.js', async () => ({
 
 const mockGetBilling = vi.fn(() => new Promise(() => {}));
 
+// One object by default, so the table renders a row with its per-row controls
+// and the header actions the empty bucket would otherwise hide from everybody.
+const ONE_OBJECT_LISTING = {
+  objects: [{ key: OBJECT_KEY, sizeBytes: 12, lastModified: '2026-01-01T00:00:00Z' }],
+  isTruncated: false,
+};
+const mockParseListObjects = vi.fn(() => ONE_OBJECT_LISTING);
+
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
@@ -80,12 +88,7 @@ vi.mock('../lib/aurora-s3.js', () => ({
   executePresignedUrl: () =>
     Promise.resolve({ text: () => Promise.resolve('<ListBucketResult/>') }),
   parseListObjectVersionsResponse: () => ({ versions: [], isTruncated: false }),
-  // One object, so the table renders a row with its per-row controls and the
-  // header actions the empty bucket would otherwise hide from everybody.
-  parseListObjectsResponse: () => ({
-    objects: [{ key: OBJECT_KEY, sizeBytes: 12, lastModified: '2026-01-01T00:00:00Z' }],
-    isTruncated: false,
-  }),
+  parseListObjectsResponse: () => mockParseListObjects(),
 }));
 
 import { BucketDetailPage } from './BucketDetailPage.js';
@@ -156,6 +159,7 @@ function renderPage(role: OrgRole = OrgRole.Owner) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockSupportsIamMethods.mockReturnValue(false);
+  mockParseListObjects.mockReturnValue(ONE_OBJECT_LISTING);
   mockApiRequest.mockImplementation((path: string) => respond(path));
   mockSendApiRequest.mockImplementation(
     async (path: string) =>
@@ -334,6 +338,27 @@ describe('BucketDetailPage — the object controls', () => {
     expect(screen.queryByRole('button', { name: `Delete ${OBJECT_KEY}` })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Empty bucket' })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+});
+
+// A bucket the create form just made opens here, so the empty state carries the
+// API key step the form no longer asks about.
+describe('BucketDetailPage — an empty bucket', () => {
+  beforeEach(() => mockParseListObjects.mockReturnValue({ objects: [], isTruncated: false }));
+
+  it('opens the Add key modal from the empty state', async () => {
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create API key' }));
+
+    expect(await screen.findByTestId('add-bucket-key-modal')).toBeInTheDocument();
+  });
+
+  it('offers no Create API key to a role without keys.create', async () => {
+    renderPage(OrgRole.ReadOnly);
+
+    expect(await screen.findByText('No objects yet')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create API key' })).not.toBeInTheDocument();
   });
 });
 
