@@ -8,6 +8,7 @@ import {
   switchToOrg,
   takeReconcileNotice,
 } from './active-org.js';
+import { getMe } from './api.js';
 import { queryClient, queryKeys } from './query-client.js';
 import { cancelGuardedWork, holdLeaveGuard } from './use-warn-before-unload.js';
 
@@ -20,6 +21,10 @@ const navigate = vi.fn();
 
 // `switchToOrg` imports the router dynamically (see its own comment for why),
 // so this is what it gets back either way.
+// `switchToOrg` starts the new org's `/me`. Left pending: these tests are about
+// the stash and the navigation, not what `/me` answers.
+vi.mock('./api.js', () => ({ getMe: vi.fn(() => new Promise(() => {})) }));
+
 vi.mock('../router.js', () => ({
   router: { navigate: (...args: unknown[]) => navigate(...args) },
 }));
@@ -82,6 +87,14 @@ describe('the active org stash', () => {
       // Org A's data cannot leak into org B's view.
       expect(clearSpy).toHaveBeenCalled();
       expect(queryClient.getQueryData(queryKeys.pendingOrgSwitch)).toBeUndefined();
+    });
+
+    it("starts the new org's /me without waiting for the switch to end", () => {
+      switchToOrg(ORG_B);
+
+      // `beforeLoad` joins this fetch, and the switch ends only after it does.
+      expect(getMe).toHaveBeenCalledWith({ skipSwitchWait: true });
+      expect(queryClient.getQueryState(queryKeys.me)).toMatchObject({ fetchStatus: 'fetching' });
     });
 
     it('navigates to the dashboard, which the stash now answers for', async () => {
