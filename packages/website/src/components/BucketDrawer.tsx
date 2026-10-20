@@ -60,14 +60,14 @@ export function BucketDrawer({ bucket, onClose, onStopIndexing }: BucketDrawerPr
         data-testid="bucket-drawer-overlay"
         aria-hidden="true"
         onClick={handleClose}
-        className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 ${shown ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+        className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 ${shown ? 'opacity-100 ease-out' : 'pointer-events-none opacity-0 ease-in'}`}
       />
       <div
         data-testid="bucket-drawer-panel"
         role="dialog"
         aria-modal="true"
         aria-label={`RAG query playground for ${bucket.name}`}
-        className={`fixed inset-y-0 right-0 z-40 flex w-[460px] flex-col bg-white shadow-xl transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed inset-y-0 right-0 z-40 flex w-[460px] flex-col bg-white shadow-xl transition-transform duration-200 motion-reduce:duration-0 ${shown ? 'translate-x-0 ease-out' : 'translate-x-full ease-in'}`}
       >
         <DrawerHeader bucket={bucket} onClose={handleClose} />
         <StatsBar bucket={bucket} />
