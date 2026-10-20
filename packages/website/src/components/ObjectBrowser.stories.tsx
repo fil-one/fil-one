@@ -189,7 +189,21 @@ export const EmptyWithCreateKey: Story = {
       currentPrefix=""
       onDownload={() => {}}
       downloading={null}
-      onCreateKey={() => {}}
+      keyAction={{ kind: 'create', onCreate: () => {} }}
+    />
+  ),
+};
+
+export const EmptyWithExistingKeys: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={[]}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      keyAction={{ kind: 'view', onView: () => {} }}
     />
   ),
 };

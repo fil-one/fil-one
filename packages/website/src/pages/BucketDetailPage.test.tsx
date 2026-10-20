@@ -130,9 +130,12 @@ const grantAllActionsToUser1 = {
   },
 };
 
+/** The keys that reach the bucket; one by default. */
+const mockBucketKeys = vi.fn(() => [ACCESS_KEY]);
+
 /** Route each of the page's reads by its path; the object listing is stubbed out. */
 function respond(path: string) {
-  if (path.startsWith('/access-keys')) return Promise.resolve({ keys: [ACCESS_KEY] });
+  if (path.startsWith('/access-keys')) return Promise.resolve({ keys: mockBucketKeys() });
   if (path.includes('/policy')) return Promise.resolve(grantAllActionsToUser1);
   if (path.startsWith('/org/members')) return Promise.resolve({ members: [] });
   if (path.includes('/analytics')) {
@@ -160,6 +163,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockSupportsIamMethods.mockReturnValue(false);
   mockParseListObjects.mockReturnValue(ONE_OBJECT_LISTING);
+  mockBucketKeys.mockReturnValue([ACCESS_KEY]);
   mockApiRequest.mockImplementation((path: string) => respond(path));
   mockSendApiRequest.mockImplementation(
     async (path: string) =>
@@ -346,7 +350,8 @@ describe('BucketDetailPage — the object controls', () => {
 describe('BucketDetailPage — an empty bucket', () => {
   beforeEach(() => mockParseListObjects.mockReturnValue({ objects: [], isTruncated: false }));
 
-  it('opens the Add key modal from the empty state', async () => {
+  it('opens the Add key modal from the empty state when no key reaches the bucket', async () => {
+    mockBucketKeys.mockReturnValue([]);
     renderPage(OrgRole.Owner);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Create API key' }));
@@ -354,11 +359,49 @@ describe('BucketDetailPage — an empty bucket', () => {
     expect(await screen.findByTestId('add-bucket-key-modal')).toBeInTheDocument();
   });
 
+  it('switches to the API Keys tab, not to a new key, when keys reach the bucket already', async () => {
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View API keys' }));
+
+    expect(screen.queryByRole('button', { name: 'Create API key' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('bucket-keys-tab')).toHaveAttribute('aria-selected', 'true');
+  });
+
   it('offers no Create API key to a role without keys.create', async () => {
     renderPage(OrgRole.ReadOnly);
 
     expect(await screen.findByText('No objects yet')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create API key' })).not.toBeInTheDocument();
+  });
+
+  // jsdom applies no stylesheet, so the class Tailwind turns into display: none stands in
+  // for "not shown".
+  it('hides the tab bar when the bucket holds no objects and no key reaches it', async () => {
+    mockBucketKeys.mockReturnValue([]);
+    renderPage(OrgRole.Owner);
+
+    await screen.findByRole('button', { name: 'Create API key' });
+
+    expect(screen.getByRole('tablist', { hidden: true })).toHaveClass('hidden');
+  });
+
+  it('keeps the tab bar when keys reach the empty bucket', async () => {
+    renderPage(OrgRole.Owner);
+
+    await screen.findByRole('button', { name: 'View API keys' });
+
+    expect(screen.getByRole('tablist')).not.toHaveClass('hidden');
+  });
+
+  it('keeps the tab bar for a role that sees the Policy tab', async () => {
+    mockBucketKeys.mockReturnValue([]);
+    mockSupportsIamMethods.mockReturnValue(true);
+    renderPage(OrgRole.Owner);
+
+    await screen.findByRole('button', { name: 'Create API key' });
+
+    expect(screen.getByRole('tablist')).not.toHaveClass('hidden');
   });
 });
 

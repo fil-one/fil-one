@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { CloudArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,10 +9,10 @@ import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../components/Tabs';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Alert } from '../components/Alert';
 import { Skeleton } from '../components/Skeleton';
-import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
-import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
+import { countObjects } from '../components/ObjectBrowser';
+import { ObjectsPanel } from './BucketObjectsPanel';
 import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import { BucketPolicyTab } from '../components/BucketPolicyTab';
@@ -98,6 +98,25 @@ async function fetchObjectListing(
     })),
     isTruncated,
   };
+}
+
+/**
+ * A bucket with no objects and no keys has nothing to switch between, and its empty state
+ * already offers both next steps, so the tab bar is hidden. Hidden rather than removed:
+ * Headless UI pairs each panel with a rendered tab. The Policy tab keeps the bar, since a
+ * bucket's policy has content from the start. Both counts must have answered, so a bucket
+ * that turns out to hold objects never loses its tabs while it loads.
+ */
+function getTabListClassName({
+  objectCount,
+  keyCount,
+  isPolicyTabVisible,
+}: {
+  objectCount: number | undefined;
+  keyCount: number | undefined;
+  isPolicyTabVisible: boolean;
+}): string | undefined {
+  return objectCount === 0 && keyCount === 0 && !isPolicyTabVisible ? 'hidden' : undefined;
 }
 
 function removeVersionFromListing(
@@ -270,63 +289,6 @@ function BucketErrorState({
   );
 }
 
-// Mirrors ObjectBrowser's columns so the placeholder holds the same shape as the
-// table it stands in for. The Version and Status pair is versioning-only, and
-// versioning is not known until the bucket metadata lands, so the skeleton shows
-// the columns every bucket has rather than guessing at two that may not appear.
-const OBJECT_SKELETON_COLUMNS: SkeletonColumn[] = [
-  { label: 'Name' },
-  { label: 'Size' },
-  { label: 'Last Modified' },
-  {},
-];
-
-/**
- * The Objects tab's body: the listing, or a table-shaped placeholder while it
- * loads. Extracted so the page component stays about layout, and so the
- * loading branch sits next to the table it stands in for.
- */
-function ObjectsPanel({
-  loading,
-  objectActions,
-  mayUpload,
-  mayDelete,
-  mayCreateKeys,
-  onAddKeyOpenChange,
-  ...browser
-}: {
-  loading: boolean;
-  bucketName: string;
-  region: S3Region;
-  versions: S3ObjectVersion[];
-  versioningEnabled: boolean;
-  currentPrefix: string;
-  onPrefixChange: (prefix: string) => void;
-  objectActions: ReturnType<typeof useObjectActions>;
-  mayUpload: boolean;
-  mayDelete: boolean;
-  mayCreateKeys: boolean;
-  onAddKeyOpenChange: (open: boolean) => void;
-  listingTruncated: boolean;
-  totalObjectCount: number | undefined;
-}) {
-  if (loading) {
-    return <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />;
-  }
-
-  return (
-    <ObjectBrowser
-      {...browser}
-      onDownload={objectActions.downloadObject}
-      downloading={objectActions.downloading}
-      canUpload={mayUpload}
-      onCreateKey={mayCreateKeys ? () => onAddKeyOpenChange(true) : undefined}
-      onDelete={mayDelete ? objectActions.deleteObject : undefined}
-      onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
-    />
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -434,6 +396,13 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   // The Add key modal goes with the `keys.create` control inside the tab.
   const [addKeyOpen, setAddKeyOpen] = usePermittedDialog(false, mayCreateKeys);
+  // Controlled so the empty bucket's View API keys button can switch tabs.
+  const [selectedTab, setSelectedTab] = useState(0);
+  // Each tab's count, undefined until its list has answered
+  const objectCount = objectsQuery.isPending
+    ? undefined
+    : displayObjectCount(analyticsData, versions, isTruncated);
+  const keyCount = accessKeysLoading ? undefined : accessKeys.length;
 
   const refreshAfterBulkDelete = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
@@ -521,27 +490,20 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         <BucketOverview bucket={bucket} region={region} bytesUsed={analyticsData?.bytesUsed} />
       )}
 
-      <Tabs>
-        <TabList>
+      <Tabs selectedIndex={selectedTab} onChange={setSelectedTab}>
+        <TabList className={getTabListClassName({ objectCount, keyCount, isPolicyTabVisible })}>
           {/* The count waits for the listing rather than counting an empty
               array: "Objects (0)" on a bucket that turns out to hold hundreds is
               a worse answer than no number yet, and it is the same rule the API
               Keys tab beside it already follows. */}
-          <Tab
-            testId="bucket-objects-tab"
-            count={
-              objectsQuery.isPending
-                ? undefined
-                : displayObjectCount(analyticsData, versions, isTruncated)
-            }
-          >
+          <Tab testId="bucket-objects-tab" count={objectCount}>
             Objects
           </Tab>
           {/* Absent, not empty, for a role that cannot list keys: an "API Keys
               (0)" tab reads as an org with no keys rather than a view this
               caller does not get. */}
           {mayListKeys && (
-            <Tab testId="bucket-keys-tab" count={accessKeysLoading ? undefined : accessKeys.length}>
+            <Tab testId="bucket-keys-tab" count={keyCount}>
               API Keys
             </Tab>
           )}
@@ -563,8 +525,11 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               objectActions={objectActions}
               mayUpload={mayUpload}
               mayDelete={mayDelete}
+              accessKeyCount={accessKeys.length}
+              accessKeysLoading={accessKeysLoading}
               mayCreateKeys={mayCreateKeys}
               onAddKeyOpenChange={setAddKeyOpen}
+              onTabChange={setSelectedTab}
               listingTruncated={isTruncated}
               totalObjectCount={analyticsData?.objectCount}
             />
