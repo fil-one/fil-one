@@ -159,10 +159,11 @@ export function CreateBucketPage() {
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-6 px-5 pt-6 pb-12 sm:px-8 lg:px-10 lg:pt-12 xl:px-0">
       {/* Back + header */}
-      {/* The arrow sits on the title's line, not centred on the title and subtitle together.
-          With room beside the page it hangs in the margin, so the title starts on the card's edge. */}
-      <div className="relative flex items-start gap-4 xl:block">
-        <div className="flex h-7 items-center xl:absolute xl:top-0 xl:right-full xl:mr-4">
+      {/* The title starts on the card's edge at every width. With room beside the page the arrow
+          hangs in the margin on the title's line; without it, the arrow takes its own row above,
+          pulled left by the button's padding so the icon itself sits on that edge. */}
+      <div className="relative flex flex-col items-start gap-2 xl:block">
+        <div className="-ml-1.5 flex h-7 items-center xl:absolute xl:top-0 xl:right-full xl:mr-4 xl:ml-0">
           <IconButton
             icon={ArrowLeftIcon}
             aria-label="Back to buckets"
@@ -279,7 +280,7 @@ export function CreateBucketPage() {
           <div className="mt-3 flex flex-col">
             {/* Encryption */}
             <div className="flex flex-col gap-0.5 py-3">
-              <span className="text-sm font-medium text-zinc-900">Encryption</span>
+              <span className="text-xs font-medium text-zinc-900">Encryption</span>
               <p className="text-xs leading-relaxed text-zinc-500">
                 All data is encrypted at rest.
               </p>
@@ -287,7 +288,7 @@ export function CreateBucketPage() {
 
             {/* Private */}
             <div className="flex flex-col gap-0.5 border-t border-zinc-200/60 py-3">
-              <span className="text-sm font-medium text-zinc-900">Private</span>
+              <span className="text-xs font-medium text-zinc-900">Private</span>
               <p className="text-xs leading-relaxed text-zinc-500">
                 All buckets are private. Access requires an API key.
               </p>
