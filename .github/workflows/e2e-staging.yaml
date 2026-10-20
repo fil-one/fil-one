@@ -65,6 +65,9 @@ jobs:
     # staging deploy. Both suites reset the same accounts on staging, so
     # runs wait in line. A waiting nightly run must not cancel a post-deploy
     # run, hence no cancel-in-progress.
+    # A staging deploy (group deploy-staging in packages-ci.yaml) can still
+    # land during a run. Deploys take about two minutes and are followed by
+    # their own post-deploy run, so we accept the rare mixed-version failure.
     concurrency:
       group: e2e-staging
       cancel-in-progress: false
