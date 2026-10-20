@@ -31,7 +31,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
         type="button"
         {...rest}
         className={cn(
-          'rounded text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700',
+          'rounded-md text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700',
           'disabled:cursor-not-allowed disabled:opacity-50',
           padding,
           className,

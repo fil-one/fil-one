@@ -180,7 +180,7 @@ function CopyButton({ value }: { value: string }) {
       onClick={() => void copy(value)}
       title={copied ? 'Copied' : 'Copy'}
       aria-label={copied ? 'Copied to clipboard' : 'Copy to clipboard'}
-      className="ml-2 shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+      className="ml-2 shrink-0 rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
     >
       <CopySimpleIcon size={14} />
     </button>
@@ -449,7 +449,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
                     {row.aws}
                   </td>
                   <td
-                    className={`px-4 py-2.5 font-mono text-xs ${row.highlight ? 'rounded bg-brand-50 font-semibold text-brand-700' : 'text-zinc-700'}`}
+                    className={`px-4 py-2.5 font-mono text-xs ${row.highlight ? 'rounded-md bg-brand-50 font-semibold text-brand-700' : 'text-zinc-700'}`}
                   >
                     {row.fil}
                   </td>
