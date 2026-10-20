@@ -160,6 +160,7 @@ export type PrincipalList = {
 export type PolicyConcreteAction =
   | 's3:GetObject'
   | 's3:GetObjectVersion'
+  | 's3:GetObjectAttributes'
   | 's3:GetObjectRetention'
   | 's3:GetObjectLegalHold'
   | 's3:ListBucket'
@@ -171,15 +172,24 @@ export type PolicyConcreteAction =
   | 's3:PutObjectRetention'
   | 's3:PutObjectLegalHold'
   | 's3:DeleteObject'
-  | 's3:DeleteObjectVersion';
+  | 's3:DeleteObjectVersion'
+  | 's3:GetObjectTagging'
+  | 's3:PutObjectTagging'
+  | 's3:DeleteObjectTagging'
+  | 's3:GetBucketAcl'
+  | 's3:GetBucketCORS'
+  | 's3:GetBucketLocation'
+  | 's3:GetBucketObjectLockConfiguration'
+  | 's3:GetBucketTagging'
+  | 's3:GetBucketVersioning';
 
 /**
- * An action a bucket policy statement may carry: every
- * `AccessKeyPermission` except the six bucket-level actions
- * (`s3:CreateBucket`, `s3:DeleteBucket`, `s3:ListAllMyBuckets`,
- * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
- * `s3:DeleteBucketPolicy`), plus `s3:*`, which stands for exactly
- * the concrete `PolicyAction` values and never for those six.
+ * An action a bucket policy statement may carry: a
+ * `PolicyConcreteAction`, or `s3:*`, which stands for exactly those
+ * values. A policy never grants `s3:CreateBucket`,
+ * `s3:DeleteBucket` or `s3:ListAllMyBuckets`, the bucket policy
+ * operations, or a write to the bucket's configuration
+ * (versioning, default object lock, tags, encryption).
  *
  */
 export type PolicyAction = PolicyConcreteAction | 's3:*';
@@ -214,8 +224,9 @@ export type PolicyStatement = {
   Action: PolicyAction | Array<PolicyAction>;
   /**
    * The bucket the policy is stored on: `arn:aws:s3:::<bucket>` for
-   * `s3:ListBucket`, `s3:ListBucketVersions` and
-   * `s3:ListBucketMultipartUploads`, `arn:aws:s3:::<bucket>*` for
+   * `s3:ListBucket`, `s3:ListBucketVersions`,
+   * `s3:ListBucketMultipartUploads` and the `s3:GetBucket*`
+   * configuration reads, `arn:aws:s3:::<bucket>*` for
    * every other action, and both for `s3:*`. A key prefix, a
    * wildcard in the bucket name or another bucket is rejected
    * (422).
