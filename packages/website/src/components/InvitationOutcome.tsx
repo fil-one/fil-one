@@ -114,7 +114,7 @@ function Refused({
           {sessionEmail ? (
             <>
               You&rsquo;re signed in as{' '}
-              <span className="font-semibold text-zinc-900">{sessionEmail}</span>.
+              <span className="font-medium text-zinc-900">{sessionEmail}</span>.
             </>
           ) : (
             'This invitation was sent to a different address than the account you are signed in with.'

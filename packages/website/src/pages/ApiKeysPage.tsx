@@ -338,7 +338,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
           ].map(({ n, title, code }) => (
             <div key={n} className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
               <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-medium text-zinc-600">
                   {n}
                 </span>
                 <span className="text-sm font-medium text-zinc-800">{title}</span>
@@ -384,7 +384,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
             </div>
             <div className="overflow-hidden border-b border-zinc-100">
               <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-medium text-zinc-600">
                   1
                 </span>
                 <span className="text-sm font-medium text-zinc-800">Install</span>
@@ -395,7 +395,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
             </div>
             <div>
               <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-2.5">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-600">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-medium text-zinc-600">
                   2
                 </span>
                 <span className="text-sm font-medium text-zinc-800">Upload &amp; retrieve</span>
@@ -449,7 +449,7 @@ client := s3.NewFromConfig(cfg, func(o *s3.Options) {
                     {row.aws}
                   </td>
                   <td
-                    className={`px-4 py-2.5 font-mono text-xs ${row.highlight ? 'rounded bg-brand-50 font-semibold text-brand-700' : 'text-zinc-700'}`}
+                    className={`px-4 py-2.5 font-mono text-xs ${row.highlight ? 'rounded bg-brand-50 font-medium text-brand-700' : 'text-zinc-700'}`}
                   >
                     {row.fil}
                   </td>

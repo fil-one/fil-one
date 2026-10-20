@@ -29,7 +29,7 @@ export function UserAvatar({ src, initial, className }: UserAvatarProps) {
       className={cn(
         // Same zinc pairing as Badge's strong grey variant — already the
         // console's established, AA-passing grey (well past 4.5:1).
-        'relative flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-zinc-200 text-xs font-semibold text-zinc-800',
+        'relative flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-zinc-200 text-xs font-medium text-zinc-800',
         className,
       )}
     >

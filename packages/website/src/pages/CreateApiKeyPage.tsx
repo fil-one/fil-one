@@ -79,7 +79,7 @@ export function CreateApiKeyPage() {
 
           {/* Right: info panel */}
           <div className="w-64 shrink-0">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            <p className="mb-3 text-xs font-medium uppercase tracking-wider text-zinc-400">
               Good to know
             </p>
             <p className="mb-4 text-sm font-medium text-zinc-700">

@@ -87,7 +87,7 @@ function UseCasesSection({ useCases }: { useCases: ComingSoonUseCase[] }) {
         {useCases.map((uc) => (
           <Card key={uc.title} color="subtle" shadow={false}>
             <Overline className="mb-2">{uc.category}</Overline>
-            <p className="mb-1.5 text-sm font-semibold text-zinc-900">{uc.title}</p>
+            <p className="mb-1.5 text-sm font-medium text-zinc-900">{uc.title}</p>
             <p className="text-sm leading-relaxed text-zinc-500">{uc.description}</p>
           </Card>
         ))}
@@ -109,7 +109,7 @@ function WhyFilOneSection({ items }: { items: { title: string; description: stri
               <CheckIcon size={11} weight="bold" className="text-brand-700" />
             </div>
             <div>
-              <p className="mb-1 text-sm font-semibold text-zinc-900">{item.title}</p>
+              <p className="mb-1 text-sm font-medium text-zinc-900">{item.title}</p>
               <p className="text-sm leading-relaxed text-zinc-500">{item.description}</p>
             </div>
           </div>

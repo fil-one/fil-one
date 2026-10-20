@@ -4,7 +4,7 @@ import { Tooltip } from './Tooltip';
 
 export type BadgeColor = 'green' | 'blue' | 'red' | 'grey' | 'amber';
 export type BadgeSize = 'sm' | 'md' | 'lg';
-export type BadgeWeight = 'regular' | 'medium' | 'semibold';
+export type BadgeWeight = 'regular' | 'medium';
 export type BadgeStrength = 'subtle' | 'strong';
 export type BadgeVariant = 'default' | 'solid';
 
@@ -86,7 +86,6 @@ const dotSizeStyles: Record<BadgeSize, string> = {
 const weightStyles: Record<BadgeWeight, string> = {
   regular: 'font-normal',
   medium: 'font-medium',
-  semibold: 'font-semibold',
 };
 
 export function Badge({
