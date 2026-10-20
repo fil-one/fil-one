@@ -10,14 +10,18 @@ on:
         required: false
         type: string
 
-concurrency:
-  group: e2e-staging
-  cancel-in-progress: true
-
 jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Shared with the e2e job in test-staging.yaml, which runs after each
+    # staging deploy. Both suites reset the same accounts on staging, so
+    # runs wait in line. A waiting nightly run must not cancel a post-deploy
+    # run, hence no cancel-in-progress and queue: max.
+    concurrency:
+      group: e2e-staging
+      cancel-in-progress: false
+      queue: max
     environment: staging
     permissions:
       id-token: write
