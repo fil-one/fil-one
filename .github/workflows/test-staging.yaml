@@ -10,12 +10,11 @@ jobs:
     # Every Playwright run against staging shares this group with
     # e2e-staging.yaml: the suites reset the same accounts' BillingTable
     # rows and org membership, so two overlapping runs break each other.
-    # queue: max keeps a waiting post-deploy run from being dropped when a
-    # nightly run joins the group.
+    # When several post-deploy runs wait, only the newest one stays queued;
+    # it tests the latest deploy, which includes the earlier commits.
     concurrency:
       group: e2e-staging
       cancel-in-progress: false
-      queue: max
     environment: staging
     permissions:
       id-token: write
@@ -113,7 +112,6 @@ jobs:
     concurrency:
       group: integration-staging
       cancel-in-progress: false
-      queue: max
     environment: staging
     permissions:
       id-token: write

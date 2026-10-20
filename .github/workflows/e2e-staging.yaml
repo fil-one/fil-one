@@ -11,17 +11,43 @@ on:
         type: string
 
 jobs:
+  # A concurrency group keeps one waiting job, and a newcomer cancels it.
+  # A nightly run joining the e2e-staging group while a post-deploy run
+  # waits would cancel that run and skip its production deploy. The nightly
+  # run therefore skips itself while a push to main is still in the deploy
+  # pipeline; that pipeline's test-staging runs the same suite.
+  check-deploy-pipeline:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      busy: ${{ steps.check.outputs.busy }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          active_runs=0
+          if [ "${{ github.event_name }}" = schedule ]; then
+            active_runs=$(gh api "repos/${{ github.repository }}/actions/workflows/packages-ci.yaml/runs?branch=main&event=push&per_page=20" \
+              --jq '[.workflow_runs[] | select(.status != "completed")] | length')
+          fi
+          echo "Active deploy pipeline runs: $active_runs"
+          if [ "$active_runs" -gt 0 ]; then busy=true; else busy=false; fi
+          echo "busy=$busy" >> "$GITHUB_OUTPUT"
+
   e2e:
+    needs: [check-deploy-pipeline]
+    if: needs.check-deploy-pipeline.outputs.busy == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Shared with the e2e job in test-staging.yaml, which runs after each
     # staging deploy. Both suites reset the same accounts on staging, so
     # runs wait in line. A waiting nightly run must not cancel a post-deploy
-    # run, hence no cancel-in-progress and queue: max.
+    # run, hence no cancel-in-progress.
     concurrency:
       group: e2e-staging
       cancel-in-progress: false
-      queue: max
     environment: staging
     permissions:
       id-token: write
