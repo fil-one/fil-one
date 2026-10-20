@@ -359,13 +359,22 @@ describe('BucketDetailPage — an empty bucket', () => {
     expect(await screen.findByTestId('add-bucket-key-modal')).toBeInTheDocument();
   });
 
-  it('switches to the API Keys tab, not to a new key, when keys reach the bucket already', async () => {
+  it('switches to the API Keys tab, opening no new key, when keys reach the bucket already', async () => {
     renderPage(OrgRole.Owner);
 
     fireEvent.click(await screen.findByRole('button', { name: 'View API keys' }));
 
-    expect(screen.queryByRole('button', { name: 'Create API key' })).not.toBeInTheDocument();
     expect(screen.getByTestId('bucket-keys-tab')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByTestId('add-bucket-key-modal')).not.toBeInTheDocument();
+  });
+
+  // The button sits in the Objects panel, which the switch replaces.
+  it('moves focus onto the API Keys tab after View API keys switches to it', async () => {
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View API keys' }));
+
+    await waitFor(() => expect(screen.getByTestId('bucket-keys-tab')).toHaveFocus());
   });
 
   it('keeps the loading placeholder, not the empty state, until the key list answers', async () => {
@@ -389,35 +398,6 @@ describe('BucketDetailPage — an empty bucket', () => {
 
     expect(await screen.findByText('This bucket is empty')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create API key' })).not.toBeInTheDocument();
-  });
-
-  // jsdom applies no stylesheet, so the class Tailwind turns into display: none stands in
-  // for "not shown".
-  it('hides the tab bar when the bucket holds no objects and no key reaches it', async () => {
-    mockBucketKeys.mockReturnValue([]);
-    renderPage(OrgRole.Owner);
-
-    await screen.findByRole('button', { name: 'Create API key' });
-
-    expect(screen.getByRole('tablist', { hidden: true })).toHaveClass('hidden');
-  });
-
-  it('keeps the tab bar when keys reach the empty bucket', async () => {
-    renderPage(OrgRole.Owner);
-
-    await screen.findByRole('button', { name: 'View API keys' });
-
-    expect(screen.getByRole('tablist')).not.toHaveClass('hidden');
-  });
-
-  it('keeps the tab bar for a role that sees the Policy tab', async () => {
-    mockBucketKeys.mockReturnValue([]);
-    mockSupportsIamMethods.mockReturnValue(true);
-    renderPage(OrgRole.Owner);
-
-    await screen.findByRole('button', { name: 'Create API key' });
-
-    expect(screen.getByRole('tablist')).not.toHaveClass('hidden');
   });
 });
 

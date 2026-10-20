@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { CloudArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -13,6 +13,7 @@ import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { countObjects } from '../components/ObjectBrowser';
 import { ObjectsPanel } from './BucketObjectsPanel';
+import { useBucketTabs } from '../lib/use-bucket-tabs.js';
 import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import { BucketPolicyTab } from '../components/BucketPolicyTab';
@@ -98,25 +99,6 @@ async function fetchObjectListing(
     })),
     isTruncated,
   };
-}
-
-/**
- * A bucket with no objects and no keys has nothing to switch between, and its empty state
- * already offers both next steps, so the tab bar is hidden. Hidden rather than removed:
- * Headless UI pairs each panel with a rendered tab. The Policy tab keeps the bar, since a
- * bucket's policy has content from the start. Both counts must have answered, so a bucket
- * that turns out to hold objects never loses its tabs while it loads.
- */
-function getTabListClassName({
-  objectCount,
-  keyCount,
-  isPolicyTabVisible,
-}: {
-  objectCount: number | undefined;
-  keyCount: number | undefined;
-  isPolicyTabVisible: boolean;
-}): string | undefined {
-  return objectCount === 0 && keyCount === 0 && !isPolicyTabVisible ? 'hidden' : undefined;
 }
 
 function removeVersionFromListing(
@@ -397,7 +379,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   // The Add key modal goes with the `keys.create` control inside the tab.
   const [addKeyOpen, setAddKeyOpen] = usePermittedDialog(false, mayCreateKeys);
   // Controlled so the empty bucket's View API keys button can switch tabs.
-  const [selectedTab, setSelectedTab] = useState(0);
+  const tabs = useBucketTabs({ hasKeysTab: mayListKeys, hasPolicyTab: isPolicyTabVisible });
   // Each tab's count, undefined until its list has answered
   const objectCount = objectsQuery.isPending
     ? undefined
@@ -490,8 +472,8 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         <BucketOverview bucket={bucket} region={region} bytesUsed={analyticsData?.bytesUsed} />
       )}
 
-      <Tabs selectedIndex={selectedTab} onChange={setSelectedTab}>
-        <TabList className={getTabListClassName({ objectCount, keyCount, isPolicyTabVisible })}>
+      <Tabs selectedIndex={tabs.selectedIndex} onChange={tabs.selectTabAt}>
+        <TabList>
           {/* The count waits for the listing rather than counting an empty
               array: "Objects (0)" on a bucket that turns out to hold hundreds is
               a worse answer than no number yet, and it is the same rule the API
@@ -503,7 +485,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               (0)" tab reads as an org with no keys rather than a view this
               caller does not get. */}
           {mayListKeys && (
-            <Tab testId="bucket-keys-tab" count={keyCount}>
+            <Tab ref={tabs.keysTabRef} testId="bucket-keys-tab" count={keyCount}>
               API Keys
             </Tab>
           )}
@@ -529,7 +511,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               accessKeysLoading={accessKeysLoading}
               mayCreateKeys={mayCreateKeys}
               onAddKeyOpenChange={setAddKeyOpen}
-              onTabChange={setSelectedTab}
+              onShowKeys={tabs.showKeysTab}
               listingTruncated={isTruncated}
               totalObjectCount={analyticsData?.objectCount}
             />

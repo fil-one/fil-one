@@ -15,10 +15,6 @@ const OBJECT_SKELETON_COLUMNS: SkeletonColumn[] = [
   {},
 ];
 
-// The API Keys tab follows Objects whenever it is shown, and the empty state links to it
-// only when keys exist, which takes the permission that shows the tab.
-const KEYS_TAB_INDEX = 1;
-
 /**
  * The key step an empty bucket offers: the keys that reach it already, when there are
  * any, else a new one.
@@ -27,14 +23,15 @@ function getEmptyBucketKeyAction({
   accessKeyCount,
   mayCreateKeys,
   onAddKeyOpenChange,
-  onTabChange,
+  onShowKeys,
 }: {
   accessKeyCount: number;
   mayCreateKeys: boolean;
   onAddKeyOpenChange: (open: boolean) => void;
-  onTabChange: (index: number) => void;
+  onShowKeys: () => void;
 }): EmptyBucketKeyAction | undefined {
-  if (accessKeyCount > 0) return { kind: 'view', onView: () => onTabChange(KEYS_TAB_INDEX) };
+  // Keys exist only for a caller who may list them, which is also what shows the Keys tab
+  if (accessKeyCount > 0) return { kind: 'view', onView: onShowKeys };
   if (mayCreateKeys) return { kind: 'create', onCreate: () => onAddKeyOpenChange(true) };
   return undefined;
 }
@@ -53,7 +50,7 @@ export function ObjectsPanel({
   accessKeysLoading,
   mayCreateKeys,
   onAddKeyOpenChange,
-  onTabChange,
+  onShowKeys,
   ...browser
 }: {
   loading: boolean;
@@ -70,7 +67,7 @@ export function ObjectsPanel({
   accessKeysLoading: boolean;
   mayCreateKeys: boolean;
   onAddKeyOpenChange: (open: boolean) => void;
-  onTabChange: (index: number) => void;
+  onShowKeys: () => void;
   listingTruncated: boolean;
   totalObjectCount: number | undefined;
 }) {
@@ -90,7 +87,7 @@ export function ObjectsPanel({
         accessKeyCount,
         mayCreateKeys,
         onAddKeyOpenChange,
-        onTabChange,
+        onShowKeys,
       })}
       onDelete={mayDelete ? objectActions.deleteObject : undefined}
       onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}

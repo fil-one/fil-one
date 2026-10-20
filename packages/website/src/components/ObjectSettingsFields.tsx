@@ -102,6 +102,8 @@ export function ObjectSettingsFields({
                     <Badge color="grey" size="xs">
                       Needs Versioning
                     </Badge>
+                    {/* Ends the sentence for a screen reader, which reads the badge and the description as one run */}
+                    <span className="sr-only">.</span>
                   </Description>
                 )}
               </div>
@@ -131,6 +133,8 @@ export function ObjectSettingsFields({
                       <Badge color="grey" size="xs">
                         Needs Object Lock
                       </Badge>
+                      {/* Ends the sentence for a screen reader, which reads the badge and the description as one run */}
+                      <span className="sr-only">.</span>
                     </Description>
                   )}
                 </div>

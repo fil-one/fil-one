@@ -181,6 +181,12 @@ test.describe('as the owner', () => {
     await page.locator('#create-bucket-submit-button').click();
     await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucket}`);
 
+    // The key form a new bucket leads to is a principal key on an iam region.
+    await page.getByTestId('bucket-keys-tab').click();
+    await page.locator('#bucket-add-key-button').click();
+    await expectPrincipalKeyFields(page);
+    await page.locator('#add-bucket-key-cancel-button').click();
+
     await page.getByTestId('bucket-policy-tab').click();
     await expect(page.getByTestId('policy-statement')).toHaveCount(1);
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(

@@ -139,7 +139,7 @@ describe('ObjectSettingsFields', () => {
 
       const toggle = screen.getByRole('switch', { name: setting });
       expect(toggle).toBeDisabled();
-      expect(toggle).toHaveAccessibleDescription(expect.stringContaining(requirement));
+      expect(toggle).toHaveAccessibleDescription(expect.stringContaining(`${requirement}.`));
     },
   );
 

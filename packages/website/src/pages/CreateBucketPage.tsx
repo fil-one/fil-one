@@ -61,6 +61,8 @@ function buildCreateBucketBody(fields: {
   };
 }
 
+const TAKEN_NAME_MESSAGE = 'This name is already taken. Try another.';
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -87,12 +89,19 @@ export function CreateBucketPage() {
 
   // Validation
   const [bucketNameError, setBucketNameError] = useState<string | null>(null);
+  // The name the server last refused as taken. The local format check accepts it, so
+  // without this a blur or an edit back to it would clear the refusal.
+  const [takenName, setTakenName] = useState<string | null>(null);
 
   // Submit state
   const [creating, setCreating] = useState(false);
   const bucketNameRef = useRef<HTMLElement>(null);
 
   function validateBucketName(value: string) {
+    if (value.trim() === takenName) {
+      setBucketNameError(TAKEN_NAME_MESSAGE);
+      return false;
+    }
     const result = CreateBucketSchema.shape.bucketName.safeParse(value);
     if (!result.success) {
       setBucketNameError(result.error.issues[0].message);
@@ -110,7 +119,10 @@ export function CreateBucketPage() {
 
   function reportCreateFailure(err: unknown) {
     // This route answers 409 only for a name someone already holds, and the fix is in the name field
-    if (errorStatusOf(err) === 409) return refuseName('This name is already taken. Try another.');
+    if (errorStatusOf(err) === 409) {
+      setTakenName(bucketName.trim());
+      return refuseName(TAKEN_NAME_MESSAGE);
+    }
     toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
   }
 

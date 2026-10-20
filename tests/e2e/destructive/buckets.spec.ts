@@ -24,8 +24,11 @@ async function createBucketWithKey(page: Page, bucketName: string, region: Regio
   await page.locator(`[data-testid="region-option"][data-region="${region}"]`).click();
   await page.locator('#create-bucket-submit-button').click();
   await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}`);
-  // A new bucket is empty, and its empty state carries the API key step.
-  await page.locator('#object-browser-create-key-button').click();
+  // Through the API Keys tab rather than the empty state's button: the empty state offers
+  // View API keys instead whenever a key already reaches the bucket, as a creator's own keys
+  // do on an iam region.
+  await page.getByTestId('bucket-keys-tab').click();
+  await page.locator('#bucket-add-key-button').click();
   await page.locator('#key-name').fill(`${bucketName}-key`);
   await page.locator('#add-bucket-key-submit-button').click();
   await page.locator('#save-credentials-done-button').click();

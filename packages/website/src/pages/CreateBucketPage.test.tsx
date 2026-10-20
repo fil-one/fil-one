@@ -49,30 +49,41 @@ beforeEach(() => {
 });
 
 describe('CreateBucketPage — advanced settings', () => {
-  it('hides the object settings until Advanced settings is opened', () => {
+  it('hides the object settings while Advanced settings is closed', () => {
     renderPage();
+
     expect(screen.queryByRole('switch', { name: 'Versioning' })).not.toBeInTheDocument();
+  });
+
+  it('shows the object settings once Advanced settings is opened', () => {
+    renderPage();
 
     toggleAdvancedSettings();
 
-    expect(screen.getByRole('button', { name: /Advanced settings/ })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    );
     expect(screen.getByRole('switch', { name: 'Versioning' })).toBeInTheDocument();
   });
 
-  it('keeps versioning on and names it in the summary after Advanced settings is closed', async () => {
+  it('names versioning in the summary after Advanced settings is closed with it on', () => {
+    renderPage();
+    toggleAdvancedSettings();
+    fireEvent.click(screen.getByRole('switch', { name: 'Versioning' }));
+
+    toggleAdvancedSettings();
+
+    expect(screen.getByRole('button', { name: /Advanced settings/ })).toHaveTextContent(
+      'Versioning on',
+    );
+  });
+
+  it('creates the bucket with versioning on after Advanced settings is closed', async () => {
     renderPage();
     fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
     toggleAdvancedSettings();
     fireEvent.click(screen.getByRole('switch', { name: 'Versioning' }));
     toggleAdvancedSettings();
 
-    expect(screen.getByRole('button', { name: /Advanced settings/ })).toHaveTextContent(
-      'Versioning on',
-    );
     fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
     await waitFor(() => expect(getBucketRequestBody()).toMatchObject({ versioning: true }));
   });
 
@@ -107,6 +118,31 @@ describe('CreateBucketPage — a name that is already taken', () => {
 
     expect(await screen.findByText('This name is already taken. Try another.')).toBeInTheDocument();
     expect(screen.getByLabelText('Bucket name')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('puts the cursor back in the name field when the create call answers 409', async () => {
+    mockApiRequest.mockRejectedValue(takenNameError);
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
+    await screen.findByText('This name is already taken. Try another.');
+    expect(screen.getByLabelText('Bucket name')).toHaveFocus();
+  });
+
+  // The local format check accepts a taken name, so a blur re-running it must not clear
+  // what the server said.
+  it('keeps the taken-name error when the name field loses focus unchanged', async () => {
+    mockApiRequest.mockRejectedValue(takenNameError);
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+    await screen.findByText('This name is already taken. Try another.');
+
+    fireEvent.blur(screen.getByLabelText('Bucket name'));
+
+    expect(screen.getByText('This name is already taken. Try another.')).toBeInTheDocument();
   });
 
   it('clears the taken-name error once the name is edited', async () => {
