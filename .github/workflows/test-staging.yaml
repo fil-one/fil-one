@@ -15,6 +15,10 @@ jobs:
     concurrency:
       group: e2e-staging
       cancel-in-progress: false
+      # queue: max would run every waiting job in turn, each testing the
+      # same latest deploy and delaying the newest commit's production
+      # deploy. The newest waiting run alone covers them all.
+      queue: single
     environment: staging
     permissions:
       id-token: write
@@ -112,6 +116,8 @@ jobs:
     concurrency:
       group: integration-staging
       cancel-in-progress: false
+      # Like the e2e job: the newest waiting run tests the latest deploy.
+      queue: single
     environment: staging
     permissions:
       id-token: write

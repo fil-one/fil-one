@@ -71,6 +71,9 @@ jobs:
     concurrency:
       group: e2e-staging
       cancel-in-progress: false
+      # Keep only the newest waiting job. check-deploy-pipeline skips this
+      # job while a post-deploy run may be waiting, so it never cancels one.
+      queue: single
     environment: staging
     permissions:
       id-token: write
