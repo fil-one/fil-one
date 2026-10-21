@@ -102,24 +102,24 @@ describe('BucketAccessTab — who may revoke', () => {
   it('gives a Member the action on the key they minted', () => {
     renderTab({ accessKeys: [key()] }, OrgRole.Member);
 
-    expect(screen.getByRole('button', { name: 'Key actions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Actions for / })).toBeInTheDocument();
   });
 
   it('withholds it on a key somebody else minted', () => {
     renderTab({ accessKeys: [key({ createdBy: USER_2 })] }, OrgRole.Member);
 
-    expect(screen.queryByRole('button', { name: 'Key actions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Actions for / })).not.toBeInTheDocument();
   });
 
   it('gives an Admin the action on every key', () => {
     renderTab({ accessKeys: [key(), key({ id: 'key-2', createdBy: USER_2 })] }, OrgRole.Admin);
 
-    expect(screen.getAllByRole('button', { name: 'Key actions' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /^Actions for / })).toHaveLength(2);
   });
 
   it('gives ReadOnly none', () => {
     renderTab({ accessKeys: [key()] }, OrgRole.ReadOnly);
 
-    expect(screen.queryByRole('button', { name: 'Key actions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Actions for / })).not.toBeInTheDocument();
   });
 });

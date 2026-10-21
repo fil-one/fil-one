@@ -758,6 +758,15 @@ describe('getBucket for a member', () => {
     );
   });
 
+  it('forwards the signal to the access lookup', async () => {
+    mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
+    const signal = new AbortController().signal;
+
+    await orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID, { signal });
+
+    expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+  });
+
   it("returns null without S3 reads when the Member's access omits the bucket", async () => {
     mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('other'));
 

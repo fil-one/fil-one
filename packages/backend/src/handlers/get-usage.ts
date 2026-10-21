@@ -7,6 +7,7 @@ import { keyScope } from '../lib/key-scope.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import { getProvisionedRegions } from '../lib/region-helpers.ts';
 import type { RegionOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -25,6 +26,10 @@ interface RegionUsage {
 }
 
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+  // One deadline for every upstream call this request makes, so a hung region
+  // fails its own leg below instead of holding the handler until the Lambda
+  // timeout kills it with nothing logged.
+  const signal = getRequestDeadline(event);
   const { orgId } = getUserInfo(event);
 
   // Access keys live in DynamoDB, not in any region's orchestrator, so this is
@@ -54,7 +59,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // rest: settle every fetch, log the failures, and keep the successes.
   const settled = await Promise.allSettled(
     regions.map(({ orchestrator, tenantId }) =>
-      fetchRegionUsage(orchestrator, tenantId, thirtyDaysAgo, now),
+      fetchRegionUsage(orchestrator, tenantId, { from: thirtyDaysAgo, to: now }, signal),
     ),
   );
 
@@ -126,17 +131,18 @@ function aggregateRegionUsages(regionUsages: RegionUsage[], accessKeyCount: numb
 async function fetchRegionUsage(
   orchestrator: RegionOrchestrator,
   tenantId: string,
-  from: Date,
-  to: Date,
+  window: { from: Date; to: Date },
+  signal: AbortSignal,
 ): Promise<RegionUsage> {
+  const { from, to } = window;
   const [metrics, info, buckets] = await Promise.all([
-    orchestrator.getTenantUsageMetrics(tenantId, {
-      from: from.toISOString(),
-      to: to.toISOString(),
-      interval: '1d',
-    }),
-    orchestrator.getTenantInfo(tenantId),
-    orchestrator.listBuckets(tenantId),
+    orchestrator.getTenantUsageMetrics(
+      tenantId,
+      { from: from.toISOString(), to: to.toISOString(), interval: '1d' },
+      { signal },
+    ),
+    orchestrator.getTenantInfo(tenantId, { signal }),
+    orchestrator.listBuckets(tenantId, undefined, { signal }),
   ]);
 
   // Storage is point-in-time: take the most recent reading. Egress is
@@ -167,6 +173,7 @@ function pickMostRestrictiveStatus(
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(authorize('buckets.read'))
