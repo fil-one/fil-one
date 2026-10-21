@@ -3,14 +3,22 @@ name: 'Tests [staging]'
 on:
   workflow_call:
 
-concurrency:
-  group: staging-tests
-  cancel-in-progress: false
-
 jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Every Playwright run against staging shares this group with
+    # e2e-staging.yaml: the suites reset the same accounts' BillingTable
+    # rows and org membership, so two overlapping runs break each other.
+    # When several post-deploy runs wait, only the newest one stays queued;
+    # it tests the latest deploy, which includes the earlier commits.
+    concurrency:
+      group: e2e-staging
+      cancel-in-progress: false
+      # queue: max would run every waiting job in turn, each testing the
+      # same latest deploy and delaying the newest commit's production
+      # deploy. The newest waiting run alone covers them all.
+      queue: single
     environment: staging
     permissions:
       id-token: write
@@ -105,6 +113,11 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    concurrency:
+      group: integration-staging
+      cancel-in-progress: false
+      # Like the e2e job: the newest waiting run tests the latest deploy.
+      queue: single
     environment: staging
     permissions:
       id-token: write
