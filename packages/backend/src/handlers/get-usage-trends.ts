@@ -3,7 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { UsageDataPoint, UsageTrendsPeriod, UsageTrendsResponse } from '@filone/shared';
 import type { RegionOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.ts';
-import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -78,9 +78,8 @@ export async function baseHandler(
 ): Promise<APIGatewayProxyStructuredResultV2> {
   // One deadline for every region's fetch, so a hung region fails its own leg
   // (swallowed in fetchSamplesByBucket) instead of holding the handler until
-  // the Lambda timeout kills it with nothing logged. Started at handler entry
-  // so the DynamoDB reads before the fan-out count against it as well.
-  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
+  // the Lambda timeout kills it with nothing logged.
+  const signal = getRequestDeadline(event);
   const { orgId } = getUserInfo(event);
   const period = parsePeriod(event.queryStringParameters?.period);
 
@@ -212,6 +211,7 @@ async function fetchSamplesByBucket({
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(authorize('buckets.read'))

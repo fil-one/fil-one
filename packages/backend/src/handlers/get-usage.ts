@@ -7,7 +7,7 @@ import { keyScope } from '../lib/key-scope.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import { getProvisionedRegions } from '../lib/region-helpers.ts';
 import type { RegionOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
-import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -28,9 +28,8 @@ interface RegionUsage {
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   // One deadline for every upstream call this request makes, so a hung region
   // fails its own leg below instead of holding the handler until the Lambda
-  // timeout kills it with nothing logged. Started at handler entry so the
-  // DynamoDB reads before the fan-out count against it as well.
-  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
+  // timeout kills it with nothing logged.
+  const signal = getRequestDeadline(event);
   const { orgId } = getUserInfo(event);
 
   // Access keys live in DynamoDB, not in any region's orchestrator, so this is
@@ -174,6 +173,7 @@ function pickMostRestrictiveStatus(
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(authorize('buckets.read'))

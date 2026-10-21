@@ -9,7 +9,7 @@ import { getDynamoClient } from '../lib/ddb-client.ts';
 import { keyScope, withinScope } from '../lib/key-scope.ts';
 import type { KeyScope } from '../lib/key-scope.ts';
 import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
-import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -88,7 +88,7 @@ export async function baseHandler(
   // One deadline for every upstream call this request makes. A hung region then
   // fails its own leg (caught in listBucketActivities) instead of holding the
   // whole handler until the Lambda timeout kills it with nothing logged.
-  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
+  const signal = getRequestDeadline(event);
   // The dashboard aggregates activity across every region the org is provisioned
   // in, so resolve the ready tenant on each available orchestrator.
   const { result: regions, durationMs: resolveRegionsMs } = await timed('resolveRegions', () =>
@@ -234,6 +234,7 @@ async function fetchAccessKeyActivities(orgId: string, scope: KeyScope): Promise
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(authorize('buckets.read'))

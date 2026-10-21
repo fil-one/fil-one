@@ -14,7 +14,7 @@ import { getScopedMemberId } from '../lib/member-scope.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { BucketSummary } from '../lib/service-orchestrator.ts';
-import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -41,7 +41,7 @@ export async function baseHandler(
   // One deadline for every leg of the fan-out below. A hung region then fails
   // its own leg and is named in the response, instead of holding the whole
   // handler until the Lambda timeout kills it with nothing logged.
-  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
+  const signal = getRequestDeadline(event);
 
   // Each orchestrator only ever serves its own fixed region, so a region filter
   // lets every other leg be skipped outright instead of fetched and discarded.
@@ -111,6 +111,7 @@ export async function baseHandler(
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(authorize('buckets.read'))
