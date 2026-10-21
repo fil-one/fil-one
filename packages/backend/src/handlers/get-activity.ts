@@ -9,6 +9,7 @@ import { getDynamoClient } from '../lib/ddb-client.ts';
 import { keyScope, withinScope } from '../lib/key-scope.ts';
 import type { KeyScope } from '../lib/key-scope.ts';
 import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -84,6 +85,10 @@ export async function baseHandler(
   // neither. The rows are not fetched at all in that last case: a read nobody
   // may see is a read worth not making.
   const scope = keyScope(event);
+  // One deadline for every upstream call this request makes. A hung region then
+  // fails its own leg (caught in listBucketActivities) instead of holding the
+  // whole handler until the Lambda timeout kills it with nothing logged.
+  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
   // The dashboard aggregates activity across every region the org is provisioned
   // in, so resolve the ready tenant on each available orchestrator.
   const { result: regions, durationMs: resolveRegionsMs } = await timed('resolveRegions', () =>
@@ -94,7 +99,7 @@ export async function baseHandler(
     { result: bucketActivities, durationMs: bucketActivitiesMs },
     { result: keyActivities, durationMs: keyActivitiesMs },
   ] = await Promise.all([
-    timed('fetchBucketActivities', () => fetchBucketActivities(orgId, regions)),
+    timed('fetchBucketActivities', () => fetchBucketActivities(orgId, regions, signal)),
     // Timed only when it runs: a phase duration emitted for a fetch that was
     // skipped reports a 0ms DynamoDB query that never happened.
     scope.sees === 'none'
@@ -117,7 +122,11 @@ export async function baseHandler(
   reportDuration('GetActivityDuration', { handler: 'get-activity' }, totalMs);
   // Single summary line so a slow request shows which phase dominated without
   // stitching together the per-phase metrics. Phases run concurrently, so the
-  // total is ~max(phases), not their sum.
+  // total is ~max(phases), not their sum. This line ships only on
+  // non-production stages: production logs at WARN (sst.config.ts), so there
+  // the GetActivityPhaseDuration series emitted by timed() is the diagnostic,
+  // at one-minute granularity. A phase that never completes (Lambda timeout)
+  // emits neither the metric nor this line.
   console.log('[get-activity] completed', {
     orgId,
     regionCount: regions.length,
@@ -138,10 +147,11 @@ export async function baseHandler(
 async function fetchBucketActivities(
   orgId: string,
   regions: ProvisionedRegion[],
+  signal: AbortSignal,
 ): Promise<RecentActivity[]> {
   const perRegion = await Promise.all(
     regions.map(({ orchestrator, tenantId }) =>
-      listBucketActivities(orgId, orchestrator, tenantId),
+      listBucketActivities(orgId, orchestrator, tenantId, signal),
     ),
   );
   return perRegion.flat();
@@ -151,15 +161,20 @@ async function listBucketActivities(
   orgId: string,
   orchestrator: RegionOrchestrator,
   tenantId: string,
+  signal: AbortSignal,
 ): Promise<RecentActivity[]> {
   // Swallow per-orchestrator errors so one region's outage still renders the rest.
   const start = performance.now();
   try {
-    const buckets = await orchestrator.listBuckets(tenantId);
+    const buckets = await orchestrator.listBuckets(tenantId, undefined, { signal });
     const durationMs = performance.now() - start;
     reportDuration('ListBucketsDuration', { region: orchestrator.region }, durationMs);
-    // bucketCount vs durationMs exposes the per-bucket cost — a duration that
+    // bucketCount vs durationMs exposes the per-bucket cost: a duration that
     // grows with bucketCount points at an N+1 in the orchestrator's listBuckets.
+    // This line ships only on non-production stages: production logs at WARN
+    // (sst.config.ts), so there ListBucketsDuration is the diagnostic, at
+    // one-minute granularity. A listBuckets that never returns (Lambda timeout)
+    // emits neither the metric nor this line.
     console.log('[get-activity] listed buckets', {
       orgId,
       tenantId,
