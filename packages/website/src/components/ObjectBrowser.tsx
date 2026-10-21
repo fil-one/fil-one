@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { CloudArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
+import { DatabaseIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
@@ -100,44 +100,98 @@ function TruncatedListingNotice({
   );
 }
 
+/** No key can reach the bucket yet, and the caller may create one. */
+export interface CreateKeyAction {
+  kind: 'create';
+  onCreate: () => void;
+}
+
+/** Keys that reach the bucket already exist, so the step is to use one, not make another. */
+export interface ViewKeysAction {
+  kind: 'view';
+  onView: () => void;
+}
+
+export type EmptyBucketKeyAction = CreateKeyAction | ViewKeysAction;
+
+const KEY_ACTION_PHRASES: Record<EmptyBucketKeyAction['kind'], { alone: string; after: string }> = {
+  create: {
+    alone: 'Create an API key to connect an app to this bucket',
+    after: 'create an API key to connect an app',
+  },
+  view: {
+    alone: 'Connect an app to this bucket with an existing API key',
+    after: 'connect an app with an existing API key',
+  },
+};
+
+/** The empty state's line, by which of its two next steps the caller may take. */
+function getEmptyBucketDescription(canUpload: boolean, keyAction?: EmptyBucketKeyAction): string {
+  const phrases = keyAction && KEY_ACTION_PHRASES[keyAction.kind];
+  if (canUpload && phrases) return `Upload files, or ${phrases.after}`;
+  if (canUpload) return 'Upload your first object to this bucket';
+  if (phrases) return phrases.alone;
+  return 'Objects uploaded to this bucket appear here';
+}
+
 function EmptyBucketState({
   bucketName,
   region,
   canUpload,
+  keyAction,
 }: {
   bucketName: string;
   region: S3Region;
   canUpload: boolean;
+  keyAction?: EmptyBucketKeyAction;
 }) {
   const navigate = useNavigate();
   return (
     <div className="mt-4">
       <EmptyStateCard
-        icon={CloudArrowUpIcon}
-        title="No objects yet"
-        description={
-          canUpload
-            ? 'Upload your first object to this bucket'
-            : 'Objects uploaded to this bucket appear here'
-        }
+        // The sidebar's Buckets icon: it names the thing, and sits evenly over both next steps
+        icon={DatabaseIcon}
+        title="This bucket is empty"
+        description={getEmptyBucketDescription(canUpload, keyAction)}
       >
-        {/* Text-only: the cloud tile directly above already speaks "upload",
-            so a glyph on the button here would just repeat it. */}
-        {canUpload && (
-          <Button
-            id="object-browser-upload-button"
-            variant="primary"
-            onClick={() =>
-              void navigate({
-                to: '/buckets/$bucketName/upload',
-                params: { bucketName },
-                search: { region },
-              })
-            }
-          >
-            Upload object
-          </Button>
-        )}
+        {/* Text-only buttons: the bucket icon above sets the scene, and two labelled
+            actions side by side read more evenly without glyphs of their own. */}
+        <div className="flex flex-wrap justify-center gap-2">
+          {canUpload && (
+            <Button
+              id="object-browser-upload-button"
+              variant="primary"
+              onClick={() =>
+                void navigate({
+                  to: '/buckets/$bucketName/upload',
+                  params: { bucketName },
+                  search: { region },
+                })
+              }
+            >
+              Upload object
+            </Button>
+          )}
+          {/* A new bucket lands here, so this is where the create form's API key step moved to */}
+          {keyAction?.kind === 'create' && (
+            <Button
+              id="object-browser-create-key-button"
+              variant={canUpload ? 'ghost' : 'primary'}
+              onClick={keyAction.onCreate}
+            >
+              Create API key
+            </Button>
+          )}
+          {keyAction?.kind === 'view' && (
+            <Button
+              id="object-browser-view-keys-button"
+              variant={canUpload ? 'ghost' : 'primary'}
+              onClick={keyAction.onView}
+            >
+              View API keys
+            </Button>
+          )}
+        </div>
       </EmptyStateCard>
     </div>
   );
@@ -256,6 +310,8 @@ export type ObjectBrowserProps = {
   onBulkDelete?: (targets: ObjectDeleteTarget[]) => Promise<void>;
   /** Whether to offer the upload route. False for a role without `objects.write`. */
   canUpload?: boolean;
+  /** The API key step the empty state offers beside upload. Absent when there is none to offer. */
+  keyAction?: EmptyBucketKeyAction;
   /**
    * True when the listing is a partial page. Selection can only ever cover the
    * objects actually loaded, so the browser says so rather than implying that
@@ -298,6 +354,7 @@ export function ObjectBrowser({
   onDelete,
   onBulkDelete,
   canUpload = true,
+  keyAction,
   listingTruncated = false,
   totalObjectCount,
 }: ObjectBrowserProps) {
@@ -349,7 +406,14 @@ export function ObjectBrowser({
   };
 
   if (versions.length === 0) {
-    return <EmptyBucketState bucketName={bucketName} region={region} canUpload={canUpload} />;
+    return (
+      <EmptyBucketState
+        bucketName={bucketName}
+        region={region}
+        canUpload={canUpload}
+        keyAction={keyAction}
+      />
+    );
   }
 
   const groups = groupVersionsByKey(versions);

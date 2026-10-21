@@ -133,9 +133,13 @@ function ConnectionFacts({
               <label htmlFor="connection-region">Region</label>
             </dt>
             <dd className="min-w-0 flex-1">
-              <div className="w-full max-w-80 [&_select]:py-1.5 [&_select]:pr-8 [&_select]:text-ui">
-                <RegionSelect id="connection-region" value={region} onChange={onRegionChange} />
-              </div>
+              <RegionSelect
+                id="connection-region"
+                value={region}
+                onChange={onRegionChange}
+                size="sm"
+                className="max-w-80"
+              />
             </dd>
           </div>
           <div className="group flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 sm:flex-nowrap sm:py-2">

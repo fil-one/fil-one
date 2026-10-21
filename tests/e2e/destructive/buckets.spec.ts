@@ -20,12 +20,18 @@ async function createBucketWithKey(page: Page, bucketName: string, region: Regio
   await page.getByTestId('nav-buckets').click();
   await page.locator('#buckets-create-button').click();
   await page.locator('#bucket-name').fill(bucketName);
-  await page.locator('#bucket-region').selectOption(region);
-  await page.locator('#create-bucket-toggle-key').click();
-  await page.locator('#key-name').fill(`${bucketName}-key`);
+  await page.locator('#bucket-region').click();
+  await page.locator(`[data-testid="region-option"][data-region="${region}"]`).click();
   await page.locator('#create-bucket-submit-button').click();
-  await page.locator('#save-credentials-done-button').click();
   await expect(page).toHaveURL((url) => url.pathname === `/buckets/${bucketName}`);
+  // Through the API Keys tab rather than the empty state's button: the empty state offers
+  // View API keys instead whenever a key already reaches the bucket, as a creator's own keys
+  // do on an iam region.
+  await page.getByTestId('bucket-keys-tab').click();
+  await page.locator('#bucket-add-key-button').click();
+  await page.locator('#key-name').fill(`${bucketName}-key`);
+  await page.locator('#add-bucket-key-submit-button').click();
+  await page.locator('#save-credentials-done-button').click();
 }
 
 // Opens the first bucket listed at /buckets for the given region and returns
@@ -219,7 +225,8 @@ for (const region of REGIONS) {
       await page.getByTestId('nav-buckets').click();
       await page.locator('#buckets-create-button').click();
       await page.locator('#bucket-name').fill(bucketName);
-      await page.locator('#bucket-region').selectOption(region);
+      await page.locator('#bucket-region').click();
+      await page.locator(`[data-testid="region-option"][data-region="${region}"]`).click();
       await page.locator('#create-bucket-submit-button').click();
 
       // No navigation on failure — still on the create page.

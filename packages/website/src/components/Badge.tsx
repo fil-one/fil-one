@@ -3,8 +3,8 @@ import clsx from 'clsx';
 import { Tooltip } from './Tooltip';
 
 export type BadgeColor = 'green' | 'blue' | 'red' | 'grey' | 'amber';
-export type BadgeSize = 'sm' | 'md' | 'lg';
-export type BadgeWeight = 'regular' | 'medium';
+export type BadgeSize = 'xs' | 'sm' | 'md' | 'lg';
+export type BadgeWeight = 'regular' | 'medium' | 'semibold';
 export type BadgeStrength = 'subtle' | 'strong';
 export type BadgeVariant = 'default' | 'solid';
 
@@ -65,19 +65,23 @@ const solidDotStyles: Record<BadgeColor, string> = {
   grey: 'bg-white/60',
 };
 
+// `xs` matches the 11px helper text it sits beside, for a status note on a settings row.
 const sizeStyles: Record<BadgeSize, string> = {
+  xs: 'text-meta py-0.5 gap-1',
   sm: 'text-xs py-0.5 gap-1',
   md: 'text-sm py-0.5 gap-1.5',
   lg: 'text-sm py-1 gap-1.5',
 };
 
 const paddingXStyles: Record<BadgeSize, { dot: string; noDot: string }> = {
+  xs: { dot: 'px-1.5', noDot: 'px-1.5' },
   sm: { dot: 'px-1.5', noDot: 'px-2' },
   md: { dot: 'px-2', noDot: 'px-2.5' },
   lg: { dot: 'px-2.5', noDot: 'px-3' },
 };
 
 const dotSizeStyles: Record<BadgeSize, string> = {
+  xs: 'size-1.5',
   sm: 'size-1.5',
   md: 'size-2',
   lg: 'size-2',
@@ -86,6 +90,7 @@ const dotSizeStyles: Record<BadgeSize, string> = {
 const weightStyles: Record<BadgeWeight, string> = {
   regular: 'font-normal',
   medium: 'font-medium',
+  semibold: 'font-semibold',
 };
 
 export function Badge({

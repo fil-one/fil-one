@@ -148,7 +148,13 @@ export function BucketAccessTab({
           API keys
         </Heading>
         <RequirePermission permission="keys.create">
-          <Button variant="ghost" size="sm" icon={PlusIcon} onClick={onCreateOpen}>
+          <Button
+            id="bucket-add-key-button"
+            variant="ghost"
+            size="sm"
+            icon={PlusIcon}
+            onClick={onCreateOpen}
+          >
             Add key
           </Button>
         </RequirePermission>

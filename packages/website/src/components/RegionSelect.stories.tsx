@@ -27,6 +27,22 @@ export const UsEast1: Story = {
   },
 };
 
+export const Small: Story = {
+  args: {
+    value: S3Region.EuWest1,
+    size: 'sm',
+    onChange: () => {},
+  },
+};
+
+export const Large: Story = {
+  args: {
+    value: S3Region.EuWest1,
+    size: 'lg',
+    onChange: () => {},
+  },
+};
+
 export const Disabled: Story = {
   args: {
     value: S3Region.EuWest1,
