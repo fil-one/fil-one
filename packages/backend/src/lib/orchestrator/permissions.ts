@@ -7,12 +7,9 @@ import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
 const ALWAYS_PERMISSIONS: readonly string[] = ['s3:ListAllMyBuckets'];
 
 // Maps FilOne permission values onto the contract's s3:* action enum. Close
-// cousin of FTH_BASE_PERMISSIONS (fth-orchestrator.ts) but deliberately not
-// shared: the Management API enum has no s3:GetBucketVersioning /
-// s3:GetBucketObjectLockConfiguration actions, so those FilOne permissions
-// map to nothing here — sending them would draw a 422. Bucket-config reads
-// classify as ListBucket (fil-one/RFC#30), so a key holding s3:ListBucket
-// already covers them.
+// cousin of FTH_BASE_PERMISSIONS (fth-orchestrator.ts). Hilt authorizes the
+// versioning and object-lock reads on their own actions (fil-forge/hilt#102),
+// so s3:ListBucket no longer covers them.
 const BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
   read: ['s3:GetObject', 's3:ListBucket', 's3:ListMultipartUploadParts'],
   write: ['s3:PutObject', 's3:AbortMultipartUpload'],
@@ -20,8 +17,8 @@ const BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
   delete: ['s3:DeleteObject'],
   CreateBucket: ['s3:CreateBucket'],
   DeleteBucket: ['s3:DeleteBucket'],
-  GetBucketVersioning: [],
-  GetBucketObjectLockConfiguration: [],
+  GetBucketVersioning: ['s3:GetBucketVersioning'],
+  GetBucketObjectLockConfiguration: ['s3:GetBucketObjectLockConfiguration'],
 };
 
 const GRANULAR_PERMISSIONS: Record<GranularPermission, string> = {

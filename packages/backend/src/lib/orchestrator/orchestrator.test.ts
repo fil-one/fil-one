@@ -1130,7 +1130,7 @@ describe('issueAccessKey', () => {
     expect(mockCreateAccessKey).not.toHaveBeenCalled();
   });
 
-  it('drops bucket-info permissions the contract enum lacks, with a warning', async () => {
+  it('sends the versioning and object-lock reads a key asks for, without a warning', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
 
@@ -1140,9 +1140,10 @@ describe('issueAccessKey', () => {
     });
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).not.toContain('s3:GetBucketVersioning');
-    expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('GetBucketVersioning'));
+    expect(permissions).toEqual(
+      expect.arrayContaining(['s3:GetBucketVersioning', 's3:GetBucketObjectLockConfiguration']),
+    );
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('maps a 409 to AccessKeyAlreadyExistsError', async () => {

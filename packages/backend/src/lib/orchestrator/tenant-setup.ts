@@ -37,7 +37,7 @@ export const CONSOLE_KEY_NAME = 'filone-console';
 // The contract-legal maximum: every action in the Management API's
 // AccessKeyPermission enum. The console key holds every action the console
 // performs for a tenant.
-const CONSOLE_KEY_PERMISSIONS = [
+export const CONSOLE_KEY_PERMISSIONS = [
   's3:CreateBucket',
   's3:ListAllMyBuckets',
   's3:DeleteBucket',
@@ -59,6 +59,11 @@ const CONSOLE_KEY_PERMISSIONS = [
   's3:GetBucketPolicy',
   's3:PutBucketPolicy',
   's3:DeleteBucketPolicy',
+  // Every bucket view reads both, and bucket create and update write them.
+  's3:GetBucketVersioning',
+  's3:PutBucketVersioning',
+  's3:GetBucketObjectLockConfiguration',
+  's3:PutBucketObjectLockConfiguration',
 ] as const;
 
 const dynamo = getDynamoClient();

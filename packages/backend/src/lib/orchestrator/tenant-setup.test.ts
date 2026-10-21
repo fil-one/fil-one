@@ -308,15 +308,15 @@ describe('ensureTenantReady', () => {
     });
   });
 
-  it('requests the bucket-policy actions but no bucket-configuration actions for the console key', async () => {
+  it('requests the bucket-policy and the versioning and object-lock actions for the console key', async () => {
     stubHappyPath();
 
     await ensureTenantReady(deps, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    // Every action in the contract enum. It carries no bucket-configuration
-    // actions: the versioning and object-lock reads classify as ListBucket
-    // (fil-one/RFC#30) and there are no writes.
+    // Every action in the contract enum. Hilt authorizes the versioning and
+    // object-lock reads and writes on their own actions (fil-forge/hilt#102),
+    // and the console reads both for every bucket it shows.
     expect(permissions).toStrictEqual([
       's3:CreateBucket',
       's3:ListAllMyBuckets',
@@ -338,6 +338,10 @@ describe('ensureTenantReady', () => {
       's3:GetBucketPolicy',
       's3:PutBucketPolicy',
       's3:DeleteBucketPolicy',
+      's3:GetBucketVersioning',
+      's3:PutBucketVersioning',
+      's3:GetBucketObjectLockConfiguration',
+      's3:PutBucketObjectLockConfiguration',
     ]);
   });
 
