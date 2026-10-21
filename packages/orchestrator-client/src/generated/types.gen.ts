@@ -87,7 +87,11 @@ export type UpdateTenantStatusRequest = {
  * `s3:PutBucketObjectLockConfiguration` — read and set a bucket's
  * default object-lock retention.
  *
- * A bucket policy may grant the two reads; the two writes are held
+ * * `s3:GetBucketLocation`, `s3:GetBucketAcl`, `s3:GetBucketCORS`,
+ * `s3:GetBucketTagging` — read a bucket's region, ACL, CORS
+ * configuration and tags.
+ *
+ * A bucket policy may grant the reads; the two writes are held
  * only by a service key.
  *
  * **Object-level** — operating on objects within buckets. The
@@ -97,6 +101,8 @@ export type UpdateTenantStatusRequest = {
  * legal holds.
  *
  * * `s3:GetObject` — get an object and its metadata.
+ * * `s3:GetObjectAttributes` — get an object's attributes, such as
+ * its checksums and parts.
  * * `s3:GetObjectVersion` — get a specific object version.
  * * `s3:GetObjectRetention` — read an object's retention policy.
  * * `s3:GetObjectLegalHold` — read an object's legal-hold status.
@@ -119,6 +125,8 @@ export type UpdateTenantStatusRequest = {
  * upload.
  * * `s3:DeleteObject` — delete an object.
  * * `s3:DeleteObjectVersion` — delete a specific object version.
+ * * `s3:GetObjectTagging`, `s3:PutObjectTagging`,
+ * `s3:DeleteObjectTagging` — read, set and remove an object's tags.
  *
  */
 export type AccessKeyPermission =
@@ -145,7 +153,15 @@ export type AccessKeyPermission =
   | 's3:GetBucketVersioning'
   | 's3:PutBucketVersioning'
   | 's3:GetBucketObjectLockConfiguration'
-  | 's3:PutBucketObjectLockConfiguration';
+  | 's3:PutBucketObjectLockConfiguration'
+  | 's3:GetBucketLocation'
+  | 's3:GetBucketAcl'
+  | 's3:GetBucketCORS'
+  | 's3:GetBucketTagging'
+  | 's3:GetObjectAttributes'
+  | 's3:GetObjectTagging'
+  | 's3:PutObjectTagging'
+  | 's3:DeleteObjectTagging';
 
 /**
  * Caller-supplied, opaque, unique within the tenant. FilOne uses

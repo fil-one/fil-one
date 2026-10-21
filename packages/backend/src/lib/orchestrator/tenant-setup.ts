@@ -64,6 +64,16 @@ export const CONSOLE_KEY_PERMISSIONS = [
   's3:PutBucketVersioning',
   's3:GetBucketObjectLockConfiguration',
   's3:PutBucketObjectLockConfiguration',
+  // The rest of the enum. The console does not call these today; the key
+  // holds them so that it stays the contract-legal maximum.
+  's3:GetBucketLocation',
+  's3:GetBucketAcl',
+  's3:GetBucketCORS',
+  's3:GetBucketTagging',
+  's3:GetObjectAttributes',
+  's3:GetObjectTagging',
+  's3:PutObjectTagging',
+  's3:DeleteObjectTagging',
 ] as const;
 
 const dynamo = getDynamoClient();
