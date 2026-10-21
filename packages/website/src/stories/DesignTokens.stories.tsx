@@ -15,7 +15,7 @@ type Story = StoryObj;
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-12">
-      <h2 className="mb-6 border-b border-zinc-200 pb-3 font-heading text-xl font-semibold text-zinc-900">
+      <h2 className="mb-6 border-b border-zinc-200 pb-3 text-xl font-semibold text-zinc-900">
         {title}
       </h2>
       {children}
@@ -298,7 +298,7 @@ export const AllTokens: Story = {
     <div className="light-section min-h-screen bg-white px-10 py-12">
       <div className="mx-auto max-w-5xl">
         <div className="mb-12">
-          <h1 className="font-heading text-3xl font-bold text-zinc-900">Design Tokens</h1>
+          <h1 className="text-3xl font-bold text-zinc-900">Design Tokens</h1>
           <p className="mt-2 text-zinc-500">
             All design tokens defined in the Fil One design system.
           </p>
