@@ -4,6 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { GetBucketResponse } from '@filone/shared';
 import { S3_REGION, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { ORCHESTRATOR_REQUEST_TIMEOUT_MS } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import {
   ResponseBuilder,
@@ -41,6 +42,7 @@ export async function baseHandler(
     tenantId,
     bucketName,
     getScopedMemberId(membership?.role, userId),
+    { signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS) },
   );
   if (!bucket) {
     return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();

@@ -121,7 +121,7 @@ export function stubMemberScopedGetBucket(
 ): void {
   orchestrator.getBucket.mockImplementation(
     async (tenantId: string, bucketName: string, memberId?: string) =>
-      memberId && !(await canMemberAccessBucket(iam, tenantId, memberId, bucketName))
+      memberId && !(await canMemberAccessBucket(iam, { tenantId, userId: memberId, bucketName }))
         ? null
         : bucket,
   );
