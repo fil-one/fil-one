@@ -125,23 +125,45 @@ describe('ObjectSettingsFields', () => {
     expect(screen.getByText('Years')).toBeInTheDocument();
   });
 
-  it('hints why Object Lock is disabled when versioning is off', () => {
-    renderWithDefaults({ versioning: false });
-    expect(screen.getByText(/Requires versioning\./)).toBeInTheDocument();
-  });
+  const UNAVAILABLE_SETTINGS = [
+    { setting: 'Object Lock', requirement: 'Needs Versioning', props: { versioning: false } },
+    {
+      setting: 'Retention',
+      requirement: 'Needs Object Lock',
+      props: { versioning: true, lock: false },
+    },
+  ];
 
-  it('does not hint at Object Lock once versioning is on', () => {
-    renderWithDefaults({ versioning: true });
-    expect(screen.queryByText(/Requires versioning\./)).not.toBeInTheDocument();
-  });
+  it.each(UNAVAILABLE_SETTINGS)(
+    'disables the $setting switch while it shows $requirement',
+    ({ setting, props }) => {
+      renderWithDefaults(props);
 
-  it('hints why Retention is disabled when Object Lock is off', () => {
-    renderWithDefaults({ versioning: true, lock: false });
-    expect(screen.getByText(/Requires Object Lock\./)).toBeInTheDocument();
-  });
+      expect(screen.getByRole('switch', { name: setting })).toBeDisabled();
+    },
+  );
 
-  it('does not hint at Retention once Object Lock is on', () => {
-    renderWithDefaults({ versioning: true, lock: true });
-    expect(screen.queryByText(/Requires Object Lock\./)).not.toBeInTheDocument();
+  it.each(UNAVAILABLE_SETTINGS)(
+    'tells a screen reader why $setting is disabled: $requirement',
+    ({ setting, requirement, props }) => {
+      renderWithDefaults(props);
+
+      expect(screen.getByRole('switch', { name: setting })).toHaveAccessibleDescription(
+        expect.stringContaining(`${requirement}.`),
+      );
+    },
+  );
+
+  it.each([
+    { setting: 'Object Lock', requirement: 'Needs Versioning', props: { versioning: true } },
+    {
+      setting: 'Retention',
+      requirement: 'Needs Object Lock',
+      props: { versioning: true, lock: true },
+    },
+  ])('drops the $requirement badge once $setting is available', ({ requirement, props }) => {
+    renderWithDefaults(props);
+
+    expect(screen.queryByText(requirement)).not.toBeInTheDocument();
   });
 });

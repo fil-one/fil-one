@@ -9,10 +9,11 @@ import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../components/Tabs';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Alert } from '../components/Alert';
 import { Skeleton } from '../components/Skeleton';
-import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
-import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
+import { countObjects } from '../components/ObjectBrowser';
+import { ObjectsPanel } from './BucketObjectsPanel';
+import { useBucketTabs } from '../lib/use-bucket-tabs.js';
 import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import { BucketPolicyTab } from '../components/BucketPolicyTab';
@@ -30,7 +31,7 @@ import type {
 import { supportsIamMethods } from '../lib/access-model.js';
 import { apiRequest } from '../lib/api.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
-import { useHasPermission } from '../lib/use-permissions.js';
+import { useHasPermission, usePermissions } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
@@ -270,58 +271,6 @@ function BucketErrorState({
   );
 }
 
-// Mirrors ObjectBrowser's columns so the placeholder holds the same shape as the
-// table it stands in for. The Version and Status pair is versioning-only, and
-// versioning is not known until the bucket metadata lands, so the skeleton shows
-// the columns every bucket has rather than guessing at two that may not appear.
-const OBJECT_SKELETON_COLUMNS: SkeletonColumn[] = [
-  { label: 'Name' },
-  { label: 'Size' },
-  { label: 'Last Modified' },
-  {},
-];
-
-/**
- * The Objects tab's body: the listing, or a table-shaped placeholder while it
- * loads. Extracted so the page component stays about layout, and so the
- * loading branch sits next to the table it stands in for.
- */
-function ObjectsPanel({
-  loading,
-  objectActions,
-  mayUpload,
-  mayDelete,
-  ...browser
-}: {
-  loading: boolean;
-  bucketName: string;
-  region: S3Region;
-  versions: S3ObjectVersion[];
-  versioningEnabled: boolean;
-  currentPrefix: string;
-  onPrefixChange: (prefix: string) => void;
-  objectActions: ReturnType<typeof useObjectActions>;
-  mayUpload: boolean;
-  mayDelete: boolean;
-  listingTruncated: boolean;
-  totalObjectCount: number | undefined;
-}) {
-  if (loading) {
-    return <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />;
-  }
-
-  return (
-    <ObjectBrowser
-      {...browser}
-      onDownload={objectActions.downloadObject}
-      downloading={objectActions.downloading}
-      canUpload={mayUpload}
-      onDelete={mayDelete ? objectActions.deleteObject : undefined}
-      onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
-    />
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -397,6 +346,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const mayDelete = useHasPermission('objects.delete');
   const { mayList: mayListKeys } = useKeyActionScope();
   const mayCreateKeys = useHasPermission('keys.create');
+  const { isPending: permissionsLoading } = usePermissions();
   // The policy tab exists where a policy can: a region serving the `iam`
   // access model, for a role that may edit one. Reading takes the same
   // permission as editing, so the tab is absent rather than read-only.
@@ -429,6 +379,13 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   // The Add key modal goes with the `keys.create` control inside the tab.
   const [addKeyOpen, setAddKeyOpen] = usePermittedDialog(false, mayCreateKeys);
+  // Controlled so the empty bucket's View API keys button can switch tabs.
+  const tabs = useBucketTabs({ hasKeysTab: mayListKeys, hasPolicyTab: isPolicyTabVisible });
+  // Each tab's count, undefined until its list has answered
+  const objectCount = objectsQuery.isPending
+    ? undefined
+    : displayObjectCount(analyticsData, versions, isTruncated);
+  const keyCount = accessKeysLoading ? undefined : accessKeys.length;
 
   const refreshAfterBulkDelete = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
@@ -516,27 +473,20 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         <BucketOverview bucket={bucket} region={region} bytesUsed={analyticsData?.bytesUsed} />
       )}
 
-      <Tabs>
+      <Tabs selectedIndex={tabs.selectedIndex} onChange={tabs.selectTabAt}>
         <TabList>
           {/* The count waits for the listing rather than counting an empty
               array: "Objects (0)" on a bucket that turns out to hold hundreds is
               a worse answer than no number yet, and it is the same rule the API
               Keys tab beside it already follows. */}
-          <Tab
-            testId="bucket-objects-tab"
-            count={
-              objectsQuery.isPending
-                ? undefined
-                : displayObjectCount(analyticsData, versions, isTruncated)
-            }
-          >
+          <Tab testId="bucket-objects-tab" count={objectCount}>
             Objects
           </Tab>
           {/* Absent, not empty, for a role that cannot list keys: an "API Keys
               (0)" tab reads as an org with no keys rather than a view this
               caller does not get. */}
           {mayListKeys && (
-            <Tab testId="bucket-keys-tab" count={accessKeysLoading ? undefined : accessKeys.length}>
+            <Tab ref={tabs.keysTabRef} testId="bucket-keys-tab" count={keyCount}>
               API Keys
             </Tab>
           )}
@@ -558,6 +508,13 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               objectActions={objectActions}
               mayUpload={mayUpload}
               mayDelete={mayDelete}
+              activeAccessKeyCount={accessKeys.filter((key) => key.status !== 'expired').length}
+              accessKeysLoading={accessKeysLoading}
+              accessKeysFailed={accessKeysQuery.isError}
+              permissionsLoading={permissionsLoading}
+              mayCreateKeys={mayCreateKeys}
+              onAddKeyOpenChange={setAddKeyOpen}
+              onShowKeys={tabs.showKeysTab}
               listingTruncated={isTruncated}
               totalObjectCount={analyticsData?.objectCount}
             />

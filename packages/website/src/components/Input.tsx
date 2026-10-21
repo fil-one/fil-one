@@ -5,13 +5,15 @@ import type { Ref } from 'react';
 
 /**
  * `md` is the form field. `sm` is toolbar chrome: shorter and quieter, for
- * filters that sit alongside content rather than inside a form.
+ * filters that sit alongside content rather than inside a form. `lg` is for a
+ * page-level form whose fields sit above a `lg` button, so the two share a height.
  */
-export type InputSize = 'sm' | 'md';
+export type InputSize = 'sm' | 'md' | 'lg';
 
 const SIZES: Record<InputSize, string> = {
   sm: 'h-(--control-height-sm) px-2.5 text-ui',
   md: 'h-(--control-height-md) px-3 text-sm',
+  lg: 'h-(--control-height-lg) px-4 text-sm',
 };
 
 type InputProps = {

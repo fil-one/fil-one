@@ -130,7 +130,8 @@ test.describe('the key form', () => {
     test('S3. offers a service key, and asks for its permissions and buckets', async ({ page }) => {
       await page.goto('/api-keys/create');
       await page.locator('#key-name').fill(`policy-e2e-svc-ui-${randomUUID().slice(0, 8)}`);
-      await page.locator('#key-region').selectOption(REGION);
+      await page.locator('#key-region').click();
+      await page.locator(`[data-testid="region-option"][data-region="${REGION}"]`).click();
       await expect(page.getByTestId('access-key-follows-bucket-policy')).toBeVisible();
 
       await page.getByTestId('access-key-type-service').click();
@@ -166,7 +167,8 @@ test.describe('the key form', () => {
     test('S4. offers a member no choice: their key follows the policies', async ({ page }) => {
       await page.goto('/api-keys/create');
       await page.locator('#key-name').fill('policy-e2e-svc-member');
-      await page.locator('#key-region').selectOption(REGION);
+      await page.locator('#key-region').click();
+      await page.locator(`[data-testid="region-option"][data-region="${REGION}"]`).click();
       await expect(page.getByTestId('access-key-follows-bucket-policy')).toBeVisible();
       await expect(page.getByTestId('access-key-type-service')).toHaveCount(0);
     });
