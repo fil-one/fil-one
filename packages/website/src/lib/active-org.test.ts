@@ -8,6 +8,7 @@ import {
   switchToOrg,
   takeReconcileNotice,
 } from './active-org.js';
+import { getMe } from './api.js';
 import { queryClient, queryKeys } from './query-client.js';
 import { cancelGuardedWork, holdLeaveGuard } from './use-warn-before-unload.js';
 
@@ -17,6 +18,10 @@ const ORG_B = '22222222-2222-2222-2222-222222222222';
 const reload = vi.fn();
 const assign = vi.fn();
 const navigate = vi.fn();
+
+// `switchToOrg` starts the new org's `/me`. Left pending: these tests are about
+// the stash and the navigation, not what `/me` answers.
+vi.mock('./api.js', () => ({ getMe: vi.fn(() => new Promise(() => {})) }));
 
 // `switchToOrg` imports the router dynamically (see its own comment for why),
 // so this is what it gets back either way.
@@ -31,6 +36,7 @@ describe('the active org stash', () => {
     assign.mockClear();
     navigate.mockReset();
     navigate.mockResolvedValue(undefined);
+    vi.mocked(getMe).mockClear();
     queryClient.clear();
     // Only `reload` and `assign` are read on these paths, so the stub carries
     // nothing else.
@@ -82,6 +88,14 @@ describe('the active org stash', () => {
       // Org A's data cannot leak into org B's view.
       expect(clearSpy).toHaveBeenCalled();
       expect(queryClient.getQueryData(queryKeys.pendingOrgSwitch)).toBeUndefined();
+    });
+
+    it("starts the new org's /me without waiting for the switch to end", () => {
+      switchToOrg(ORG_B);
+
+      // `beforeLoad` joins this fetch, and the switch ends only after it does.
+      expect(getMe).toHaveBeenCalledExactlyOnceWith({ skipSwitchWait: true });
+      expect(queryClient.getQueryState(queryKeys.me)).toMatchObject({ fetchStatus: 'fetching' });
     });
 
     it('navigates to the dashboard, which the stash now answers for', async () => {
@@ -146,6 +160,30 @@ describe('the active org stash', () => {
       expect(getActiveOrgId()).toBe(ORG_B);
 
       await vi.waitFor(() => expect(getActiveOrgId()).toBe(ORG_A));
+    });
+
+    it("forgets the new org's /me when the navigation does not complete", async () => {
+      setActiveOrgId(ORG_A);
+      vi.mocked(getMe).mockResolvedValueOnce({
+        orgId: ORG_B,
+        orgName: 'any-org',
+        emailVerified: true,
+        mfaEnrollments: [],
+        ragAccess: false,
+        orgsBeta: false,
+        billingActive: true,
+      });
+      // Fails only once the new org's `/me` has landed in the cache.
+      navigate.mockImplementation(async () => {
+        await vi.waitFor(() => expect(queryClient.getQueryData(queryKeys.me)).toBeDefined());
+        throw new Error('navigation blocked');
+      });
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      switchToOrg(ORG_B);
+      await vi.waitFor(() => expect(getActiveOrgId()).toBe(ORG_A));
+
+      expect(queryClient.getQueryData(queryKeys.me)).toBeUndefined();
     });
 
     it('asks before cancelling a running upload, and changes nothing when declined', () => {
@@ -224,6 +262,7 @@ describe('the active org stash: reconciling what the server resolved', () => {
     assign.mockClear();
     navigate.mockReset();
     navigate.mockResolvedValue(undefined);
+    vi.mocked(getMe).mockClear();
     queryClient.clear();
     // Only `reload` and `assign` are read on these paths, so the stub carries
     // nothing else.

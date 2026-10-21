@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { queryClient, queryKeys } from './query-client.js';
+import { getMe } from './api.js';
+import { ME_STALE_TIME, queryClient, queryKeys } from './query-client.js';
 import { cancelGuardedWork, leaveGuardedWork } from './use-warn-before-unload.js';
 
 const ACTIVE_ORG_KEY = 'filone:activeOrgId';
@@ -298,6 +299,18 @@ export function switchToOrg(
   setActiveOrgId(orgId);
   setSwitching(true);
   queryClient.clear();
+  // The new org's `/me`, started before anything can render. A component that
+  // re-renders before the navigation below (the create dialog closing, say)
+  // finds the cache empty and reads `/me`; `apiRequest` would hold that read
+  // until the switch ends. `_app.tsx`'s `beforeLoad` joins whatever `/me` is in
+  // flight rather than starting its own, so it would wait on the held read, and
+  // the switch ends only once `beforeLoad` does. Started here, unheld, there is
+  // nothing held for anyone to join. Same options as that `beforeLoad` call.
+  void queryClient.prefetchQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => getMe({ skipSwitchWait: true }),
+    staleTime: ME_STALE_TIME,
+  });
   if (knownDisplay) {
     queryClient.setQueryData(queryKeys.pendingOrgSwitch, {
       orgId,
@@ -318,6 +331,12 @@ export function switchToOrg(
       if (previousOrgId === null) clearActiveOrgId();
       else setActiveOrgId(previousOrgId);
       setSwitching(false, 'rolledBack');
+      // The `/me` started above is about the org the tab never reached. Kept,
+      // it would name that org over this one's pages for `ME_STALE_TIME`, and
+      // the reconcile in `getMe` cannot catch it: it compares against the org
+      // the request was sent under. A reset drops it, and any mounted reader
+      // fetches again under the restored stash.
+      void queryClient.resetQueries({ queryKey: queryKeys.me });
     }
   })();
 
