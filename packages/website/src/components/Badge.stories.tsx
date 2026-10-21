@@ -13,7 +13,7 @@ const meta: Meta<typeof Badge> = {
   component: Badge,
   argTypes: {
     color: { control: 'select', options: ['green', 'blue', 'red', 'amber', 'grey'] },
-    size: { control: 'select', options: ['sm', 'md', 'lg'] },
+    size: { control: 'select', options: ['xs', 'sm', 'md', 'lg'] },
     weight: { control: 'select', options: ['regular', 'medium', 'semibold'] },
     strength: { control: 'select', options: ['subtle', 'strong'] },
     variant: { control: 'select', options: ['default', 'solid'] },
@@ -31,7 +31,7 @@ export const Default: Story = {
 export const Sizes: Story = {
   render: () => (
     <div className="flex flex-col gap-3">
-      {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
+      {(['xs', 'sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
         <div key={size} className="flex items-center gap-2">
           {(['green', 'blue', 'red', 'grey', 'amber'] as BadgeColor[]).map((color) => (
             <Badge key={color} color={color} size={size}>
@@ -122,12 +122,12 @@ export const AllVariants: Story = {
                 {color}
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
+                {(['xs', 'sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
                   <Badge key={size} color={color} size={size} variant={variant} strength={strength}>
                     {size}
                   </Badge>
                 ))}
-                {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
+                {(['xs', 'sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
                   <Badge
                     key={`dot-${size}`}
                     color={color}
@@ -155,17 +155,17 @@ export const Solid: Story = {
         <div key={color} className="flex flex-col gap-2">
           <p className="text-meta font-medium uppercase tracking-wider text-zinc-400">{color}</p>
           <div className="flex flex-wrap items-center gap-2">
-            {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
+            {(['xs', 'sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
               <Badge key={size} color={color} size={size} variant="solid">
                 {size}
               </Badge>
             ))}
-            {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
+            {(['xs', 'sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
               <Badge key={`dot-${size}`} color={color} size={size} variant="solid" dot>
                 {size}
               </Badge>
             ))}
-            {(['sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
+            {(['xs', 'sm', 'md', 'lg'] as BadgeSize[]).map((size) => (
               <Badge key={`med-${size}`} color={color} size={size} variant="solid" weight="medium">
                 {size}
               </Badge>

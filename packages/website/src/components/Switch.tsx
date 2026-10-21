@@ -7,8 +7,9 @@ type SwitchProps = {
   onChange: (checked: boolean) => void;
   disabled?: boolean;
   'data-testid'?: string;
-  'aria-describedby'?: string;
 } & AccessibleControlName;
+// No `aria-describedby`: Headless UI writes its own value over it. Describe a switch by
+// putting it in a Headless UI `Field` beside a `Description`, as `ObjectSettingsFields` does.
 
 export function Switch({ checked, onChange, disabled, ...passthroughProps }: SwitchProps) {
   warnIfUnnamedControl('Switch', passthroughProps.id ?? passthroughProps['aria-label']);
@@ -21,7 +22,9 @@ export function Switch({ checked, onChange, disabled, ...passthroughProps }: Swi
       className={clsx(
         'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2',
         checked ? 'bg-brand-600' : 'bg-zinc-400/30',
-        disabled && 'cursor-not-allowed opacity-50',
+        // A variant, not a plain class beside cursor-pointer: two plain cursor classes win by
+        // stylesheet order, which left a disabled switch showing the pointer hand.
+        'data-disabled:cursor-not-allowed data-disabled:opacity-50',
       )}
     >
       <span

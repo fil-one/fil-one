@@ -47,7 +47,7 @@ export function ProgressBar({
       <div
         className={clsx(
           'h-full rounded-full bg-brand-700',
-          indeterminate ? 'w-full animate-pulse' : 'transition-all duration-300',
+          indeterminate ? 'w-full animate-pulse' : 'transition-all duration-200',
         )}
         style={indeterminate ? undefined : { width: `${clamped}%` }}
       />

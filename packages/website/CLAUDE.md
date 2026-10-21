@@ -17,7 +17,8 @@ The rules broken most often, so check these first:
   `text-xs` (12px), `text-ui` (13px, the default), `text-sm` (14px).
 - **`focus-visible`, never `focus`.** Including in the `src/styles/*.css` files.
 - **Four radii only:** `rounded-md` for controls, `rounded-lg` for toasts and table
-  containers, `rounded-xl` for cards and modals, `rounded-full` for pills.
+  containers, `rounded-xl` for cards and modals, `rounded-full` for pills. Two exceptions:
+  `rounded-sm` on 16px squares (`OrgAvatar` xs, `Checkbox`), `rounded-xs` on `RegionFlag`.
 - **Shadows only on overlays.** Resting surfaces get a border plus at most `shadow-xs`.
 - **Durations are `150` or `200`.**
 - **Control heights come from `--control-height-*`**, never computed from padding.

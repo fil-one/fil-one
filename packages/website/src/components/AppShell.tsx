@@ -264,7 +264,7 @@ export function AppShell({ children }: AppShellProps) {
           aria-hidden="true"
           onClick={closeDrawer}
           className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 motion-reduce:duration-0 lg:hidden ${
-            mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+            mobileOpen ? 'opacity-100 ease-out' : 'pointer-events-none opacity-0 ease-in'
           }`}
         />
 
@@ -276,7 +276,7 @@ export function AppShell({ children }: AppShellProps) {
           aria-modal="true"
           aria-label="Navigation menu"
           className={`fixed inset-y-0 right-0 z-40 flex w-72 flex-col bg-white shadow-xl transition-transform duration-200 motion-reduce:duration-0 lg:hidden ${
-            mobileOpen ? 'translate-x-0' : 'translate-x-full'
+            mobileOpen ? 'translate-x-0 ease-out' : 'translate-x-full ease-in'
           }`}
           // Hide from assistive technology when closed
           inert={!mobileOpen || undefined}
