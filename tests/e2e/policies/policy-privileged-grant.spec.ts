@@ -185,7 +185,7 @@ test.describe('through the API', () => {
   });
 });
 
-test.describe('in the editor', () => {
+test.describe('in the editor', { tag: '@browser' }, () => {
   // The Admin's tab acts in the Owner's org, which lives in sessionStorage.
   const openPolicyTab = async (page: Page) => {
     await page.addInitScript((id) => sessionStorage.setItem('filone:activeOrgId', id), orgId);

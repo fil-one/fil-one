@@ -78,7 +78,7 @@ test.afterAll(async () => {
   await Promise.all([owner.dispose(), member.dispose(), leaver.dispose()]);
 });
 
-test('B1. a promotion and a demotion change no policy', async () => {
+test('B1. a promotion and a demotion change no policy', { tag: '@serial' }, async () => {
   const adminListStatement = allow([adminId], ['s3:ListBucket'], 'team');
   const bucket = await createTrackedBucket([adminListStatement]);
   const before = toCanonicalPolicy((await owner.readPolicy(bucket)).policy);
@@ -106,28 +106,32 @@ test('B1. a promotion and a demotion change no policy', async () => {
 
 let leaverBucket: string;
 
-test('B2a. removing a member takes their keys and every statement naming them', async () => {
-  leaverBucket = await createTrackedBucket([allow([leaverId], ['s3:ListBucket'], 'leaver-only')]);
-  // Created and not yet used, so the gateway holds nothing cached for it.
-  const key = await leaver.createAccessKey();
-  createdKeys.push({ api: leaver, id: key.id });
-  const byId = (a: string, b: string) => a.localeCompare(b);
-  const leaverKeyIds = (await leaver.listKeyIds()).sort(byId);
-  expect(leaverKeyIds).toContain(key.id);
-  const removed = await owner.removeMember(leaverId);
-  expect(removed.status(), await removed.text()).toBe(200);
-  const { keysRevoked = [] } = await removed.json();
-  expect(keysRevoked.map((k: { id: string }) => k.id).sort(byId)).toEqual(leaverKeyIds);
+test(
+  'B2a. removing a member takes their keys and every statement naming them',
+  { tag: '@serial' },
+  async () => {
+    leaverBucket = await createTrackedBucket([allow([leaverId], ['s3:ListBucket'], 'leaver-only')]);
+    // Created and not yet used, so the gateway holds nothing cached for it.
+    const key = await leaver.createAccessKey();
+    createdKeys.push({ api: leaver, id: key.id });
+    const byId = (a: string, b: string) => a.localeCompare(b);
+    const leaverKeyIds = (await leaver.listKeyIds()).sort(byId);
+    expect(leaverKeyIds).toContain(key.id);
+    const removed = await owner.removeMember(leaverId);
+    expect(removed.status(), await removed.text()).toBe(200);
+    const { keysRevoked = [] } = await removed.json();
+    expect(keysRevoked.map((k: { id: string }) => k.id).sort(byId)).toEqual(leaverKeyIds);
 
-  expect(toCanonicalPolicy((await owner.readPolicy(leaverBucket)).policy)).toEqual(
-    toCanonicalPolicy(buildBucketPolicy(leaverBucket, [grantAllToOwner(ownerId)])),
-  );
-  expect(await getS3Outcome(listObjects(createS3Client(key), leaverBucket))).toBe(
-    '403 InvalidAccessKeyId',
-  );
-});
+    expect(toCanonicalPolicy((await owner.readPolicy(leaverBucket)).policy)).toEqual(
+      toCanonicalPolicy(buildBucketPolicy(leaverBucket, [grantAllToOwner(ownerId)])),
+    );
+    expect(await getS3Outcome(listObjects(createS3Client(key), leaverBucket))).toBe(
+      '403 InvalidAccessKeyId',
+    );
+  },
+);
 
-test('B2b. a policy naming a removed member is refused', async () => {
+test('B2b. a policy naming a removed member is refused', { tag: '@serial' }, async () => {
   const { etag } = await owner.readPolicy(leaverBucket);
   const writeNamingRemovedMember = await owner.putPolicy(leaverBucket, {
     policy: buildBucketPolicy(leaverBucket, [
@@ -144,16 +148,20 @@ test('B2b. a policy naming a removed member is refused', async () => {
   });
 });
 
-test('B3. a bucket deleted and created again under its name starts from a creator-only policy', async () => {
-  const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'], 'member-read')]);
-  expect([200, 204]).toContain((await owner.deleteBucket(bucket)).status());
-  await owner.createBucket(bucket);
-  expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-    toCanonicalPolicy(buildCreatorPolicy(bucket, ownerId)),
-  );
-});
+test(
+  'B3. a bucket deleted and created again under its name starts from a creator-only policy',
+  { tag: '@serial' },
+  async () => {
+    const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'], 'member-read')]);
+    expect([200, 204]).toContain((await owner.deleteBucket(bucket)).status());
+    await owner.createBucket(bucket);
+    expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
+      toCanonicalPolicy(buildCreatorPolicy(bucket, ownerId)),
+    );
+  },
+);
 
-test('B4a. a deleted principal key stops working', async () => {
+test('B4a. a deleted principal key stops working', { tag: '@serial' }, async () => {
   const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'])]);
   const deleted = await member.createAccessKey();
   createdKeys.push({ api: member, id: deleted.id });
@@ -163,7 +171,7 @@ test('B4a. a deleted principal key stops working', async () => {
   );
 });
 
-test('B4b. a rotated principal key is replaced by a working key', async () => {
+test('B4b. a rotated principal key is replaced by a working key', { tag: '@serial' }, async () => {
   const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'])]);
   const old = await member.createAccessKey();
   createdKeys.push({ api: member, id: old.id });

@@ -66,7 +66,7 @@ async function listObjectKeysAsOwner(bucket: string): Promise<string[]> {
   return Contents.map((o) => o.Key!);
 }
 
-test.describe('as the member', () => {
+test.describe('as the member', { tag: ['@serial', '@browser'] }, () => {
   test.use({ storageState: STORAGE_STATE.member });
 
   // The tab's active org lives in sessionStorage (lib/active-org.ts).
@@ -138,7 +138,7 @@ test.describe('as the member', () => {
   });
 });
 
-test.describe('as the owner', () => {
+test.describe('as the owner', { tag: ['@serial', '@browser'] }, () => {
   test.use({ storageState: STORAGE_STATE.owner });
 
   async function expectPrincipalKeyFields(page: Page): Promise<void> {

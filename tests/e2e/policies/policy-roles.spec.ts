@@ -189,7 +189,7 @@ test('R6. readonly reads what a policy grants and no more than the role allows',
   expect((await apiByRole.readonly.listBucketNames()).includes(bucket)).toBe(true);
 });
 
-test.describe('the Policy tab', () => {
+test.describe('the Policy tab', { tag: '@browser' }, () => {
   let bucket: string;
   test.beforeAll(async () => {
     bucket = await createTrackedBucket();

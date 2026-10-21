@@ -108,28 +108,36 @@ async function savePolicy(page: Page): Promise<void> {
   await expect(saveBar(page)).toBeHidden();
 }
 
-test('U1. the tab lists the creator statement of a new bucket', async ({ page }) => {
-  await openPolicyTab(page);
-  await expect(cards(page)).toHaveCount(1);
-  await expect(card(page, 'creator')).toBeVisible();
-});
+test(
+  'U1. the tab lists the creator statement of a new bucket',
+  { tag: '@browser' },
+  async ({ page }) => {
+    await openPolicyTab(page);
+    await expect(cards(page)).toHaveCount(1);
+    await expect(card(page, 'creator')).toBeVisible();
+  },
+);
 
-test('U2. the creator statement can be renamed like any other', async ({ page }) => {
-  await openPolicyTab(page);
-  await chooseStatementMenuAction(page, 'creator', 'edit');
-  await expect(nameInput(page)).toBeEnabled();
-  await expect(nameInput(page)).toHaveValue('creator');
-  await nameInput(page).fill('owner-all');
-  await submitStatement(page);
-  await savePolicy(page);
-  expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-    toCanonicalPolicy(
-      buildBucketPolicy(bucket, [{ ...buildCreatorStatement(ownerId), Sid: 'owner-all' }]),
-    ),
-  );
-});
+test(
+  'U2. the creator statement can be renamed like any other',
+  { tag: '@browser' },
+  async ({ page }) => {
+    await openPolicyTab(page);
+    await chooseStatementMenuAction(page, 'creator', 'edit');
+    await expect(nameInput(page)).toBeEnabled();
+    await expect(nameInput(page)).toHaveValue('creator');
+    await nameInput(page).fill('owner-all');
+    await submitStatement(page);
+    await savePolicy(page);
+    expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
+      toCanonicalPolicy(
+        buildBucketPolicy(bucket, [{ ...buildCreatorStatement(ownerId), Sid: 'owner-all' }]),
+      ),
+    );
+  },
+);
 
-test('U3. an allow added in the tab grants the member', async ({ page }) => {
+test('U3. an allow added in the tab grants the member', { tag: '@browser' }, async ({ page }) => {
   await openPolicyTab(page);
   await openAddStatement(page);
   await nameInput(page).fill('member-read');
@@ -153,7 +161,7 @@ test('U3. an allow added in the tab grants the member', async ({ page }) => {
   ).toBe('ok');
 });
 
-test('U4. editing a statement widens the grant', async ({ page }) => {
+test('U4. editing a statement widens the grant', { tag: '@browser' }, async ({ page }) => {
   await owner.replaceStatements(bucket, [
     grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket'], 'member-read'),
@@ -179,7 +187,7 @@ test('U4. editing a statement widens the grant', async ({ page }) => {
   ).toBe('ok');
 });
 
-test('U5. removing a statement takes its grant away', async ({ page }) => {
+test('U5. removing a statement takes its grant away', { tag: '@browser' }, async ({ page }) => {
   await owner.replaceStatements(bucket, [
     grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket'], 'member-read'),
@@ -197,49 +205,57 @@ test('U5. removing a statement takes its grant away', async ({ page }) => {
   ).toBe('404 NoSuchBucket');
 });
 
-test('U6. a deny for everyone warns, locks the owner out, and can be undone', async ({ page }) => {
-  await openPolicyTab(page);
-  await openAddStatement(page);
-  await nameInput(page).fill('lockdown');
-  await modal(page).getByTestId('policy-effect-deny').click();
-  await modal(page).getByTestId('policy-principal-everyone').click();
-  await expect(modal(page).getByTestId('policy-statement-denies-everyone')).toBeVisible();
-  await actionBox(page, 'all').click();
-  await submitStatement(page);
-  await expect(page.getByTestId('policy-denies-everyone')).toBeVisible();
-  await savePolicy(page);
+test(
+  'U6. a deny for everyone warns, locks the owner out, and can be undone',
+  { tag: '@browser' },
+  async ({ page }) => {
+    await openPolicyTab(page);
+    await openAddStatement(page);
+    await nameInput(page).fill('lockdown');
+    await modal(page).getByTestId('policy-effect-deny').click();
+    await modal(page).getByTestId('policy-principal-everyone').click();
+    await expect(modal(page).getByTestId('policy-statement-denies-everyone')).toBeVisible();
+    await actionBox(page, 'all').click();
+    await submitStatement(page);
+    await expect(page.getByTestId('policy-denies-everyone')).toBeVisible();
+    await savePolicy(page);
 
-  expect(
-    (await owner.readPolicy(bucket)).policy.Statement.find((st) => st.Sid === 'lockdown'),
-  ).toEqual(bindStatementToBucket(bucket, deny('*', ['s3:*'], 'lockdown')));
-  expect(
-    await getS3Outcome(listObjects(await createS3ClientWithNewKey(owner, createdKeys), bucket)),
-  ).toBe('404 NoSuchBucket');
+    expect(
+      (await owner.readPolicy(bucket)).policy.Statement.find((st) => st.Sid === 'lockdown'),
+    ).toEqual(bindStatementToBucket(bucket, deny('*', ['s3:*'], 'lockdown')));
+    expect(
+      await getS3Outcome(listObjects(await createS3ClientWithNewKey(owner, createdKeys), bucket)),
+    ).toBe('404 NoSuchBucket');
 
-  await chooseStatementMenuAction(page, 'lockdown', 'remove');
-  await expect(page.getByTestId('policy-denies-everyone')).toBeHidden();
-  await savePolicy(page);
-  expect(
-    await getS3Outcome(listObjects(await createS3ClientWithNewKey(owner, createdKeys), bucket)),
-  ).toBe('ok');
-});
+    await chooseStatementMenuAction(page, 'lockdown', 'remove');
+    await expect(page.getByTestId('policy-denies-everyone')).toBeHidden();
+    await savePolicy(page);
+    expect(
+      await getS3Outcome(listObjects(await createS3ClientWithNewKey(owner, createdKeys), bucket)),
+    ).toBe('ok');
+  },
+);
 
-test('U7. a statement may take a name starting with filone-', async ({ page }) => {
-  await openPolicyTab(page);
-  await openAddStatement(page);
-  await nameInput(page).fill('filone-x');
-  await memberBox(page, memberId).click();
-  await pickActions(page, ['s3:ListBucket']);
-  await expect(submit(page)).toBeEnabled();
-  await submitStatement(page);
-  await savePolicy(page);
+test(
+  'U7. a statement may take a name starting with filone-',
+  { tag: '@browser' },
+  async ({ page }) => {
+    await openPolicyTab(page);
+    await openAddStatement(page);
+    await nameInput(page).fill('filone-x');
+    await memberBox(page, memberId).click();
+    await pickActions(page, ['s3:ListBucket']);
+    await expect(submit(page)).toBeEnabled();
+    await submitStatement(page);
+    await savePolicy(page);
 
-  expect(
-    (await owner.readPolicy(bucket)).policy.Statement.find((st) => st.Sid === 'filone-x'),
-  ).toEqual(bindStatementToBucket(bucket, allow([memberId], ['s3:ListBucket'], 'filone-x')));
-});
+    expect(
+      (await owner.readPolicy(bucket)).policy.Statement.find((st) => st.Sid === 'filone-x'),
+    ).toEqual(bindStatementToBucket(bucket, allow([memberId], ['s3:ListBucket'], 'filone-x')));
+  },
+);
 
-test('U8. a statement needs a principal and an action', async ({ page }) => {
+test('U8. a statement needs a principal and an action', { tag: '@browser' }, async ({ page }) => {
   await openPolicyTab(page);
   await openAddStatement(page);
   await expect(submit(page)).toBeDisabled();
@@ -251,24 +267,28 @@ test('U8. a statement needs a principal and an action', async ({ page }) => {
   await expect(submit(page)).toBeDisabled();
 });
 
-test('U9. all actions covers every action and saves as s3:*', async ({ page }) => {
-  await openPolicyTab(page);
-  await openAddStatement(page);
-  await memberBox(page, memberId).click();
-  await actionBox(page, 'all').click();
-  await expect(actionBox(page, 's3:GetObject')).toBeDisabled();
-  await expect(actionBox(page, 's3:GetObject')).toBeChecked();
-  await submitStatement(page);
-  await savePolicy(page);
+test(
+  'U9. all actions covers every action and saves as s3:*',
+  { tag: '@browser' },
+  async ({ page }) => {
+    await openPolicyTab(page);
+    await openAddStatement(page);
+    await memberBox(page, memberId).click();
+    await actionBox(page, 'all').click();
+    await expect(actionBox(page, 's3:GetObject')).toBeDisabled();
+    await expect(actionBox(page, 's3:GetObject')).toBeChecked();
+    await submitStatement(page);
+    await savePolicy(page);
 
-  // The stored order is the storage system's own; the new statement is the
-  // unnamed one.
-  expect((await owner.readPolicy(bucket)).policy.Statement.find((st) => !st.Sid)).toEqual(
-    bindStatementToBucket(bucket, allow([memberId], ['s3:*'])),
-  );
-});
+    // The stored order is the storage system's own; the new statement is the
+    // unnamed one.
+    expect((await owner.readPolicy(bucket)).policy.Statement.find((st) => !st.Sid)).toEqual(
+      bindStatementToBucket(bucket, allow([memberId], ['s3:*'])),
+    );
+  },
+);
 
-test('U10a. a cancelled statement writes nothing', async ({ page }) => {
+test('U10a. a cancelled statement writes nothing', { tag: '@browser' }, async ({ page }) => {
   const { etag } = await owner.readPolicy(bucket);
   await openPolicyTab(page);
   await openAddStatement(page);
@@ -280,7 +300,7 @@ test('U10a. a cancelled statement writes nothing', async ({ page }) => {
   expect((await owner.readPolicy(bucket)).etag).toBe(etag);
 });
 
-test('U10b. a discarded edit writes nothing', async ({ page }) => {
+test('U10b. a discarded edit writes nothing', { tag: '@browser' }, async ({ page }) => {
   const { etag } = await owner.readPolicy(bucket);
   await openPolicyTab(page);
   await openAddStatement(page);
@@ -294,31 +314,33 @@ test('U10b. a discarded edit writes nothing', async ({ page }) => {
   expect((await owner.readPolicy(bucket)).etag).toBe(etag);
 });
 
-test("U11. a save after another writer's change shows the conflict, and reload shows their policy", async ({
-  page,
-}) => {
-  await openPolicyTab(page);
-  await expect(cards(page)).toHaveCount(1);
-  const theirs = [grantAllToOwner(ownerId), allow([memberId], ['s3:ListBucket'], 'theirs')];
-  await owner.replaceStatements(bucket, theirs);
+test(
+  "U11. a save after another writer's change shows the conflict, and reload shows their policy",
+  { tag: '@browser' },
+  async ({ page }) => {
+    await openPolicyTab(page);
+    await expect(cards(page)).toHaveCount(1);
+    const theirs = [grantAllToOwner(ownerId), allow([memberId], ['s3:ListBucket'], 'theirs')];
+    await owner.replaceStatements(bucket, theirs);
 
-  await openAddStatement(page);
-  await memberBox(page, memberId).click();
-  await pickActions(page, ['s3:GetObject']);
-  await submitStatement(page);
-  await page.locator('#policy-save-button').click();
-  await expect(page.getByTestId('policy-conflict')).toBeVisible();
-  expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-    toCanonicalPolicy(buildBucketPolicy(bucket, theirs)),
-  );
+    await openAddStatement(page);
+    await memberBox(page, memberId).click();
+    await pickActions(page, ['s3:GetObject']);
+    await submitStatement(page);
+    await page.locator('#policy-save-button').click();
+    await expect(page.getByTestId('policy-conflict')).toBeVisible();
+    expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
+      toCanonicalPolicy(buildBucketPolicy(bucket, theirs)),
+    );
 
-  await page.locator('#policy-reload-button').click();
-  await expect(page.getByTestId('policy-conflict')).toBeHidden();
-  await expect(cards(page)).toHaveCount(2);
-  await expect(card(page, 'theirs')).toBeVisible();
-});
+    await page.locator('#policy-reload-button').click();
+    await expect(page.getByTestId('policy-conflict')).toBeHidden();
+    await expect(cards(page)).toHaveCount(2);
+    await expect(card(page, 'theirs')).toBeVisible();
+  },
+);
 
-test('U12. removing the policy leaves the empty state', async ({ page }) => {
+test('U12. removing the policy leaves the empty state', { tag: '@browser' }, async ({ page }) => {
   await openPolicyTab(page);
   await page.locator('#policy-remove-button').click();
   await page.locator('#confirm-dialog-confirm-button').click();
@@ -328,19 +350,23 @@ test('U12. removing the policy leaves the empty state', async ({ page }) => {
   expect([res.status(), (await res.json()).code]).toEqual([404, 'POLICY_NOT_FOUND']);
 });
 
-test('U13. the first statement on a bucket with no policy creates one', async ({ page }) => {
-  const { etag } = await owner.readPolicy(bucket);
-  expect((await owner.deletePolicy(bucket, etag)).status()).toBe(204);
-  await openPolicyTab(page);
-  await expect(emptyState(page)).toHaveAttribute('data-empty-state', 'no-policy');
+test(
+  'U13. the first statement on a bucket with no policy creates one',
+  { tag: '@browser' },
+  async ({ page }) => {
+    const { etag } = await owner.readPolicy(bucket);
+    expect((await owner.deletePolicy(bucket, etag)).status()).toBe(204);
+    await openPolicyTab(page);
+    await expect(emptyState(page)).toHaveAttribute('data-empty-state', 'no-policy');
 
-  await page.locator('#policy-empty-add-statement-button').click();
-  await memberBox(page, ownerId).click();
-  await actionBox(page, 'all').click();
-  await submitStatement(page);
-  await savePolicy(page);
+    await page.locator('#policy-empty-add-statement-button').click();
+    await memberBox(page, ownerId).click();
+    await actionBox(page, 'all').click();
+    await submitStatement(page);
+    await savePolicy(page);
 
-  expect((await owner.readPolicy(bucket)).policy).toEqual(
-    buildBucketPolicy(bucket, [allow([ownerId], ['s3:*'])]),
-  );
-});
+    expect((await owner.readPolicy(bucket)).policy).toEqual(
+      buildBucketPolicy(bucket, [allow([ownerId], ['s3:*'])]),
+    );
+  },
+);

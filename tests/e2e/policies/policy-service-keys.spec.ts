@@ -123,7 +123,7 @@ test('S2. an admin may create a service key; a member and a readonly user may no
   expect(readonly.status()).toBe(403);
 });
 
-test.describe('the key form', () => {
+test.describe('the key form', { tag: '@browser' }, () => {
   test.describe('as the owner', () => {
     test.use({ storageState: STORAGE_STATE.owner });
 
