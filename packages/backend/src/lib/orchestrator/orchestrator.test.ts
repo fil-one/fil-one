@@ -1143,15 +1143,12 @@ describe('issueAccessKey', () => {
 
     await orchestrator.issueAccessKey(tenantId, {
       keyName: 'My Key',
-      permissions: ['read', 'GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
+      permissions: ['GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
     });
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
     expect(permissions).toStrictEqual([
       's3:ListAllMyBuckets',
-      's3:GetObject',
-      's3:ListBucket',
-      's3:ListMultipartUploadParts',
       's3:GetBucketVersioning',
       's3:GetBucketObjectLockConfiguration',
     ]);
