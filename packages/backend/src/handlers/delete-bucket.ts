@@ -4,6 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, isSupportedRegion, S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import { BucketNotEmptyError } from '../lib/errors.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.ts';
@@ -18,6 +19,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  const signal = getRequestDeadline(event);
   const bucketName = event.pathParameters?.name;
   if (!bucketName) {
     return new ResponseBuilder()
@@ -46,7 +48,7 @@ export async function baseHandler(
   }
 
   try {
-    await orchestrator.deleteBucket(tenantId, bucketName);
+    await orchestrator.deleteBucket(tenantId, bucketName, { signal });
   } catch (err) {
     if (err instanceof BucketNotEmptyError) {
       return new ResponseBuilder()
@@ -67,6 +69,7 @@ export async function baseHandler(
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(authorize('buckets.delete'))
