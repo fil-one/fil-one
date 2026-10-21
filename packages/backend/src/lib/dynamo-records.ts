@@ -8,6 +8,7 @@ import type {
   GranularPermission,
   SubscriptionStatus,
 } from '@filone/shared';
+import type Stripe from 'stripe';
 
 /**
  * The era a key was minted in.
@@ -160,8 +161,12 @@ export interface StripePriceDetails {
    */
   plan_display_name?: string;
   currency?: string;
-  billing_scheme?: 'per_unit' | 'tiered';
-  tiers_mode?: 'graduated' | 'volume' | null;
+  /**
+   * Stripe may add values to these enums at any time. The pricing code reports
+   * neither a minimum nor a rate for a value it does not know.
+   */
+  billing_scheme?: Stripe.Price.BillingScheme;
+  tiers_mode?: Stripe.Price.TiersMode | null;
   unit_amount?: number | null;
   /** Set instead of `unit_amount` for sub-cent rates, e.g. '0.499' per GB. */
   unit_amount_decimal?: string | null;
