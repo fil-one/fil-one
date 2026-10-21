@@ -4,11 +4,8 @@ import { seedBillingRecord, getBillingRecord, deleteBillingRecord } from '../hel
 import {
   attachValidCard,
   createSubscription,
-  createTestClock,
   createTestCustomer,
   getStripeClient,
-  getStripePriceId,
-  pollTestClockReady,
   testOrgId,
   waitForEventHandled,
 } from '../stripe-webhooks/helpers.ts';
@@ -159,22 +156,15 @@ describe('the Stripe subscription behind an expired grace period', () => {
     );
   }
 
-  it('cancels a paused trial in Stripe and the row stays canceled after the deletion event', async () => {
+  it('cancels a paused subscription in Stripe and the row stays canceled after the deletion event', async () => {
     const stripe = getStripeClient();
     const userId = `enforcer-paused-${crypto.randomUUID().slice(0, 8)}`;
-    const clockId = await createTestClock('enforcer-paused');
-    cleanups.push(() => stripe.testHelpers.testClocks.del(clockId));
-    const customerId = await createTestCustomer(userId, clockId);
-    const { frozen_time: now } = await stripe.testHelpers.testClocks.retrieve(clockId);
-    const { id: subscriptionId } = await stripe.subscriptions.create({
-      customer: customerId,
-      items: [{ price: getStripePriceId() }],
-      trial_end: now + 3600,
-      trial_settings: { end_behavior: { missing_payment_method: 'pause' } },
-      metadata: { userId, orgId: testOrgId(userId) },
-    });
-    await stripe.testHelpers.testClocks.advance(clockId, { frozen_time: now + 2 * 3600 });
-    await pollTestClockReady({ clockId });
+    const customerId = await createTestCustomer(userId);
+    cleanups.push(() => stripe.customers.del(customerId));
+    const paymentMethodId = await attachValidCard(customerId);
+    const subscriptionId = await createSubscription({ userId, customerId, paymentMethodId });
+    await waitForEventHandled('customer.subscription.created', subscriptionId);
+    await stripe.subscriptions.pause(subscriptionId);
     expect(await stripe.subscriptions.retrieve(subscriptionId)).toMatchObject({ status: 'paused' });
     await waitForEventHandled('customer.subscription.updated', subscriptionId);
     await seedExpiredGrace(userId, customerId, subscriptionId);
@@ -192,7 +182,7 @@ describe('the Stripe subscription behind an expired grace period', () => {
     expect((await getBillingRecord(userId))?.subscriptionStatus).toStrictEqual({
       S: SubscriptionStatus.Canceled,
     });
-  }, 420_000);
+  });
 
   it('leaves the row in grace and the subscription active when Stripe still bills it', async () => {
     const userId = `enforcer-live-${crypto.randomUUID().slice(0, 8)}`;
