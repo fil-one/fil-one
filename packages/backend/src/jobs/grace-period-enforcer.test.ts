@@ -30,6 +30,16 @@ vi.mock('../lib/org-profile.ts', () => ({
   isOrgDeletedOrDeleting: (orgId: string) => mockIsOrgDeletedOrDeleting(orgId),
 }));
 
+const mockSubscriptionsRetrieve = vi.fn();
+const mockSubscriptionsCancel = vi.fn();
+vi.mock('../lib/stripe-client.ts', () => ({
+  getStripeClient: () => ({
+    subscriptions: { retrieve: mockSubscriptionsRetrieve, cancel: mockSubscriptionsCancel },
+  }),
+  isStripeResourceMissing: (err: unknown) =>
+    (err as { code?: string } | null)?.code === 'resource_missing',
+}));
+
 process.env.FILONE_STAGE = 'test';
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -204,8 +214,9 @@ describe('grace-period-enforcer', () => {
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.Canceled },
         ':now': { S: expect.any(String) },
+        ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
       },
-      ConditionExpression: 'attribute_exists(pk)',
+      ConditionExpression: 'attribute_exists(pk) AND (subscriptionStatus = :gracePeriod)',
     });
   });
 
@@ -613,6 +624,122 @@ describe('grace-period-enforcer', () => {
       await handler();
 
       expect(aurora.updateTenantStatus).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // The Stripe subscription behind an expired grace period
+  // -----------------------------------------------------------------------
+  describe('the Stripe subscription behind an expired grace period', () => {
+    /** The disable, the Stripe cancel and the row write, in the order they ran. */
+    let order: string[];
+
+    beforeEach(() => {
+      order = [];
+      aurora.updateTenantStatus.mockImplementation(async () => void order.push('disable'));
+      mockSubscriptionsCancel.mockImplementation(async (id: string) => {
+        order.push(`cancel:${id}`);
+        return { id, status: 'canceled' };
+      });
+      ddbMock.on(UpdateItemCommand).callsFake(() => {
+        order.push('write');
+        return {};
+      });
+      ddbMock.on(ScanCommand).resolves({
+        Items: [
+          buildBillingItem({
+            subscriptionId: 'sub_any',
+            subscriptionStatus: SubscriptionStatus.GracePeriod,
+            gracePeriodEndsAt: pastDate(1),
+          }),
+        ],
+      });
+    });
+
+    it.each(['paused', 'past_due', 'unpaid', 'incomplete'])(
+      'cancels the %s subscription in Stripe after the disable and before the row write',
+      async (status) => {
+        mockSubscriptionsRetrieve.mockResolvedValue({ id: 'sub_any', status });
+
+        await handler();
+
+        expect(order).toStrictEqual(['disable', 'cancel:sub_any', 'write']);
+        expect(mockSubscriptionsCancel).toHaveBeenCalledWith('sub_any', {
+          invoice_now: false,
+          prorate: false,
+        });
+      },
+    );
+
+    it.each(['canceled', 'incomplete_expired'])(
+      'marks the row canceled without a Stripe cancel when Stripe reports the subscription %s',
+      async (status) => {
+        mockSubscriptionsRetrieve.mockResolvedValue({ id: 'sub_any', status });
+
+        await handler();
+
+        expect(order).toStrictEqual(['disable', 'write']);
+        expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
+      },
+    );
+
+    it('marks the row canceled without a Stripe cancel when Stripe no longer has the subscription', async () => {
+      mockSubscriptionsRetrieve.mockRejectedValue(
+        Object.assign(new Error('No such subscription'), { code: 'resource_missing' }),
+      );
+
+      await handler();
+
+      expect(order).toStrictEqual(['disable', 'write']);
+    });
+
+    it.each(['active', 'trialing'])(
+      'leaves the row in grace and the tenant enabled when Stripe reports the subscription %s',
+      async (status) => {
+        mockSubscriptionsRetrieve.mockResolvedValue({ id: 'sub_any', status });
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+        await handler();
+
+        expect(order).toStrictEqual([]);
+        expect(errorSpy).toHaveBeenCalledWith(
+          '[grace-period-enforcer] Grace expired but Stripe still bills the subscription, skipping',
+          expect.objectContaining({ orgId: MOCK_ORG_ID, subscriptionId: 'sub_any', status }),
+        );
+        const metrics = stdoutSpy.mock.calls.map(([line]) => JSON.parse(String(line)));
+        expect(metrics).toStrictEqual([
+          expect.objectContaining({ GraceExpiredWithLiveSubscription: 1, status }),
+        ]);
+        errorSpy.mockRestore();
+        stdoutSpy.mockRestore();
+      },
+    );
+
+    it('keeps the row in grace when the Stripe cancel fails', async () => {
+      mockSubscriptionsRetrieve.mockResolvedValue({ id: 'sub_any', status: 'paused' });
+      mockSubscriptionsCancel.mockRejectedValue(new Error('Stripe unavailable'));
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await handler();
+
+      expect(order).toStrictEqual(['disable']);
+      errorSpy.mockRestore();
+    });
+
+    it('writes canceled only while the row is still in grace', async () => {
+      mockSubscriptionsRetrieve.mockResolvedValue({ id: 'sub_any', status: 'paused' });
+
+      await handler();
+
+      // A reactivation that lands between the scan and this write has already
+      // moved the row on; canceling over it would lock out a paying org.
+      expect(canceledUpdate()).toMatchObject({
+        ConditionExpression: 'attribute_exists(pk) AND (subscriptionStatus = :gracePeriod)',
+        ExpressionAttributeValues: expect.objectContaining({
+          ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
+        }),
+      });
     });
   });
 });
