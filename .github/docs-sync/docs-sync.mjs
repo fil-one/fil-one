@@ -94,43 +94,51 @@ function prepare() {
 // ── gate ─────────────────────────────────────────────────────────────────────
 
 function gate() {
-  // An empty or malformed result (Claude ran out of turns, say) still gets a
-  // comment, as "unclear", rather than failing silently.
-  let raw;
-  try {
-    raw = JSON.parse(process.env.TRIAGE_RESULT ?? '');
-  } catch {
-    raw = { impact: 'unsure', summary: 'Triage returned no usable result; see the workflow run.' };
-  }
-  const { triage, dropped } = sanitizeTriage(raw);
+  const { triage, dropped } = sanitizeTriage(parseTriageResult(process.env.TRIAGE_RESULT));
   const held = process.env.HELD === 'true';
-  const ungated = process.env.UNGATED === 'true';
   const force = process.env.FORCE === 'true';
-  const gatedByTriage = triage.gated && !ungated;
+  const docsLinked = process.env.DOCS_LINKED === 'true';
+  const gatedByTriage = triage.gated && process.env.UNGATED !== 'true';
 
   const draftable = triage.impact === 'affected' || (force && triage.impact === 'unsure');
   const blockedByGate = !force && (held || gatedByTriage);
-  const shouldDraft = draftable && !blockedByGate;
+  const blockedByLinkedDocs = !force && docsLinked;
+  const shouldDraft = draftable && !blockedByGate && !blockedByLinkedDocs;
 
   writeFileSync(join(WORK_DIR, 'triage.json'), JSON.stringify(triage, null, 2));
 
-  let status;
-  if (triage.impact === 'none') status = 'No docs changes needed.';
-  else if (triage.impact === 'unsure')
-    status =
-      'Triage could not tell whether the docs need changes; a person should check. To draft anyway, run the **Docs sync** workflow for this PR with `force` checked.';
-  else if (blockedByGate)
-    status =
-      'Held: this change looks feature-gated, so no docs PR is opened yet (a public docs PR announces the feature). At launch, run the **Docs sync** workflow for this PR with `force` checked. If the feature is already public, add the `docs:ungated` label and push or re-run.';
-  else status = 'Drafting a docs PR… this comment updates when it is ready.';
-
   if (gatedByTriage && !held && !force) addLabel('docs:gated');
+  const status = describeGateStatus(triage.impact, { blockedByLinkedDocs, blockedByGate });
   upsertComment(renderComment(triage, status, dropped));
 
   setOutput('should_draft', String(shouldDraft));
   console.log(
-    `impact=${triage.impact} gated=${triage.gated} held=${held} force=${force} should_draft=${shouldDraft}`,
+    `impact=${triage.impact} gated=${triage.gated} held=${held} force=${force} docs_linked=${docsLinked} should_draft=${shouldDraft}`,
   );
+}
+
+// An empty or malformed result (Claude ran out of turns, say) still gets a
+// comment, as "unclear", rather than failing silently.
+function parseTriageResult(text) {
+  try {
+    return JSON.parse(text ?? '');
+  } catch {
+    return { impact: 'unsure', summary: 'Triage returned no usable result; see the workflow run.' };
+  }
+}
+
+function describeGateStatus(impact, { blockedByLinkedDocs, blockedByGate }) {
+  if (impact === 'none') return 'No docs changes needed.';
+  if (impact === 'unsure') {
+    return 'Triage could not tell whether the docs need changes; a person should check. To draft anyway, run the **Docs sync** workflow for this PR with `force` checked.';
+  }
+  if (blockedByLinkedDocs) {
+    return 'This PR links a docs PR, so nothing is drafted. Check that the linked docs PR covers the claims below.';
+  }
+  if (blockedByGate) {
+    return 'Held: this change looks feature-gated, so no docs PR is opened yet (a public docs PR announces the feature). At launch, run the **Docs sync** workflow for this PR with `force` checked. If the feature is already public, add the `docs:ungated` label and push or re-run.';
+  }
+  return 'Drafting a docs PR… this comment updates when it is ready.';
 }
 
 function sanitizeTriage(raw) {

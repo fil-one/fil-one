@@ -70,6 +70,7 @@ jobs:
       held: ${{ steps.pr.outputs.held }}
       ungated: ${{ steps.pr.outputs.ungated }}
       force: ${{ steps.pr.outputs.force }}
+      docs_linked: ${{ steps.pr.outputs.docs_linked }}
     steps:
       - id: pr
         env:
@@ -104,6 +105,13 @@ jobs:
           held=false; has_label docs:gated && held=true
           ungated=false; has_label docs:ungated && ungated=true
           [ "$ungated" = true ] && held=false
+          # The author already did the docs work (AGENTS.md → Documentation):
+          # triage still comments, but nothing is drafted.
+          docs_linked=false
+          if jq -r '.body // ""' <<<"$pr" \
+            | grep -Eqi 'github\.com/FilecoinFoundationWeb/filone-docs/pull/[0-9]+|FilecoinFoundationWeb/filone-docs#[0-9]+'; then
+            docs_linked=true
+          fi
           {
             echo "mode=$mode"
             echo "number=$(field .number)"
@@ -113,6 +121,7 @@ jobs:
             echo "held=$held"
             echo "ungated=$ungated"
             echo "force=$FORCE"
+            echo "docs_linked=$docs_linked"
           } >> "$GITHUB_OUTPUT"
 
   triage:
@@ -213,6 +222,7 @@ jobs:
           TRIAGE_RESULT: ${{ needs.triage.outputs.result }}
           HELD: ${{ needs.context.outputs.held }}
           UNGATED: ${{ needs.context.outputs.ungated }}
+          DOCS_LINKED: ${{ needs.context.outputs.docs_linked }}
           FORCE: ${{ needs.context.outputs.force }}
         run: |
           mkdir -p .docs-sync

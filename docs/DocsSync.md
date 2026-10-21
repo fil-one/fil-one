@@ -10,12 +10,26 @@ The docs have drifted from the product often enough to need three manual
 audits (FIL-830, FIL-867, FIL-1563). This moves the check to the moment the
 drift is introduced, when the author still has the context.
 
+## Docs are part of the definition of done
+
+The first line of defence is the author, not this workflow. The Documentation
+section of `AGENTS.md` makes a docs update part of finishing any user-facing
+change, so Claude Code does it as part of the task. The PR template asks every
+author to link the docs PR, say why none is needed, or mark the change as
+feature-gated.
+
+When a PR's description links a `filone-docs` PR, this workflow still triages
+it and posts the comment, so the author can check their docs PR covers every
+claim. It drafts nothing, to avoid a second, competing docs PR. The description
+is read when the workflow runs, so linking a docs PR later takes effect on the
+next push or manual run.
+
 ## What a product PR author sees
 
 1. One comment on the product PR, updated in place on every push:
    **Docs impact: none**, **docs need changes** (with a table of the pages and
    claims affected), or **unclear**.
-2. When the docs need changes, a draft PR in `filone-docs` on the branch
+2. When the docs need changes and the description links no docs PR, a draft PR in `filone-docs` on the branch
    `docs-sync/fil-one-<PR number>`, linked from that comment. It requests a
    review from the author and @-mentions them.
 3. Each push to the product PR regenerates the docs PR, until a person pushes
@@ -221,5 +235,7 @@ where to confirm that `claude-code-action` runs with the read-only
 - `.github/docs-sync/triage-schema.json`, `draft-schema.json`: structured output schemas.
 - `.github/docs-sync/docs-sync.mjs`: validation, comments, checks, PR body.
 - `.github/docs-sync/paths.txt`: the diff Claude sees.
+- `AGENTS.md` (Documentation) and `.github/pull_request_template.md`: docs in
+  the definition of done.
 - In `filone-docs`: `.github/workflows/build.yaml` builds every docs PR, and
   `AGENTS.md` has a section on how drafted PRs are handled.
