@@ -16,6 +16,7 @@ import {
   getStripePriceId,
   pollForBillingStatusChange,
   pollForPaymentMethod,
+  pollUntil,
   seedBillingRecord,
   testOrgId,
   waitForEventHandled,
@@ -45,6 +46,20 @@ async function seedGraceRow(userId: string, customerId: string, subscriptionId: 
     subscriptionId: { S: subscriptionId },
     gracePeriodEndsAt: { S: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString() },
   });
+}
+
+/**
+ * Wait for the row to name `subscriptionId` as active. Setting the card sends
+ * its own `customer.subscription.updated` first, carrying the status the
+ * subscription had before activation, so the row passes through that status.
+ */
+async function pollForActiveRow(userId: string, subscriptionId: string) {
+  await pollUntil(async () => {
+    const row = await getBillingRecord(userId);
+    return row?.subscriptionStatus.S === 'active' && row.subscriptionId?.S === subscriptionId
+      ? row
+      : null;
+  }, 120_000);
 }
 
 async function reactivate(userId: string, paymentMethodId: string) {
@@ -101,12 +116,7 @@ describe('Reactivation from grace_period', () => {
     expect(await liveSubscriptions(customerId)).toStrictEqual([
       { id: subscriptionId, status: 'active' },
     ]);
-    await pollForBillingStatusChange({
-      userId,
-      expectedStatus: 'active',
-      fromStatus: 'grace_period',
-    });
-    expect(await getBillingRecord(userId)).toMatchObject({ subscriptionId: { S: subscriptionId } });
+    await pollForActiveRow(userId, subscriptionId);
   });
 
   it('pays the open invoice of the past-due subscription the row names with the new card', async () => {
@@ -136,11 +146,7 @@ describe('Reactivation from grace_period', () => {
       status: 'open',
     });
     expect(openInvoices).toStrictEqual([]);
-    await pollForBillingStatusChange({
-      userId,
-      expectedStatus: 'active',
-      fromStatus: 'grace_period',
-    });
+    await pollForActiveRow(userId, subscriptionId);
   }, 420_000);
 
   it('creates one new subscription when the subscription the row names is canceled', async () => {
