@@ -176,6 +176,30 @@ describe('CreateBucketPage — a name that is already taken', () => {
     expect(screen.queryByText('This name is already taken. Try another.')).not.toBeInTheDocument();
   });
 
+  it('shows the taken-name error again when the region that refused the name is picked back', async () => {
+    mockApiRequest.mockRejectedValue(takenNameError);
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+    await screen.findByText('This name is already taken. Try another.');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Region/ }));
+    const options = await screen.findAllByRole('option');
+    const refusingRegion = options.find(
+      (option) => option.getAttribute('aria-selected') === 'true',
+    );
+    const otherRegion = options.find((option) => option.getAttribute('aria-selected') === 'false');
+    fireEvent.click(otherRegion!);
+    fireEvent.click(screen.getByRole('button', { name: /^Region/ }));
+    fireEvent.click(
+      (await screen.findAllByRole('option')).find(
+        (option) => option.dataset.region === refusingRegion!.dataset.region,
+      )!,
+    );
+
+    expect(screen.getByText('This name is already taken. Try another.')).toBeInTheDocument();
+  });
+
   it('clears the taken-name error once the name is edited', async () => {
     mockApiRequest.mockRejectedValue(takenNameError);
     renderPage();

@@ -116,10 +116,13 @@ export function CreateBucketPage() {
     return true;
   }
 
-  /** A name taken in one region may be free in the next, so the name is checked again. */
+  /**
+   * A name taken in one region may be free in the next, so a shown error is checked again,
+   * and a return to the region that refused the name brings the refusal back.
+   */
   function handleRegionChange(next: S3Region) {
     setRegion(next);
-    if (bucketNameError) validateBucketName(bucketName, next);
+    if (bucketNameError || isTakenName(bucketName, next)) validateBucketName(bucketName, next);
   }
 
   /** Says what is wrong with the name under the field, and puts the cursor back in it. */

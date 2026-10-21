@@ -20,13 +20,13 @@ const OBJECT_SKELETON_COLUMNS: SkeletonColumn[] = [
  * any, else a new one.
  */
 function getEmptyBucketKeyAction({
-  accessKeyCount,
+  activeAccessKeyCount,
   accessKeysFailed,
   mayCreateKeys,
   onAddKeyOpenChange,
   onShowKeys,
 }: {
-  accessKeyCount: number;
+  activeAccessKeyCount: number;
   accessKeysFailed: boolean;
   mayCreateKeys: boolean;
   onAddKeyOpenChange: (open: boolean) => void;
@@ -35,8 +35,9 @@ function getEmptyBucketKeyAction({
   // A list that failed to load says nothing about whether keys exist, and offering a new key
   // then could mint a duplicate; the Keys tab shows the failure.
   if (accessKeysFailed) return undefined;
-  // Keys exist only for a caller who may list them, which is also what shows the Keys tab
-  if (accessKeyCount > 0) return { kind: 'view', onView: onShowKeys };
+  // Keys exist only for a caller who may list them, which is also what shows the Keys tab.
+  // An expired key no longer opens the bucket, so a bucket with only expired keys is offered a new one.
+  if (activeAccessKeyCount > 0) return { kind: 'view', onView: onShowKeys };
   if (mayCreateKeys) return { kind: 'create', onCreate: () => onAddKeyOpenChange(true) };
   return undefined;
 }
@@ -51,7 +52,7 @@ export function ObjectsPanel({
   objectActions,
   mayUpload,
   mayDelete,
-  accessKeyCount,
+  activeAccessKeyCount,
   accessKeysLoading,
   accessKeysFailed,
   permissionsLoading,
@@ -70,7 +71,7 @@ export function ObjectsPanel({
   objectActions: ReturnType<typeof useObjectActions>;
   mayUpload: boolean;
   mayDelete: boolean;
-  accessKeyCount: number;
+  activeAccessKeyCount: number;
   accessKeysLoading: boolean;
   accessKeysFailed: boolean;
   permissionsLoading: boolean;
@@ -95,7 +96,7 @@ export function ObjectsPanel({
       downloading={objectActions.downloading}
       canUpload={mayUpload}
       keyAction={getEmptyBucketKeyAction({
-        accessKeyCount,
+        activeAccessKeyCount,
         accessKeysFailed,
         mayCreateKeys,
         onAddKeyOpenChange,

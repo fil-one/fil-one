@@ -365,6 +365,14 @@ describe('BucketDetailPage — an empty bucket', () => {
     expect(await screen.findByTestId('add-bucket-key-modal')).toBeInTheDocument();
   });
 
+  it('offers Create API key when every key that reaches the bucket has expired', async () => {
+    mockBucketKeys.mockReturnValue([{ ...ACCESS_KEY, status: 'expired' }]);
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByRole('button', { name: 'Create API key' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View API keys' })).not.toBeInTheDocument();
+  });
+
   it('switches to the API Keys tab when keys reach the bucket already', async () => {
     renderPage(OrgRole.Owner);
 

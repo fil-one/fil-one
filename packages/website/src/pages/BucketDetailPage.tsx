@@ -508,7 +508,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               objectActions={objectActions}
               mayUpload={mayUpload}
               mayDelete={mayDelete}
-              accessKeyCount={accessKeys.length}
+              activeAccessKeyCount={accessKeys.filter((key) => key.status !== 'expired').length}
               accessKeysLoading={accessKeysLoading}
               accessKeysFailed={accessKeysQuery.isError}
               permissionsLoading={permissionsLoading}
