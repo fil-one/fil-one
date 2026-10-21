@@ -20,7 +20,7 @@ jobs:
             args: --project=multi-org --project=multi-org-firefox --project=multi-org-webkit
           - suite: policies
             browsers: chromium firefox webkit
-            args: --project=policies --project=policies-firefox --project=policies-webkit
+            args: --project=policies-serial-webkit --workers=2
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Each suite's group is shared with the same suite's job in

@@ -7,7 +7,11 @@ import { defineConfig, devices } from '@playwright/test';
 if (existsSync('.env.e2e.local')) process.loadEnvFile('.env.e2e.local');
 
 const isCI = !!process.env.CI;
-const API_ONLY_POLICY_SPECS = /(policies|policy-enforcement|policy-lifecycle)\.spec\.ts$/;
+// Policy specs that change what other specs see: member-ui reads the member's
+// whole bucket list, lifecycle changes the roster. They run alone, after the rest.
+const SERIAL_POLICY_SPECS = /(policy-member-ui|policy-lifecycle)\.spec\.ts$/;
+// Policy tests that open a page; Firefox and WebKit run only these.
+const PAGE_POLICY_TESTS = /\b(M[1-5]|K[12]|PU[1-3]|R7|S[34]|U\d+[ab]?)\. /;
 const baseURL = process.env.BASE_URL;
 
 if (!baseURL) {
@@ -106,24 +110,42 @@ export default defineConfig({
             fullyParallel: false,
             workers: 1,
           },
-          // One project per browser; the specs restore the roster they change.
-          // Firefox and WebKit skip the specs that only call the API, which
-          // no browser runs.
+          // Every spec but the serial ones, one project per browser. Spec files
+          // run side by side (each makes its own buckets and keys); the tests in
+          // a file stay in order. Firefox and WebKit run only the page tests.
           ...(
             [
               ['policies', 'Desktop Chrome', undefined],
-              ['policies-firefox', 'Desktop Firefox', API_ONLY_POLICY_SPECS],
-              ['policies-webkit', 'Desktop Safari', API_ONLY_POLICY_SPECS],
+              ['policies-firefox', 'Desktop Firefox', PAGE_POLICY_TESTS],
+              ['policies-webkit', 'Desktop Safari', PAGE_POLICY_TESTS],
             ] as const
-          ).map(([name, device, testIgnore]) => ({
+          ).map(([name, device, grep]) => ({
             name,
             testDir: './tests/e2e/policies',
-            testIgnore,
+            testIgnore: SERIAL_POLICY_SPECS,
+            grep,
             use: { ...devices[device] },
-            // One org and one roster for every spec, and some specs change the roster.
+            fullyParallel: false,
+            dependencies: ['policies-setup'],
+          })),
+          // The serial specs, one browser after another, once every project
+          // above has finished. `--project=policies-serial-webkit` runs the lot.
+          ...(
+            [
+              ['policies-serial', 'Desktop Chrome', undefined],
+              ['policies-serial-firefox', 'Desktop Firefox', PAGE_POLICY_TESTS],
+              ['policies-serial-webkit', 'Desktop Safari', PAGE_POLICY_TESTS],
+            ] as const
+          ).map(([name, device, grep], i, all) => ({
+            name,
+            testDir: './tests/e2e/policies',
+            testMatch: SERIAL_POLICY_SPECS,
+            grep,
+            use: { ...devices[device] },
             fullyParallel: false,
             workers: 1,
-            dependencies: ['policies-setup'],
+            dependencies:
+              i === 0 ? ['policies', 'policies-firefox', 'policies-webkit'] : [all[i - 1][0]],
           })),
         ]
       : []),
