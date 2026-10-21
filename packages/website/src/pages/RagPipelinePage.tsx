@@ -35,7 +35,7 @@ function StatSkeleton() {
     <span
       data-testid="rag-pipeline-stat-loading"
       aria-hidden="true"
-      className="block h-6 w-14 animate-pulse rounded bg-zinc-200"
+      className="block h-6 w-14 animate-pulse rounded-md bg-zinc-200"
     />
   );
 }

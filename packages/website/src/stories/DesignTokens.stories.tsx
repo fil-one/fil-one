@@ -15,7 +15,7 @@ type Story = StoryObj;
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-12">
-      <h2 className="mb-6 border-b border-zinc-200 pb-3 font-heading text-xl font-semibold text-zinc-900">
+      <h2 className="mb-6 border-b border-zinc-200 pb-3 text-xl font-semibold text-zinc-900">
         {title}
       </h2>
       {children}
@@ -297,7 +297,7 @@ export const AllTokens: Story = {
     <div className="light-section min-h-screen bg-white px-10 py-12">
       <div className="mx-auto max-w-5xl">
         <div className="mb-12">
-          <h1 className="font-heading text-3xl font-bold text-zinc-900">Design Tokens</h1>
+          <h1 className="text-3xl font-bold text-zinc-900">Design Tokens</h1>
           <p className="mt-2 text-zinc-500">
             All design tokens defined in the Fil One design system.
           </p>
@@ -311,7 +311,7 @@ export const AllTokens: Story = {
             <div className="rounded-xl border border-zinc-200 p-5">
               <p className="mb-3 font-mono text-xs text-zinc-400">--spacing-readable (60ch)</p>
               <div
-                className="rounded bg-brand-100 px-4 py-3 text-sm text-brand-800"
+                className="rounded-md bg-brand-100 px-4 py-3 text-sm text-brand-800"
                 style={{ maxWidth: '60ch' }}
               >
                 This container is capped at 60ch — the readable line length used for text-heavy
@@ -324,13 +324,11 @@ export const AllTokens: Story = {
         <Section title="Border Radius">
           <div className="grid grid-cols-3 gap-4 sm:grid-cols-6">
             {[
-              { label: 'rounded-sm', cls: 'rounded-sm', value: '2px' },
-              { label: 'rounded', cls: 'rounded', value: '4px' },
+              { label: 'rounded-xs', cls: 'rounded-xs', value: '2px' },
+              { label: 'rounded-sm', cls: 'rounded-sm', value: '4px' },
               { label: 'rounded-md', cls: 'rounded-md', value: '6px' },
               { label: 'rounded-lg', cls: 'rounded-lg', value: '8px' },
               { label: 'rounded-xl', cls: 'rounded-xl', value: '12px' },
-              { label: 'rounded-2xl', cls: 'rounded-2xl', value: '16px' },
-              { label: 'rounded-3xl', cls: 'rounded-3xl', value: '24px' },
               { label: 'rounded-full', cls: 'rounded-full', value: '9999px' },
             ].map(({ label, cls, value }) => (
               <div key={label} className="flex flex-col gap-2">
@@ -378,8 +376,9 @@ export const AllTokens: Story = {
             <div className="rounded-xl border border-zinc-200 p-5">
               <p className="mb-3 font-mono text-xs text-zinc-400">toast-slide-in</p>
               <p className="text-sm text-zinc-600">
-                Used by <code className="rounded bg-zinc-100 px-1 py-0.5 text-xs">.toast-item</code>{' '}
-                — slides in from the right with a fade (0.2s ease-out).
+                Used by{' '}
+                <code className="rounded-md bg-zinc-100 px-1 py-0.5 text-xs">.toast-item</code> —
+                slides in from the right with a fade (0.2s ease-out).
               </p>
               <div className="mt-3 font-mono text-xs text-zinc-400">
                 from: opacity 0, translateX(100%) → to: opacity 1, translateX(0)
