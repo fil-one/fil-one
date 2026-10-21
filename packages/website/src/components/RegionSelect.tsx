@@ -13,7 +13,7 @@ type RegionSelectProps = {
   onChange: (region: S3Region) => void;
   disabled?: boolean;
   /** Matches `Input`'s sizes, so the field lines up with the inputs beside it. */
-  size?: Exclude<InputSize, 'sm'>;
+  size?: InputSize;
   /**
    * Width for a picker set in a row beside other content. The default fills its container,
    * as a form field does; Headless UI renders the listbox with no wrapper element, so the
@@ -23,9 +23,19 @@ type RegionSelectProps = {
 };
 
 // The same heights and insets as `Select`, which this replaces for regions.
-const SIZES: Record<NonNullable<RegionSelectProps['size']>, { control: string; caret: string }> = {
-  md: { control: 'h-(--control-height-md) pr-9 pl-3', caret: 'right-3' },
-  lg: { control: 'h-(--control-height-lg) pr-10 pl-4', caret: 'right-4' },
+const SIZES: Record<InputSize, { control: string; caret: { inset: string; size: number } }> = {
+  sm: {
+    control: 'h-(--control-height-sm) pr-7 pl-2.5 text-ui',
+    caret: { inset: 'right-2', size: 12 },
+  },
+  md: {
+    control: 'h-(--control-height-md) pr-9 pl-3 text-sm',
+    caret: { inset: 'right-3', size: 14 },
+  },
+  lg: {
+    control: 'h-(--control-height-lg) pr-10 pl-4 text-sm',
+    caret: { inset: 'right-4', size: 14 },
+  },
 };
 
 /**
@@ -71,13 +81,13 @@ export function RegionSelect({
       <ListboxButton
         id={id}
         aria-label={`Region, ${formatRegion(value)}`}
-        className={`group relative flex w-full items-center gap-2 rounded-md border border-(--input-border-color) bg-white text-left text-sm ${SIZES[size].control} text-(--color-text-base) transition-colors duration-150 focus-visible:brand-outline data-disabled:cursor-not-allowed data-disabled:bg-zinc-100 data-disabled:text-zinc-400 ${className ?? ''}`}
+        className={`group relative flex w-full items-center gap-2 rounded-md border border-(--input-border-color) bg-white text-left ${SIZES[size].control} text-(--color-text-base) transition-colors duration-150 focus-visible:brand-outline data-disabled:cursor-not-allowed data-disabled:bg-zinc-100 data-disabled:text-zinc-400 ${className ?? ''}`}
       >
         <RegionLine region={value} isCodeInColumn={false} />
         <span
-          className={`pointer-events-none absolute inset-y-0 flex items-center text-zinc-400 ${SIZES[size].caret}`}
+          className={`pointer-events-none absolute inset-y-0 flex items-center text-zinc-400 ${SIZES[size].caret.inset}`}
         >
-          <CaretDownIcon size={14} weight="bold" />
+          <CaretDownIcon size={SIZES[size].caret.size} weight="bold" />
         </span>
       </ListboxButton>
       <ListboxOptions
