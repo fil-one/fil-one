@@ -13,6 +13,8 @@ import { buildEvent } from '../test/lambda-test-utilities.ts';
 const mockSetupIntentsList = vi.fn();
 const mockSubscriptionsCreate = vi.fn();
 const mockSubscriptionsUpdate = vi.fn();
+const mockSubscriptionsRetrieve = vi.fn();
+const mockSubscriptionsList = vi.fn();
 const mockPromotionCodesList = vi.fn();
 
 vi.mock('sst', () => ({
@@ -50,9 +52,16 @@ vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
 vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     setupIntents: { list: mockSetupIntentsList },
-    subscriptions: { create: mockSubscriptionsCreate, update: mockSubscriptionsUpdate },
+    subscriptions: {
+      create: mockSubscriptionsCreate,
+      update: mockSubscriptionsUpdate,
+      retrieve: mockSubscriptionsRetrieve,
+      list: mockSubscriptionsList,
+    },
     promotionCodes: { list: mockPromotionCodesList },
   }),
+  isStripeResourceMissing: (err: unknown) =>
+    (err as { code?: string } | null)?.code === 'resource_missing',
   getBillingSecrets: () => ({
     STRIPE_SECRET_KEY: 'sk_test_fake',
     STRIPE_PRICE_ID: 'price_test_fake',
@@ -128,6 +137,8 @@ describe('activate-subscription baseHandler', () => {
     mockSetupIntentsList.mockReset();
     mockSubscriptionsCreate.mockReset();
     mockSubscriptionsUpdate.mockReset();
+    mockSubscriptionsRetrieve.mockReset();
+    mockSubscriptionsList.mockReset();
     mockPromotionCodesList.mockReset();
     mockSyncTenantStatusInProvisionedRegions.mockReset();
 
@@ -135,6 +146,12 @@ describe('activate-subscription baseHandler', () => {
       data: [{ status: 'succeeded', payment_method: 'pm_test_789' }],
     });
     mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
+    mockSubscriptionsList.mockResolvedValue({ data: [] });
+    // Stripe reports the named subscription still trialing unless a test says otherwise.
+    mockSubscriptionsRetrieve.mockImplementation(async (id: string) => ({
+      id,
+      status: 'trialing',
+    }));
     mockIsOrgDeleting.mockResolvedValue(false);
     // The billing read asks both keys at once. Absent unless a test says
     // otherwise, so a row only exists where the test put one.
@@ -333,19 +350,26 @@ describe('activate-subscription baseHandler', () => {
     const body = JSON.parse((result as { body: string }).body);
 
     // Should call create, NOT update
-    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-      customer: 'cus_test_123',
-      items: [{ price: 'price_test_fake' }],
-      default_payment_method: 'pm_test_789',
-      metadata: { userId: 'user-1', orgId: 'org-1' },
-      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-    });
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      {
+        customer: 'cus_test_123',
+        items: [{ price: 'price_test_fake' }],
+        default_payment_method: 'pm_test_789',
+        metadata: { userId: 'user-1', orgId: 'org-1' },
+        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+      },
+      { idempotencyKey: expect.any(String) },
+    );
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
 
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
   });
 
   it('creates a new subscription when reactivating a canceled subscription (GracePeriod)', async () => {
+    mockSubscriptionsRetrieve.mockImplementation(async (id: string) => ({
+      id,
+      status: 'canceled',
+    }));
     // Record retains the stale subscriptionId from the canceled Stripe subscription;
     // the webhook clears it later via customer.subscription.created.
     ddbMock
@@ -371,19 +395,26 @@ describe('activate-subscription baseHandler', () => {
     const body = JSON.parse((result as { body: string }).body);
 
     expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-      customer: 'cus_test_123',
-      items: [{ price: 'price_test_fake' }],
-      default_payment_method: 'pm_test_789',
-      metadata: { userId: 'user-1', orgId: 'org-1' },
-      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-    });
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      {
+        customer: 'cus_test_123',
+        items: [{ price: 'price_test_fake' }],
+        default_payment_method: 'pm_test_789',
+        metadata: { userId: 'user-1', orgId: 'org-1' },
+        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+      },
+      { idempotencyKey: expect.any(String) },
+    );
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
 
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
   });
 
   it('clears canceledAt and the grace deadline when reactivating from grace', async () => {
+    mockSubscriptionsRetrieve.mockImplementation(async (id: string) => ({
+      id,
+      status: 'canceled',
+    }));
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves({
@@ -418,6 +449,10 @@ describe('activate-subscription baseHandler', () => {
   });
 
   it('creates a new subscription when reactivating a fully canceled subscription (Canceled)', async () => {
+    mockSubscriptionsRetrieve.mockImplementation(async (id: string) => ({
+      id,
+      status: 'canceled',
+    }));
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves({
@@ -441,16 +476,77 @@ describe('activate-subscription baseHandler', () => {
     const body = JSON.parse((result as { body: string }).body);
 
     expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-      customer: 'cus_test_123',
-      items: [{ price: 'price_test_fake' }],
-      default_payment_method: 'pm_test_789',
-      metadata: { userId: 'user-1', orgId: 'org-1' },
-      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-    });
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      {
+        customer: 'cus_test_123',
+        items: [{ price: 'price_test_fake' }],
+        default_payment_method: 'pm_test_789',
+        metadata: { userId: 'user-1', orgId: 'org-1' },
+        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+      },
+      { idempotencyKey: expect.any(String) },
+    );
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
 
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
+  });
+
+  it('keeps the named subscription when a grace-period row names one Stripe still bills', async () => {
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({
+        Item: buildBillingRecord({
+          subscriptionId: 'sub_live',
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+        }),
+      })
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsUpdate.mockResolvedValue(
+      mockSubscriptionResponse({ id: 'sub_live', status: 'active' }),
+    );
+
+    const result = await baseHandler(
+      buildEvent({
+        userInfo: { userId: 'user-1', orgId: 'org-1' },
+        method: 'POST',
+        rawPath: '/api/billing/activate',
+      }),
+    );
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(
+      ddbMock.commandCalls(UpdateItemCommand).at(0)?.args[0].input.ExpressionAttributeValues,
+    ).toMatchObject({ ':subId': { S: 'sub_live' } });
+  });
+
+  it('answers 409 and writes nothing when the customer has a live subscription the row does not name', async () => {
+    ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({
+      Item: buildBillingRecord({
+        subscriptionId: 'sub_ended',
+        subscriptionStatus: SubscriptionStatus.GracePeriod,
+      }),
+    });
+    mockSubscriptionsRetrieve.mockResolvedValue({ id: 'sub_ended', status: 'canceled' });
+    mockSubscriptionsList.mockResolvedValue({ data: [{ id: 'sub_stray', status: 'active' }] });
+
+    const result = await baseHandler(
+      buildEvent({
+        userInfo: { userId: 'user-1', orgId: 'org-1' },
+        method: 'POST',
+        rawPath: '/api/billing/activate',
+      }),
+    );
+
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(JSON.parse((result as { body: string }).body)).toMatchObject({
+      code: 'SUBSCRIPTION_CONFLICT',
+    });
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(UpdateItemCommand)).toStrictEqual([]);
+    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
   });
 
   it('removes trialEndsAt when updating trial subscription (trial_end: now)', async () => {
@@ -577,6 +673,10 @@ describe('activate-subscription baseHandler', () => {
   // ── useSavedPaymentMethod path ────────────────────────────────────
 
   it('reactivates a canceled subscription using the saved payment method (GracePeriod)', async () => {
+    mockSubscriptionsRetrieve.mockImplementation(async (id: string) => ({
+      id,
+      status: 'canceled',
+    }));
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves({
@@ -606,17 +706,24 @@ describe('activate-subscription baseHandler', () => {
     expect(mockSetupIntentsList).not.toHaveBeenCalled();
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
     expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-    expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-      customer: 'cus_test_123',
-      items: [{ price: 'price_test_fake' }],
-      default_payment_method: 'pm_saved_1',
-      metadata: { userId: 'user-1', orgId: 'org-1' },
-      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-    });
+    expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+      {
+        customer: 'cus_test_123',
+        items: [{ price: 'price_test_fake' }],
+        default_payment_method: 'pm_saved_1',
+        metadata: { userId: 'user-1', orgId: 'org-1' },
+        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+      },
+      { idempotencyKey: expect.any(String) },
+    );
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
   });
 
   it('reactivates a canceled subscription using the saved payment method (Canceled)', async () => {
+    mockSubscriptionsRetrieve.mockImplementation(async (id: string) => ({
+      id,
+      status: 'canceled',
+    }));
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves({
@@ -798,17 +905,24 @@ describe('activate-subscription baseHandler', () => {
       await baseHandler(event);
 
       expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-      expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-        customer: 'cus_test_123',
-        items: [{ price: 'price_test_fake' }],
-        default_payment_method: 'pm_test_789',
-        metadata: { userId: 'user-1', orgId: 'org-1' },
-        discounts: [{ promotion_code: 'promo_xxx' }],
-        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-      });
+      expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+        {
+          customer: 'cus_test_123',
+          items: [{ price: 'price_test_fake' }],
+          default_payment_method: 'pm_test_789',
+          metadata: { userId: 'user-1', orgId: 'org-1' },
+          discounts: [{ promotion_code: 'promo_xxx' }],
+          expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+        },
+        { idempotencyKey: expect.any(String) },
+      );
     });
 
     it('includes discounts in subscriptions.create when reactivating a canceled subscription', async () => {
+      mockSubscriptionsRetrieve.mockImplementation(async (id: string) => ({
+        id,
+        status: 'canceled',
+      }));
       ddbMock
         .on(GetItemCommand, { Key: ORG_KEY })
         .resolves({
@@ -833,14 +947,17 @@ describe('activate-subscription baseHandler', () => {
       await baseHandler(event);
 
       expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-      expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-        customer: 'cus_test_123',
-        items: [{ price: 'price_test_fake' }],
-        default_payment_method: 'pm_test_789',
-        metadata: { userId: 'user-1', orgId: 'org-1' },
-        discounts: [{ promotion_code: 'promo_xxx' }],
-        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-      });
+      expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+        {
+          customer: 'cus_test_123',
+          items: [{ price: 'price_test_fake' }],
+          default_payment_method: 'pm_test_789',
+          metadata: { userId: 'user-1', orgId: 'org-1' },
+          discounts: [{ promotion_code: 'promo_xxx' }],
+          expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+        },
+        { idempotencyKey: expect.any(String) },
+      );
       expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
     });
 
@@ -916,6 +1033,10 @@ describe('activate-subscription baseHandler', () => {
     });
 
     it('applies discounts on the saved-payment-method reactivation create', async () => {
+      mockSubscriptionsRetrieve.mockImplementation(async (id: string) => ({
+        id,
+        status: 'canceled',
+      }));
       ddbMock
         .on(GetItemCommand, { Key: ORG_KEY })
         .resolves({
@@ -942,14 +1063,17 @@ describe('activate-subscription baseHandler', () => {
 
       expect(mockSetupIntentsList).not.toHaveBeenCalled();
       expect(mockSubscriptionsCreate).toHaveBeenCalledTimes(1);
-      expect(mockSubscriptionsCreate).toHaveBeenCalledWith({
-        customer: 'cus_test_123',
-        items: [{ price: 'price_test_fake' }],
-        default_payment_method: 'pm_saved_1',
-        metadata: { userId: 'user-1', orgId: 'org-1' },
-        discounts: [{ promotion_code: 'promo_xxx' }],
-        expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-      });
+      expect(mockSubscriptionsCreate).toHaveBeenCalledWith(
+        {
+          customer: 'cus_test_123',
+          items: [{ price: 'price_test_fake' }],
+          default_payment_method: 'pm_saved_1',
+          metadata: { userId: 'user-1', orgId: 'org-1' },
+          discounts: [{ promotion_code: 'promo_xxx' }],
+          expand: ['latest_invoice.payment_intent', 'default_payment_method'],
+        },
+        { idempotencyKey: expect.any(String) },
+      );
     });
   });
 });
