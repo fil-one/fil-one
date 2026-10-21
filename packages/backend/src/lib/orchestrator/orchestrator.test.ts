@@ -1065,8 +1065,15 @@ describe('issueAccessKey', () => {
       's3:GetObject',
       's3:ListBucket',
       's3:ListMultipartUploadParts',
+      's3:GetObjectTagging',
+      's3:GetObjectAttributes',
+      's3:GetBucketLocation',
+      's3:GetBucketAcl',
+      's3:GetBucketCORS',
+      's3:GetBucketTagging',
       's3:PutObject',
       's3:AbortMultipartUpload',
+      's3:PutObjectTagging',
       's3:ListBucketMultipartUploads',
     ]);
   });
