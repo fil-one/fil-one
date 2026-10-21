@@ -10,6 +10,7 @@
     "@aws-sdk/client-dynamodb": "^3.1152.0",
     "@aws-sdk/client-lambda": "^3.1152.0",
     "@aws-sdk/util-dynamodb": "^3.996.9",
+    "@filone/backend": "workspace:*",
     "@filone/shared": "workspace:*",
     "sst": "^4.17.2",
     "stripe": "^23.0.0"
