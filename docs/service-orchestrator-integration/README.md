@@ -54,6 +54,8 @@ The S3 Gateway uses per-tenant AWS Sig V4 access keys, provisioned through the M
 
 All API traffic — Management API and S3 Gateway alike — must be served over HTTPS/TLS.
 
+FilOne aborts a Management API or S3 Gateway call that has not answered within 8 s when it serves an interactive console read (usage, activity, bucket list, bucket details, bucket analytics) or a bucket deletion, and treats the call as failed. Endpoints should answer well inside that bound.
+
 ### Versioning
 
 The Management API is unversioned at this stage. Future breaking revisions will be introduced via a `/v2` URL prefix or HTTP content negotiation; partners do not need to plan for versioning today.
