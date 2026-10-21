@@ -78,7 +78,7 @@ test.afterAll(async () => {
   await Promise.all([owner.dispose(), member.dispose(), leaver.dispose()]);
 });
 
-test('a promotion and a demotion change no policy', { tag: '@serial' }, async () => {
+test('a promotion and a demotion change no policy', { tag: ['@serial', '@api'] }, async () => {
   const adminListStatement = allow([adminId], ['s3:ListBucket'], 'team');
   const bucket = await createTrackedBucket([adminListStatement]);
   const before = toCanonicalPolicy((await owner.readPolicy(bucket)).policy);
@@ -108,7 +108,7 @@ let leaverBucket: string;
 
 test(
   'removing a member takes their keys and every statement naming them',
-  { tag: '@serial' },
+  { tag: ['@serial', '@api'] },
   async () => {
     leaverBucket = await createTrackedBucket([allow([leaverId], ['s3:ListBucket'], 'leaver-only')]);
     // Created and not yet used, so the gateway holds nothing cached for it.
@@ -131,7 +131,7 @@ test(
   },
 );
 
-test('a policy naming a removed member is refused', { tag: '@serial' }, async () => {
+test('a policy naming a removed member is refused', { tag: ['@serial', '@api'] }, async () => {
   const { etag } = await owner.readPolicy(leaverBucket);
   const writeNamingRemovedMember = await owner.putPolicy(leaverBucket, {
     policy: buildBucketPolicy(leaverBucket, [
@@ -150,7 +150,7 @@ test('a policy naming a removed member is refused', { tag: '@serial' }, async ()
 
 test(
   'a bucket deleted and created again under its name starts from a creator-only policy',
-  { tag: '@serial' },
+  { tag: ['@serial', '@api'] },
   async () => {
     const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'], 'member-read')]);
     expect([200, 204]).toContain((await owner.deleteBucket(bucket)).status());
@@ -161,7 +161,7 @@ test(
   },
 );
 
-test('a deleted principal key stops working', { tag: '@serial' }, async () => {
+test('a deleted principal key stops working', { tag: ['@serial', '@api'] }, async () => {
   const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'])]);
   const deleted = await member.createAccessKey();
   createdKeys.push({ api: member, id: deleted.id });
@@ -171,17 +171,21 @@ test('a deleted principal key stops working', { tag: '@serial' }, async () => {
   );
 });
 
-test('a rotated principal key is replaced by a working key', { tag: '@serial' }, async () => {
-  const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'])]);
-  const old = await member.createAccessKey();
-  createdKeys.push({ api: member, id: old.id });
-  const rotated = await member.rotateKey(old.id);
-  expect(rotated.status(), await rotated.text()).toBe(201);
-  const replacement = (await rotated.json()) as RotateAccessKeyResponse;
-  createdKeys.push({ api: member, id: replacement.id });
-  expect(replacement.previousKeyRevoked).toBe(true);
-  expect(await getS3Outcome(listObjects(createS3Client(replacement), bucket))).toBe('ok');
-  expect(await getS3Outcome(listObjects(createS3Client(old), bucket))).toBe(
-    '403 InvalidAccessKeyId',
-  );
-});
+test(
+  'a rotated principal key is replaced by a working key',
+  { tag: ['@serial', '@api'] },
+  async () => {
+    const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'])]);
+    const old = await member.createAccessKey();
+    createdKeys.push({ api: member, id: old.id });
+    const rotated = await member.rotateKey(old.id);
+    expect(rotated.status(), await rotated.text()).toBe(201);
+    const replacement = (await rotated.json()) as RotateAccessKeyResponse;
+    createdKeys.push({ api: member, id: replacement.id });
+    expect(replacement.previousKeyRevoked).toBe(true);
+    expect(await getS3Outcome(listObjects(createS3Client(replacement), bucket))).toBe('ok');
+    expect(await getS3Outcome(listObjects(createS3Client(old), bucket))).toBe(
+      '403 InvalidAccessKeyId',
+    );
+  },
+);

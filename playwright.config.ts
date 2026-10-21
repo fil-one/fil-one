@@ -106,22 +106,21 @@ export default defineConfig({
             workers: 1,
           },
           // Tags in the specs pick the project: `@serial` tests change what other
-          // tests see and run alone, after the rest; `@browser` tests open a page,
-          // and only they run in Firefox and WebKit.
+          // tests see and run alone, after the rest; `@api` tests open no page, so
+          // they run in Chromium only. Every other test runs in all three browsers.
           //
-          // Untagged spec files run side by side (each makes its own buckets and
-          // keys); the tests in a file stay in order.
+          // Spec files run side by side (each makes its own buckets and keys); the
+          // tests in a file stay in order.
           ...(
             [
-              ['policies', 'Desktop Chrome', undefined],
-              ['policies-firefox', 'Desktop Firefox', /@browser/],
-              ['policies-webkit', 'Desktop Safari', /@browser/],
+              ['policies', 'Desktop Chrome', /@serial/],
+              ['policies-firefox', 'Desktop Firefox', /@serial|@api/],
+              ['policies-webkit', 'Desktop Safari', /@serial|@api/],
             ] as const
-          ).map(([name, device, grep]) => ({
+          ).map(([name, device, grepInvert]) => ({
             name,
             testDir: './tests/e2e/policies',
-            grep,
-            grepInvert: /@serial/,
+            grepInvert,
             use: { ...devices[device] },
             fullyParallel: false,
             dependencies: ['policies-setup'],
@@ -130,14 +129,15 @@ export default defineConfig({
           // above has finished.
           ...(
             [
-              ['policies-serial', 'Desktop Chrome', /@serial/],
-              ['policies-serial-firefox', 'Desktop Firefox', /^(?=.*@serial)(?=.*@browser)/],
-              ['policies-serial-webkit', 'Desktop Safari', /^(?=.*@serial)(?=.*@browser)/],
+              ['policies-serial', 'Desktop Chrome', undefined],
+              ['policies-serial-firefox', 'Desktop Firefox', /@api/],
+              ['policies-serial-webkit', 'Desktop Safari', /@api/],
             ] as const
-          ).map(([name, device, grep], i, all) => ({
+          ).map(([name, device, grepInvert], i, all) => ({
             name,
             testDir: './tests/e2e/policies',
-            grep,
+            grep: /@serial/,
+            grepInvert,
             use: { ...devices[device] },
             fullyParallel: false,
             workers: 1,

@@ -68,7 +68,7 @@ async function putPolicyAs(api: ConsoleApi, statements: UnboundStatement[], etag
   };
 }
 
-test.describe('through the API', () => {
+test.describe('through the API', { tag: '@api' }, () => {
   for (const [title, grant] of [
     [
       'an admin cannot newly grant s3:PutObjectRetention',
@@ -185,7 +185,7 @@ test.describe('through the API', () => {
   });
 });
 
-test.describe('in the editor', { tag: '@browser' }, () => {
+test.describe('in the editor', () => {
   // The Admin's tab acts in the Owner's org, which lives in sessionStorage.
   const openPolicyTab = async (page: Page) => {
     await page.addInitScript((id) => sessionStorage.setItem('filone:activeOrgId', id), orgId);
