@@ -179,7 +179,11 @@ describe('list-buckets baseHandler (single-region)', () => {
       }),
     );
 
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', scopeToMemberId);
+    expect(aurora.listBuckets).toHaveBeenCalledWith(
+      'aurora-t-1',
+      scopeToMemberId,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('scopes the listing to the caller when the membership is missing', async () => {
@@ -187,7 +191,11 @@ describe('list-buckets baseHandler (single-region)', () => {
 
     await baseHandler(buildEvent({ userInfo: { ...USER_INFO, membership: NO_MEMBERSHIP } }));
 
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', USER_1);
+    expect(aurora.listBuckets).toHaveBeenCalledWith(
+      'aurora-t-1',
+      USER_1,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('consults the orchestrator registry to fan out across available regions', async () => {
@@ -312,7 +320,11 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(body.buckets.map((b: { bucketName: string }) => b.bucketName)).toStrictEqual([
       'fth-bucket',
     ]);
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', undefined);
+    expect(fth.listBuckets).toHaveBeenCalledWith(
+      'fth-t-9',
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(aurora.isTenantReady).not.toHaveBeenCalled();
     expect(aurora.listBuckets).not.toHaveBeenCalled();
   });
@@ -364,8 +376,16 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
         },
       ],
     });
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1', undefined);
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9', undefined);
+    expect(aurora.listBuckets).toHaveBeenCalledWith(
+      'aurora-t-1',
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(fth.listBuckets).toHaveBeenCalledWith(
+      'fth-t-9',
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('sorts buckets alphabetically by name across regions', async () => {
@@ -572,5 +592,28 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
       message: unavailableMessage('us-east-1'),
     });
     expect(aurora.listBuckets).not.toHaveBeenCalled();
+  });
+});
+
+describe('list-buckets baseHandler (request deadline)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    availableOrchestrators.mockReturnValue([aurora, fth]);
+    aurora.isTenantReady.mockReturnValue('aurora-t-1');
+    fth.isTenantReady.mockReturnValue('fth-t-9');
+    aurora.listBuckets.mockResolvedValue([]);
+    fth.listBuckets.mockResolvedValue([]);
+  });
+
+  // One budget per request: every leg of the fan-out gets the same signal, so
+  // the slowest region cannot hold the handler past what the fastest one saw.
+  it('hands every region the same deadline signal', async () => {
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const [, , auroraOpts] = aurora.listBuckets.mock.calls[0];
+    const [, , fthOpts] = fth.listBuckets.mock.calls[0];
+    // Identity, not deep equality: two separate signals compare as equal
+    // objects. The fan-out tests above check that each leg gets a signal.
+    expect(fthOpts.signal).toBe(auroraOpts.signal);
   });
 });

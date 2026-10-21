@@ -6,6 +6,7 @@ import {
   TabPanels as HeadlessTabPanels,
 } from '@headlessui/react';
 import { clsx } from 'clsx';
+import type { Ref } from 'react';
 
 export type TabsProps = {
   children: React.ReactNode;
@@ -27,6 +28,8 @@ export type TabListProps = {
 
 export type TabItemProps = {
   children: React.ReactNode;
+  /** For a page that moves focus onto a tab it selected on the caller's behalf. */
+  ref?: Ref<HTMLButtonElement>;
   /**
    * How many things the tab's panel holds, shown after the label.
    *
@@ -70,9 +73,14 @@ export function TabList({ children, className }: TabListProps) {
   return <HeadlessTabList className={clsx('tabs-list', className)}>{children}</HeadlessTabList>;
 }
 
-export function TabItem({ children, count, disabled, className, testId }: TabItemProps) {
+export function TabItem({ children, ref, count, disabled, className, testId }: TabItemProps) {
   return (
-    <HeadlessTab disabled={disabled} data-testid={testId} className={clsx('tab-item', className)}>
+    <HeadlessTab
+      ref={ref}
+      disabled={disabled}
+      data-testid={testId}
+      className={clsx('tab-item', className)}
+    >
       {children}
       {count !== undefined && <span className="tab-count">{count.toLocaleString()}</span>}
     </HeadlessTab>

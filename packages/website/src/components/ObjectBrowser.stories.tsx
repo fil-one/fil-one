@@ -176,7 +176,75 @@ export const Empty: Story = {
       currentPrefix=""
       onDownload={() => {}}
       downloading={null}
+      canUpload={false}
     />
+  ),
+};
+
+export const EmptyWithCreateKey: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={[]}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      keyAction={{ kind: 'create', onCreate: () => {} }}
+    />
+  ),
+};
+
+export const EmptyWithExistingKeys: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={[]}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      keyAction={{ kind: 'view', onView: () => {} }}
+    />
+  ),
+};
+
+// Every empty state the bucket page shows, side by side. Every role that may upload may
+// also create keys, and the one role that may not upload may neither create nor list them,
+// so an uploader always gets a key step and a read-only viewer never does.
+const EMPTY_STATE_CASES: {
+  label: string;
+  canUpload: boolean;
+  keyAction?: ObjectBrowserProps['keyAction'];
+}[] = [
+  {
+    label: 'Upload, create a key',
+    canUpload: true,
+    keyAction: { kind: 'create', onCreate: () => {} },
+  },
+  { label: 'Upload, keys exist', canUpload: true, keyAction: { kind: 'view', onView: () => {} } },
+  { label: 'Read only: no upload, no key step', canUpload: false },
+];
+
+export const AllEmptyStates: Story = {
+  render: () => (
+    <div className="flex flex-col gap-8">
+      {EMPTY_STATE_CASES.map(({ label, canUpload, keyAction }) => (
+        <div key={label}>
+          <p className="text-xs font-medium uppercase tracking-wider text-zinc-400">{label}</p>
+          <ObjectBrowserHarness
+            bucketName="my-bucket"
+            region={S3Region.EuWest1}
+            versions={[]}
+            currentPrefix=""
+            onDownload={() => {}}
+            downloading={null}
+            canUpload={canUpload}
+            keyAction={keyAction}
+          />
+        </div>
+      ))}
+    </div>
   ),
 };
 

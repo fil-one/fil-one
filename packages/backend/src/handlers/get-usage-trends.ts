@@ -3,6 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { UsageDataPoint, UsageTrendsPeriod, UsageTrendsResponse } from '@filone/shared';
 import type { RegionOrchestrator, StorageUsageSample } from '../lib/service-orchestrator.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -75,6 +76,10 @@ function parsePeriod(raw: string | undefined): UsageTrendsPeriod {
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  // One deadline for every region's fetch, so a hung region fails its own leg
+  // (swallowed in fetchSamplesByBucket) instead of holding the handler until
+  // the Lambda timeout kills it with nothing logged.
+  const signal = getRequestDeadline(event);
   const { orgId } = getUserInfo(event);
   const period = parsePeriod(event.queryStringParameters?.period);
 
@@ -82,13 +87,14 @@ export async function baseHandler(
   // in, so resolve the ready tenant on each available orchestrator.
   const regions = await getProvisionedRegions(orgId);
 
-  const response: UsageTrendsResponse = await buildTimeSeries(regions, period);
+  const response: UsageTrendsResponse = await buildTimeSeries(regions, period, signal);
   return new ResponseBuilder().status(200).body(response).build();
 }
 
 async function buildTimeSeries(
   regions: ProvisionedRegion[],
   period: UsageTrendsPeriod,
+  signal: AbortSignal,
 ): Promise<UsageTrendsResponse> {
   const { points, granularity } = TREND_WINDOWS[period];
   const now = new Date();
@@ -100,7 +106,7 @@ async function buildTimeSeries(
   // regions per bucket for the org-wide trend.
   const perRegion = await Promise.all(
     regions.map(({ orchestrator, tenantId }) =>
-      fetchSamplesByBucket({ orchestrator, tenantId, from, to: now, granularity }),
+      fetchSamplesByBucket({ orchestrator, tenantId, from, to: now, granularity, signal }),
     ),
   );
 
@@ -135,6 +141,7 @@ type FetchSamplesArgs = {
   from: Date;
   to: Date;
   granularity: Granularity;
+  signal: AbortSignal;
 };
 
 type SamplesByBucket = {
@@ -165,14 +172,15 @@ async function fetchSamplesByBucket({
   from,
   to,
   granularity,
+  signal,
 }: FetchSamplesArgs): Promise<SamplesByBucket> {
   // Swallow errors so one region's outage still renders the rest.
   try {
-    const { storage, egress } = await orchestrator.getTenantUsageMetrics(tenantId, {
-      from: from.toISOString(),
-      to: to.toISOString(),
-      interval: granularity.interval,
-    });
+    const { storage, egress } = await orchestrator.getTenantUsageMetrics(
+      tenantId,
+      { from: from.toISOString(), to: to.toISOString(), interval: granularity.interval },
+      { signal },
+    );
 
     const storageByBucket = new Map<string, StorageUsageSample>();
     for (const s of storage) {
@@ -203,6 +211,7 @@ async function fetchSamplesByBucket({
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(authorize('buckets.read'))
