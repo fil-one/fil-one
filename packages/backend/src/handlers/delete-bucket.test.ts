@@ -116,7 +116,11 @@ describe('delete-bucket baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result).toMatchObject({ statusCode: 204, body: '' });
-    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('aurora-t-1', 'my-bucket');
+    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith(
+      'aurora-t-1',
+      'my-bucket',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('passes the tenantId from isTenantReady through to deleteBucket', async () => {
@@ -127,7 +131,11 @@ describe('delete-bucket baseHandler', () => {
     event.pathParameters = { name: 'some-bucket' };
     await baseHandler(event);
 
-    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith('tenant-xyz', 'some-bucket');
+    expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith(
+      'tenant-xyz',
+      'some-bucket',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   // A non-empty bucket is the one failure translated to a response here, so the
