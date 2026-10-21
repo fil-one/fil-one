@@ -83,7 +83,7 @@ export function BucketActionMenu({ actions, onDisable }: BucketActionMenuProps) 
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={handleOpen}
-        className="rounded p-1.5 text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+        className="rounded-md p-1.5 text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
       >
         <DotsThreeIcon weight="bold" width={18} height={18} aria-hidden="true" />
       </button>

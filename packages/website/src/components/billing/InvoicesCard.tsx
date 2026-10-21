@@ -44,10 +44,10 @@ export function InvoicesCard({ invoices, loading, errorMessage, onViewAll }: Inv
         className="animate-pulse rounded-xl border border-zinc-200 bg-white p-5 shadow-xs"
         data-testid="invoices-loading"
       >
-        <div className="mb-4 h-4 w-24 rounded bg-zinc-200" />
-        <div className="mb-3 h-4 w-full rounded bg-zinc-200" />
-        <div className="mb-3 h-4 w-full rounded bg-zinc-200" />
-        <div className="h-4 w-full rounded bg-zinc-200" />
+        <div className="mb-4 h-4 w-24 rounded-md bg-zinc-200" />
+        <div className="mb-3 h-4 w-full rounded-md bg-zinc-200" />
+        <div className="mb-3 h-4 w-full rounded-md bg-zinc-200" />
+        <div className="h-4 w-full rounded-md bg-zinc-200" />
       </div>
     );
   }

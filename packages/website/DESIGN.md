@@ -204,7 +204,7 @@ per call site: `p-1.5` trigger padding with an 18px icon, `min-w-36` panel, `tex
 with `gap-2 px-3 py-1.5` and a 13px icon. `RowActionsMenu.tsx` (used by the Organizations
 list and the Members table) matches this.
 
-## 8. Use four radii (plus one sanctioned exception)
+## 8. Use four radii (plus two sanctioned exceptions)
 
 | Radius              | Use for                                                                |
 | ------------------- | ---------------------------------------------------------------------- |
@@ -215,12 +215,16 @@ list and the Members table) matches this.
 
 Nothing else. Not bare `rounded`, not `rounded-2xl`, `rounded-3xl`, or `rounded-[6px]`.
 
-**The one exception:** `OrgAvatar` is a rounded square, not a circle, so an org is
-distinguishable from a person at a glance rather than only by color (`OrgAvatar.tsx`).
-Its `sm` (28px), `md` (56px) and `lg` (64px) sizes nest inside the four radii above
-(`rounded-md`, `rounded-xl`) same as anything else, but its `xs` size (16px, the org switcher's list
-rows) is small enough that even `rounded-md` reads closer to round than square, so it
-steps down to `rounded-sm` (4px) — the one place in the console that class is allowed.
+**Exception 1, 16px squares:** at 16px even `rounded-md` reads closer to round than
+square, so a 16px square steps down to `rounded-sm` (4px). Two components qualify:
+
+- `OrgAvatar` `xs` (the org switcher's list rows). `OrgAvatar` is a rounded square, not a
+  circle, so an org is distinguishable from a person at a glance rather than only by
+  color. Its larger sizes nest inside the four radii above like anything else.
+- `Checkbox`, whose box is 16px.
+
+**Exception 2, region flags:** `RegionFlag` is a 16 by 12 image, not a control. It takes
+`rounded-xs` (2px), which softens the corners without changing the flag's shape.
 
 **Why:** Radius is where a system leaks most visibly, because mismatches show up as
 optically wrong corners when elements nest. These four keep nesting correct: a 6px control
@@ -232,7 +236,8 @@ needs removing is the leftovers, including `rounded-[6px]`, which is already `ro
 
 Side-specific variants of a permitted radius (`rounded-l-md`, `rounded-t-lg`) are fine.
 
-**Check:** this prints nothing.
+**Check:** this prints only `rounded-sm` and `rounded-xs`. Confirm each is one of the
+exceptions above. It also matches the word in comments and in `IconBox`'s `rounded` prop.
 
 ```bash
 grep -rhoE '\brounded(-(t|b|l|r|tl|tr|bl|br))?(-[a-z0-9]+|-\[[^]]*\])?' src --include="*.tsx" --include="*.css" | sort -u | grep -vE '(rounded(-(t|b|l|r|tl|tr|bl|br))?-(md|lg|xl|full))$'
