@@ -147,7 +147,7 @@ function DrawerHeader({ bucket, onClose }: DrawerHeaderProps) {
         data-testid="bucket-drawer-close"
         onClick={onClose}
         aria-label="Close"
-        className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+        className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
       >
         <XIcon size={16} weight="bold" />
       </button>

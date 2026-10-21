@@ -79,7 +79,7 @@ export function RegionFlag({ region, className }: RegionFlagProps) {
       aria-label={getRegionLabel(region)}
       // The inset ring keeps the white edges of the French and Dutch flags from
       // dissolving into the white table row.
-      className={`shrink-0 overflow-hidden rounded-[2px] ring-1 ring-inset ring-black/10 ${className ?? ''}`}
+      className={`shrink-0 overflow-hidden rounded-xs ring-1 ring-inset ring-black/10 ${className ?? ''}`}
     >
       <Flag />
     </svg>
