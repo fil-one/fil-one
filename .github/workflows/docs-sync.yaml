@@ -1,0 +1,563 @@
+name: Docs sync
+
+# Checks each product PR for changes that make docs.fil.one wrong or incomplete,
+# and drafts the docs change as a PR in FilecoinFoundationWeb/filone-docs.
+# Design, threat model and setup: docs/DocsSync.md.
+#
+# Claude reads PR content, which can carry prompt injection, so the jobs that
+# run Claude hold no token that can write anywhere. Every write happens in a
+# later job that runs no model and no PR code, from output docs-sync.mjs has
+# validated:
+#
+#   context ─► triage (Claude, read-only) ─► gate (comment, decide)
+#                                              └─► draft (Claude, edits a copy)
+#                                                    └─► verify (no secrets: path and MDX checks, build)
+#                                                          └─► publish (App token: push, open docs PR)
+#                                                                └─► finalize (comment the link)
+#   context ─► lifecycle (on close: ready or close the docs PR)
+
+on:
+  pull_request:
+    # No labeled/unlabeled: with cancel-in-progress, labelling a PR for any
+    # reason would cancel a running draft. Label changes apply on the next
+    # push or manual run.
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+    # Keep in step with .github/docs-sync/paths.txt, which limits the diff
+    # Claude sees.
+    paths:
+      - 'packages/website/src/**'
+      - 'packages/shared/src/**'
+      - 'packages/backend/src/**'
+      - 'sst.config.ts'
+      - 'infra/**'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Product PR number'
+        required: true
+        type: number
+      force:
+        description: 'Draft even when the PR is gated or triage is unsure (use at launch)'
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: docs-sync-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+env:
+  DOCS_REPO: FilecoinFoundationWeb/filone-docs
+  DOCS_BRANCH_PREFIX: docs-sync/fil-one-
+  TRIAGE_MODEL: claude-haiku-5-5
+  DRAFT_MODEL: ${{ vars.DOCS_SYNC_DRAFT_MODEL || 'claude-opus-5-5' }}
+
+jobs:
+  # Normalises pull_request and workflow_dispatch into one set of outputs and
+  # decides whether this PR is in scope at all.
+  context:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      mode: ${{ steps.pr.outputs.mode }}
+      number: ${{ steps.pr.outputs.number }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      merged: ${{ steps.pr.outputs.merged }}
+      held: ${{ steps.pr.outputs.held }}
+      ungated: ${{ steps.pr.outputs.ungated }}
+      force: ${{ steps.pr.outputs.force }}
+    steps:
+      - id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          FORCE: ${{ inputs.force || false }}
+        run: |
+          set -euo pipefail
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")
+          field() { jq -r "$1" <<<"$pr"; }
+          has_label() { jq -e --arg name "$1" 'any(.labels[]; .name == $name)' <<<"$pr" >/dev/null; }
+
+          mode=sync
+          if [ "$(field .head.repo.full_name)" != "$GITHUB_REPOSITORY" ]; then
+            mode=skip; echo "Skipping: fork PR"
+          elif [ "$(field .user.type)" = Bot ]; then
+            mode=skip; echo "Skipping: bot author"
+          elif ! [[ "$(field .author_association)" =~ ^(OWNER|MEMBER|COLLABORATOR)$ ]]; then
+            mode=skip; echo "Skipping: author is not a collaborator"
+          elif has_label docs:skip; then
+            mode=skip; echo "Skipping: docs:skip label"
+          elif [ "$EVENT" = pull_request ] && [ "$ACTION" = closed ]; then
+            mode=lifecycle
+          elif [ "$(field .draft)" = true ]; then
+            mode=skip; echo "Skipping: draft PR (runs again on ready_for_review)"
+          elif [ "$(field .state)" != open ] && [ "$(field .merged)" != true ]; then
+            mode=skip; echo "Skipping: PR closed without merging"
+          fi
+
+          held=false; has_label docs:gated && held=true
+          ungated=false; has_label docs:ungated && ungated=true
+          [ "$ungated" = true ] && held=false
+          {
+            echo "mode=$mode"
+            echo "number=$(field .number)"
+            echo "base_sha=$(field .base.sha)"
+            echo "head_sha=$(field .head.sha)"
+            echo "merged=$(field .merged)"
+            echo "held=$held"
+            echo "ungated=$ungated"
+            echo "force=$FORCE"
+          } >> "$GITHUB_OUTPUT"
+
+  triage:
+    needs: context
+    if: needs.context.outputs.mode == 'sync'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Read-only token: whatever Claude is talked into, it cannot write to GitHub.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      result: ${{ steps.claude.outputs.structured_output }}
+    steps:
+      # The workspace root is the base commit, so the prompts, schemas and
+      # scripts are the reviewed versions, not the PR's.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.base_sha }}
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.head_sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.DOCS_REPO }}
+          path: docs-site
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: 24
+
+      - name: Prepare Claude's inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.context.outputs.number }}
+          BASE_SHA: ${{ needs.context.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.context.outputs.head_sha }}
+        run: node .github/docs-sync/docs-sync.mjs prepare
+
+      - id: schema
+        run: echo "json=$(jq -c . .github/docs-sync/triage-schema.json)" >> "$GITHUB_OUTPUT"
+
+      - id: claude
+        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1.0.244
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: Follow the instructions in .github/docs-sync/triage-prompt.md.
+          claude_args: >-
+            --model ${{ env.TRIAGE_MODEL }}
+            --max-turns 40
+            --add-dir pr docs-site
+            --allowedTools Read,Glob,Grep
+            --disallowedTools Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task
+            --json-schema '${{ steps.schema.outputs.json }}'
+
+  gate:
+    needs: [context, triage]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    outputs:
+      should_draft: ${{ steps.gate.outputs.should_draft }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.base_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/docs-sync
+
+      # Only to check that the pages triage names exist.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.DOCS_REPO }}
+          path: docs-site
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: 24
+
+      - id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.context.outputs.number }}
+          BASE_SHA: ${{ needs.context.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.context.outputs.head_sha }}
+          TRIAGE_RESULT: ${{ needs.triage.outputs.result }}
+          HELD: ${{ needs.context.outputs.held }}
+          UNGATED: ${{ needs.context.outputs.ungated }}
+          FORCE: ${{ needs.context.outputs.force }}
+        run: |
+          mkdir -p .docs-sync
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json number,title,url,author \
+            | jq '{number, title, url, author: .author.login}' > .docs-sync/pr.json
+          node .github/docs-sync/docs-sync.mjs gate
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: docs-sync-triage
+          path: |
+            .docs-sync/triage.json
+            .docs-sync/pr.json
+          include-hidden-files: true
+          retention-days: 7
+
+  draft:
+    needs: [context, gate]
+    if: needs.gate.outputs.should_draft == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      result: ${{ steps.claude.outputs.structured_output }}
+      docs_sha: ${{ steps.docs.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.base_sha }}
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.head_sha }}
+          path: pr
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.DOCS_REPO }}
+          path: docs-site
+          persist-credentials: false
+
+      # Verify and publish rebuild the change on this exact commit.
+      - id: docs
+        run: echo "sha=$(git -C docs-site rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: 24
+
+      - name: Prepare Claude's inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.context.outputs.number }}
+          BASE_SHA: ${{ needs.context.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.context.outputs.head_sha }}
+        run: node .github/docs-sync/docs-sync.mjs prepare
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: docs-sync-triage
+          path: .docs-sync-triage
+
+      - run: cp .docs-sync-triage/triage.json .docs-sync/triage.json
+
+      - id: schema
+        run: echo "json=$(jq -c . .github/docs-sync/draft-schema.json)" >> "$GITHUB_OUTPUT"
+
+      # No Bash: Claude cannot run the build, git, or anything in the PR.
+      - id: claude
+        uses: anthropics/claude-code-action@58985842b834ed26087302ba27d07bc24ca8697a # v1.0.244
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: Follow the instructions in .github/docs-sync/draft-prompt.md.
+          claude_args: >-
+            --model ${{ env.DRAFT_MODEL }}
+            --max-turns 80
+            --add-dir pr docs-site
+            --allowedTools Read,Glob,Grep,Edit,Write
+            --disallowedTools Bash,NotebookEdit,WebFetch,WebSearch,Task
+            --json-schema '${{ steps.schema.outputs.json }}'
+
+      # Hand over only the editable paths, as plain files. Running git in a
+      # directory Claude could write to would let a planted .git/config run
+      # commands; verify rebuilds the diff on a clean checkout instead.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: docs-sync-draft
+          path: |
+            docs-site/docs/
+            docs-site/static/llms.txt
+            docs-site/static/llms-full.txt
+          retention-days: 7
+
+  verify:
+    needs: [context, draft]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # No secrets in this job: it builds model-written MDX.
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.base_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/docs-sync
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.DOCS_REPO }}
+          ref: ${{ needs.draft.outputs.docs_sha }}
+          path: docs-site
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: docs-sync-draft
+          path: draft
+
+      - name: Apply the draft to a clean checkout
+        run: |
+          set -euo pipefail
+          rsync -a --delete --no-links draft/docs/ docs-site/docs/
+          cp draft/static/llms.txt draft/static/llms-full.txt docs-site/static/
+          git -C docs-site add -A
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: 24
+
+      - id: check
+        run: node .github/docs-sync/docs-sync.mjs check-draft
+
+      - name: Build the docs
+        if: steps.check.outputs.changed == 'true'
+        working-directory: docs-site
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+
+      - name: Export the patch
+        if: steps.check.outputs.changed == 'true'
+        run: git -C docs-site diff --cached > .docs-sync/docs.patch
+
+      - if: steps.check.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: docs-sync-patch
+          path: |
+            .docs-sync/docs.patch
+            .docs-sync/checks.json
+          include-hidden-files: true
+          retention-days: 7
+
+  publish:
+    needs: [context, draft, verify]
+    if: needs.verify.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The product repo token stays read-only; writes to the docs repo use the
+    # App token, which is scoped to that one repository.
+    permissions:
+      contents: read
+    outputs:
+      docs_pr_url: ${{ steps.pr.outputs.url || steps.guard.outputs.url }}
+      status: ${{ steps.guard.outputs.status || steps.pr.outputs.status }}
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.DOCS_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOCS_SYNC_APP_PRIVATE_KEY }}
+          owner: FilecoinFoundationWeb
+          repositories: filone-docs
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.base_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/docs-sync
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: docs-sync-triage
+          path: .docs-sync
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: docs-sync-patch
+          path: .docs-sync
+
+      # Stop when a person has pushed to the branch or closed the docs PR:
+      # force-pushing would throw their work away.
+      - id: guard
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ env.DOCS_BRANCH_PREFIX }}${{ needs.context.outputs.number }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          declined=$(gh pr list --repo "$DOCS_REPO" --head "$BRANCH" --state closed --json number,mergedAt \
+            --jq '[.[] | select(.mergedAt == null)] | length')
+          open=$(gh pr list --repo "$DOCS_REPO" --head "$BRANCH" --state open --json number --jq length)
+          if [ "$open" = 0 ] && [ "$declined" != 0 ]; then
+            echo "status=declined" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if gh api "repos/$DOCS_REPO/branches/$BRANCH" >/dev/null 2>&1; then
+            others=$(gh api "repos/$DOCS_REPO/compare/main...$BRANCH" \
+              | jq --arg bot "$APP_SLUG[bot]" '[.commits[] | select(.author.login != $bot)] | length')
+            if [ "$others" != 0 ]; then
+              echo "status=human-edits" >> "$GITHUB_OUTPUT"
+              gh pr list --repo "$DOCS_REPO" --head "$BRANCH" --state open --json url --jq '.[0].url // ""' \
+                | sed 's/^/url=/' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.guard.outputs.status == ''
+        with:
+          repository: ${{ env.DOCS_REPO }}
+          ref: ${{ needs.draft.outputs.docs_sha }}
+          path: docs-site
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        if: steps.guard.outputs.status == ''
+        with:
+          node-version: 24
+
+      # Nothing from the docs repo or the PR runs here: git apply, commit and
+      # push only, on a patch verify has checked and built.
+      - id: pr
+        if: steps.guard.outputs.status == ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ env.DOCS_BRANCH_PREFIX }}${{ needs.context.outputs.number }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          DRAFT_RESULT: ${{ needs.draft.outputs.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          node .github/docs-sync/docs-sync.mjs pr-body
+          title=$(cat .docs-sync/docs-pr-title.txt)
+          author=$(jq -r .author .docs-sync/pr.json)
+
+          bot_id=$(gh api "users/$APP_SLUG%5Bbot%5D" --jq .id)
+          cd docs-site
+          git config user.name "$APP_SLUG[bot]"
+          git config user.email "$bot_id+$APP_SLUG[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git apply --index ../.docs-sync/docs.patch
+          git commit --quiet --file ../.docs-sync/docs-pr-title.txt
+          git push --force origin "$BRANCH"
+
+          url=$(gh pr list --repo "$DOCS_REPO" --head "$BRANCH" --state open --json url --jq '.[0].url // ""')
+          if [ -z "$url" ]; then
+            url=$(gh pr create --repo "$DOCS_REPO" --head "$BRANCH" --base main --draft \
+              --title "$title" --body-file ../.docs-sync/docs-pr-body.md)
+          else
+            gh pr edit "$url" --title "$title" --body-file ../.docs-sync/docs-pr-body.md
+          fi
+          gh pr edit "$url" --add-label docs-sync || echo "::warning::Could not add the docs-sync label"
+          # Fails when the author is not a collaborator on the docs repo; the
+          # @-mention in the body notifies them anyway.
+          gh pr edit "$url" --add-reviewer "$author" || echo "::warning::Could not request a review from $author"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "status=published" >> "$GITHUB_OUTPUT"
+
+  finalize:
+    needs: [context, gate, draft, verify, publish]
+    if: always() && needs.gate.outputs.should_draft == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.context.outputs.base_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/docs-sync
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: docs-sync-triage
+          path: .docs-sync
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: 24
+
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ needs.context.outputs.number }}
+          DRAFT_RESULT: ${{ needs.draft.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          PUBLISH_RESULT: ${{ needs.verify.outputs.changed == 'true' && needs.publish.result || 'success' }}
+          CHANGED: ${{ needs.verify.outputs.changed }}
+          DOCS_PR_URL: ${{ needs.publish.outputs.docs_pr_url }}
+          PUBLISH_STATUS: ${{ needs.publish.outputs.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node .github/docs-sync/docs-sync.mjs finalize
+
+  # Product PR merged: the docs PR is ready for review. Closed without merging:
+  # close the docs PR. Runs no model and reads no PR content.
+  lifecycle:
+    needs: context
+    if: needs.context.outputs.mode == 'lifecycle'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.DOCS_SYNC_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOCS_SYNC_APP_PRIVATE_KEY }}
+          owner: FilecoinFoundationWeb
+          repositories: filone-docs
+          permission-contents: write
+          permission-pull-requests: write
+
+      - env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          BRANCH: ${{ env.DOCS_BRANCH_PREFIX }}${{ needs.context.outputs.number }}
+          MERGED: ${{ needs.context.outputs.merged }}
+          PRODUCT_REF: ${{ github.repository }}#${{ needs.context.outputs.number }}
+        run: |
+          set -euo pipefail
+          url=$(gh pr list --repo "$DOCS_REPO" --head "$BRANCH" --state open --json url --jq '.[0].url // ""')
+          if [ -z "$url" ]; then echo "No open docs PR for $BRANCH"; exit 0; fi
+          if [ "$MERGED" = true ]; then
+            gh pr ready "$url"
+            gh pr comment "$url" --body "$PRODUCT_REF merged, so this is ready for review."
+          else
+            gh pr close "$url" --delete-branch --comment "$PRODUCT_REF was closed without merging."
+          fi
