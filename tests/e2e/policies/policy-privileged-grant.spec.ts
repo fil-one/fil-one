@@ -71,20 +71,20 @@ async function putPolicyAs(api: ConsoleApi, statements: UnboundStatement[], etag
 test.describe('through the API', () => {
   for (const [title, grant] of [
     [
-      'P1a. an admin cannot newly grant s3:PutObjectRetention',
+      'an admin cannot newly grant s3:PutObjectRetention',
       allow([memberId], ['s3:PutObjectRetention']),
     ],
     [
-      'P1b. an admin cannot newly grant s3:PutObjectLegalHold',
+      'an admin cannot newly grant s3:PutObjectLegalHold',
       allow([memberId], ['s3:PutObjectLegalHold']),
     ],
-    ['P1c. an admin cannot newly grant s3:*', allow([memberId], ['s3:*'])],
+    ['an admin cannot newly grant s3:*', allow([memberId], ['s3:*'])],
     [
-      'P1d. an admin cannot newly grant s3:PutObjectLegalHold to everyone',
+      'an admin cannot newly grant s3:PutObjectLegalHold to everyone',
       allow('*', ['s3:PutObjectLegalHold']),
     ],
     [
-      'P1e. an admin cannot newly grant s3:PutObjectRetention to themselves',
+      'an admin cannot newly grant s3:PutObjectRetention to themselves',
       allow([adminId], ['s3:PutObjectRetention']),
     ],
   ] as const) {
@@ -98,7 +98,7 @@ test.describe('through the API', () => {
     });
   }
 
-  test("P2. an admin may save a policy that keeps an owner's s3:* statement", async () => {
+  test("an admin may save a policy that keeps an owner's s3:* statement", async () => {
     const ownerAll = grantAllToOwner(ownerId);
     expect(await putPolicyAs(owner, [ownerAll], (await owner.readPolicy(bucket)).etag)).toEqual({
       status: 204,
@@ -112,7 +112,7 @@ test.describe('through the API', () => {
     );
   });
 
-  test('P3. an owner grants the pair, and an admin may keep or drop it', async () => {
+  test('an owner grants the pair, and an admin may keep or drop it', async () => {
     const granted = allow([memberId], ['s3:PutObjectRetention', 's3:PutObjectLegalHold'], 'hold');
     const { etag } = await owner.readPolicy(bucket);
     expect(await putPolicyAs(owner, [...getStoredStatements(), granted], etag)).toEqual({
@@ -133,7 +133,7 @@ test.describe('through the API', () => {
     );
   });
 
-  test('P4. an admin may deny the pair, since withholding is not granting', async () => {
+  test('an admin may deny the pair, since withholding is not granting', async () => {
     const statement = [
       ...getStoredStatements(),
       deny('*', ['s3:PutObjectRetention', 's3:PutObjectLegalHold'], 'no-holds'),
@@ -144,7 +144,7 @@ test.describe('through the API', () => {
     });
   });
 
-  test('P5. an admin writing a first policy may not grant s3:*, even to the owner', async () => {
+  test('an admin writing a first policy may not grant s3:*, even to the owner', async () => {
     const { etag } = await owner.readPolicy(bucket);
     expect((await owner.deletePolicy(bucket, etag)).status()).toBe(204);
 
@@ -156,7 +156,7 @@ test.describe('through the API', () => {
     expect(await putPolicyAs(admin, statement)).toEqual({ status: 204, code: undefined });
   });
 
-  test('P6. an admin may not name a retention write, even for the owner', async () => {
+  test('an admin may not name a retention write, even for the owner', async () => {
     const { etag } = await admin.readPolicy(bucket);
     const named = [
       ...getStoredStatements(),
@@ -168,7 +168,7 @@ test.describe('through the API', () => {
     });
   });
 
-  test('P7. an admin writing without a precondition meets the same cap', async () => {
+  test('an admin writing without a precondition meets the same cap', async () => {
     const before = await owner.readPolicy(bucket);
     const res = await admin.putPolicy(bucket, {
       policy: buildBucketPolicy(bucket, [
@@ -200,14 +200,14 @@ test.describe('in the editor', { tag: '@browser' }, () => {
   test.describe('as the admin', () => {
     test.use({ storageState: STORAGE_STATE.admin });
 
-    test('PU1. the admin is not offered the privileged actions', async ({ page }) => {
+    test('the admin is not offered the privileged actions', async ({ page }) => {
       await openPolicyTab(page);
       await page.locator('#policy-add-statement-button').click();
       for (const action of PRIVILEGED_ROWS) await expect(actionRow(page, action)).toHaveCount(0);
       await expect(actionRow(page, 's3:GetObjectRetention')).toBeVisible();
     });
 
-    test("PU2. the admin's edit keeps the owner's s3:* statement", async ({ page }) => {
+    test("the admin's edit keeps the owner's s3:* statement", async ({ page }) => {
       expect(
         await putPolicyAs(owner, [grantAllToOwner(ownerId)], (await owner.readPolicy(bucket)).etag),
       ).toEqual({ status: 204, code: undefined });
@@ -228,7 +228,7 @@ test.describe('in the editor', { tag: '@browser' }, () => {
   test.describe('as the owner', () => {
     test.use({ storageState: STORAGE_STATE.owner });
 
-    test('PU3. the owner grants a retention write from the editor', async ({ page }) => {
+    test('the owner grants a retention write from the editor', async ({ page }) => {
       await openPolicyTab(page);
       await page.locator('#policy-add-statement-button').click();
       for (const action of PRIVILEGED_ROWS) await expect(actionRow(page, action)).toBeVisible();

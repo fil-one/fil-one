@@ -86,7 +86,7 @@ test.describe('as the member', { tag: ['@serial', '@browser'] }, () => {
     await page.locator('#upload-submit-button').click();
   }
 
-  test('M1. a granted bucket opens without a Policy tab', async ({ page }) => {
+  test('a granted bucket opens without a Policy tab', async ({ page }) => {
     const bucket = await createBucketGrantingMember(['s3:ListBucket', 's3:GetObject']);
     await openBucket(page, bucket);
     await expect(page.locator('#bucket-detail-heading')).toHaveText(bucket);
@@ -94,7 +94,7 @@ test.describe('as the member', { tag: ['@serial', '@browser'] }, () => {
     await expect(page.getByTestId('bucket-policy-tab')).toHaveCount(0);
   });
 
-  test('M2. the bucket list shows only the buckets a statement names the member in', async ({
+  test('the bucket list shows only the buckets a statement names the member in', async ({
     page,
   }) => {
     const granted = await createBucketGrantingMember(['s3:ListBucket']);
@@ -108,7 +108,7 @@ test.describe('as the member', { tag: ['@serial', '@browser'] }, () => {
     ).toHaveCount(0);
   });
 
-  test('M3. an ungranted bucket reads like one that does not exist', async ({ page }) => {
+  test('an ungranted bucket reads like one that does not exist', async ({ page }) => {
     const hidden = await createBucketGrantingMember([]);
     await openBucket(page, generateBucketName('missing'));
     const missingMessage = await page.getByTestId('bucket-error').textContent();
@@ -116,7 +116,7 @@ test.describe('as the member', { tag: ['@serial', '@browser'] }, () => {
     await expect(page.getByTestId('bucket-error')).toHaveText(missingMessage!);
   });
 
-  test('M4. the member uploads where the policy grants writes', async ({ page }) => {
+  test('the member uploads where the policy grants writes', async ({ page }) => {
     const bucket = await createBucketGrantingMember([
       's3:ListBucket',
       's3:GetObject',
@@ -130,7 +130,7 @@ test.describe('as the member', { tag: ['@serial', '@browser'] }, () => {
     expect(await listObjectKeysAsOwner(bucket)).toEqual(['member-upload.txt']);
   });
 
-  test('M5. an upload the policy does not grant fails and stores nothing', async ({ page }) => {
+  test('an upload the policy does not grant fails and stores nothing', async ({ page }) => {
     const bucket = await createBucketGrantingMember(['s3:ListBucket', 's3:GetObject']);
     await uploadObjectInUi(page, bucket, 'member-upload.txt');
     await expect(page.locator('#upload-retry-button')).toBeVisible();
@@ -146,7 +146,7 @@ test.describe('as the owner', { tag: ['@serial', '@browser'] }, () => {
     await expect(page.getByTestId('access-key-permissions')).toHaveCount(0);
   }
 
-  test('K1. a key form on an iam region shows no permission fields and creates a principal key', async ({
+  test('a key form on an iam region shows no permission fields and creates a principal key', async ({
     page,
   }) => {
     await page.goto('/api-keys/create');
@@ -169,7 +169,7 @@ test.describe('as the owner', { tag: ['@serial', '@browser'] }, () => {
     await expect(row.getByTestId('permission-badge-follows-bucket-policy')).toBeVisible();
   });
 
-  test('K2. a bucket created on an iam region names its creator', async ({ page }) => {
+  test('a bucket created on an iam region names its creator', async ({ page }) => {
     const bucket = generateBucketName('form');
     buckets.push(bucket);
     await page.goto('/buckets');

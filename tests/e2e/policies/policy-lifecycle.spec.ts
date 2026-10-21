@@ -78,7 +78,7 @@ test.afterAll(async () => {
   await Promise.all([owner.dispose(), member.dispose(), leaver.dispose()]);
 });
 
-test('B1. a promotion and a demotion change no policy', { tag: '@serial' }, async () => {
+test('a promotion and a demotion change no policy', { tag: '@serial' }, async () => {
   const adminListStatement = allow([adminId], ['s3:ListBucket'], 'team');
   const bucket = await createTrackedBucket([adminListStatement]);
   const before = toCanonicalPolicy((await owner.readPolicy(bucket)).policy);
@@ -107,7 +107,7 @@ test('B1. a promotion and a demotion change no policy', { tag: '@serial' }, asyn
 let leaverBucket: string;
 
 test(
-  'B2a. removing a member takes their keys and every statement naming them',
+  'removing a member takes their keys and every statement naming them',
   { tag: '@serial' },
   async () => {
     leaverBucket = await createTrackedBucket([allow([leaverId], ['s3:ListBucket'], 'leaver-only')]);
@@ -131,7 +131,7 @@ test(
   },
 );
 
-test('B2b. a policy naming a removed member is refused', { tag: '@serial' }, async () => {
+test('a policy naming a removed member is refused', { tag: '@serial' }, async () => {
   const { etag } = await owner.readPolicy(leaverBucket);
   const writeNamingRemovedMember = await owner.putPolicy(leaverBucket, {
     policy: buildBucketPolicy(leaverBucket, [
@@ -149,7 +149,7 @@ test('B2b. a policy naming a removed member is refused', { tag: '@serial' }, asy
 });
 
 test(
-  'B3. a bucket deleted and created again under its name starts from a creator-only policy',
+  'a bucket deleted and created again under its name starts from a creator-only policy',
   { tag: '@serial' },
   async () => {
     const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'], 'member-read')]);
@@ -161,7 +161,7 @@ test(
   },
 );
 
-test('B4a. a deleted principal key stops working', { tag: '@serial' }, async () => {
+test('a deleted principal key stops working', { tag: '@serial' }, async () => {
   const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'])]);
   const deleted = await member.createAccessKey();
   createdKeys.push({ api: member, id: deleted.id });
@@ -171,7 +171,7 @@ test('B4a. a deleted principal key stops working', { tag: '@serial' }, async () 
   );
 });
 
-test('B4b. a rotated principal key is replaced by a working key', { tag: '@serial' }, async () => {
+test('a rotated principal key is replaced by a working key', { tag: '@serial' }, async () => {
   const bucket = await createTrackedBucket([allow([memberId], ['s3:ListBucket'])]);
   const old = await member.createAccessKey();
   createdKeys.push({ api: member, id: old.id });

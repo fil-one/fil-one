@@ -67,7 +67,7 @@ test.afterAll(async () => {
   await Promise.all(ROLES.map((r) => apiByRole[r].dispose()));
 });
 
-test('R1. only the owner and the admin may read or write a policy', async () => {
+test('only the owner and the admin may read or write a policy', async () => {
   const bucket = await createTrackedBucket();
   const { etag, policy } = await apiByRole.owner.readPolicy(bucket);
   const statuses = [];
@@ -92,7 +92,7 @@ test('R1. only the owner and the admin may read or write a policy', async () => 
   expect(etag).toEqual(expect.any(String));
 });
 
-test('R2. every role but readonly may create a bucket and mint a key', async () => {
+test('every role but readonly may create a bucket and mint a key', async () => {
   const outcomes = [];
   for (const role of ROLES) {
     const bucket = generateBucketName(`r2-${role}`);
@@ -116,7 +116,7 @@ test('R2. every role but readonly may create a bucket and mint a key', async () 
   ]);
 });
 
-test('R3. a bucket the admin creates names only the admin', async () => {
+test('a bucket the admin creates names only the admin', async () => {
   const bucket = generateBucketName('r3');
   await apiByRole.admin.createBucket(bucket);
   buckets.push(bucket);
@@ -125,7 +125,7 @@ test('R3. a bucket the admin creates names only the admin', async () => {
   );
 });
 
-test("R4. on a new bucket the creator's key reaches it and nobody else's", async () => {
+test("on a new bucket the creator's key reaches it and nobody else's", async () => {
   const bucket = await createTrackedBucket();
   const results = [];
   for (const role of ['owner', 'admin', 'member'] as const) {
@@ -144,7 +144,7 @@ test("R4. on a new bucket the creator's key reaches it and nobody else's", async
   ]);
 });
 
-test('R5. the console lists a bucket to the roles a statement grants access', async () => {
+test('the console lists a bucket to the roles a statement grants access', async () => {
   const bucket = await createTrackedBucket();
   await apiByRole.owner.replaceStatements(bucket, [
     grantAllToOwner(userIdByRole.owner),
@@ -162,7 +162,7 @@ test('R5. the console lists a bucket to the roles a statement grants access', as
   ]);
 });
 
-test('R6. readonly reads what a policy grants and no more than the role allows', async () => {
+test('readonly reads what a policy grants and no more than the role allows', async () => {
   const bucket = await createTrackedBucket();
   await putObject(await createS3ClientWithNewKey(apiByRole.owner, createdKeys), bucket, SEEDED_KEY);
   // Even a write grant does not let readonly write: the role caps the console.
@@ -218,14 +218,14 @@ test.describe('the Policy tab', { tag: '@browser' }, () => {
   ] as const) {
     test.describe(role, () => {
       test.use({ storageState: STORAGE_STATE[role] });
-      test(`R7. the tab is ${shown ? 'shown to' : 'hidden from'} the ${role}`, async ({ page }) => {
+      test(`the tab is ${shown ? 'shown to' : 'hidden from'} the ${role}`, async ({ page }) => {
         await expectPolicyTabVisibility(page, shown);
       });
     });
   }
 });
 
-test("R8. the first policy is the server's own, whatever a creator sends", async () => {
+test("the first policy is the server's own, whatever a creator sends", async () => {
   // The create request carries no policy; the server names the creator and
   // sends that on the create itself, so a creator who asks for more gets the
   // default and nothing else.

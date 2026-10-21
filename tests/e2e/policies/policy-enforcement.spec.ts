@@ -94,7 +94,7 @@ test.afterAll(async () => {
   await Promise.all([owner.dispose(), admin.dispose(), member.dispose()]);
 });
 
-test('A1. a write grant does not carry deletion', async () => {
+test('a write grant does not carry deletion', async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:PutObject'])]);
   const s3 = await createS3ClientWithNewKey(member, createdKeys);
   expect([
@@ -103,7 +103,7 @@ test('A1. a write grant does not carry deletion', async () => {
   ]).toEqual(['ok', '403 AccessDenied']);
 });
 
-test('A2. a list grant does not carry reading', async () => {
+test('a list grant does not carry reading', async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:ListBucket'])]);
   const s3 = await createS3ClientWithNewKey(member, createdKeys);
   expect([
@@ -112,7 +112,7 @@ test('A2. a list grant does not carry reading', async () => {
   ]).toEqual(['ok', '403 AccessDenied']);
 });
 
-test('A3. a deny carves one action out of s3:*', async () => {
+test('a deny carves one action out of s3:*', async () => {
   const bucket = await createBucketWithStatements([
     allow([memberId], ['s3:*']),
     deny([memberId], ['s3:DeleteObject']),
@@ -125,7 +125,7 @@ test('A3. a deny carves one action out of s3:*', async () => {
   ]).toEqual(['ok', 'ok', '403 AccessDenied']);
 });
 
-test('A4. a deny naming one member leaves an allow for everyone to the rest', async () => {
+test('a deny naming one member leaves an allow for everyone to the rest', async () => {
   const bucket = await createBucketWithStatements([
     allow('*', ['s3:ListBucket', 's3:GetObject']),
     deny([memberId], ['s3:ListBucket']),
@@ -139,7 +139,7 @@ test('A4. a deny naming one member leaves an allow for everyone to the rest', as
   ]).toEqual(['403 AccessDenied', 'ok', 'ok']);
 });
 
-test('A5. actions granted across statements add up', async () => {
+test('actions granted across statements add up', async () => {
   const bucket = await createBucketWithStatements([
     allow([memberId], ['s3:ListBucket'], 'list'),
     allow([memberId], ['s3:GetObject'], 'read'),
@@ -152,7 +152,7 @@ test('A5. actions granted across statements add up', async () => {
   ]).toEqual(['ok', 'ok', '403 AccessDenied']);
 });
 
-test('A6. a widened grant applies to a key the gateway has cached', async () => {
+test('a widened grant applies to a key the gateway has cached', async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:ListBucket'])]);
   const s3 = await createS3ClientWithNewKey(member, createdKeys);
   expect(await getS3Outcome(listObjects(s3, bucket))).toBe('ok');
@@ -168,7 +168,7 @@ test('A6. a widened grant applies to a key the gateway has cached', async () => 
     .toBe('ok');
 });
 
-test('A7. a copy needs a read on its source bucket', async () => {
+test('a copy needs a read on its source bucket', async () => {
   const source = await createBucketWithStatements([]);
   const target = await createBucketWithStatements([allow([memberId], ['s3:PutObject'])]);
   const copy = (s3: S3Client) =>
@@ -190,7 +190,7 @@ test('A7. a copy needs a read on its source bucket', async () => {
   expect(await getS3Outcome(copy(await createS3ClientWithNewKey(member, createdKeys)))).toBe('ok');
 });
 
-test('A8. multipart parts listing and abort are granted on their own', async () => {
+test('multipart parts listing and abort are granted on their own', async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:PutObject'])]);
   const writeOnly = await createS3ClientWithNewKey(member, createdKeys);
   const { UploadId } = await writeOnly.send(
@@ -216,7 +216,7 @@ test('A8. multipart parts listing and abort are granted on their own', async () 
   ]).toEqual(['ok', 'ok']);
 });
 
-test('A9. versions are read and deleted under their own actions', async () => {
+test('versions are read and deleted under their own actions', async () => {
   const bucket = await createBucketWithStatements(
     [allow([memberId], ['s3:GetObject', 's3:DeleteObject', 's3:ListBucket'])],
     { versioning: true },
@@ -235,7 +235,7 @@ test('A9. versions are read and deleted under their own actions', async () => {
   ]).toEqual(['ok', '403 AccessDenied', '403 AccessDenied', 'ok']);
 });
 
-test('A10. GetBucketVersioning is refused without s3:ListBucket', async () => {
+test('GetBucketVersioning is refused without s3:ListBucket', async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:GetObject'])]);
   expect(
     await getS3Outcome(
@@ -246,7 +246,7 @@ test('A10. GetBucketVersioning is refused without s3:ListBucket', async () => {
   ).toBe('403 AccessDenied');
 });
 
-test('A11. a write or read grant does not carry retention or legal holds', async () => {
+test('a write or read grant does not carry retention or legal holds', async () => {
   const bucket = await createBucketWithStatements(
     [allow([memberId], ['s3:PutObject', 's3:GetObject'])],
     {
@@ -278,7 +278,7 @@ test('A11. a write or read grant does not carry retention or legal holds', async
   }
 });
 
-test('A12. listing versions is granted on its own', async () => {
+test('listing versions is granted on its own', async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:ListBucket'])], {
     versioning: true,
   });
@@ -295,7 +295,7 @@ test.describe('C. policy writes', () => {
     bucket = await createBucketWithStatements([]);
   });
 
-  test('C1. of two writes under one If-Match, exactly one succeeds and the other gets 412', async () => {
+  test('of two writes under one If-Match, exactly one succeeds and the other gets 412', async () => {
     const { etag } = await owner.readPolicy(bucket);
     const write = (sid: string) =>
       owner.putPolicy(bucket, {
@@ -309,7 +309,7 @@ test.describe('C. policy writes', () => {
     expect(statuses.sort((a, b) => a - b)).toEqual([204, 412]);
   });
 
-  test('C2. a delete under a stale If-Match is refused', async () => {
+  test('a delete under a stale If-Match is refused', async () => {
     const { etag: stale } = await owner.readPolicy(bucket);
     await owner.replaceStatements(bucket, [grantAllToOwner(ownerId)]);
     const before = await owner.readPolicy(bucket);
@@ -320,18 +320,18 @@ test.describe('C. policy writes', () => {
 
   for (const [title, statement] of [
     [
-      'C3a. a statement with a field the schema does not know is refused',
+      'a statement with a field the schema does not know is refused',
       { ...allow([memberId], ['s3:GetObject']), resource: 'arn:aws:s3:::x' } as UnboundStatement,
     ],
     [
-      'C3b. a Sid longer than 128 characters is refused',
+      'a Sid longer than 128 characters is refused',
       allow([memberId], ['s3:GetObject'], 'x'.repeat(129)),
     ],
     [
-      'C3c. a principal id longer than 255 characters is refused',
+      'a principal id longer than 255 characters is refused',
       allow(['x'.repeat(256)], ['s3:GetObject']),
     ],
-    ['C3d. a principal id that is not a UUID is refused', allow(['not-a-uuid'], ['s3:GetObject'])],
+    ['a principal id that is not a UUID is refused', allow(['not-a-uuid'], ['s3:GetObject'])],
   ] as const) {
     test(title, async () => {
       const { etag } = await owner.readPolicy(bucket);
@@ -348,7 +348,7 @@ test.describe('C. policy writes', () => {
     });
   }
 
-  test('C4. a member named twice in a statement is stored once', async () => {
+  test('a member named twice in a statement is stored once', async () => {
     await owner.replaceStatements(bucket, [
       grantAllToOwner(ownerId),
       allow([memberId, ownerId, memberId], ['s3:ListBucket'], 'repeat'),
