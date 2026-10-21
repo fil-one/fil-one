@@ -29,7 +29,7 @@ export function EmptyStateCard({
     >
       <IconBox icon={icon} size="md" color={iconColor} className="mb-4" />
       <p className="mb-1 text-sm font-medium text-zinc-900">{title}</p>
-      <p className="mb-4 max-w-xs text-sm text-zinc-500">{description}</p>
+      <p className="mb-4 max-w-xs text-sm text-balance text-zinc-500">{description}</p>
       {children}
     </div>
   );

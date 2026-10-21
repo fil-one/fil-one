@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
@@ -7,7 +7,9 @@ import type { ServiceAccessKey } from '@filone/shared';
 const mockApiRequest = vi.fn();
 const mockGetUsage = vi.fn(() => Promise.resolve({ tenantStatus: 'active' }));
 
-vi.mock('../lib/api.js', () => ({
+vi.mock('../lib/api.js', async () => ({
+  // The real helpers (errorStatusOf and the like); only the network calls are faked.
+  ...(await vi.importActual<typeof import('../lib/api.js')>('../lib/api.js')),
   apiRequest: (...args: unknown[]) => mockApiRequest(...args),
   getMe: vi.fn(() => new Promise(() => {})),
   // `useAccountDisabled` reads /usage. Tests that care about the disabled state
@@ -15,11 +17,17 @@ vi.mock('../lib/api.js', () => ({
   getUsage: () => mockGetUsage(),
 }));
 
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => vi.fn() }));
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => vi.fn(),
+  // The details drawer links each bucket; a plain anchor stands in for the router's.
+  Link: ({ children, to }: { children: React.ReactNode; to: string }) => (
+    <a href={to}>{children}</a>
+  ),
+}));
 
 import { ApiKeysPage } from './ApiKeysPage.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
-import { queryKeys } from '../lib/query-client.js';
+import { queryClient as sharedQueryClient, queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
 const USER_1 = '00000000-0000-0000-0000-000000000001';
@@ -45,8 +53,10 @@ function key(over: Partial<ServiceAccessKey> = {}): ServiceAccessKey {
   };
 }
 
-function renderPage(role: OrgRole = OrgRole.Owner) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(
+  role: OrgRole = OrgRole.Owner,
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   seedPermissions(client, role);
   const view = render(
     <QueryClientProvider client={client}>
@@ -137,7 +147,7 @@ describe('ApiKeysPage — who may revoke', () => {
     renderPage(OrgRole.Member);
 
     expect(await screen.findByText('my key')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Key actions' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /^Actions for / })).toHaveLength(1);
   });
 
   it('requests the list for a Member — the server narrows it', async () => {
@@ -202,7 +212,7 @@ describe('ApiKeysPage — rotating a key', () => {
 
   /** Open the row menu and press one of its items. */
   async function openRowMenu() {
-    fireEvent.click(await screen.findByRole('button', { name: 'Key actions' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Actions for / }));
   }
 
   it('asks first, then shows the new secret once', async () => {
@@ -210,7 +220,7 @@ describe('ApiKeysPage — rotating a key', () => {
 
     renderPage(OrgRole.Owner);
     await openRowMenu();
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rotate' }));
 
     // Nothing is rotated until the caller confirms: the credential they are
     // using stops working the moment the replacement is issued.
@@ -231,7 +241,7 @@ describe('ApiKeysPage — rotating a key', () => {
 
     renderPage(OrgRole.Owner);
     await openRowMenu();
-    fireEvent.click(screen.getByRole('button', { name: 'Rotate' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rotate' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Rotate key' }));
 
     expect(await screen.findByText(/still active/)).toBeInTheDocument();
@@ -247,8 +257,8 @@ describe('ApiKeysPage — rotating a key', () => {
     renderPage(OrgRole.Admin);
     await openRowMenu();
 
-    expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Rotate' })).not.toBeInTheDocument();
   });
 
   it('hides the action on an expired key', async () => {
@@ -260,8 +270,8 @@ describe('ApiKeysPage — rotating a key', () => {
     renderPage(OrgRole.Owner);
     await openRowMenu();
 
-    expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Rotate' })).not.toBeInTheDocument();
   });
 
   it('offers no rotation to a role that cannot create keys', async () => {
@@ -274,7 +284,192 @@ describe('ApiKeysPage — rotating a key', () => {
     renderPage(OrgRole.Member);
     await openRowMenu();
 
-    expect(await screen.findByRole('button', { name: 'Delete' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rotate' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Rotate' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ApiKeysPage: searching and filtering keys', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Five keys, the count at which the search and filters appear.
+  const fiveKeys = ['alpha', 'bravo', 'charlie', 'delta', 'echo'].map((name, index) =>
+    key({ id: `key-${index}`, keyName: name, accessKeyId: `ANYACCESSKEYID00000${index}` }),
+  );
+
+  const rowNames = () =>
+    screen.getAllByTestId('access-key-row').map((row) => row.querySelector('button')?.textContent);
+
+  it('narrows the rows to the keys whose name matches the search', async () => {
+    mockApiRequest.mockResolvedValue({ keys: fiveKeys });
+    renderPage();
+    await screen.findByText('alpha');
+
+    fireEvent.change(screen.getByRole('searchbox', { name: /search keys/i }), {
+      target: { value: 'CHAR' },
+    });
+
+    expect(rowNames()).toStrictEqual(['charlie']);
+  });
+
+  it('offers Clear filters when nothing matches, and Clear filters brings every key back', async () => {
+    mockApiRequest.mockResolvedValue({ keys: fiveKeys });
+    renderPage();
+    await screen.findByText('alpha');
+
+    fireEvent.change(screen.getByRole('searchbox', { name: /search keys/i }), {
+      target: { value: 'no-such-key' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+
+    expect(rowNames()).toStrictEqual(['alpha', 'bravo', 'charlie', 'delta', 'echo']);
+  });
+
+  it('shows every key again once the filter it set can no longer split the list', async () => {
+    const keys = [...fiveKeys, key({ id: 'key-5', keyName: 'foxtrot', status: 'expired' })];
+    mockApiRequest.mockResolvedValue({ keys });
+    const { client } = renderPage();
+    await screen.findByText('alpha');
+    fireEvent.change(screen.getByRole('combobox', { name: /filter keys by status/i }), {
+      target: { value: 'expired' },
+    });
+    expect(rowNames()).toStrictEqual(['foxtrot']);
+
+    // The only expired key is deleted elsewhere, so the Status filter hides.
+    act(() => {
+      client.setQueryData(queryKeys.accessKeys, { keys: fiveKeys });
+    });
+
+    await waitFor(() =>
+      expect(rowNames()).toStrictEqual(['alpha', 'bravo', 'charlie', 'delta', 'echo']),
+    );
+  });
+
+  it('clears a filter whose control hid, so it does not come back set', async () => {
+    const personal = {
+      ...fiveKeys[0],
+      id: 'key-p',
+      keyName: 'personal',
+      type: 'principal' as const,
+      principalId: 'any-user',
+    };
+    mockApiRequest.mockResolvedValue({ keys: [...fiveKeys, personal] });
+    const { client } = renderPage();
+    await screen.findByText('alpha');
+    fireEvent.change(screen.getByRole('combobox', { name: /filter keys by type/i }), {
+      target: { value: 'principal' },
+    });
+
+    // The only personal key goes, so the Type filter hides; then a new one arrives.
+    act(() => {
+      client.setQueryData(queryKeys.accessKeys, { keys: fiveKeys });
+    });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('combobox', { name: /filter keys by type/i }),
+      ).not.toBeInTheDocument(),
+    );
+    act(() => {
+      client.setQueryData(queryKeys.accessKeys, {
+        keys: [...fiveKeys, { ...personal, id: 'key-q', keyName: 'new personal' }],
+      });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: /filter keys by type/i })).toHaveValue('all'),
+    );
+    expect(rowNames()).toHaveLength(6);
+  });
+
+  it('leaves out the search below five keys', async () => {
+    mockApiRequest.mockResolvedValue({ keys: fiveKeys.slice(0, 4) });
+    renderPage();
+    await screen.findByText('alpha');
+
+    expect(screen.queryByRole('searchbox', { name: /search keys/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('ApiKeysPage: the details drawer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('links each bucket in the drawer to its page', async () => {
+    mockApiRequest.mockResolvedValue({
+      keys: [key({ bucketScope: 'specific', buckets: ['any-bucket'] })],
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'my key' }));
+
+    expect(screen.getByRole('link', { name: 'any-bucket' })).toBeInTheDocument();
+  });
+});
+
+describe('ApiKeysPage: a bulk delete that partly fails', () => {
+  // The deletion hook refreshes through the app's shared query client, so the
+  // page renders with that client here and its refetch reaches the screen.
+  afterEach(() => {
+    sharedQueryClient.clear();
+  });
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /** A server holding two keys, refusing the deletes `refuse` says to. */
+  function mockServer(refuse: (id: string) => Error | undefined) {
+    const existing = new Map([
+      ['key-1', key()],
+      ['key-2', key({ id: 'key-2', keyName: 'other key' })],
+    ]);
+    mockApiRequest.mockImplementation((path: string, init?: { method?: string }) => {
+      if (init?.method !== 'DELETE') return Promise.resolve({ keys: [...existing.values()] });
+      const id = path.split('/').at(-1) ?? '';
+      const refusal = refuse(id);
+      if (refusal) return Promise.reject(refusal);
+      existing.delete(id);
+      return Promise.resolve({});
+    });
+  }
+
+  const withStatus = (message: string, status: number) =>
+    Object.assign(new Error(message), { status });
+
+  async function deleteBoth() {
+    renderPage(OrgRole.Owner, sharedQueryClient);
+    await screen.findByText('my key');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all keys' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete 2 keys' }));
+  }
+
+  it('says how many were deleted and why the rest were not', async () => {
+    mockServer((id) =>
+      id === 'key-2' ? withStatus('Not allowed to delete this key', 403) : undefined,
+    );
+    await deleteBoth();
+
+    expect(
+      await screen.findByText("1 deleted. 1 couldn't be deleted: Not allowed to delete this key"),
+    ).toBeInTheDocument();
+  });
+
+  it('refreshes the key list after the partial failure, so the deleted key stops showing', async () => {
+    mockServer((id) =>
+      id === 'key-2' ? withStatus('Not allowed to delete this key', 403) : undefined,
+    );
+    await deleteBoth();
+
+    await waitFor(() => expect(screen.queryByText('my key')).not.toBeInTheDocument());
+    expect(screen.getByText('other key')).toBeInTheDocument();
+  });
+
+  it('counts a key the server no longer has (404) as deleted', async () => {
+    mockServer((id) => (id === 'key-2' ? withStatus('Access key not found', 404) : undefined));
+    await deleteBoth();
+
+    expect(await screen.findByText('2 access keys deleted')).toBeInTheDocument();
   });
 });

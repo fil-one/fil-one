@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
 import { isRegion, REGIONS, type Region } from './regions.util.ts';
 
-// Bucket names are globally unique across regions and rejected with 409 if
-// taken, so each caller mints a fresh name. We do not delete buckets afterward
+// Bucket names are unique within a region and rejected with 409 if taken
+// there, so each caller mints a fresh name. We do not delete buckets afterward
 // because these specs have no teardown step yet — deletion itself is wired for
 // every region (see packages/backend/src/handlers/delete-bucket.ts), but a
 // bucket must be emptied before it can be deleted.
@@ -70,7 +70,8 @@ async function listRegionsWithBucket(page: Page): Promise<Set<Region>> {
 async function createBucket(page: Page, bucketName: string, region: Region): Promise<void> {
   await page.goto('/buckets/create');
   await page.locator('#bucket-name').fill(bucketName);
-  await page.locator('#bucket-region').selectOption(region);
+  await page.locator('#bucket-region').click();
+  await page.locator(`[data-testid="region-option"][data-region="${region}"]`).click();
 
   // Read the API response rather than only asserting the navigation: on failure
   // the page stays on /buckets/create and shows a toast, which would surface as

@@ -167,7 +167,7 @@ export const LabelsNeverWrap: Story = {
 export const AlignedWithFormControls: Story = {
   render: () => (
     <div className="flex flex-col gap-6 p-4">
-      {(['sm', 'md'] as InputSize[]).map((size) => (
+      {(['sm', 'md', 'lg'] as InputSize[]).map((size) => (
         <div key={size} className="flex flex-col gap-2">
           <p className="text-xs font-medium uppercase tracking-wider text-zinc-400">{size}</p>
           <div className="flex flex-wrap items-center gap-2">

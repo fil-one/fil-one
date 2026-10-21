@@ -153,6 +153,7 @@ describe('get-bucket baseHandler', () => {
       tenantFor('aurora', 'org-1'),
       'my-bucket',
       undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -175,6 +176,7 @@ describe('get-bucket baseHandler', () => {
         tenantFor('aurora', 'org-1'),
         'my-bucket',
         USER_1,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     },
   );
@@ -186,6 +188,7 @@ describe('get-bucket baseHandler', () => {
       tenantFor('aurora', 'org-1'),
       'my-bucket',
       undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 

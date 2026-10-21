@@ -780,6 +780,28 @@ describe('get-billing baseHandler', () => {
     });
   });
 
+  // Neither value existed in Stripe when this code was written.
+  it.each([
+    ['billing scheme', { billing_scheme: 'any-new-scheme' }],
+    ['tiers mode', { tiers_mode: 'any-new-mode' }],
+  ])(
+    'reports neither a minimum nor a rate for a %s the console does not know',
+    async (_, unknownField) => {
+      ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+      ddbMock.on(UpdateItemCommand).resolves({});
+      mockSubscriptionsRetrieve.mockResolvedValue(
+        stripeSubscription({ ...TIERED_PRICE, ...unknownField }),
+      );
+
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(JSON.parse(String(result.body)).subscription).toStrictEqual({
+        planId: PlanId.PayAsYouGo,
+        status: SubscriptionStatus.Active,
+      });
+    },
+  );
+
   const missingTiersCases: Record<string, unknown> = {
     'the tiers are missing': undefined,
     'the tiers are empty': [],
