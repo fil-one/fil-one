@@ -22,6 +22,10 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  // Started at handler entry so the profile read before the orchestrator call
+  // counts against the deadline too. It then fires well inside the Lambda
+  // timeout, and the error handler logs the hung call.
+  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
   const { orgId } = getUserInfo(event);
   const bucketName = event.pathParameters?.name;
 
@@ -49,7 +53,7 @@ export async function baseHandler(
       tenantId,
       bucketName,
       { from: thirtyDaysAgo.toISOString(), to: now.toISOString(), interval: '1d' },
-      { signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS) },
+      { signal },
     );
   } catch (err) {
     if (err instanceof BucketNotFoundError) {

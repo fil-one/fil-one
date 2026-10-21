@@ -19,6 +19,10 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  // Started at handler entry so the profile read before the orchestrator call
+  // counts against the deadline too. It then fires well inside the Lambda
+  // timeout, and the error handler logs the hung call.
+  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
   const bucketName = event.pathParameters?.name;
   if (!bucketName) {
     return new ResponseBuilder()
@@ -47,9 +51,7 @@ export async function baseHandler(
   }
 
   try {
-    await orchestrator.deleteBucket(tenantId, bucketName, {
-      signal: AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS),
-    });
+    await orchestrator.deleteBucket(tenantId, bucketName, { signal });
   } catch (err) {
     if (err instanceof BucketNotEmptyError) {
       return new ResponseBuilder()

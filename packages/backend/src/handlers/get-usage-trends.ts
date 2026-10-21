@@ -76,6 +76,11 @@ function parsePeriod(raw: string | undefined): UsageTrendsPeriod {
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  // One deadline for every region's fetch, so a hung region fails its own leg
+  // (swallowed in fetchSamplesByBucket) instead of holding the handler until
+  // the Lambda timeout kills it with nothing logged. Started at handler entry
+  // so the DynamoDB reads before the fan-out count against it as well.
+  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
   const { orgId } = getUserInfo(event);
   const period = parsePeriod(event.queryStringParameters?.period);
 
@@ -83,24 +88,20 @@ export async function baseHandler(
   // in, so resolve the ready tenant on each available orchestrator.
   const regions = await getProvisionedRegions(orgId);
 
-  const response: UsageTrendsResponse = await buildTimeSeries(regions, period);
+  const response: UsageTrendsResponse = await buildTimeSeries(regions, period, signal);
   return new ResponseBuilder().status(200).body(response).build();
 }
 
 async function buildTimeSeries(
   regions: ProvisionedRegion[],
   period: UsageTrendsPeriod,
+  signal: AbortSignal,
 ): Promise<UsageTrendsResponse> {
   const { points, granularity } = TREND_WINDOWS[period];
   const now = new Date();
   const from = new Date(now);
   granularity.rewind(from, points - 1);
   granularity.toStartOfBucket(from);
-
-  // One deadline for every region's fetch, so a hung region fails its own leg
-  // (swallowed in fetchSamplesByBucket) instead of holding the handler until
-  // the Lambda timeout kills it with nothing logged.
-  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
 
   // Fetch each region's series and index them by bucket, then sum across
   // regions per bucket for the org-wide trend.

@@ -26,6 +26,11 @@ interface RegionUsage {
 }
 
 export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+  // One deadline for every upstream call this request makes, so a hung region
+  // fails its own leg below instead of holding the handler until the Lambda
+  // timeout kills it with nothing logged. Started at handler entry so the
+  // DynamoDB reads before the fan-out count against it as well.
+  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
   const { orgId } = getUserInfo(event);
 
   // Access keys live in DynamoDB, not in any region's orchestrator, so this is
@@ -50,11 +55,6 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime());
   thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
-
-  // One deadline for every upstream call this request makes, so a hung region
-  // fails its own leg below instead of holding the handler until the Lambda
-  // timeout kills it with nothing logged.
-  const signal = AbortSignal.timeout(ORCHESTRATOR_REQUEST_TIMEOUT_MS);
 
   // Swallow per-orchestrator errors so one region's outage still renders the
   // rest: settle every fetch, log the failures, and keep the successes.
