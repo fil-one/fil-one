@@ -1565,7 +1565,8 @@ export default $config({
     // ── Grace period enforcement ────────────────────────────────────
     const gracePeriodEnforcer = createFn('GracePeriodEnforcer', {
       handler: 'packages/backend/src/jobs/grace-period-enforcer.handler',
-      link: [billingTable, userInfoTable, ...managementApiTokens],
+      // Stripe: the subscription behind an expired grace period is canceled there.
+      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, ...managementApiTokens],
       environment: orchestratorEnv,
       timeout: '300 seconds',
       memory: '256 MB',
