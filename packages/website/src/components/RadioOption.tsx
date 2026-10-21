@@ -1,3 +1,5 @@
+import { clsx } from 'clsx';
+
 import { Radio } from './Radio.js';
 
 type RadioOptionProps = {
@@ -22,7 +24,12 @@ export function RadioOption({
   return (
     <label
       data-testid={testId}
-      className="flex flex-1 cursor-pointer items-center gap-2.5 rounded-lg border border-zinc-200 px-4 py-3 transition-all hover:border-zinc-400 hover:bg-zinc-50 has-[:checked]:border-brand-300 has-[:checked]:bg-brand-50"
+      className={clsx(
+        'flex flex-1 cursor-pointer gap-2.5 rounded-lg border border-zinc-200 px-4 py-3 transition-all hover:border-zinc-400 hover:bg-zinc-50 has-[:checked]:border-brand-300 has-[:checked]:bg-brand-50',
+        // With a description the radio sits on the title's line, so options of
+        // different heights keep their titles level.
+        description ? 'items-start' : 'items-center',
+      )}
     >
       <Radio name={name} value={value} checked={checked} onChange={onChange} />
       {description ? (

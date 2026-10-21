@@ -206,7 +206,7 @@ function BucketManagementFields({
         description="List all buckets in the account"
         checked
         disabled
-        tooltip="Always enabled — this permission is currently not configurable."
+        tooltip="Always enabled. This permission is not configurable."
       />
 
       {/* Bucket-info reads — selectable in every region, not region-gated. */}
