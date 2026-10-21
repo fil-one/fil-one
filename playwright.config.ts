@@ -43,7 +43,6 @@ export default defineConfig({
       dependencies: ['setup'],
     },
     // The staging-only suites, per browser. Smoke runs in its own project below.
-    // CI runs Firefox and WebKit only in the nightly run.
     {
       name: 'full-chromium',
       testDir: './tests/e2e',

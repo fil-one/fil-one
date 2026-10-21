@@ -11,44 +11,88 @@ on:
         type: string
 
 jobs:
-  # One job per suite and browser. Jobs that share accounts share a lock.
+  # A concurrency group keeps one waiting job, and a newcomer cancels it.
+  # A run of this workflow joining the e2e-staging group while a post-deploy
+  # run waits would cancel that run and skip its production deploy. This
+  # workflow therefore skips itself while a push to main has reached
+  # deploy-staging and its test-staging e2e job has not finished; that job
+  # runs the same suite. A pipeline still in lint or unit tests does not
+  # count, because it may fail before it tests staging. If the GitHub API
+  # fails, the suite runs anyway.
+  check-deploy-pipeline:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      busy: ${{ steps.check.outputs.busy }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A deploy-staging job appears only after the pre-deploy jobs pass.
+          AWAITS_STAGING_E2E: >-
+            .jobs
+            | (map(select(.name == "deploy-staging")) | .[0]) as $deploy
+            | map(select(.name | startswith("test-staging / e2e"))) as $e2e
+            | $deploy != null
+              and ($deploy.status != "completed" or $deploy.conclusion == "success")
+              and ($e2e == [] or any($e2e[]; .status != "completed"))
+        run: |
+          busy=false
+          if ! run_ids=$(gh api "repos/${{ github.repository }}/actions/workflows/packages-ci.yaml/runs?branch=main&event=push&per_page=20" \
+            --jq '.workflow_runs[] | select(.status != "completed") | .id'); then
+            echo "::warning::Could not list deploy pipeline runs; running the suite anyway"
+            run_ids=""
+          fi
+          for run_id in $run_ids; do
+            if ! awaits=$(gh api "repos/${{ github.repository }}/actions/runs/$run_id/jobs?per_page=100" --jq "$AWAITS_STAGING_E2E"); then
+              echo "::warning::Could not read jobs of run $run_id; ignoring it"
+              continue
+            fi
+            if [ "$awaits" = true ]; then
+              busy=true
+              echo "Skipping: deploy pipeline run ${{ github.server_url }}/${{ github.repository }}/actions/runs/$run_id will test staging" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "busy=$busy" >> "$GITHUB_OUTPUT"
+
   e2e:
+    # One job per suite, each logging in as its own accounts, so the suites
+    # run at once. The main suite runs every browser in one Playwright run, one
+    # test at a time, because the browsers share its accounts.
     strategy:
       fail-fast: false
       matrix:
         include:
           - suite: main
-            lock: main
-            browser: chromium
-            projects: --project=full-chromium --project=smoke
-          - suite: main-firefox
-            lock: main
-            browser: firefox
-            projects: --project=full-firefox
-          - suite: main-webkit
-            lock: main
-            browser: webkit
-            projects: --project=full-webkit
+            browsers: chromium firefox webkit
+            args: --project=full-chromium --project=full-firefox --project=full-webkit --project=smoke --global-timeout=5100000
+            timeout: 90
           - suite: multi-org
-            lock: multi-org
-            browser: chromium
-            projects: --project=multi-org
+            browsers: chromium
+            args: --project=multi-org
+            timeout: 30
           - suite: policies
-            lock: policies
-            browser: chromium
-            projects: --project=policies
+            browsers: chromium
+            args: --project=policies
+            timeout: 30
+    needs: [check-deploy-pipeline]
+    if: needs.check-deploy-pipeline.outputs.busy == 'false'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # One group per set of accounts, shared with the same suite's job in
-    # test-staging.yaml, which runs after each staging deploy. A suite resets
-    # its own accounts on staging, so jobs on the same accounts (the main
-    # suite in each browser, and the post-deploy main run) wait in line, and
-    # different suites run at once. A waiting nightly run must not cancel a
-    # post-deploy run, hence no cancel-in-progress and queue: max.
+    timeout-minutes: ${{ matrix.timeout }}
+    # Each suite's group is shared with the same suite's job in
+    # test-staging.yaml, which runs after each staging deploy. Both reset the
+    # same accounts on staging, so runs of a suite wait in line. A waiting nightly run must not cancel a post-deploy
+    # run, hence no cancel-in-progress.
+    # A staging deploy (group deploy-staging in packages-ci.yaml) can still
+    # land during a run. Deploys take about two minutes and are followed by
+    # their own post-deploy run, so we accept the rare mixed-version failure.
     concurrency:
-      group: e2e-staging-${{ matrix.lock }}
+      group: e2e-staging-${{ matrix.suite }}
       cancel-in-progress: false
-      queue: max
+      # Keep only the newest waiting job. check-deploy-pipeline skips this
+      # job while a post-deploy run may be waiting, so it never cancels one.
+      queue: single
     environment: staging
     permissions:
       id-token: write
@@ -106,7 +150,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
+        run: pnpm exec playwright install --with-deps ${{ matrix.browsers }}
 
       # auth.setup.ts re-seeds BillingTable rows for the test users via direct
       # DynamoDB writes (see tests/e2e/billing-reset.ts). The test:e2e script
@@ -119,7 +163,7 @@ jobs:
           aws-region: us-east-2
 
       - name: Run E2E tests
-        run: pnpm test:e2e ${{ matrix.projects }}
+        run: pnpm test:e2e ${{ matrix.args }}
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
