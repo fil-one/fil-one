@@ -127,7 +127,7 @@ export default defineConfig({
             dependencies: ['policies-setup'],
           })),
           // The `@serial` tests, one browser after another, once every project
-          // above has finished. `--project=policies-serial-webkit` runs the lot.
+          // above has finished.
           ...(
             [
               ['policies-serial', 'Desktop Chrome', /@serial/],

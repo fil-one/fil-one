@@ -27,7 +27,7 @@
     "test:unit": "pnpm -r --filter '!filone' --filter '!@filone/integration' test",
     "test:storybook": "pnpm --filter @filone/website test:storybook",
     "test:e2e": "pnpm exec sst shell -- pnpm exec playwright test",
-    "test:e2e:policies": "pnpm exec sst shell -- pnpm exec playwright test --project=policies-serial-webkit",
+    "test:e2e:policies": "pnpm exec sst shell -- pnpm exec playwright test --project=policies --project=policies-firefox --project=policies-webkit --project=policies-serial --project=policies-serial-firefox --project=policies-serial-webkit",
     "test:smoke": "pnpm exec playwright test --project=smoke",
     "test:integration": "pnpm exec sst shell -- pnpm --filter @filone/integration exec vitest run"
   },

@@ -72,7 +72,7 @@ jobs:
             args: --project=multi-org --project=multi-org-firefox --project=multi-org-webkit
           - suite: policies
             browsers: chromium firefox webkit
-            args: --project=policies-serial-webkit --workers=2
+            args: --project=policies --project=policies-firefox --project=policies-webkit --project=policies-serial --project=policies-serial-firefox --project=policies-serial-webkit --workers=2
     needs: [check-deploy-pipeline]
     if: needs.check-deploy-pipeline.outputs.busy == 'false'
     runs-on: ubuntu-latest
