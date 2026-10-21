@@ -314,9 +314,7 @@ describe('ensureTenantReady', () => {
     await ensureTenantReady(deps, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    // Hilt authorizes each operation the gateway serves on its own action
-    // (fil-forge/hilt#102), and the console reads the versioning and
-    // object-lock configuration for every bucket it shows.
+    // The console key holds every action in the contract enum.
     expect(permissions).toStrictEqual([
       's3:CreateBucket',
       's3:ListAllMyBuckets',

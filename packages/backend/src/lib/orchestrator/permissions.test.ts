@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { buildPermissions } from './permissions.ts';
 
 describe('buildPermissions', () => {
-  // Each permission carries the actions Hilt authorized as its plain bucket
-  // or object operation before fil-forge/hilt#102: the bucket's location,
-  // ACL, CORS and tag reads with s3:ListBucket, and the object's tags and
-  // attributes with the object operation.
+  // Each permission includes the tag, attribute and bucket configuration
+  // actions of the operations it allows.
   it.each([
     [
       'read',
@@ -35,7 +33,7 @@ describe('buildPermissions', () => {
     ],
     ['delete', ['s3:DeleteObject', 's3:DeleteObjectTagging']],
   ] as const)(
-    'grants %s as its actions and the tag and configuration reads it covered',
+    'grants %s as its object, tag and bucket configuration actions',
     (permission, actions) => {
       expect(buildPermissions([permission])).toStrictEqual(['s3:ListAllMyBuckets', ...actions]);
     },

@@ -64,8 +64,8 @@ export const CONSOLE_KEY_PERMISSIONS = [
   's3:PutBucketVersioning',
   's3:GetBucketObjectLockConfiguration',
   's3:PutBucketObjectLockConfiguration',
-  // The rest of the enum. The console does not call these today; the key
-  // holds them so that it stays the contract-legal maximum.
+  // The rest of the enum. The console does not call these; the key holds
+  // them because it holds every action in the enum.
   's3:GetBucketLocation',
   's3:GetBucketAcl',
   's3:GetBucketCORS',
