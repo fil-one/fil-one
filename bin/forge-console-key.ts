@@ -130,9 +130,9 @@ const command = process.argv[2];
 const stage = process.argv[3];
 
 if (command !== 'rotate' && command !== 'prune') {
-  usage(`Unknown command: ${command ?? '(none)'}`);
+  exitWithUsage(`Unknown command: ${command ?? '(none)'}`);
 }
-if (!stage || stage.startsWith('--')) usage('Missing <stage>.');
+if (!stage || stage.startsWith('--')) exitWithUsage('Missing <stage>.');
 
 const orgFilter = readFlag('org');
 const regionFilter = readFlag('region');
@@ -144,7 +144,7 @@ if (stageForgeRegions.length === 0) {
   process.exit(1);
 }
 if (regionFilter && !stageForgeRegions.includes(regionFilter as S3Region)) {
-  usage(
+  exitWithUsage(
     `--region ${regionFilter} is not a Forge region on stage "${stage}" ` +
       `(Forge regions there: ${stageForgeRegions.join(', ')}).`,
   );
@@ -232,7 +232,7 @@ for (const region of regions) {
       else skipped++;
     } catch (err) {
       failed++;
-      console.error(`${label(ctx, orgId, tenantId)}: FAILED — ${formatError(err)}`);
+      console.error(`${formatLabel(ctx, orgId, tenantId)}: FAILED — ${formatError(err)}`);
     }
   }
 }
@@ -251,20 +251,20 @@ process.exit(failed > 0 ? 1 : 0);
 
 /** Returns true when a new v2 key was created for this tenant. */
 async function rotateTenant(ctx: RegionContext, orgId: string, tenantId: string): Promise<boolean> {
-  const where = label(ctx, orgId, tenantId);
+  const where = formatLabel(ctx, orgId, tenantId);
   const currentAccessKeyId = await readSsmAccessKeyId(ctx, tenantId);
   const currentKey = currentAccessKeyId
     ? await getAccessKey(ctx, tenantId, currentAccessKeyId)
     : undefined;
 
-  if (currentKey && missingPermissions(currentKey).length === 0) {
+  if (currentKey && getMissingPermissions(currentKey).length === 0) {
     console.error(`${where}: already on a key with the full permission list — skipping.`);
     return false;
   }
   if (currentKey?.name === CONSOLE_KEY_NAME_V2) {
     throw new Error(
       `SSM already points at ${CONSOLE_KEY_NAME_V2} (${currentKey.accessKeyId}), which lacks ` +
-        `${missingPermissions(currentKey).join(', ')}. A further rotation needs a new key name.`,
+        `${getMissingPermissions(currentKey).join(', ')}. A further rotation needs a new key name.`,
     );
   }
 
@@ -298,7 +298,7 @@ async function rotateTenant(ctx: RegionContext, orgId: string, tenantId: string)
   if (dryRun) {
     console.error(
       `${where}: [dry-run] would create ${CONSOLE_KEY_NAME_V2}, verify it, and repoint ` +
-        `${ssmParameterName(ctx, tenantId)}`,
+        `${getSsmParameterName(ctx, tenantId)}`,
     );
     return true;
   }
@@ -308,7 +308,7 @@ async function rotateTenant(ctx: RegionContext, orgId: string, tenantId: string)
 
   await ssm.send(
     new PutParameterCommand({
-      Name: ssmParameterName(ctx, tenantId),
+      Name: getSsmParameterName(ctx, tenantId),
       Value: JSON.stringify({
         accessKeyId: created.accessKeyId,
         secretAccessKey: created.secretAccessKey,
@@ -328,7 +328,7 @@ async function rotateTenant(ctx: RegionContext, orgId: string, tenantId: string)
 
 /** Returns true when the v1 key was deleted for this tenant. */
 async function pruneTenant(ctx: RegionContext, orgId: string, tenantId: string): Promise<boolean> {
-  const where = label(ctx, orgId, tenantId);
+  const where = formatLabel(ctx, orgId, tenantId);
   const existingKeys = await listAccessKeys(ctx, tenantId);
   const v1 = existingKeys.find((k) => k.type === 'service' && k.name === CONSOLE_KEY_NAME);
   if (!v1) {
@@ -341,7 +341,7 @@ async function pruneTenant(ctx: RegionContext, orgId: string, tenantId: string):
   const currentAccessKeyId = await readSsmAccessKeyId(ctx, tenantId);
   if (!currentAccessKeyId) {
     throw new Error(
-      `${ssmParameterName(ctx, tenantId)} holds no accessKeyId, so the console has no key. ` +
+      `${getSsmParameterName(ctx, tenantId)} holds no accessKeyId, so the console has no key. ` +
         'Run `rotate` for this tenant first.',
     );
   }
@@ -351,7 +351,7 @@ async function pruneTenant(ctx: RegionContext, orgId: string, tenantId: string):
       `SSM points at ${currentAccessKeyId}, which the API answers with a 404. Run \`rotate\` for this tenant first.`,
     );
   }
-  const missing = missingPermissions(currentKey);
+  const missing = getMissingPermissions(currentKey);
   if (missing.length > 0) {
     throw new Error(
       `SSM points at ${currentKey.name} (${currentAccessKeyId}), which lacks ${missing.join(', ')}. ` +
@@ -586,7 +586,7 @@ async function readSsmAccessKeyId(
 ): Promise<string | undefined> {
   try {
     const { Parameter } = await ssm.send(
-      new GetParameterCommand({ Name: ssmParameterName(ctx, tenantId), WithDecryption: true }),
+      new GetParameterCommand({ Name: getSsmParameterName(ctx, tenantId), WithDecryption: true }),
     );
     if (!Parameter?.Value) return undefined;
     return (JSON.parse(Parameter.Value) as { accessKeyId?: string }).accessKeyId;
@@ -597,19 +597,19 @@ async function readSsmAccessKeyId(
 }
 
 // Must match the path getConsoleS3Credentials (lib/s3-credentials.ts) reads.
-function ssmParameterName(ctx: RegionContext, tenantId: string): string {
+function getSsmParameterName(ctx: RegionContext, tenantId: string): string {
   return `/filone/${stage}/${ctx.orchestratorId}-s3/access-key/${tenantId}`;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
 
 /** The CONSOLE_KEY_PERMISSIONS actions the key lacks; all of them for a principal key. */
-function missingPermissions(key: AccessKey): string[] {
+function getMissingPermissions(key: AccessKey): string[] {
   const held: readonly string[] = key.type === 'service' ? key.permissions : [];
   return CONSOLE_KEY_PERMISSIONS.filter((action) => !held.includes(action));
 }
 
-function label(ctx: RegionContext, orgId: string, tenantId: string): string {
+function formatLabel(ctx: RegionContext, orgId: string, tenantId: string): string {
   return `${ctx.region} org ${orgId} (tenant ${tenantId})`;
 }
 
@@ -617,7 +617,7 @@ function readFlag(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
   if (index === -1) return undefined;
   const value = process.argv[index + 1];
-  if (!value || value.startsWith('--')) usage(`Missing value for --${name}.`);
+  if (!value || value.startsWith('--')) exitWithUsage(`Missing value for --${name}.`);
   return value;
 }
 
@@ -628,7 +628,7 @@ function formatError(err: unknown): string {
   return String(err);
 }
 
-function usage(message: string): never {
+function exitWithUsage(message: string): never {
   console.error(`${message}\n${USAGE}`);
   process.exit(1);
 }
