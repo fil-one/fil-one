@@ -671,6 +671,21 @@ describe('grace-period-enforcer', () => {
       },
     );
 
+    it('cancels a trialing subscription whose trial ends by the grace deadline', async () => {
+      // The trial runs through the grace period that follows the row's own
+      // trial, and Stripe ends it at the deadline; the enforcer can get there
+      // first.
+      mockSubscriptionsRetrieve.mockResolvedValue({
+        id: 'sub_any',
+        status: 'trialing',
+        trial_end: Math.floor(new Date(pastDate(1)).getTime() / 1000),
+      });
+
+      await handler();
+
+      expect(order).toStrictEqual(['disable', 'cancel:sub_any', 'write']);
+    });
+
     it.each(['canceled', 'incomplete_expired'])(
       'marks the row canceled without a Stripe cancel when Stripe reports the subscription %s',
       async (status) => {
@@ -693,10 +708,18 @@ describe('grace-period-enforcer', () => {
       expect(order).toStrictEqual(['disable', 'write']);
     });
 
-    it.each(['active', 'trialing'])(
+    it.each([
+      ['active', null],
+      ['trialing with a trial that outlasts the grace period', futureDate(3)],
+    ])(
       'leaves the row in grace and the tenant enabled when Stripe reports the subscription %s',
-      async (status) => {
-        mockSubscriptionsRetrieve.mockResolvedValue({ id: 'sub_any', status });
+      async (_case, trialEnd) => {
+        const status = trialEnd ? 'trialing' : 'active';
+        mockSubscriptionsRetrieve.mockResolvedValue({
+          id: 'sub_any',
+          status,
+          trial_end: trialEnd && Math.floor(new Date(trialEnd).getTime() / 1000),
+        });
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 

@@ -17,19 +17,29 @@ interface Candidate {
   orgId: string;
   subscriptionId?: string;
   subscriptionStatus: string;
+  gracePeriodEndsAt?: string;
   action: Action;
 }
 
-/** Statuses of a subscription that has stopped billing yet that Stripe has not ended. */
+/** Statuses of a subscription that is not billing yet that Stripe has not ended. */
 const CANCELABLE_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set([
+  'trialing',
   'paused',
   'past_due',
   'unpaid',
   'incomplete',
 ]);
 
-/** Statuses that mean the customer is paying, whatever the row says. */
-const LIVE_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set(['active', 'trialing']);
+/**
+ * Whether Stripe still treats the customer as entitled, whatever the row says.
+ * A trial is, unless it ends by the grace deadline: a trial's Stripe trial runs
+ * through the grace period that follows the row's own, and Stripe ends it then.
+ */
+function isStillBilling(subscription: Stripe.Subscription, gracePeriodEndsAt: string): boolean {
+  if (subscription.status === 'active') return true;
+  if (subscription.status !== 'trialing') return false;
+  return (subscription.trial_end ?? 0) * 1000 > new Date(gracePeriodEndsAt).getTime();
+}
 
 type CandidateOutcome = 'canceled' | 'write_locked' | 'skipped';
 
@@ -103,6 +113,7 @@ async function scanGracePeriodCandidates(nowMs: number): Promise<Candidate[]> {
       return {
         ...owner,
         subscriptionStatus: record.subscriptionStatus as string,
+        gracePeriodEndsAt,
         // Grace period expired → cancel + DISABLE. Still active → ensure WRITE_LOCKED.
         action:
           gracePeriodEndsAt && new Date(gracePeriodEndsAt).getTime() < nowMs
@@ -130,7 +141,9 @@ async function cancelSubscriptionAndDisableTenant(
 
   // The row is behind Stripe: a subscription that still bills means the
   // customer is paying, and disabling them is not this job's call.
-  if (subscription && LIVE_STATUSES.has(subscription.status)) {
+  // The scan picks the cancel action only for a row whose deadline has passed.
+  const gracePeriodEndsAt = candidate.gracePeriodEndsAt!;
+  if (subscription && isStillBilling(subscription, gracePeriodEndsAt)) {
     return skipLiveSubscription(candidate, subscription);
   }
 
@@ -144,7 +157,7 @@ async function cancelSubscriptionAndDisableTenant(
     // Looked up again: a reactivation can land while the tenant is disabled,
     // and may have re-enabled it before this run's disable reached it.
     const current = await retrieveIfExists(subscription.id);
-    if (current && LIVE_STATUSES.has(current.status)) {
+    if (current && isStillBilling(current, gracePeriodEndsAt)) {
       assertRegionSyncSucceeded(
         await syncTenantStatusInProvisionedRegions(candidate.orgId, 'active'),
       );

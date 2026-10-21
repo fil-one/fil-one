@@ -35,6 +35,11 @@ const ddbMock = mockClient(DynamoDBClient);
 import { createBillingTrial } from './create-billing-trial.ts';
 import { OrgDeletingError } from './org-profile.ts';
 
+/** The values of the one record write. */
+function updateValues() {
+  return ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input.ExpressionAttributeValues!;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -152,16 +157,22 @@ describe('createBillingTrial', () => {
     });
   });
 
-  it('sets trial_end to 30 days from now', async () => {
+  it('ends the Stripe trial when the grace period after the 30-day trial runs out', async () => {
     await createBillingTrial({ userId: 'user-1', orgId: 'org-1' });
 
-    const trialEnd = mockSubscriptionsCreate.mock.calls[0][0].trial_end;
+    // The row's trial ends after 30 days and its grace period 7 days later. The
+    // Stripe trial lasts until then, so the subscription bills nothing through
+    // grace and a card added during it ends the trial on the same subscription.
+    const day = 24 * 60 * 60;
+    const trialEndsAt = updateValues()[':trialEndsAt'].S!;
+    const rowTrialEnd = Math.floor(new Date(trialEndsAt).getTime() / 1000);
     const nowUnix = Math.floor(Date.now() / 1000);
-    const thirtyDaysInSeconds = 30 * 24 * 60 * 60;
-
-    // Allow 5 seconds of tolerance for test execution time
-    expect(trialEnd).toBeGreaterThanOrEqual(nowUnix + thirtyDaysInSeconds - 5);
-    expect(trialEnd).toBeLessThanOrEqual(nowUnix + thirtyDaysInSeconds + 5);
+    expect(rowTrialEnd).toBeGreaterThanOrEqual(nowUnix + 30 * day - 5);
+    expect(rowTrialEnd).toBeLessThanOrEqual(nowUnix + 30 * day + 5);
+    expect(mockSubscriptionsCreate.mock.calls[0][0]).toMatchObject({
+      trial_end: rowTrialEnd + 7 * day,
+      trial_settings: { end_behavior: { missing_payment_method: 'cancel' } },
+    });
   });
 
   it('passes undefined email when not provided', async () => {
