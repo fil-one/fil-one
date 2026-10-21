@@ -7,6 +7,7 @@ import { defineConfig, devices } from '@playwright/test';
 if (existsSync('.env.e2e.local')) process.loadEnvFile('.env.e2e.local');
 
 const isCI = !!process.env.CI;
+const API_ONLY_POLICY_SPECS = /(policies|policy-enforcement|policy-lifecycle)\.spec\.ts$/;
 const baseURL = process.env.BASE_URL;
 
 if (!baseURL) {
@@ -70,20 +71,28 @@ export default defineConfig({
       testDir: './tests/e2e/multi-org',
       testMatch: /login\.setup\.ts/,
     },
-    {
-      name: 'multi-org',
+    // One project per browser. The specs reset the accounts they change, so
+    // they run again after one setup.
+    ...(
+      [
+        ['multi-org', 'Desktop Chrome'],
+        ['multi-org-firefox', 'Desktop Firefox'],
+        ['multi-org-webkit', 'Desktop Safari'],
+      ] as const
+    ).map(([name, device]) => ({
+      name,
       testDir: './tests/e2e/multi-org',
       fullyParallel: false,
       // Lambdas start cold.
       timeout: 90_000,
       expect: { timeout: 20_000 },
       use: {
-        ...devices['Desktop Chrome'],
-        trace: 'retain-on-failure',
-        screenshot: 'only-on-failure',
+        ...devices[device],
+        trace: 'retain-on-failure' as const,
+        screenshot: 'only-on-failure' as const,
       },
       dependencies: ['multi-org-setup'],
-    },
+    })),
     // Bucket policies, against a stage whose Forge region serves the `iam`
     // access model: us-east-9 from smelt locally, eu-central-3 on a remote stage
     // (tests/e2e/policies/README.md). Only offered when the policy users are
@@ -97,15 +106,25 @@ export default defineConfig({
             fullyParallel: false,
             workers: 1,
           },
-          {
-            name: 'policies',
+          // One project per browser; the specs restore the roster they change.
+          // Firefox and WebKit skip the specs that only call the API, which
+          // no browser runs.
+          ...(
+            [
+              ['policies', 'Desktop Chrome', undefined],
+              ['policies-firefox', 'Desktop Firefox', API_ONLY_POLICY_SPECS],
+              ['policies-webkit', 'Desktop Safari', API_ONLY_POLICY_SPECS],
+            ] as const
+          ).map(([name, device, testIgnore]) => ({
+            name,
             testDir: './tests/e2e/policies',
-            use: { ...devices['Desktop Chrome'] },
+            testIgnore,
+            use: { ...devices[device] },
             // One org and one roster for every spec, and some specs change the roster.
             fullyParallel: false,
             workers: 1,
             dependencies: ['policies-setup'],
-          },
+          })),
         ]
       : []),
     // smoke tests executed in production

@@ -6,8 +6,8 @@ on:
 jobs:
   e2e:
     # One job per suite, each logging in as its own accounts, so the suites
-    # run at once. The main suite runs every browser in one Playwright run, one
-    # test at a time, because the browsers share its accounts.
+    # run at once. Each suite runs every browser in one Playwright run, one
+    # test at a time, because the browsers share the suite's accounts.
     strategy:
       fail-fast: false
       matrix:
@@ -16,11 +16,11 @@ jobs:
             browsers: chromium firefox webkit
             args: --project=full-chromium --project=full-firefox --project=full-webkit --project=smoke
           - suite: multi-org
-            browsers: chromium
-            args: --project=multi-org
+            browsers: chromium firefox webkit
+            args: --project=multi-org --project=multi-org-firefox --project=multi-org-webkit
           - suite: policies
-            browsers: chromium
-            args: --project=policies
+            browsers: chromium firefox webkit
+            args: --project=policies --project=policies-firefox --project=policies-webkit
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Each suite's group is shared with the same suite's job in

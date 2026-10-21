@@ -1,6 +1,6 @@
 # Bucket policy e2e suite
 
-End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run against a stage whose Forge region serves the `iam` access model: locally `us-east-9`, backed by a smelt network; on a remote stage `eu-central-3`. The `full-*` projects ignore this directory, so the suite runs only as the `policies` project.
+End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run against a stage whose Forge region serves the `iam` access model: locally `us-east-9`, backed by a smelt network; on a remote stage `eu-central-3`. The `full-*` projects ignore this directory, so the suite runs only as the `policies` project (Chromium) and `policies-firefox` and `policies-webkit`, which skip the specs that only call the API.
 
 ## What they need
 
