@@ -967,14 +967,12 @@ describe('stripe-event-worker handler', () => {
       expect(graceRead?.args[0].input.ConsistentRead).toBe(true);
     });
 
-    it('gives 7 days when the enforcer has already canceled the expired trial', async () => {
-      // A trial's deletion redriven after its grace ran out finds the row
-      // `canceled`, with the trial's deadline and no canceledAt.
-      const endedAt = Date.UTC(2026, 9, 1) / 1000;
-      setupStripeEvent(
-        'customer.subscription.deleted',
-        mockSubscription({ trial_end: endedAt, ended_at: endedAt }),
-      );
+    it('keeps the row canceled when the enforcer has already ended its grace period', async () => {
+      // The enforcer cancels the subscription in Stripe when grace runs out, so
+      // this event follows every ended grace period. The row it finds is
+      // `canceled` with the grace deadline still on it.
+      const endedAt = Date.UTC(2026, 9, 8) / 1000;
+      setupStripeEvent('customer.subscription.deleted', mockSubscription({ ended_at: endedAt }));
       setupCustomerRetrieve();
       setupStoredGraceState({
         subscriptionStatus: SubscriptionStatus.Canceled,
@@ -983,8 +981,21 @@ describe('stripe-event-worker handler', () => {
 
       await deliver();
 
+      expect(updateInputs()).toStrictEqual([]);
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    });
+
+    it('starts a grace period for a row a webhook marked canceled', async () => {
+      // A `canceled` row with no deadline never had a grace period; a webhook
+      // wrote the status and removed the grace fields.
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      setupStoredGraceState({ subscriptionStatus: SubscriptionStatus.Canceled });
+
+      await deliver();
+
       expect(updateInputs()[0].ExpressionAttributeValues).toMatchObject({
-        ':grace': { S: '2026-10-08T00:00:00.000Z' },
+        ':status': { S: SubscriptionStatus.GracePeriod },
       });
     });
 

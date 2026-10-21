@@ -1,9 +1,12 @@
+import type Stripe from 'stripe';
 import { SubscriptionStatus } from '@filone/shared';
+import { emitGraceExpiredWithLiveSubscription } from '../lib/grace-period-metrics.ts';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
 import {
   assertRegionSyncSucceeded,
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.ts';
+import { getStripeClient, isStripeResourceMissing } from '../lib/stripe-client.ts';
 import { scanSubscriptions, updateSubscriptionByUser } from '../lib/subscription-store.ts';
 
 type Action = 'cancel' | 'write_lock';
@@ -12,9 +15,21 @@ interface Candidate {
   pk: string;
   userId?: string;
   orgId: string;
+  subscriptionId?: string;
   subscriptionStatus: string;
   action: Action;
 }
+
+/** Statuses of a subscription that has stopped billing yet that Stripe has not ended. */
+const CANCELABLE_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set([
+  'paused',
+  'past_due',
+  'unpaid',
+  'incomplete',
+]);
+
+/** Statuses that mean the customer is paying, whatever the row says. */
+const BILLING_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set(['active', 'trialing']);
 
 type CandidateOutcome = 'canceled' | 'write_locked' | 'skipped';
 
@@ -69,10 +84,7 @@ export async function handler(): Promise<void> {
 }
 
 async function processCandidate(candidate: Candidate, now: Date): Promise<CandidateOutcome> {
-  if (candidate.action === 'cancel') {
-    await cancelSubscriptionAndDisableTenant(candidate, now);
-    return 'canceled';
-  }
+  if (candidate.action === 'cancel') return cancelSubscriptionAndDisableTenant(candidate, now);
 
   return ensureTenantWriteLocked(candidate);
 }
@@ -101,33 +113,80 @@ async function scanGracePeriodCandidates(nowMs: number): Promise<Candidate[]> {
   });
 }
 
-// Grace period expired — disable the tenant on every orchestrator it exists on
-// and cancel the subscription. The disable is a probe-first sync: regions that
-// are already disabled are skipped, so a partially disabled tenant converges
-// on retry. A failed region throws before the cancel write, keeping the record
-// in grace_period so the next run retries only the out-of-sync regions. An org
-// with no provisioned regions still transitions out of grace (empty outcomes,
-// cancel proceeds).
-async function cancelSubscriptionAndDisableTenant(candidate: Candidate, now: Date): Promise<void> {
+// Grace period expired — disable the tenant on every orchestrator it exists on,
+// cancel the Stripe subscription and mark the row canceled. The disable is a
+// probe-first sync: regions that are already disabled are skipped, so a
+// partially disabled tenant converges on retry. A failed region or Stripe call
+// throws before the row write, keeping the record in grace_period so the next
+// run retries. An org with no provisioned regions still transitions out of
+// grace (empty outcomes, cancel proceeds).
+async function cancelSubscriptionAndDisableTenant(
+  candidate: Candidate,
+  now: Date,
+): Promise<CandidateOutcome> {
+  const subscription = candidate.subscriptionId
+    ? await retrieveIfExists(candidate.subscriptionId)
+    : undefined;
+
+  // The row is behind Stripe: a subscription that still bills means the
+  // customer is paying, and disabling them is not this job's call.
+  if (subscription && BILLING_STATUSES.has(subscription.status)) {
+    console.error(
+      '[grace-period-enforcer] Grace expired but Stripe still bills the subscription, skipping',
+      {
+        userId: candidate.userId,
+        orgId: candidate.orgId,
+        subscriptionId: subscription.id,
+        status: subscription.status,
+      },
+    );
+    emitGraceExpiredWithLiveSubscription(subscription.status);
+    return 'skipped';
+  }
+
   assertRegionSyncSucceeded(
     await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
   );
+
+  // Nothing is billed at a cancel that ends a grace period: a trial owes
+  // nothing, and an unpaid subscription's open invoices stay open.
+  if (subscription && CANCELABLE_STATUSES.has(subscription.status)) {
+    await getStripeClient().subscriptions.cancel(subscription.id, {
+      invoice_now: false,
+      prorate: false,
+    });
+  }
+
   // Transition DynamoDB status to canceled, on both keys — a cancel that
   // reached only the row this scan happened to pick would leave the twin in
-  // grace_period, and the next run would see the org again.
+  // grace_period, and the next run would see the org again. Only while the row
+  // is still in grace: a reactivation since the scan has moved it on.
   await updateSubscriptionByUser(candidate, {
     UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
     ExpressionAttributeValues: {
       ':status': { S: SubscriptionStatus.Canceled },
       ':now': { S: now.toISOString() },
+      ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
     },
+    ConditionExpression: 'subscriptionStatus = :gracePeriod',
   });
 
   console.log('[grace-period-enforcer] Canceled + disabled', {
     userId: candidate.userId,
     orgId: candidate.orgId,
     previousStatus: candidate.subscriptionStatus,
+    subscriptionId: candidate.subscriptionId,
   });
+  return 'canceled';
+}
+
+async function retrieveIfExists(subscriptionId: string): Promise<Stripe.Subscription | undefined> {
+  try {
+    return await getStripeClient().subscriptions.retrieve(subscriptionId);
+  } catch (err) {
+    if (isStripeResourceMissing(err)) return undefined;
+    throw err;
+  }
 }
 
 // Non-expired grace period — ensure every orchestrator tenant is write-locked.

@@ -359,12 +359,14 @@ async function updateBillingRecord({
 
 // The grace period a cancellation starts, sized by the row's status: a trial
 // gets 7 days, a paying org 30. A row with canceledAt keeps its dates, since an
-// earlier delivery of this event already set them.
+// earlier delivery of this event already set them. Null when the row's grace
+// period has already ended: the enforcer cancels the subscription when it does,
+// and the deletion that follows must not start another.
 async function getGraceWindow(
   subscription: Stripe.Subscription,
   orgId: string | undefined,
   now: Date,
-): Promise<{ canceledAt: string; gracePeriodEndsAt: string }> {
+): Promise<{ canceledAt: string; gracePeriodEndsAt: string } | null> {
   // Consistent: an upgrade written a moment earlier has to be what this sees,
   // or a paying org reads as `trialing`.
   const stored = orgId
@@ -373,12 +375,17 @@ async function getGraceWindow(
         consistentRead: true,
       })
     : undefined;
+  // The enforcer leaves the deadline on the row it cancels; a webhook that
+  // writes `canceled` removes it.
+  if (stored?.subscriptionStatus === SubscriptionStatus.Canceled && stored.gracePeriodEndsAt) {
+    return null;
+  }
   if (stored?.canceledAt && stored.gracePeriodEndsAt) {
     return { canceledAt: stored.canceledAt, gracePeriodEndsAt: stored.gracePeriodEndsAt };
   }
 
-  // With no canceledAt, a `canceled` row is a trial whose grace the enforcer
-  // already ended, met again when its deletion is redriven late.
+  // A `canceled` row left here has no deadline, and nothing on it says the org
+  // was paying, so it gets a trial's grace.
   const wasTrialing =
     stored?.subscriptionStatus === SubscriptionStatus.Trialing ||
     stored?.subscriptionStatus === SubscriptionStatus.GracePeriod ||
@@ -445,7 +452,16 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   }
 
   const now = new Date();
-  const { canceledAt, gracePeriodEndsAt } = await getGraceWindow(subscription, orgId, now);
+  const graceWindow = await getGraceWindow(subscription, orgId, now);
+  if (!graceWindow) {
+    console.log('[stripe-webhook] Grace period already ended, row stays canceled', {
+      userId,
+      orgId,
+      subscriptionId: subscription.id,
+    });
+    return;
+  }
+  const { canceledAt, gracePeriodEndsAt } = graceWindow;
 
   const backfill = orgIdBackfill(orgId);
   await updateSubscriptionByUser(
