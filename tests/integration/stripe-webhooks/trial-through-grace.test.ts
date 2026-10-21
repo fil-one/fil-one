@@ -79,9 +79,11 @@ describe('A trial that ends without a card', () => {
     await pollTestClockReady({ clockId });
     await waitForEventHandled('customer.subscription.deleted', subscriptionId);
 
-    expect(await getBillingRecord(userId)).toMatchObject({
-      subscriptionStatus: { S: SubscriptionStatus.GracePeriod },
-      gracePeriodEndsAt: { S: gracePeriodEndsAt },
+    // Still the deadline the trial's grace period started with. The status may
+    // already read canceled: the enforcer integration tests run beside this one
+    // and invoke the same enforcer, which acts on every expired row.
+    expect((await getBillingRecord(userId))?.gracePeriodEndsAt).toStrictEqual({
+      S: gracePeriodEndsAt,
     });
 
     const result = await invokeEnforcer();
