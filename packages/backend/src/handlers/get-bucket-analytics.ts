@@ -11,6 +11,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -21,6 +22,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  const signal = getRequestDeadline(event);
   const { orgId } = getUserInfo(event);
   const bucketName = event.pathParameters?.name;
 
@@ -44,11 +46,12 @@ export async function baseHandler(
   // BucketNotFoundError when the bucket isn't owned by this tenant.
   let samples;
   try {
-    samples = await orchestrator.getBucketUsageMetrics(tenantId, bucketName, {
-      from: thirtyDaysAgo.toISOString(),
-      to: now.toISOString(),
-      interval: '1d',
-    });
+    samples = await orchestrator.getBucketUsageMetrics(
+      tenantId,
+      bucketName,
+      { from: thirtyDaysAgo.toISOString(), to: now.toISOString(), interval: '1d' },
+      { signal },
+    );
   } catch (err) {
     if (err instanceof BucketNotFoundError) {
       return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
@@ -67,6 +70,7 @@ export async function baseHandler(
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(authorize('buckets.read'))

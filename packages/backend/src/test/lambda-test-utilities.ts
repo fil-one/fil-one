@@ -123,7 +123,7 @@ interface BuildEventProps {
   cookies?: string[];
   userInfo?: BuildEventUserInfo;
   queryStringParameters?: Record<string, string>;
-  requestContext?: Partial<APIGatewayProxyEventV2['requestContext']>;
+  requestContext?: Partial<APIGatewayProxyEventV2['requestContext'] & { deadline?: AbortSignal }>;
   rawPath?: string;
   method?: string;
 }
@@ -191,6 +191,10 @@ export function buildEvent(
       time: '01/Jan/2024:00:00:00 +0000',
       timeEpoch: 1704067200000,
       ...(props?.userInfo ? { userInfo: buildUserInfo(props.userInfo) } : {}),
+      // What requestDeadlineMiddleware attaches in production: handler tests
+      // call baseHandler directly, past the middleware, and a deadline that
+      // never fires keeps every upstream call unbounded as before.
+      deadline: new AbortController().signal,
       ...props?.requestContext,
     },
     isBase64Encoded: false,
