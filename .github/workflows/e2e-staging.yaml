@@ -66,20 +66,17 @@ jobs:
         include:
           - suite: main
             browsers: chromium firefox webkit
-            args: --project=full-chromium --project=full-firefox --project=full-webkit --project=smoke --global-timeout=5100000
-            timeout: 90
+            args: --project=full-chromium --project=full-firefox --project=full-webkit --project=smoke
           - suite: multi-org
             browsers: chromium
             args: --project=multi-org
-            timeout: 30
           - suite: policies
             browsers: chromium
             args: --project=policies
-            timeout: 30
     needs: [check-deploy-pipeline]
     if: needs.check-deploy-pipeline.outputs.busy == 'false'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.timeout }}
+    timeout-minutes: 30
     # Each suite's group is shared with the same suite's job in
     # test-staging.yaml, which runs after each staging deploy. Both reset the
     # same accounts on staging, so runs of a suite wait in line. A waiting nightly run must not cancel a post-deploy

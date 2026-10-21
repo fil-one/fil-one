@@ -14,18 +14,15 @@ jobs:
         include:
           - suite: main
             browsers: chromium firefox webkit
-            args: --project=full-chromium --project=full-firefox --project=full-webkit --project=smoke --global-timeout=5100000
-            timeout: 90
+            args: --project=full-chromium --project=full-firefox --project=full-webkit --project=smoke
           - suite: multi-org
             browsers: chromium
             args: --project=multi-org
-            timeout: 30
           - suite: policies
             browsers: chromium
             args: --project=policies
-            timeout: 30
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ matrix.timeout }}
+    timeout-minutes: 30
     # Each suite's group is shared with the same suite's job in
     # e2e-staging.yaml: a suite resets its accounts' BillingTable rows and
     # org membership, so two overlapping runs of it break each other.
