@@ -904,6 +904,28 @@ describe('stripe-event-worker handler', () => {
       });
     });
 
+    it('keeps the deadline of the grace period an expired trial started when Stripe ends the trial at it', async () => {
+      // Stripe's trial runs through the grace period that follows ours and
+      // cancels at its end, so the deletion arrives when the deadline is due.
+      const endedAt = Date.UTC(2026, 9, 8) / 1000;
+      setupStripeEvent(
+        'customer.subscription.deleted',
+        mockSubscription({ trial_end: endedAt, ended_at: endedAt }),
+      );
+      setupCustomerRetrieve();
+      setupStoredGraceState({
+        subscriptionStatus: SubscriptionStatus.GracePeriod,
+        gracePeriodEndsAt: '2026-10-08T00:00:00.000Z',
+      });
+
+      await deliver();
+
+      expect(updateInputs()[0].ExpressionAttributeValues).toMatchObject({
+        ':canceledAt': { S: '2026-10-08T00:00:00.000Z' },
+        ':grace': { S: '2026-10-08T00:00:00.000Z' },
+      });
+    });
+
     it.each([SubscriptionStatus.Active, SubscriptionStatus.PastDue])(
       'gives 30 days when the row is %s',
       async (subscriptionStatus) => {

@@ -384,6 +384,17 @@ async function getGraceWindow(
     return { canceledAt: stored.canceledAt, gracePeriodEndsAt: stored.gracePeriodEndsAt };
   }
 
+  // Dated from when Stripe ended the subscription, so a redelivered event
+  // writes the same deadline. Stripe sets ended_at on a deleted subscription;
+  // the clock covers one that arrives without it.
+  const canceledAt = subscription.ended_at ? new Date(subscription.ended_at * 1000) : now;
+
+  // An expired trial's grace period started before Stripe ended the trial,
+  // which it does when that grace runs out; the deletion does not start another.
+  if (stored?.subscriptionStatus === SubscriptionStatus.GracePeriod && stored.gracePeriodEndsAt) {
+    return { canceledAt: canceledAt.toISOString(), gracePeriodEndsAt: stored.gracePeriodEndsAt };
+  }
+
   // A `canceled` row left here has no deadline, and nothing on it says the org
   // was paying, so it gets a trial's grace.
   const wasTrialing =
@@ -391,11 +402,6 @@ async function getGraceWindow(
     stored?.subscriptionStatus === SubscriptionStatus.GracePeriod ||
     stored?.subscriptionStatus === SubscriptionStatus.Canceled;
   const graceDays = wasTrialing ? TRIAL_GRACE_DAYS : PAID_GRACE_DAYS;
-
-  // Dated from when Stripe ended the subscription, so a redelivered event
-  // writes the same deadline. Stripe sets ended_at on a deleted subscription;
-  // the clock covers one that arrives without it.
-  const canceledAt = subscription.ended_at ? new Date(subscription.ended_at * 1000) : now;
   return {
     canceledAt: canceledAt.toISOString(),
     gracePeriodEndsAt: new Date(
