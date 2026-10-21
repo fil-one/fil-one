@@ -758,6 +758,15 @@ describe('getBucket for a member', () => {
     );
   });
 
+  it('forwards the signal to the access lookup', async () => {
+    mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
+    const signal = new AbortController().signal;
+
+    await orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID, { signal });
+
+    expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
+  });
+
   it("returns null without S3 reads when the Member's access omits the bucket", async () => {
     mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('other'));
 
@@ -1089,6 +1098,36 @@ describe('issueAccessKey', () => {
         }),
       }),
     );
+  });
+
+  it('sends a bare expiry date as the start of the next UTC day', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
+
+    await orchestrator.issueAccessKey(tenantId, {
+      keyName: 'My Key',
+      permissions: ['read'],
+      // The console's date picker sends a calendar date; the storage system
+      // decodes the field as a timestamp.
+      expiresAt: '2026-10-20',
+    });
+
+    const { body } = mockCreateAccessKey.mock.calls[0]![0] as { body: Record<string, unknown> };
+    expect(body).toMatchObject({ expiresAt: '2026-10-21T00:00:00.000Z' });
+  });
+
+  it('refuses an impossible expiry date as a validation error without calling the storage system', async () => {
+    mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
+
+    await expect(
+      orchestrator.issueAccessKey(tenantId, {
+        keyName: 'My Key',
+        permissions: ['read'],
+        // Passes the schema's shape check; there is no 13th month.
+        expiresAt: '2026-13-01',
+      }),
+    ).rejects.toBeInstanceOf(AccessKeyValidationError);
+
+    expect(mockCreateAccessKey).not.toHaveBeenCalled();
   });
 
   it('drops bucket-info permissions the contract enum lacks, with a warning', async () => {

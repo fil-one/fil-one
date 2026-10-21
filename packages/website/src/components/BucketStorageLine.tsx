@@ -44,7 +44,7 @@ export function BucketStorageLine({
       <>
         <MobileSeparator />
         <span
-          className="inline-block h-3 w-24 animate-pulse rounded bg-zinc-100"
+          className="inline-block h-3 w-24 animate-pulse rounded-md bg-zinc-100"
           aria-label={`Loading storage for ${bucketName}`}
         />
       </>

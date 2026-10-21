@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   OrgRole,
@@ -33,12 +33,23 @@ vi.mock('../lib/api.js', async () => ({
   // Each row's Share control reads the plan; a never-settling read leaves it at
   // its "not known yet" state, which is not what these tests are about.
   getBilling: () => mockGetBilling(),
+  // Permissions come seeded; only the test about loading them leaves /me to this.
+  getMe: () => mockGetMe(),
   // The policy client reads the ETag header, so it sends through sendApiRequest
   // and gets a Response back.
   sendApiRequest: (...a: unknown[]) => mockSendApiRequest(...a),
 }));
 
 const mockGetBilling = vi.fn(() => new Promise(() => {}));
+const mockGetMe = vi.fn(() => new Promise(() => {}));
+
+// One object by default, so the table renders a row with its per-row controls
+// and the header actions the empty bucket would otherwise hide from everybody.
+const ONE_OBJECT_LISTING = {
+  objects: [{ key: OBJECT_KEY, sizeBytes: 12, lastModified: '2026-01-01T00:00:00Z' }],
+  isTruncated: false,
+};
+const mockParseListObjects = vi.fn(() => ONE_OBJECT_LISTING);
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
@@ -80,12 +91,7 @@ vi.mock('../lib/aurora-s3.js', () => ({
   executePresignedUrl: () =>
     Promise.resolve({ text: () => Promise.resolve('<ListBucketResult/>') }),
   parseListObjectVersionsResponse: () => ({ versions: [], isTruncated: false }),
-  // One object, so the table renders a row with its per-row controls and the
-  // header actions the empty bucket would otherwise hide from everybody.
-  parseListObjectsResponse: () => ({
-    objects: [{ key: OBJECT_KEY, sizeBytes: 12, lastModified: '2026-01-01T00:00:00Z' }],
-    isTruncated: false,
-  }),
+  parseListObjectsResponse: () => mockParseListObjects(),
 }));
 
 import { BucketDetailPage } from './BucketDetailPage.js';
@@ -127,9 +133,12 @@ const grantAllActionsToUser1 = {
   },
 };
 
+/** The keys that reach the bucket; one by default. */
+const mockBucketKeys = vi.fn(() => [ACCESS_KEY]);
+
 /** Route each of the page's reads by its path; the object listing is stubbed out. */
 function respond(path: string) {
-  if (path.startsWith('/access-keys')) return Promise.resolve({ keys: [ACCESS_KEY] });
+  if (path.startsWith('/access-keys')) return Promise.resolve({ keys: mockBucketKeys() });
   if (path.includes('/policy')) return Promise.resolve(grantAllActionsToUser1);
   if (path.startsWith('/org/members')) return Promise.resolve({ members: [] });
   if (path.includes('/analytics')) {
@@ -140,9 +149,12 @@ function respond(path: string) {
   });
 }
 
-function renderPage(role: OrgRole = OrgRole.Owner) {
+function renderPage(
+  role: OrgRole = OrgRole.Owner,
+  { arePermissionsKnown = true }: { arePermissionsKnown?: boolean } = {},
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, role);
+  if (arePermissionsKnown) seedPermissions(client, role);
   const view = render(
     <QueryClientProvider client={client}>
       <ToastProvider>
@@ -156,6 +168,8 @@ function renderPage(role: OrgRole = OrgRole.Owner) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockSupportsIamMethods.mockReturnValue(false);
+  mockParseListObjects.mockReturnValue(ONE_OBJECT_LISTING);
+  mockBucketKeys.mockReturnValue([ACCESS_KEY]);
   mockApiRequest.mockImplementation((path: string) => respond(path));
   mockSendApiRequest.mockImplementation(
     async (path: string) =>
@@ -334,6 +348,102 @@ describe('BucketDetailPage — the object controls', () => {
     expect(screen.queryByRole('button', { name: `Delete ${OBJECT_KEY}` })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Empty bucket' })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+});
+
+// A bucket the create form just made opens here, so the empty state carries the
+// API key step the form no longer asks about.
+describe('BucketDetailPage — an empty bucket', () => {
+  beforeEach(() => mockParseListObjects.mockReturnValue({ objects: [], isTruncated: false }));
+
+  it('opens the Add key modal from the empty state when no key reaches the bucket', async () => {
+    mockBucketKeys.mockReturnValue([]);
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create API key' }));
+
+    expect(await screen.findByTestId('add-bucket-key-modal')).toBeInTheDocument();
+  });
+
+  it('offers Create API key when every key that reaches the bucket has expired', async () => {
+    mockBucketKeys.mockReturnValue([{ ...ACCESS_KEY, status: 'expired' }]);
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByRole('button', { name: 'Create API key' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View API keys' })).not.toBeInTheDocument();
+  });
+
+  it('switches to the API Keys tab when keys reach the bucket already', async () => {
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View API keys' }));
+
+    expect(screen.getByTestId('bucket-keys-tab')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('opens no Add key modal from View API keys', async () => {
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View API keys' }));
+
+    expect(screen.queryByTestId('add-bucket-key-modal')).not.toBeInTheDocument();
+  });
+
+  // A failed list says nothing about whether keys exist, and a new key could duplicate one.
+  it('offers no key step when the key list fails to load', async () => {
+    mockApiRequest.mockImplementation((path: string) =>
+      path.startsWith('/access-keys')
+        ? Promise.reject(Object.assign(new Error('Service unavailable'), { status: 503 }))
+        : respond(path),
+    );
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('This bucket is empty')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /API key/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps the loading placeholder, not the empty state, until permissions load', async () => {
+    mockGetMe.mockReturnValue(new Promise(() => {}));
+    renderPage(OrgRole.Owner, { arePermissionsKnown: false });
+
+    // The listing has answered once the Objects tab shows its count.
+    expect(
+      await within(screen.getByTestId('bucket-objects-tab')).findByText('0'),
+    ).toBeInTheDocument();
+
+    expect(screen.getByLabelText('Loading objects')).toBeInTheDocument();
+  });
+
+  // The button sits in the Objects panel, which the switch replaces.
+  it('moves focus onto the API Keys tab after View API keys switches to it', async () => {
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'View API keys' }));
+
+    await waitFor(() => expect(screen.getByTestId('bucket-keys-tab')).toHaveFocus());
+  });
+
+  it('keeps the loading placeholder, not the empty state, until the key list answers', async () => {
+    mockApiRequest.mockImplementation((path: string) =>
+      // A key list that never answers.
+      path.startsWith('/access-keys') ? new Promise(() => {}) : respond(path),
+    );
+    renderPage(OrgRole.Owner);
+
+    // The listing has answered once the Objects tab shows its count.
+    expect(
+      await within(screen.getByTestId('bucket-objects-tab')).findByText('0'),
+    ).toBeInTheDocument();
+
+    expect(screen.getByLabelText('Loading objects')).toBeInTheDocument();
+    expect(screen.queryByText('This bucket is empty')).not.toBeInTheDocument();
+  });
+
+  it('offers no Create API key to a role without keys.create', async () => {
+    renderPage(OrgRole.ReadOnly);
+
+    expect(await screen.findByText('This bucket is empty')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create API key' })).not.toBeInTheDocument();
   });
 });
 

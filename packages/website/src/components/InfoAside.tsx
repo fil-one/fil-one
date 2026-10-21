@@ -13,10 +13,19 @@ type InfoAsideProps = {
   className?: string;
 };
 
-/** Sticky column of short notes that sits beside a create form. */
+/**
+ * Column of short notes beside a create form: stacked under the form below `xl`, a sticky column
+ * beside it from `xl`. The page lays both out with `flex flex-col xl:flex-row`.
+ */
 export function InfoAside({ title, items, className }: InfoAsideProps) {
   return (
-    <aside className={clsx('sticky top-0 w-60 shrink-0 self-start pt-1', className)}>
+    // xl:pt-5 lines the overline up with the card's first label, which sits under the card's p-5
+    <aside
+      className={clsx(
+        'w-full max-w-[520px] xl:sticky xl:top-0 xl:w-60 xl:shrink-0 xl:self-start xl:pt-5',
+        className,
+      )}
+    >
       <Overline>{title}</Overline>
 
       <div className="mt-3 flex flex-col">
@@ -28,7 +37,7 @@ export function InfoAside({ title, items, className }: InfoAsideProps) {
               index > 0 && 'border-t border-zinc-200/60',
             )}
           >
-            <span className="text-sm font-medium text-zinc-900">{item.title}</span>
+            <span className="text-xs font-medium text-zinc-900">{item.title}</span>
             <p className="text-xs leading-relaxed text-zinc-500">{item.description}</p>
           </div>
         ))}

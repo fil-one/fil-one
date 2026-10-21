@@ -10,14 +10,70 @@ on:
         required: false
         type: string
 
-concurrency:
-  group: e2e-staging
-  cancel-in-progress: true
-
 jobs:
+  # A concurrency group keeps one waiting job, and a newcomer cancels it.
+  # A run of this workflow joining the e2e-staging group while a post-deploy
+  # run waits would cancel that run and skip its production deploy. This
+  # workflow therefore skips itself while a push to main has reached
+  # deploy-staging and its test-staging e2e job has not finished; that job
+  # runs the same suite. A pipeline still in lint or unit tests does not
+  # count, because it may fail before it tests staging. If the GitHub API
+  # fails, the suite runs anyway.
+  check-deploy-pipeline:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      busy: ${{ steps.check.outputs.busy }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # A deploy-staging job appears only after the pre-deploy jobs pass.
+          AWAITS_STAGING_E2E: >-
+            .jobs
+            | (map(select(.name == "deploy-staging")) | .[0]) as $deploy
+            | (map(select(.name == "test-staging / e2e")) | .[0]) as $e2e
+            | $deploy != null
+              and ($deploy.status != "completed" or $deploy.conclusion == "success")
+              and ($e2e == null or $e2e.status != "completed")
+        run: |
+          busy=false
+          if ! run_ids=$(gh api "repos/${{ github.repository }}/actions/workflows/packages-ci.yaml/runs?branch=main&event=push&per_page=20" \
+            --jq '.workflow_runs[] | select(.status != "completed") | .id'); then
+            echo "::warning::Could not list deploy pipeline runs; running the suite anyway"
+            run_ids=""
+          fi
+          for run_id in $run_ids; do
+            if ! awaits=$(gh api "repos/${{ github.repository }}/actions/runs/$run_id/jobs?per_page=100" --jq "$AWAITS_STAGING_E2E"); then
+              echo "::warning::Could not read jobs of run $run_id; ignoring it"
+              continue
+            fi
+            if [ "$awaits" = true ]; then
+              busy=true
+              echo "Skipping: deploy pipeline run ${{ github.server_url }}/${{ github.repository }}/actions/runs/$run_id will test staging" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "busy=$busy" >> "$GITHUB_OUTPUT"
+
   e2e:
+    needs: [check-deploy-pipeline]
+    if: needs.check-deploy-pipeline.outputs.busy == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Shared with the e2e job in test-staging.yaml, which runs after each
+    # staging deploy. Both suites reset the same accounts on staging, so
+    # runs wait in line. A waiting nightly run must not cancel a post-deploy
+    # run, hence no cancel-in-progress.
+    # A staging deploy (group deploy-staging in packages-ci.yaml) can still
+    # land during a run. Deploys take about two minutes and are followed by
+    # their own post-deploy run, so we accept the rare mixed-version failure.
+    concurrency:
+      group: e2e-staging
+      cancel-in-progress: false
+      # Keep only the newest waiting job. check-deploy-pipeline skips this
+      # job while a post-deploy run may be waiting, so it never cancels one.
+      queue: single
     environment: staging
     permissions:
       id-token: write

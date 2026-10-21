@@ -14,7 +14,7 @@
 import { listMemberships } from './org-membership.ts';
 import type { SubscriptionRecord } from './dynamo-records.ts';
 import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.ts';
-import { legacyRowExists, readSubscription } from './subscription-store.ts';
+import { legacyRowExists, getSubscription } from './subscription-store.ts';
 import { ensureTrialEntitlement } from './trial-entitlement.ts';
 import type { UserInfo } from './user-context.ts';
 
@@ -93,7 +93,7 @@ export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialCla
   // the claim reads anyway — `createBillingTrial` upgrades it in place and
   // reuses its `stripeCustomerId`, so no second Stripe customer can be minted.
   if (await legacyRowExists(userId)) {
-    const orgRow = await readSubscription(orgId, {
+    const orgRow = await getSubscription(orgId, {
       consistentRead: true,
       projectionExpression: 'pk',
     });

@@ -378,7 +378,10 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
     const userId = memberId;
-    if (userId && !(await canMemberAccessBucket(this, tenantId, userId, bucketName))) return null;
+    const canAccess =
+      !userId ||
+      (await canMemberAccessBucket(this, { tenantId, userId, bucketName }, requestOptions));
+    if (!canAccess) return null;
     const ctx = await this.getS3ClientContext(tenantId, requestOptions);
     const s3 = createS3Client(ctx);
 

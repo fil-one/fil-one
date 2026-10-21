@@ -9,7 +9,7 @@ import { getStripeClient } from '../lib/stripe-client.ts';
 import { emitTrialClaimBlockedByLegacyRow } from '../lib/stripe-webhook-metrics.ts';
 import {
   legacyRowExists,
-  readSubscription,
+  getSubscription,
   updateSubscription,
   writeSubscription,
 } from '../lib/subscription-store.ts';
@@ -31,7 +31,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // one, and an eventually-consistent miss on a record written seconds ago
   // (a trial claim, or a second click on the same button) creates a second
   // Stripe customer for the same org.
-  const record = await readSubscription(orgId, { consistentRead: true });
+  const record = await getSubscription(orgId, { consistentRead: true });
 
   let stripeCustomerId: string;
 

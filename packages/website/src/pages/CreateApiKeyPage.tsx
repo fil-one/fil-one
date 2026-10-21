@@ -59,10 +59,10 @@ export function CreateApiKeyPage() {
           </div>
         </div>
 
-        {/* Two-column layout */}
-        <div className="flex gap-8">
+        {/* Two columns once both fit beside the app sidebar; stacked below that */}
+        <div className="flex flex-col gap-6 xl:flex-row xl:gap-10">
           {/* Left: form */}
-          <Card className="flex-1">
+          <Card className="w-full max-w-[520px] shrink-0">
             <form onSubmit={form.handleSubmit} className="flex flex-col gap-5">
               <AccessKeyFormFields form={form} region={region} onRegionChange={setRegion} />
 

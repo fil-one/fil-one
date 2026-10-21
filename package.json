@@ -35,8 +35,8 @@
     "@filone/shared": "workspace:*"
   },
   "devDependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1149.0",
-    "@aws-sdk/client-s3": "^3.1149.0",
+    "@aws-sdk/client-dynamodb": "^3.1152.0",
+    "@aws-sdk/client-s3": "^3.1152.0",
     "@filone/oxlint-rules": "workspace:*",
     "@playwright/test": "^1.60.0",
     "@pulumi/aws": "^7.23.0",
@@ -47,9 +47,9 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "oxfmt": "^0.45.0",
-    "oxlint": "^1.87.0",
-    "oxlint-plugin-complexity": "^3.0.1",
-    "oxlint-tsgolint": "^7.0.2003",
+    "oxlint": "^1.88.0",
+    "oxlint-plugin-complexity": "^4.0.0",
+    "oxlint-tsgolint": "^7.0.2004",
     "sst": "^4.17.2"
   },
   "lint-staged": {

@@ -4,7 +4,7 @@ import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { CreatePortalSessionResponse } from '@filone/shared';
 import { getStripeClient } from '../lib/stripe-client.ts';
 import { resolveOrigin } from '../lib/resolve-origin.ts';
-import { readSubscription } from '../lib/subscription-store.ts';
+import { getSubscription } from '../lib/subscription-store.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -23,7 +23,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const stripe = getStripeClient();
 
   // The org's record. Every member reaches the same one.
-  const record = await readSubscription(orgId);
+  const record = await getSubscription(orgId);
 
   if (!record) {
     return new ResponseBuilder().status(400).body({ message: 'No billing record found.' }).build();

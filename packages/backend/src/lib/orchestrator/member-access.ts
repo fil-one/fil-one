@@ -3,7 +3,7 @@
 
 import type { MemberBucketAccess } from '@filone/shared';
 import type { MemberOrchestrator } from '../member-orchestrator.ts';
-import type { BucketSummary } from '../service-orchestrator.ts';
+import type { BucketSummary, OrchestratorRequestOptions } from '../service-orchestrator.ts';
 
 /**
  * The buckets in a tenant listing that one member can actually access. The
@@ -36,10 +36,9 @@ export async function filterBucketsByMemberAccess(
  */
 export async function canMemberAccessBucket(
   members: MemberOrchestrator,
-  tenantId: string,
-  userId: string,
-  bucketName: string,
+  { tenantId, userId, bucketName }: { tenantId: string; userId: string; bucketName: string },
+  requestOptions?: OrchestratorRequestOptions,
 ): Promise<boolean> {
-  const access = await members.resolveMemberAccess(tenantId, userId);
+  const access = await members.resolveMemberAccess(tenantId, userId, requestOptions);
   return access.some((entry) => entry.bucketName === bucketName);
 }

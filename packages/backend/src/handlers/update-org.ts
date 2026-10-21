@@ -3,6 +3,7 @@ import {
   TransactionCanceledException,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
+import type { Update } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
@@ -161,6 +162,51 @@ async function resolveLogoChange(
       })
       .build(),
   );
+}
+
+/**
+ * The profile-row half of `saveOrg`'s transaction: write the new name, the new
+ * logo, or both, conditional on the values this request read.
+ */
+function buildOrgProfileUpdate({
+  key,
+  name,
+  previousName,
+  logoUrl,
+  previousLogoUrl,
+}: {
+  key: OrgProfileKey;
+  name?: string;
+  previousName?: string;
+  logoUrl?: string;
+  previousLogoUrl?: string;
+}): Update {
+  const renamed = name !== undefined;
+  const logoChanged = logoUrl !== undefined;
+  return {
+    TableName: Resource.UserInfoTable.name,
+    Key: key,
+    // Naming it is what confirms it, so the flag rides the same write.
+    UpdateExpression: `SET ${[
+      ...(renamed ? ['#name = :name', 'nameConfirmed = :confirmed'] : []),
+      ...(logoChanged ? ['logoUrl = :logoUrl'] : []),
+    ].join(', ')}`,
+    ConditionExpression: saveCondition({
+      renamed,
+      previousName,
+      logoChanged,
+      previousLogoUrl,
+    }),
+    ...(renamed ? { ExpressionAttributeNames: { '#name': 'name' } } : {}),
+    ExpressionAttributeValues: {
+      ...(renamed ? { ':name': { S: name }, ':confirmed': { BOOL: true } } : {}),
+      ...(renamed && previousName !== undefined ? { ':previousName': { S: previousName } } : {}),
+      ...(logoChanged ? { ':logoUrl': { S: logoUrl } } : {}),
+      ...(logoChanged && previousLogoUrl !== undefined
+        ? { ':previousLogoUrl': { S: previousLogoUrl } }
+        : {}),
+    },
+  };
 }
 
 /**
@@ -343,34 +389,7 @@ async function saveOrg({
   const commit = () =>
     commitAudited({
       items: [
-        {
-          Update: {
-            TableName: Resource.UserInfoTable.name,
-            Key: key,
-            // Naming it is what confirms it, so the flag rides the same write.
-            UpdateExpression: `SET ${[
-              ...(renamed ? ['#name = :name', 'nameConfirmed = :confirmed'] : []),
-              ...(logoChanged ? ['logoUrl = :logoUrl'] : []),
-            ].join(', ')}`,
-            ConditionExpression: saveCondition({
-              renamed,
-              previousName,
-              logoChanged,
-              previousLogoUrl,
-            }),
-            ...(renamed ? { ExpressionAttributeNames: { '#name': 'name' } } : {}),
-            ExpressionAttributeValues: {
-              ...(renamed ? { ':name': { S: name }, ':confirmed': { BOOL: true } } : {}),
-              ...(renamed && previousName !== undefined
-                ? { ':previousName': { S: previousName } }
-                : {}),
-              ...(logoChanged ? { ':logoUrl': { S: logoUrl } } : {}),
-              ...(logoChanged && previousLogoUrl !== undefined
-                ? { ':previousLogoUrl': { S: previousLogoUrl } }
-                : {}),
-            },
-          },
-        },
+        { Update: buildOrgProfileUpdate({ key, name, previousName, logoUrl, previousLogoUrl }) },
       ],
       event: auditEvent({
         actor,
