@@ -6,6 +6,7 @@ import { OrgDeletingError } from '../lib/org-profile.ts';
 import {
   ResponseBuilder,
   accountDeletedResponse,
+  storageTimeoutResponse,
   unexpectedFailureResponse,
 } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
@@ -48,7 +49,8 @@ export function errorHandlerMiddleware(): MiddlewareObj<
     // userInfo is only present when the error occurred after authMiddleware;
     // apiRequestId is the API Gateway request id, correlating with the API
     // access logs (the Lambda-injected requestId in the JSON envelope differs).
-    const userInfo = (request.event as Partial<AuthenticatedEvent>).requestContext?.userInfo;
+    const requestContext = (request.event as Partial<AuthenticatedEvent>).requestContext;
+    const userInfo = requestContext?.userInfo;
     console.error(
       'Unhandled handler error:',
       {
@@ -59,7 +61,11 @@ export function errorHandlerMiddleware(): MiddlewareObj<
       request.error,
     );
 
-    request.response = unexpectedFailureResponse();
+    // Once the request deadline has fired, the request is out of time whatever
+    // error surfaced: the abort itself or a failure that followed from it.
+    request.response = requestContext?.deadline?.aborted
+      ? storageTimeoutResponse()
+      : unexpectedFailureResponse();
   };
 
   return { onError };

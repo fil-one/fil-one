@@ -40,6 +40,39 @@ describe('errorHandlerMiddleware', () => {
     });
   });
 
+  it('sets a 504 response when the request deadline has fired', async () => {
+    const { onError } = errorHandlerMiddleware();
+    const request = buildErrorRequest(new Error('The operation was aborted due to timeout'));
+    request.event = buildEvent({ requestContext: { deadline: AbortSignal.abort() } });
+
+    await onError!(request);
+
+    expect(request.response).toMatchObject({
+      statusCode: 504,
+      body: JSON.stringify({
+        message: 'The storage service took too long to respond. Please try again.',
+      }),
+    });
+  });
+
+  it.each([
+    { condition: 'has not fired', deadline: new AbortController().signal },
+    { condition: 'is not attached', deadline: undefined },
+  ])('sets a 500 response when the request deadline $condition', async ({ deadline }) => {
+    const { onError } = errorHandlerMiddleware();
+    const request = buildErrorRequest(new Error('db connection failed'));
+    request.event = buildEvent({ requestContext: { deadline } });
+
+    await onError!(request);
+
+    expect(request.response).toMatchObject({
+      statusCode: 500,
+      body: JSON.stringify({
+        message: 'An unexpected server error occurred. Please try again later.',
+      }),
+    });
+  });
+
   // Mapped centrally so no writer has to catch it, and so it can never be
   // reported as a 500 the caller would retry.
   it('maps OrgDeletingError to 410 ACCOUNT_DELETED', async () => {
