@@ -1,6 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-// Held at 9.x: 10.x passes itself to Node's `setMaxListeners` as an
-// `EventTarget`, which throws under jsdom, so the unit tests cannot load it.
 import PQueue from 'p-queue';
 
 import type { BucketAnalyticsResponse, S3Region } from '@filone/shared';
