@@ -24,7 +24,7 @@ import { z } from 'zod';
  * its user ARN with an empty account field since the bucket already fixes the
  * tenant; `*` names every member. The helpers here convert at that boundary,
  * so the console's own code and UI handle bare user ids. `Resource` names the
- * policy's bucket, as the bucket ARN for the three bucket actions and the
+ * policy's bucket, as the bucket ARN for the bucket actions and the
  * objects ARN for every other action; {@link getStatementResources} derives
  * it from a statement's actions. The storage system returns the canonical
  * form: lists sorted and deduplicated, statements reordered.
@@ -33,14 +33,17 @@ import { z } from 'zod';
  */
 
 /**
- * The actions a statement may carry: the storage system's S3 permission set
- * without the three bucket-level actions. `s3:CreateBucket` and
- * `s3:DeleteBucket` act outside the bucket whose policy would grant them, and
+ * The actions a statement may carry, as the storage system allows them. The
+ * rest of the S3 vocabulary stays out: `s3:CreateBucket` and `s3:DeleteBucket`
+ * act outside the bucket whose policy would grant them, a policy operation
+ * could rewrite the policy that granted it, a configuration write (versioning,
+ * default object lock, bucket tags) changes the bucket for every principal, and
  * `s3:ListAllMyBuckets` is held by every principal.
  */
 export const POLICY_ACTIONS = [
   's3:GetObject',
   's3:GetObjectVersion',
+  's3:GetObjectAttributes',
   's3:GetObjectRetention',
   's3:GetObjectLegalHold',
   's3:ListBucket',
@@ -53,17 +56,34 @@ export const POLICY_ACTIONS = [
   's3:PutObjectLegalHold',
   's3:DeleteObject',
   's3:DeleteObjectVersion',
+  's3:GetObjectTagging',
+  's3:PutObjectTagging',
+  's3:DeleteObjectTagging',
+  's3:GetBucketAcl',
+  's3:GetBucketCORS',
+  's3:GetBucketLocation',
+  's3:GetBucketObjectLockConfiguration',
+  's3:GetBucketTagging',
+  's3:GetBucketVersioning',
 ] as const;
 export type PolicyAction = (typeof POLICY_ACTIONS)[number];
 
-/** Stands for every action in {@link POLICY_ACTIONS}, and never for the three excluded ones. */
+/** Stands for every action in {@link POLICY_ACTIONS}, and never for the excluded ones. */
 export const POLICY_ACTION_WILDCARD = 's3:*';
 export type PolicyActionOrWildcard = PolicyAction | typeof POLICY_ACTION_WILDCARD;
 
 export const POLICY_ACTIONS_WITH_WILDCARD = [...POLICY_ACTIONS, POLICY_ACTION_WILDCARD] as const;
 
 /** How the editor groups the actions. Order is display order. */
-export const POLICY_ACTION_GROUPS = ['read', 'list', 'write', 'delete', 'protect'] as const;
+export const POLICY_ACTION_GROUPS = [
+  'read',
+  'list',
+  'write',
+  'delete',
+  'tags',
+  'bucket',
+  'protect',
+] as const;
 export type PolicyActionGroup = (typeof POLICY_ACTION_GROUPS)[number];
 
 export const POLICY_ACTION_GROUP_LABELS: Record<PolicyActionGroup, string> = {
@@ -71,6 +91,8 @@ export const POLICY_ACTION_GROUP_LABELS: Record<PolicyActionGroup, string> = {
   list: 'List objects',
   write: 'Write objects',
   delete: 'Delete objects',
+  tags: 'Manage object tags',
+  bucket: 'Read bucket settings',
   protect: 'Manage data protection',
 };
 
@@ -86,6 +108,11 @@ export const POLICY_ACTION_LABELS: Record<
   's3:GetObjectVersion': {
     label: 'Read object versions',
     description: 'Retrieve specific versions of objects',
+    group: 'read',
+  },
+  's3:GetObjectAttributes': {
+    label: 'Read object attributes',
+    description: "View an object's size, checksum and storage details",
     group: 'read',
   },
   's3:ListBucket': { label: 'List objects', description: 'Browse and list objects', group: 'list' },
@@ -123,6 +150,51 @@ export const POLICY_ACTION_LABELS: Record<
     label: 'Delete object versions',
     description: 'Remove specific object versions',
     group: 'delete',
+  },
+  's3:GetObjectTagging': {
+    label: 'Read object tags',
+    description: 'View the tags on objects',
+    group: 'tags',
+  },
+  's3:PutObjectTagging': {
+    label: 'Set object tags',
+    description: 'Add or replace the tags on objects',
+    group: 'tags',
+  },
+  's3:DeleteObjectTagging': {
+    label: 'Remove object tags',
+    description: 'Remove all tags from objects',
+    group: 'tags',
+  },
+  's3:GetBucketAcl': {
+    label: 'Read bucket ACL',
+    description: 'View the access grants recorded on the bucket',
+    group: 'bucket',
+  },
+  's3:GetBucketCORS': {
+    label: 'Read CORS configuration',
+    description: "View the bucket's cross-origin rules",
+    group: 'bucket',
+  },
+  's3:GetBucketLocation': {
+    label: 'Read bucket region',
+    description: 'View the region the bucket is in',
+    group: 'bucket',
+  },
+  's3:GetBucketObjectLockConfiguration': {
+    label: 'Read object lock configuration',
+    description: "View the bucket's default retention",
+    group: 'bucket',
+  },
+  's3:GetBucketTagging': {
+    label: 'Read bucket tags',
+    description: 'View the tags on the bucket',
+    group: 'bucket',
+  },
+  's3:GetBucketVersioning': {
+    label: 'Read versioning status',
+    description: 'View whether versioning is on',
+    group: 'bucket',
   },
   's3:GetObjectRetention': {
     label: 'Read retention settings',
@@ -266,11 +338,17 @@ export function toPolicyPrincipal(userIds: '*' | readonly string[]): PolicyPrinc
 }
 
 /**
- * The three actions that act on the bucket rather than on its objects. The
- * split is the storage system's, which evaluates a statement against the ARN
- * its actions need.
+ * The actions that act on the bucket rather than on its objects: the bucket
+ * listings and the bucket configuration reads. The split is the storage
+ * system's, which evaluates a statement against the ARN its actions need.
  */
 const BUCKET_ACTIONS: readonly PolicyAction[] = [
+  's3:GetBucketAcl',
+  's3:GetBucketCORS',
+  's3:GetBucketLocation',
+  's3:GetBucketObjectLockConfiguration',
+  's3:GetBucketTagging',
+  's3:GetBucketVersioning',
   's3:ListBucket',
   's3:ListBucketMultipartUploads',
   's3:ListBucketVersions',
