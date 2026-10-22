@@ -165,7 +165,7 @@ export async function baseHandler(
 
   await revokeDeferred(later);
 
-  const [orgName, signUp] = await Promise.all([resolveOrgName(orgId), isSignUpLikely(emailNorm)]);
+  const [orgName, signUp] = await Promise.all([resolveOrgName(orgId), isNewSignUp(emailNorm)]);
   const emailSent = await sendInvitationEmail({
     to: email,
     emailNorm,
@@ -233,10 +233,10 @@ function newInvitation({
  *
  * Decided here because the console, before login, holds only an opaque token
  * and no endpoint will look an invitation up for an anonymous caller. A failed
- * lookup answers false: sign-in still offers sign-up, and the invitation does
- * not wait on Auth0.
+ * lookup answers false: sign-in still offers sign-up, and the invitation still
+ * goes out.
  */
-async function isSignUpLikely(emailNorm: string): Promise<boolean> {
+async function isNewSignUp(emailNorm: string): Promise<boolean> {
   try {
     return !(await hasAuth0UserWithEmail(emailNorm));
   } catch (err) {
