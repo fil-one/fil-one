@@ -18,7 +18,11 @@ import { PageLayout } from '../components/PageLayout';
 type TaskProps = {
   title: string;
   description: string;
-  /** Path under `public/` to the task's illustration. */
+  /**
+   * Path to the task's illustration. Kept under `/static/`, one of the paths
+   * the CloudFront rewrite (`spa-rewrite.js`) passes through to the bucket;
+   * anywhere else below the root it would be served the app shell.
+   */
   illustration: string;
   children: React.ReactNode;
 };
@@ -132,7 +136,7 @@ export function OnboardingPage({ hasBucket, hasKey, mayInvite }: OnboardingPageP
           <Task
             title="Create a bucket"
             description="Buckets hold your objects."
-            illustration="/illustrations/create-bucket.svg"
+            illustration="/static/illustrations/create-bucket.svg"
           >
             <Button variant="primary" size="sm" href="/buckets/create">
               {hasBucket ? 'Create another bucket' : 'Create bucket'}
@@ -143,7 +147,7 @@ export function OnboardingPage({ hasBucket, hasKey, mayInvite }: OnboardingPageP
           <Task
             title="Create an API key"
             description="An API key is needed to connect an S3 client."
-            illustration="/illustrations/create-api-key.svg"
+            illustration="/static/illustrations/create-api-key.svg"
           >
             <Button variant="primary" size="sm" href="/api-keys/create">
               {hasKey ? 'Create another key' : 'Create API key'}
