@@ -101,7 +101,8 @@ describe('hasAuth0UserWithEmail', () => {
     await expect(hasAuth0UserWithEmail('any@example.com')).rejects.toMatchObject({
       name: 'TimeoutError',
     });
-  }, 5000);
+    // Longer than the lookup's own 5-second deadline, which this test waits out.
+  }, 7000);
 
   it('throws when Auth0 refuses the lookup', async () => {
     setupFetchMock([

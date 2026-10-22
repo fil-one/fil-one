@@ -97,7 +97,7 @@ export async function getAuth0UserEmail(sub: string): Promise<string | undefined
 export async function hasAuth0UserWithEmail(email: string): Promise<boolean> {
   const domain = getMgmtDomain();
   // One deadline for the token and the lookup together.
-  const signal = AbortSignal.timeout(3000);
+  const signal = AbortSignal.timeout(5000);
   const token = await getManagementToken(signal);
   const resp = await fetch(
     `https://${domain}/api/v2/users-by-email?email=${encodeURIComponent(email)}&fields=user_id&include_fields=true`,
