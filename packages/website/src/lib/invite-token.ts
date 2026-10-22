@@ -49,7 +49,12 @@ export function readAndStripInviteTokenFromHash(): string | null {
  */
 let inMemoryToken: string | null = null;
 
+/** The token `takeInviteToken` last returned, until the next stash. */
+let stashedToken: string | null = null;
+
 export function stashInviteToken(token: string): void {
+  // A stash starts a new hand-over, so the next take reads storage and clears it.
+  stashedToken = null;
   try {
     sessionStorage.setItem(STASH_KEY, token);
   } catch {
@@ -74,32 +79,30 @@ export function hasPendingInviteToken(): boolean {
   }
 }
 
-let taken: string | null = null;
-
 /**
  * Take the stashed token, clearing it from storage.
  *
- * Idempotent for the life of the page: the route takes it in `beforeLoad`, so
+ * Idempotent until the next stash: the route takes it in `beforeLoad`, so
  * that storage is clear before any redirect can be thrown, and the component
  * asks again when it renders. Memoizing the answer means those two are the same
  * token rather than a token and a null, and clearing storage first means a page
  * that then fails to render cannot leave the app bouncing back here forever.
  */
 export function takeInviteToken(): string | null {
-  if (taken !== null) return taken;
+  if (stashedToken !== null) return stashedToken;
   try {
     const stored = sessionStorage.getItem(STASH_KEY);
     if (stored !== null) sessionStorage.removeItem(STASH_KEY);
-    taken = stored ?? inMemoryToken;
+    stashedToken = stored ?? inMemoryToken;
   } catch {
-    taken = inMemoryToken;
+    stashedToken = inMemoryToken;
   }
   inMemoryToken = null;
-  return taken;
+  return stashedToken;
 }
 
 /** Test seam: forget the token this page load has already taken. */
 export function resetTakenInviteToken(): void {
-  taken = null;
+  stashedToken = null;
   inMemoryToken = null;
 }

@@ -87,6 +87,19 @@ describe('invite-token', () => {
       expect(takeInviteToken()).toBe(TOKEN);
     });
 
+    it('clears storage again when a token taken earlier in the page load is stashed and taken again', () => {
+      stashInviteToken(TOKEN);
+      takeInviteToken();
+
+      // The accept page stashes again when it is refused for an unverified
+      // email, then comes back to the route after `/verify-email` without a
+      // reload. A token left in storage sends every later visit to the app
+      // route straight back to the accept page.
+      stashInviteToken(TOKEN);
+      expect(takeInviteToken()).toBe(TOKEN);
+      expect(hasPendingInviteToken()).toBe(false);
+    });
+
     it('has nothing to hand over when nothing was stashed', () => {
       expect(hasPendingInviteToken()).toBe(false);
       expect(takeInviteToken()).toBeNull();
