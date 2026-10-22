@@ -108,6 +108,7 @@ export async function baseHandler(
     emailNorm: invitation.emailNorm,
   });
   if (verificationFailure) return verificationFailure;
+  const verifiedEmail = email;
 
   const items = existing ? [] : joinItems(invitation, userId);
   const labels = existing ? [] : joinLabels(invitation);
@@ -127,7 +128,7 @@ export async function baseHandler(
       event: acceptedEvent({
         invitation,
         userId,
-        verifiedEmail: email,
+        verifiedEmail,
         alreadyMember: Boolean(existing),
       }),
     });
@@ -135,7 +136,7 @@ export async function baseHandler(
     return await acceptFailureResponse(
       err,
       ['org', ...(accepterOrgId ? ['accepterOrg'] : []), ...labels, 'invitation', 'token'],
-      { invitation, userId, verifiedEmail: email, accepterOrgId },
+      { invitation, userId, verifiedEmail, accepterOrgId },
     );
   }
 
@@ -145,7 +146,7 @@ export async function baseHandler(
   // policy write naming them registers the principal if the retry never comes.
   if (!existing) await registerMemberPrincipal({ orgId: invitation.orgId, userId });
 
-  await rememberVerifiedEmail(userId, email);
+  await rememberVerifiedEmail(userId, verifiedEmail);
 
   return await acceptedResponse({
     invitation,
