@@ -7,7 +7,7 @@ import { InvitationOutcome } from '../components/InvitationOutcome';
 import type { InvitationOutcomeProps } from '../components/InvitationOutcome';
 import { switchToOrg } from '../lib/active-org.js';
 import { errorCodeOf, errorStatusOf, getMe, logout } from '../lib/api.js';
-import { stashInviteToken } from '../lib/invite-token.js';
+import { cacheInviteToken } from '../lib/invite-token.js';
 import { acceptInvitation } from '../lib/members-api.js';
 import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
 
@@ -80,7 +80,7 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
           errorStatusOf(error) === 401 ||
           errorCodeOf(error) === ApiErrorCode.EMAIL_NOT_VERIFIED
         ) {
-          stashInviteToken(token);
+          cacheInviteToken(token);
         }
         setOutcome({ status: 'refused', error });
       },
