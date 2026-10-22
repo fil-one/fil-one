@@ -478,6 +478,24 @@ export default $config({
         allowCredentials: true,
         maxAge: '1 day',
       },
+      transform: {
+        // Per-route CloudWatch metrics (Count, 4xx, 5xx, latencies) let the SLOs
+        // track a single route. They are billed per route and metric, so only
+        // production turns them on.
+        stage: isProduction
+          ? {
+              defaultRouteSettings: {
+                detailedMetricsEnabled: true,
+                // The AWS provider sends an unset throttling limit as 0, and a
+                // limit of 0 answers every request with 429, see
+                // https://github.com/hashicorp/terraform-provider-aws/issues/27674.
+                // These match the default account quota in us-east-2.
+                throttlingBurstLimit: 5000,
+                throttlingRateLimit: 10000,
+              },
+            }
+          : undefined,
+      },
     });
 
     // ── Website (S3 + CloudFront via sst.aws.Router) ─────────────────
