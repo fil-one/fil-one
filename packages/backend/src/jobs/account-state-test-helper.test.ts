@@ -33,13 +33,29 @@ process.env.FILONE_STAGE = 'test';
 const ddbMock = mockClient(DynamoDBClient);
 
 import { handler, type AccountState } from './account-state-test-helper.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
 import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
 
 const USER_ID = 'any-user';
 const ORG_ID = 'any-org';
 
-function billingUpdate() {
+function getBillingUpdate() {
   return ddbMock.commandCalls(UpdateItemCommand)[0]?.args[0].input;
+}
+
+/** The attributes the billing update SETs, by name. */
+function getSetAttributes(): Record<string, string | undefined> {
+  const input = getBillingUpdate()!;
+  const setClause = input.UpdateExpression!.split(' REMOVE ')[0].replace(/^SET /, '');
+  return Object.fromEntries(
+    setClause.split(', ').map((assignment) => {
+      const [namePlaceholder, valuePlaceholder] = assignment.split(' = ');
+      return [
+        input.ExpressionAttributeNames![namePlaceholder],
+        input.ExpressionAttributeValues![valuePlaceholder].S,
+      ];
+    }),
+  );
 }
 
 describe('account-state-test-helper', () => {
@@ -51,6 +67,9 @@ describe('account-state-test-helper', () => {
     ddbMock
       .on(GetItemCommand, { TableName: 'UserInfoTable' })
       .resolves({ Item: { orgId: { S: ORG_ID } } });
+    ddbMock
+      .on(GetItemCommand, { TableName: 'BillingTable' })
+      .resolves({ Item: { pk: { S: `ORG#${ORG_ID}` } } });
     ddbMock.on(QueryCommand, { TableName: 'OrgTable' }).resolves({ Items: [] });
     ddbMock.on(UpdateItemCommand).resolves({});
     aurora = fakeOrchestrator('aurora');
@@ -67,6 +86,8 @@ describe('account-state-test-helper', () => {
     { state: 'unpaid', subscriptionStatus: 'past_due' },
     { state: 'trial', subscriptionStatus: 'trialing' },
     { state: 'disabled', subscriptionStatus: 'canceled' },
+    { state: 'paid_grace_period', subscriptionStatus: 'grace_period' },
+    { state: 'trial_grace_period', subscriptionStatus: 'grace_period' },
   ] satisfies Array<{ state: AccountState; subscriptionStatus: string }>)(
     'writes $subscriptionStatus to the org row for state $state',
     async ({ state, subscriptionStatus }) => {
@@ -74,7 +95,7 @@ describe('account-state-test-helper', () => {
 
       await handler({ userId: USER_ID, state });
 
-      expect(billingUpdate()).toMatchObject({
+      expect(getBillingUpdate()).toMatchObject({
         TableName: 'BillingTable',
         Key: { pk: { S: `ORG#${ORG_ID}` }, sk: { S: 'SUBSCRIPTION' } },
         ConditionExpression: 'attribute_exists(pk)',
@@ -83,16 +104,18 @@ describe('account-state-test-helper', () => {
     },
   );
 
+  // Each live status differs from the target, so every state has to update it.
   it.each([
-    { state: 'paid', tenantStatus: 'active' },
-    { state: 'unpaid', tenantStatus: 'active' },
-    { state: 'trial', tenantStatus: 'active' },
-    { state: 'disabled', tenantStatus: 'disabled' },
-  ] satisfies Array<{ state: AccountState; tenantStatus: TenantStatus }>)(
+    { state: 'paid', liveStatus: 'disabled', tenantStatus: 'active' },
+    { state: 'unpaid', liveStatus: 'disabled', tenantStatus: 'active' },
+    { state: 'trial', liveStatus: 'disabled', tenantStatus: 'active' },
+    { state: 'disabled', liveStatus: 'active', tenantStatus: 'disabled' },
+    { state: 'paid_grace_period', liveStatus: 'active', tenantStatus: 'write-locked' },
+    { state: 'trial_grace_period', liveStatus: 'active', tenantStatus: 'write-locked' },
+  ] satisfies Array<{ state: AccountState; liveStatus: TenantStatus; tenantStatus: TenantStatus }>)(
     'sets the tenants to $tenantStatus for state $state',
-    async ({ state, tenantStatus }) => {
-      // A live status matching neither target, so every state has to update it.
-      aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: 'write-locked' });
+    async ({ state, liveStatus, tenantStatus }) => {
+      aurora.getTenantStatus.mockResolvedValue({ kind: 'ok', status: liveStatus });
 
       await handler({ userId: USER_ID, state });
 
@@ -106,17 +129,46 @@ describe('account-state-test-helper', () => {
     { state: 'paid', removed: ['gracePeriodEndsAt', 'canceledAt', 'lastPaymentFailedAt'] },
     { state: 'unpaid', removed: ['gracePeriodEndsAt', 'canceledAt'] },
     { state: 'disabled', removed: ['gracePeriodEndsAt', 'canceledAt', 'lastPaymentFailedAt'] },
+    { state: 'paid_grace_period', removed: ['lastPaymentFailedAt'] },
+    { state: 'trial_grace_period', removed: ['canceledAt', 'lastPaymentFailedAt'] },
   ] satisfies Array<{ state: AccountState; removed: string[] }>)(
     'removes the state-specific attributes state $state does not set',
     async ({ state, removed }) => {
       await handler({ userId: USER_ID, state });
 
-      const input = billingUpdate()!;
+      const input = getBillingUpdate()!;
       const removedNames = input
         .UpdateExpression!.split(' REMOVE ')[1]
         .split(', ')
         .map((placeholder) => input.ExpressionAttributeNames![placeholder]);
       expect(removedNames).toStrictEqual(removed);
+    },
+  );
+
+  it.each([
+    {
+      state: 'paid_grace_period',
+      dates: {
+        canceledAt: '2026-01-09T00:00:00.000Z',
+        gracePeriodEndsAt: '2026-02-08T00:00:00.000Z',
+      },
+    },
+    {
+      state: 'trial_grace_period',
+      dates: {
+        trialEndsAt: '2026-01-09T00:00:00.000Z',
+        gracePeriodEndsAt: '2026-01-16T00:00:00.000Z',
+      },
+    },
+  ] satisfies Array<{ state: AccountState; dates: Record<string, string> }>)(
+    'dates the grace period from a day ago for state $state',
+    async ({ state, dates }) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-01-10T00:00:00.000Z'));
+
+      await handler({ userId: USER_ID, state });
+
+      expect(getSetAttributes()).toMatchObject(dates);
     },
   );
 
@@ -173,7 +225,29 @@ describe('account-state-test-helper', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toStrictEqual([]);
   });
 
-  it('rejects naming the missing row when the org has no subscription row', async () => {
+  it('reads the provisioned regions consistently', async () => {
+    await handler({ userId: USER_ID, state: 'paid' });
+
+    expect(vi.mocked(getOrgProfile).mock.calls).toStrictEqual([[ORG_ID, { consistentRead: true }]]);
+  });
+
+  it('rejects naming the missing row when the org has no billing row', async () => {
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({ Item: undefined });
+
+    await expect(handler({ userId: USER_ID, state: 'disabled' })).rejects.toThrow(
+      `no billing row at ORG#${ORG_ID}/SUBSCRIPTION`,
+    );
+  });
+
+  it('leaves the tenants untouched when the org has no billing row', async () => {
+    ddbMock.on(GetItemCommand, { TableName: 'BillingTable' }).resolves({ Item: undefined });
+
+    await handler({ userId: USER_ID, state: 'disabled' }).catch(() => {});
+
+    expect(aurora.updateTenantStatus.mock.calls).toStrictEqual([]);
+  });
+
+  it('rejects naming the missing row when the row disappears before the write', async () => {
     ddbMock.on(UpdateItemCommand).rejects(
       new ConditionalCheckFailedException({
         message: 'The conditional request failed',
@@ -203,6 +277,25 @@ describe('account-state-test-helper', () => {
     expect(result).toMatchObject({ orgId: 'any-member-org' });
   });
 
+  it('rejects instead of using the first membership when the profile cannot be read', async () => {
+    ddbMock
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .rejects(new Error('any profile read error'));
+    ddbMock.on(QueryCommand, { TableName: 'OrgTable' }).resolves({
+      Items: [
+        {
+          pk: { S: `USER#${USER_ID}` },
+          sk: { S: 'MEMBERSHIP#any-member-org' },
+          role: { S: 'owner' },
+        },
+      ],
+    });
+
+    await expect(handler({ userId: USER_ID, state: 'paid' })).rejects.toThrow(
+      'any profile read error',
+    );
+  });
+
   it('rejects when the profile names no org and the user belongs to none', async () => {
     ddbMock.on(GetItemCommand, { TableName: 'UserInfoTable' }).resolves({ Item: undefined });
 
@@ -230,7 +323,7 @@ describe('account-state-test-helper', () => {
     { event: { userId: 42, state: 'paid' }, message: /userId must be a non-empty string/ },
     // state missing.
     { event: { userId: USER_ID }, message: /state must be one of/ },
-    // state not one of the four.
+    // state not one of the known states.
     { event: { userId: USER_ID, state: 'grace_period' }, message: /state must be one of/ },
     // An inherited property name, which a plain `in` check would accept.
     { event: { userId: USER_ID, state: 'toString' }, message: /state must be one of/ },
