@@ -45,8 +45,10 @@ vi.mock('../lib/member-principals.ts', () => ({
 }));
 
 const mockMarkAuth0EmailVerified = vi.fn(async (_sub: string) => {});
+const mockGetAuth0UserEmail = vi.fn(async (_sub: string): Promise<string | undefined> => EMAIL);
 vi.mock('../lib/auth0-management.ts', () => ({
   markAuth0EmailVerified: (sub: string) => mockMarkAuth0EmailVerified(sub),
+  getAuth0UserEmail: (sub: string) => mockGetAuth0UserEmail(sub),
 }));
 
 import { handler } from './accept-invitation.ts';
@@ -279,6 +281,7 @@ describe('POST /api/invitations/accept handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMarkAuth0EmailVerified.mockReset();
+    mockGetAuth0UserEmail.mockReset();
     ddbMock.reset();
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -605,6 +608,7 @@ describe('POST /api/invitations/accept handler', () => {
     const result = await handler(acceptEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200 });
+    expect(mockGetAuth0UserEmail).not.toHaveBeenCalled();
     expect(mockMarkAuth0EmailVerified).not.toHaveBeenCalled();
   });
 
@@ -657,6 +661,42 @@ describe('POST /api/invitations/accept handler', () => {
 
     expect(result).toMatchObject({ statusCode: 403 });
     expect(body(result).code).toBe(ApiErrorCode.INVITE_EMAIL_MISMATCH);
+    expect(mockMarkAuth0EmailVerified).not.toHaveBeenCalled();
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it.each([
+    ['holds a different address', 'someone.else@example.com'],
+    ['has no such user', undefined],
+  ])(
+    'refuses an unverified session, verifying nothing, when Auth0 %s',
+    async (_label, auth0Email) => {
+      // The ID token can be stale: an unverified user may change their address
+      // after signing in, and verifying whatever Auth0 now holds would let them
+      // invite themselves under any address.
+      stubUnverifiedSession();
+      mockGetAuth0UserEmail.mockResolvedValue(auth0Email);
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 403 });
+      expect(body(result).code).toBe(ApiErrorCode.INVITE_EMAIL_MISMATCH);
+      expect(mockGetAuth0UserEmail).toHaveBeenCalledWith(MOCK_SUB);
+      expect(mockMarkAuth0EmailVerified).not.toHaveBeenCalled();
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    },
+  );
+
+  it('refuses the accept, verifying and writing nothing, when Auth0 cannot be read', async () => {
+    stubUnverifiedSession();
+    mockGetAuth0UserEmail.mockRejectedValue(new Error('Auth0 get user failed (503)'));
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 502 });
+    expect(body(result)).toStrictEqual({
+      message: 'We could not confirm your email address. Please try again.',
+    });
     expect(mockMarkAuth0EmailVerified).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });

@@ -5,7 +5,7 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { AcceptInvitationSchema, ApiErrorCode, OrgRole } from '@filone/shared';
 import type { AcceptInvitationResponse, ErrorResponse } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
-import { markAuth0EmailVerified } from '../lib/auth0-management.ts';
+import { getAuth0UserEmail, markAuth0EmailVerified } from '../lib/auth0-management.ts';
 import {
   isInvitationUsable,
   normalizeInviteEmail,
@@ -100,7 +100,12 @@ export async function baseHandler(
     accepterOrgFence(userId, invitation.orgId),
   ]);
 
-  const verificationFailure = await verifyInvitedAddress({ sub, userId, emailVerified });
+  const verificationFailure = await verifyInvitedAddress({
+    sub,
+    userId,
+    emailVerified,
+    emailNorm: invitation.emailNorm,
+  });
   if (verificationFailure) return verificationFailure;
 
   const items = existing ? [] : joinItems(invitation, userId);
@@ -152,18 +157,27 @@ export async function baseHandler(
  * Mark the caller's address verified in Auth0, unless it already is. Runs
  * before the join so that a failure leaves no member with an unverified
  * address, and answers that failure so the caller can retry the same link.
+ *
+ * Auth0's current address is checked first: the ID token may predate an email
+ * change, and the verification applies to whatever Auth0 holds now.
  */
 async function verifyInvitedAddress({
   sub,
   userId,
   emailVerified,
+  emailNorm,
 }: {
   sub: string;
   userId: string;
   emailVerified: boolean;
+  emailNorm: string;
 }): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
   if (emailVerified) return undefined;
   try {
+    const heldEmail = await getAuth0UserEmail(sub);
+    if (!heldEmail || normalizeInviteEmail(heldEmail) !== emailNorm) {
+      return emailMismatchResponse();
+    }
     await markAuth0EmailVerified(sub);
     return undefined;
   } catch (err) {
