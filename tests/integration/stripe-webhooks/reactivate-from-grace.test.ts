@@ -149,6 +149,31 @@ describe('Reactivation from grace_period', () => {
     await pollForActiveRow(userId, subscriptionId);
   }, 420_000);
 
+  it('resumes the paused subscription the row names with the new card', async () => {
+    const { userId, customerId } = await newOrg('rfg-paused');
+    const stripe = getStripeClient();
+    const firstCard = await attachValidCard(customerId);
+    await pollForPaymentMethod({ userId, paymentMethodId: firstCard });
+    const subscriptionId = await createSubscription({
+      userId,
+      customerId,
+      paymentMethodId: firstCard,
+    });
+    await stripe.subscriptions.pause(subscriptionId);
+    // The pause also arrives as an update, which writes the row; seed after it.
+    await waitForEventHandled('customer.subscription.updated', subscriptionId);
+    await seedGraceRow(userId, customerId, subscriptionId);
+    const paymentMethodId = await attachValidCard(customerId);
+    await pollForPaymentMethod({ userId, paymentMethodId });
+
+    const result = await reactivate(userId, paymentMethodId);
+
+    expect(result).toMatchObject({ ok: true, value: { id: subscriptionId, status: 'active' } });
+    expect(await liveSubscriptions(customerId)).toStrictEqual([
+      { id: subscriptionId, status: 'active' },
+    ]);
+  });
+
   it('creates one new subscription when the subscription the row names is canceled', async () => {
     const { userId, customerId } = await newOrg('rfg-canceled');
     const firstCard = await attachValidCard(customerId);
