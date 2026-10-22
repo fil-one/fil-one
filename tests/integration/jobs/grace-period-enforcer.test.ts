@@ -1,6 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { SubscriptionStatus } from '@filone/shared';
 import { seedBillingRecord, getBillingRecord, deleteBillingRecord } from '../helpers.ts';
+import {
+  attachValidCard,
+  createSubscription,
+  createTestCustomer,
+  getStripeClient,
+  testOrgId,
+  waitForEventHandled,
+} from '../stripe-webhooks/helpers.ts';
 import { invokeEnforcer, seedOrgProfile, deleteOrgProfile } from './helpers.ts';
 
 function pastDate(daysAgo: number): string {
@@ -121,5 +129,78 @@ describe('mixed batch — only expired records get canceled', () => {
     const activeRecord = await getBillingRecord(activeUserId, activeOrgId);
     expect(activeRecord).not.toBeNull();
     expect(activeRecord!.subscriptionStatus?.S).toBe(SubscriptionStatus.GracePeriod);
+  });
+});
+
+// =============================================================================
+// 4. The Stripe subscription behind an expired grace period
+// =============================================================================
+describe('the Stripe subscription behind an expired grace period', () => {
+  const tenantId = 'e7da8138-c669-4cc0-82ef-253e534be11c';
+  const cleanups: (() => Promise<unknown>)[] = [];
+
+  afterAll(async () => {
+    for (const cleanup of cleanups) await cleanup();
+  });
+
+  /** An org whose expired grace row names `subscriptionId`, seeded once Stripe's own events for it landed. */
+  async function seedExpiredGrace(userId: string, customerId: string, subscriptionId: string) {
+    await seedOrgProfile(testOrgId(userId), tenantId);
+    await seedBillingRecord(userId, customerId, SubscriptionStatus.GracePeriod, {
+      subscriptionId: { S: subscriptionId },
+      gracePeriodEndsAt: { S: pastDate(1) },
+    });
+    cleanups.push(
+      () => deleteBillingRecord(userId),
+      () => deleteOrgProfile(testOrgId(userId)),
+    );
+  }
+
+  it('cancels a paused subscription in Stripe and the row stays canceled after the deletion event', async () => {
+    const stripe = getStripeClient();
+    const userId = `enforcer-paused-${crypto.randomUUID().slice(0, 8)}`;
+    const customerId = await createTestCustomer(userId);
+    cleanups.push(() => stripe.customers.del(customerId));
+    const paymentMethodId = await attachValidCard(customerId);
+    const subscriptionId = await createSubscription({ userId, customerId, paymentMethodId });
+    await waitForEventHandled('customer.subscription.created', subscriptionId);
+    await stripe.subscriptions.pause(subscriptionId);
+    expect(await stripe.subscriptions.retrieve(subscriptionId)).toMatchObject({ status: 'paused' });
+    await waitForEventHandled('customer.subscription.updated', subscriptionId);
+    await seedExpiredGrace(userId, customerId, subscriptionId);
+
+    const result = await invokeEnforcer();
+
+    expect(result.functionError).toBeUndefined();
+    expect(await stripe.subscriptions.retrieve(subscriptionId)).toMatchObject({
+      status: 'canceled',
+    });
+    expect((await getBillingRecord(userId))?.subscriptionStatus).toStrictEqual({
+      S: SubscriptionStatus.Canceled,
+    });
+    await waitForEventHandled('customer.subscription.deleted', subscriptionId);
+    expect((await getBillingRecord(userId))?.subscriptionStatus).toStrictEqual({
+      S: SubscriptionStatus.Canceled,
+    });
+  });
+
+  it('leaves the row in grace and the subscription active when Stripe still bills it', async () => {
+    const userId = `enforcer-live-${crypto.randomUUID().slice(0, 8)}`;
+    const customerId = await createTestCustomer(userId);
+    cleanups.push(() => getStripeClient().customers.del(customerId));
+    const paymentMethodId = await attachValidCard(customerId);
+    const subscriptionId = await createSubscription({ userId, customerId, paymentMethodId });
+    await waitForEventHandled('customer.subscription.created', subscriptionId);
+    await seedExpiredGrace(userId, customerId, subscriptionId);
+
+    const result = await invokeEnforcer();
+
+    expect(result.functionError).toBeUndefined();
+    expect(await getStripeClient().subscriptions.retrieve(subscriptionId)).toMatchObject({
+      status: 'active',
+    });
+    expect((await getBillingRecord(userId))?.subscriptionStatus).toStrictEqual({
+      S: SubscriptionStatus.GracePeriod,
+    });
   });
 });
