@@ -649,6 +649,14 @@ export default $config({
               functionArn: spaRewriteFunction.arn,
             },
           ];
+          // SST gives every URL origin (the API routes) a 20 s read timeout,
+          // so CloudFront answers 504 while a slower API request is still
+          // running. API Gateway caps integrations at 30 s; waiting a few
+          // seconds longer lets its answer, or the handler's own, reach the
+          // browser. The cast reflects that origins are plain objects here.
+          for (const origin of args.origins as aws.types.output.cloudfront.DistributionOrigin[]) {
+            if (origin.customOriginConfig) origin.customOriginConfig.originReadTimeout = 35;
+          }
         },
       },
     });
