@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, type DefaultOptions } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import type { ListBucketsResponse } from '@filone/shared';
 
+import { ANALYTICS_CONCURRENCY } from '../components/BucketStorageLine.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { defaultRetry } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { BucketsPage } from './BucketsPage.js';
 
@@ -96,8 +98,11 @@ const DEGRADED: ListBucketsResponse = {
 
 const DEGRADED_MESSAGE = 'Cannot list buckets in the us-east-1 region. Please try again later.';
 
-function renderPage(role: OrgRole = OrgRole.Owner) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(
+  role: OrgRole = OrgRole.Owner,
+  queryDefaults: DefaultOptions['queries'] = { retry: false },
+) {
+  const client = new QueryClient({ defaultOptions: { queries: queryDefaults } });
   // Delete is gated on `buckets.delete`, so the caller's role has to be in the
   // cache before the rows render or the control is absent for the wrong reason.
   seedPermissions(client, role);
@@ -324,3 +329,72 @@ describe('BucketsPage degraded regions', () => {
     expect(await screen.findByText(DEGRADED_MESSAGE)).toBeInTheDocument();
   });
 });
+
+describe('BucketsPage storage line', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it(`asks for the analytics of at most ${ANALYTICS_CONCURRENCY} buckets at a time`, async () => {
+    mockBucketsWithPendingAnalytics(ANALYTICS_CONCURRENCY + 3);
+    renderPage();
+    await waitFor(() => expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY));
+
+    // Give any request over the limit the chance to go out.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+    expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY);
+  });
+
+  it("asks for the next bucket's analytics once an earlier one answers", async () => {
+    const answers = mockBucketsWithPendingAnalytics(ANALYTICS_CONCURRENCY + 3);
+    renderPage();
+    await waitFor(() => expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY));
+
+    act(() => answers[0]());
+
+    await waitFor(() => expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY + 1));
+  });
+
+  it('does not ask again for analytics that failed with a server error', async () => {
+    mockApiRequest.mockImplementation((path: string) =>
+      path.includes('/analytics')
+        ? Promise.reject(Object.assign(new Error('any server error'), { status: 500 }))
+        : Promise.resolve(BUCKETS),
+    );
+    // The console's own retry policy, without the delay between attempts.
+    renderPage(OrgRole.Owner, { retry: defaultRetry, retryDelay: 0 });
+    await screen.findByText('my-bucket');
+
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Loading storage for my-bucket')).not.toBeInTheDocument(),
+    );
+
+    expect(analyticsCalls()).toHaveLength(1);
+  });
+});
+
+/**
+ * A list of buckets whose analytics requests stay pending until the test
+ * answers them. Returns one answer function per request, in request order.
+ */
+function mockBucketsWithPendingAnalytics(bucketCount: number): Array<() => void> {
+  const buckets = Array.from({ length: bucketCount }, (_, index) => ({
+    ...BUCKETS.buckets[0],
+    bucketName: `any-bucket-${index}`,
+  }));
+  const answers: Array<() => void> = [];
+  mockApiRequest.mockImplementation((path: string, options?: { signal?: AbortSignal }) => {
+    if (!path.includes('/analytics')) return Promise.resolve({ buckets });
+    return new Promise((resolve, reject) => {
+      answers.push(() => resolve(EMPTY_ANALYTICS));
+      // Rejects on abort as fetch does.
+      options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+    });
+  });
+  return answers;
+}
+
+function analyticsCalls() {
+  return mockApiRequest.mock.calls.filter(([path]) => String(path).includes('/analytics'));
+}

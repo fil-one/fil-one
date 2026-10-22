@@ -6,6 +6,7 @@ import {
   isRoleDenial,
   queryClient,
   queryKeys,
+  retryExceptServerErrors,
   ME_STALE_TIME,
 } from './query-client.js';
 
@@ -41,6 +42,20 @@ describe('defaultRetry', () => {
 
   it('retries once on a 404', () => {
     expect(defaultRetry(0, Object.assign(new Error(), { status: 404 }))).toBe(true);
+  });
+});
+
+describe('retryExceptServerErrors', () => {
+  it.each([500, 503, 504])('does not retry on %s', (status) => {
+    expect(retryExceptServerErrors(0, Object.assign(new Error(), { status }))).toBe(false);
+  });
+
+  it('retries once on a network error with no status', () => {
+    expect(retryExceptServerErrors(0, new Error('Failed to fetch'))).toBe(true);
+  });
+
+  it('does not retry on 403', () => {
+    expect(retryExceptServerErrors(0, Object.assign(new Error(), { status: 403 }))).toBe(false);
   });
 });
 
