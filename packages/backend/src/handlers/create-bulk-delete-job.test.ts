@@ -41,7 +41,13 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
     region,
     isTenantReady: () => mockIsTenantReady(),
     resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args),
+    getS3ClientContext: async () => ({}),
   }),
+}));
+vi.mock('../lib/s3-client.ts', () => ({ createS3Client: vi.fn(() => ({})) }));
+const mockGetBucketVersioningStatus = vi.fn<() => Promise<string>>(async () => 'Enabled');
+vi.mock('../lib/s3-bucket-operations.ts', () => ({
+  getBucketVersioningStatus: () => mockGetBucketVersioningStatus(),
 }));
 vi.mock('../lib/org-profile.ts', () => ({ getOrgProfile: vi.fn(async () => ({})) }));
 
@@ -247,24 +253,63 @@ describe('create-bulk-delete-job', () => {
       expect(mockEnqueue).not.toHaveBeenCalled();
     });
 
-    it('refuses an all-versions delete for a Member whose policy lacks s3:DeleteObjectVersion', async () => {
+    // An all-versions delete deletes by version id on a bucket with versioning
+    // Enabled or Suspended, and issues plain deletes on one that was Never
+    // versioned, so the delete action it needs follows the bucket's state.
+    it.each([
+      ['Enabled', 's3:DeleteObject'],
+      ['Suspended', 's3:DeleteObject'],
+      ['Never', 's3:DeleteObjectVersion'],
+    ])(
+      'refuses an all-versions delete on a bucket whose versioning is %s for a Member granted only %s',
+      async (versioning, deleteAction) => {
+        mockGetBucketVersioningStatus.mockResolvedValueOnce(versioning);
+        mockResolveMemberAccess.mockResolvedValue(
+          grantActionsOnBucket('my-bucket', ['s3:ListBucketVersions', deleteAction]),
+        );
+
+        const result = await baseHandler(
+          eventAs(OrgRole.Member, { idempotencyKey, scope: BulkDeleteScope.AllVersions }),
+        );
+
+        expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+          statusCode: 403,
+          body: { message: 'Your access to my-bucket does not permit bulk deletion.' },
+        });
+        expect(mockCreate).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['Enabled', 's3:DeleteObjectVersion'],
+      ['Suspended', 's3:DeleteObjectVersion'],
+      ['Never', 's3:DeleteObject'],
+    ])(
+      'queues an all-versions delete on a bucket whose versioning is %s for a Member granted %s',
+      async (versioning, deleteAction) => {
+        mockGetBucketVersioningStatus.mockResolvedValueOnce(versioning);
+        mockResolveMemberAccess.mockResolvedValue(
+          grantActionsOnBucket('my-bucket', ['s3:ListBucketVersions', deleteAction]),
+        );
+
+        const result = await baseHandler(
+          eventAs(OrgRole.Member, { idempotencyKey, scope: BulkDeleteScope.AllVersions }),
+        );
+
+        expect(result.statusCode).toBe(202);
+      },
+    );
+
+    it("reads the bucket's versioning only for an all-versions delete", async () => {
       mockResolveMemberAccess.mockResolvedValue(
-        grantActionsOnBucket('my-bucket', [
-          's3:ListBucket',
-          's3:ListBucketVersions',
-          's3:DeleteObject',
-        ]),
+        grantActionsOnBucket('my-bucket', ['s3:ListBucket', 's3:DeleteObject']),
       );
 
-      const result = await baseHandler(
-        eventAs(OrgRole.Member, { idempotencyKey, scope: BulkDeleteScope.AllVersions }),
+      await baseHandler(
+        eventAs(OrgRole.Member, { idempotencyKey, scope: BulkDeleteScope.Current }),
       );
 
-      expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
-        statusCode: 403,
-        body: { message: 'Your access to my-bucket does not permit bulk deletion.' },
-      });
-      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockGetBucketVersioningStatus).not.toHaveBeenCalled();
     });
 
     it("looks up the Member's access by tenant and user id", async () => {
@@ -344,6 +389,7 @@ describe('create-bulk-delete-job', () => {
 
         expect(result.statusCode).toBe(202);
         expect(mockResolveMemberAccess).not.toHaveBeenCalled();
+        expect(mockGetBucketVersioningStatus).not.toHaveBeenCalled();
       },
     );
   });

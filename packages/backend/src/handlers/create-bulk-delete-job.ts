@@ -24,6 +24,8 @@ import {
 } from '../lib/bulk-delete-jobs.ts';
 import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
+import { getBucketVersioningStatus } from '../lib/s3-bucket-operations.ts';
+import { createS3Client } from '../lib/s3-client.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
@@ -107,7 +109,15 @@ export async function baseHandler(
   const { prefix, scope, idempotencyKey } = parsed.data;
 
   const memberId = getScopedMemberId(membership?.role, userId);
-  const access = await canBulkDelete(orchestrator, tenantId, memberId, { bucketName, scope });
+  const access = await canBulkDelete(orchestrator, tenantId, memberId, {
+    bucketName,
+    scope,
+    getVersioningStatus: async () =>
+      getBucketVersioningStatus(
+        createS3Client(await orchestrator.getS3ClientContext(tenantId)),
+        bucketName,
+      ),
+  });
   if (!access.ok) return buildBulkDeleteRefusalResponse(access.reason, bucketName);
 
   // The job id is derived from the request (bucket, prefix, scope and the

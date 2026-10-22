@@ -6,21 +6,24 @@
 
 import { BulkDeleteScope, supportsIamMethods, type PolicyAction } from '@filone/shared';
 
+import type { BucketVersioningStatus } from './s3-bucket-operations.ts';
 import type { RegionOrchestrator, ServiceOrchestrator } from './service-orchestrator.ts';
 
 /**
- * The policy actions the worker's S3 calls need for each scope. An all-versions
- * delete lists versions and deletes by version id, except on a bucket that never
- * enabled versioning, where it issues plain object deletes.
+ * The policy actions the worker's S3 calls need. An all-versions delete lists
+ * versions and deletes by version id, except on a bucket that never enabled
+ * versioning: every version there is the literal "null" one, which the worker
+ * drops to issue plain object deletes.
  */
-const SCOPE_ACTIONS: Record<BulkDeleteScope, PolicyAction[]> = {
-  [BulkDeleteScope.Current]: ['s3:ListBucket', 's3:DeleteObject'],
-  [BulkDeleteScope.AllVersions]: [
-    's3:ListBucketVersions',
-    's3:DeleteObject',
-    's3:DeleteObjectVersion',
-  ],
-};
+async function getRequiredActions({
+  scope,
+  getVersioningStatus,
+}: BulkDeleteTarget): Promise<PolicyAction[]> {
+  if (scope === BulkDeleteScope.Current) return ['s3:ListBucket', 's3:DeleteObject'];
+  return (await getVersioningStatus()) === 'Never'
+    ? ['s3:ListBucketVersions', 's3:DeleteObject']
+    : ['s3:ListBucketVersions', 's3:DeleteObjectVersion'];
+}
 
 /**
  * Why a member may not run a bulk deletion: no policy grants them the bucket,
@@ -42,6 +45,8 @@ export type BulkDeleteAccess = BulkDeleteAllowed | BulkDeleteRefused;
 export interface BulkDeleteTarget {
   bucketName: string;
   scope: BulkDeleteScope;
+  /** Read only for an all-versions delete the member check applies to. */
+  getVersioningStatus: () => Promise<BucketVersioningStatus>;
 }
 
 /**
@@ -53,7 +58,7 @@ export async function canBulkDelete(
   orchestrator: RegionOrchestrator,
   tenantId: string,
   memberId: string | undefined,
-  { bucketName, scope }: BulkDeleteTarget,
+  target: BulkDeleteTarget,
 ): Promise<BulkDeleteAccess> {
   if (!memberId || !supportsIamMethods(orchestrator.region)) return { ok: true };
   // Every region serving the iam access model has a ServiceOrchestrator, which
@@ -62,9 +67,10 @@ export async function canBulkDelete(
     tenantId,
     memberId,
   );
-  const granted = access.find((entry) => entry.bucketName === bucketName)?.actions;
+  const granted = access.find((entry) => entry.bucketName === target.bucketName)?.actions;
   if (!granted) return { ok: false, reason: 'bucket-not-granted' };
-  if (!SCOPE_ACTIONS[scope].every((action) => granted.includes(action))) {
+  const required = await getRequiredActions(target);
+  if (!required.every((action) => granted.includes(action))) {
     return { ok: false, reason: 'action-not-granted' };
   }
   return { ok: true };

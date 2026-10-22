@@ -38,7 +38,10 @@ import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { createS3Client } from '../lib/s3-client.ts';
-import { getBucketVersioningStatus } from '../lib/s3-bucket-operations.ts';
+import {
+  getBucketVersioningStatus,
+  type BucketVersioningStatus,
+} from '../lib/s3-bucket-operations.ts';
 import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.ts';
 
 const LOG = '[bulk-delete-worker]';
@@ -162,16 +165,34 @@ async function runPages(
   getRemainingTimeInMillis: RemainingTimeFn,
   onProgress: (job: BulkDeleteJobRecord) => void,
 ): Promise<RunOutcome> {
-  const s3 = createS3Client(await resolveClientContext(initial));
+  const { orchestrator, tenantId } = await resolveTenant(initial);
+  const s3 = createS3Client(await orchestrator.getS3ClientContext(tenantId));
   let job = initial;
 
   // Only AllVersions ever sees a literal "null" version id (Current lists by
   // key only), and a job's bucket doesn't change mid-run, so this is resolved
-  // once per invocation rather than per page.
+  // at most once per invocation, shared by the access check and the walk.
+  let versioningStatus: Promise<BucketVersioningStatus> | undefined;
+  const getVersioningStatus = () =>
+    (versioningStatus ??= getBucketVersioningStatus(s3, job.bucketName));
+
+  // The tenant's credentials delete without any policy evaluation, so the
+  // starting member's access is re-checked before this run deletes anything:
+  // access revoked after the job was queued stops it.
+  const access = await canBulkDelete(orchestrator, tenantId, job.memberId, {
+    bucketName: job.bucketName,
+    scope: job.scope,
+    getVersioningStatus,
+  });
+  if (!access.ok) {
+    // A policy change will not be undone by redelivery.
+    throw new NonRetryableBulkDeleteError(
+      `Your access to ${job.bucketName} no longer permits bulk deletion`,
+    );
+  }
+
   const bucketVersioningStatus =
-    job.scope === BulkDeleteScope.AllVersions
-      ? await getBucketVersioningStatus(s3, job.bucketName)
-      : undefined;
+    job.scope === BulkDeleteScope.AllVersions ? await getVersioningStatus() : undefined;
 
   for (;;) {
     const page = await enumerateDeletionPage({
@@ -207,27 +228,16 @@ async function runPages(
 }
 
 /**
- * Resolve the tenant's S3 credentials for the job's region. Every backend
- * (Aurora, FTH, Forge) supplies these through the same orchestrator method, so
- * the worker needs no per-region knowledge.
- *
- * Re-checks the starting member's bucket access first, since those credentials
- * delete without any policy evaluation: access revoked after the job was queued
- * stops it before this run deletes anything.
+ * Resolve the tenant for the job's region. Every backend (Aurora, FTH, Forge)
+ * supplies its S3 credentials through the same orchestrator method, so the
+ * worker needs no per-region knowledge.
  */
-async function resolveClientContext(job: BulkDeleteJobRecord) {
+async function resolveTenant(job: BulkDeleteJobRecord) {
   const orchestrator = getOrchestratorForRegion(job.region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(job.orgId));
   if (!tenantId) {
     // Provisioning will not appear by itself between deliveries.
     throw new NonRetryableBulkDeleteError(`Tenant is not provisioned in region ${job.region}`);
   }
-  const access = await canBulkDelete(orchestrator, tenantId, job.memberId, job);
-  if (!access.ok) {
-    // A policy change will not be undone by redelivery.
-    throw new NonRetryableBulkDeleteError(
-      `Your access to ${job.bucketName} no longer permits bulk deletion`,
-    );
-  }
-  return orchestrator.getS3ClientContext(tenantId);
+  return { orchestrator, tenantId };
 }

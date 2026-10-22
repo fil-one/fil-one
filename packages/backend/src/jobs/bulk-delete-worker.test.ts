@@ -52,6 +52,7 @@ vi.mock('../lib/bulk-delete-queue.ts', async (importOriginal) => {
 
 import { getBulkDeleteJob, putBulkDeleteJob } from '../lib/bulk-delete-jobs.ts';
 import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.ts';
+import { getBucketVersioningStatus } from '../lib/s3-bucket-operations.ts';
 import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.ts';
 import { processJob } from './bulk-delete-worker.ts';
 
@@ -284,6 +285,31 @@ describe('bulk-delete worker', () => {
 
       expect(mockDelete).toHaveBeenCalledTimes(1);
       expect(lastSavedJob().status).toBe(BulkDeleteJobStatus.Completed);
+    });
+
+    it('deletes for a member without s3:DeleteObjectVersion on a bucket that never enabled versioning', async () => {
+      // The worker drops the "null" version id there and issues plain deletes.
+      vi.mocked(getBucketVersioningStatus).mockResolvedValueOnce('Never');
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockResolvedValue([
+        { bucketName: 'bucket', actions: ['s3:ListBucketVersions', 's3:DeleteObject'] },
+      ]);
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+      expect(lastSavedJob().status).toBe(BulkDeleteJobStatus.Completed);
+    });
+
+    it("reads the bucket's versioning once for both the access check and the walk", async () => {
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockResolvedValue([
+        { bucketName: 'bucket', actions: allVersionsActions },
+      ]);
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(getBucketVersioningStatus).toHaveBeenCalledTimes(1);
     });
 
     it("looks up the member's access by tenant and member id", async () => {
