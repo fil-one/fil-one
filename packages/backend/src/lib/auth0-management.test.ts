@@ -88,6 +88,21 @@ describe('hasAuth0UserWithEmail', () => {
     );
   });
 
+  it('gives up within its timeout when the token endpoint stalls', async () => {
+    // Only the token request stalls, so a cached token would let the lookup
+    // answer and fail this test rather than pass it by another route.
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (!String(url).includes('/oauth/token')) return Response.json([]);
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+      });
+    });
+
+    await expect(hasAuth0UserWithEmail('any@example.com')).rejects.toMatchObject({
+      name: 'TimeoutError',
+    });
+  }, 5000);
+
   it('throws when Auth0 refuses the lookup', async () => {
     setupFetchMock([
       { match: '/users-by-email', response: new Response('forbidden', { status: 403 }) },
