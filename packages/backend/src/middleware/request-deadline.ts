@@ -7,6 +7,21 @@ import type { AuthenticatedEvent } from '../lib/user-context.ts';
 // regions returned, log the failure and send the response.
 export const REQUEST_DEADLINE_MARGIN_MS = 500;
 
+// The API Gateway request context plus the fields this middleware writes and
+// reads, which the AWS type does not declare.
+type DeadlineRequestContext = APIGatewayProxyEventV2['requestContext'] & {
+  deadline: AbortSignal;
+  deadlineStep?: string;
+  userInfo?: { orgId?: string; userId?: string };
+};
+
+type DeadlineRequest = Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
+
+// The abort listener of each request still in flight, so the request's end can
+// remove it. Without that, a warm container thawed for the next invocation would
+// fire the old timer and log a deadline for a request that had already answered.
+const stopDeadlineLogs = new WeakMap<APIGatewayProxyEventV2, () => void>();
+
 /**
  * Attaches `requestContext.deadline`, a signal that aborts
  * {@link REQUEST_DEADLINE_MARGIN_MS} before the Lambda timeout. Handlers pass
@@ -17,20 +32,43 @@ export const REQUEST_DEADLINE_MARGIN_MS = 500;
  * The deadline comes from the invocation's remaining time, so it follows each
  * route's configured timeout, and the time spent in middleware and in reads
  * before the first upstream call counts against it.
+ *
+ * When the deadline fires on a handler that marked its steps with
+ * {@link markRequestStep}, the step in flight is logged. That names the call
+ * even when it takes no signal and goes on hanging until the Lambda timeout.
  */
 export function requestDeadlineMiddleware() {
-  const before = (
-    request: Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>,
-  ): void => {
+  const before = (request: DeadlineRequest): void => {
     const remainingMs = request.context.getRemainingTimeInMillis();
-    (
-      request.event.requestContext as APIGatewayProxyEventV2['requestContext'] & {
-        deadline: AbortSignal;
-      }
-    ).deadline = AbortSignal.timeout(Math.max(0, remainingMs - REQUEST_DEADLINE_MARGIN_MS));
+    const requestContext = request.event.requestContext as DeadlineRequestContext;
+    const deadline = AbortSignal.timeout(Math.max(0, remainingMs - REQUEST_DEADLINE_MARGIN_MS));
+    requestContext.deadline = deadline;
+
+    const logStepInFlight = () => {
+      if (requestContext.deadlineStep === undefined) return;
+      console.error('[request-deadline] Request deadline reached', {
+        step: requestContext.deadlineStep,
+        orgId: requestContext.userInfo?.orgId,
+        userId: requestContext.userInfo?.userId,
+        apiRequestId: requestContext.requestId,
+      });
+    };
+    deadline.addEventListener('abort', logStepInFlight, { once: true });
+    stopDeadlineLogs.set(request.event, () =>
+      deadline.removeEventListener('abort', logStepInFlight),
+    );
   };
 
-  return { before } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;
+  const stopDeadlineLog = (request: DeadlineRequest): void => {
+    stopDeadlineLogs.get(request.event)?.();
+    stopDeadlineLogs.delete(request.event);
+  };
+
+  return {
+    before,
+    after: stopDeadlineLog,
+    onError: stopDeadlineLog,
+  } satisfies MiddlewareObj<APIGatewayProxyEventV2, APIGatewayProxyResultV2>;
 }
 
 /** The signal {@link requestDeadlineMiddleware} attached to this request. */
@@ -42,4 +80,12 @@ export function getRequestDeadline(event: AuthenticatedEvent): AbortSignal {
     );
   }
   return deadline;
+}
+
+/**
+ * Names the upstream call the handler is about to await, for the log line
+ * {@link requestDeadlineMiddleware} writes if the deadline fires during it.
+ */
+export function markRequestStep(event: AuthenticatedEvent, step: string): void {
+  event.requestContext.deadlineStep = step;
 }

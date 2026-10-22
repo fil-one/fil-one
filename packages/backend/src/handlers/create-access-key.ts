@@ -57,13 +57,25 @@ import {
 } from '../middleware/authorize.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import {
+  getRequestDeadline,
+  markRequestStep,
+  requestDeadlineMiddleware,
+} from '../middleware/request-deadline.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
+//
+// The request deadline bounds the orchestrator calls that take it: a hung one
+// fails at the deadline and reaches the error handler, instead of the Lambda
+// timeout killing the request with nothing logged. The steps marked below name
+// the call in flight when the deadline fires, including the DynamoDB calls and
+// `syncMember`, which take no signal.
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  const signal = getRequestDeadline(event);
   const parsed = parseCreateRequest(event.body);
   if ('error' in parsed) return parsed.error;
 
@@ -84,17 +96,20 @@ export async function baseHandler(
 
   // Before ensureTenantReady: the key is minted upstream, so a fence checked
   // only at the DynamoDB write would leave a live credential behind.
+  markRequestStep(event, 'isOrgDeleting');
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(region);
   const denied = checkServiceKeyAuthority(event, parsed.data, orchestrator);
   if (denied) return denied;
-  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  markRequestStep(event, 'ensureTenantReady');
+  const tenantId = await orchestrator.ensureTenantReady(orgId, { signal });
   if (!tenantId) return tenantNotReadyResponse();
 
   // Before the intent, because nothing happened: a name the org already shows
   // is a request that was never going to produce a key, and writing an intent
   // for it would leave an operator reading a mint that never started.
+  markRequestStep(event, 'orgAlreadyShowsKeyName');
   if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) return duplicateKeyNameResponse();
 
   // A key bound to a principal syncs the principal first: the write is
@@ -104,6 +119,7 @@ export async function baseHandler(
   // anywhere, and an intent left dangling by it would read to an operator as a
   // possible orphan key.
   if ('principalId' in keyOpts && supportsIamMethods(region)) {
+    markRequestStep(event, 'syncMember');
     await (orchestrator as ServiceOrchestrator).syncMember(tenantId, userId);
   }
 
@@ -113,6 +129,7 @@ export async function baseHandler(
   // name the key — the id comes back from the vendor — which is what makes a
   // dangling intent legible: a key was asked for by this name and no completion
   // followed. Both halves are filed under the org for the same reason.
+  markRequestStep(event, 'twoPhaseAudit');
   const mint = await twoPhaseAudit({
     type: 'key.created',
     mode: 'fail-closed',
@@ -124,8 +141,10 @@ export async function baseHandler(
 
   let accessKey: IssuedAccessKey;
   try {
-    accessKey = await orchestrator.issueAccessKey(tenantId, keyOpts);
+    markRequestStep(event, 'issueAccessKey');
+    accessKey = await orchestrator.issueAccessKey(tenantId, keyOpts, { signal });
   } catch (err) {
+    markRequestStep(event, 'handleMintRefusal');
     return await handleMintRefusal(err, {
       orgId,
       tenantId,
@@ -136,6 +155,7 @@ export async function baseHandler(
       mint,
       creator,
       principalId: getPrincipalId(keyOpts),
+      signal,
     });
   }
 
@@ -148,6 +168,7 @@ export async function baseHandler(
     tenantId,
   };
 
+  markRequestStep(event, 'recordMintedKey');
   const record = await recordMintedKey({
     row: {
       pk: AccessKeyKeys.orgPk(orgId),
@@ -163,16 +184,32 @@ export async function baseHandler(
     mint,
     minter: creator,
   });
+  // The discards below delete a key the vendor already minted, so they run
+  // without the deadline: a signal that has already fired would abort the
+  // delete at once and leave the very credential they exist to remove.
   if (!record.recorded) {
+    markRequestStep(event, 'discardUnrecordedKey');
     await discardUnrecordedKey({ minted: mintedKey, mint, minter: creator });
     return record.reason === 'minter_role_changed' ? roleChangedResponse() : mintConflictResponse();
   }
 
+  markRequestStep(event, 'keyExceedsCurrentRole');
   if (await keyExceedsCurrentRole(creator)) {
+    markRequestStep(event, 'discardRecordedKey');
     await discardRecordedKey({ minted: mintedKey, minter: creator, actor });
     return roleChangedResponse();
   }
 
+  return createdKeyResponse(accessKey, keyName);
+}
+
+type CreateKeyRequest = CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest;
+
+/** The 201 that hands the caller the new key, its secret included. */
+function createdKeyResponse(
+  accessKey: IssuedAccessKey,
+  keyName: string,
+): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(201)
     .body<CreateAccessKeyResponse>({
@@ -185,8 +222,6 @@ export async function baseHandler(
     })
     .build();
 }
-
-type CreateKeyRequest = CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest;
 
 /**
  * The key the orchestrator is asked to mint, by the request's shape. A key bound
@@ -398,6 +433,8 @@ interface MintAttempt {
   creator: KeyMinter;
   /** The principal a principal-bound key is bound to; its name is unique only within it. */
   principalId?: string;
+  /** The request deadline, for the vendor lookup a duplicate's recovery makes. */
+  signal: AbortSignal;
 }
 
 async function recoverDuplicateKey({
@@ -410,6 +447,7 @@ async function recoverDuplicateKey({
   mint,
   creator,
   principalId,
+  signal,
 }: MintAttempt): Promise<void> {
   if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) {
     // A plain duplicate name: the vendor refused and there is nothing to
@@ -420,7 +458,9 @@ async function recoverDuplicateKey({
 
   // Partial failure: key exists in Orchestrator's DB, but our DynamoDB record is missing.
   // Recover by fetching key details from the provider and writing the DB record.
-  const recovered = await orchestrator.findAccessKeyByName(tenantId, keyName, principalId);
+  const recovered = await orchestrator.findAccessKeyByName(tenantId, keyName, principalId, {
+    signal,
+  });
 
   if (!recovered) {
     // Shouldn't happen — orchestrator returned conflict but key not found in list.
@@ -481,6 +521,7 @@ async function recoverDuplicateKey({
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   // A service key's permissions are capped at the creator's own inside the
