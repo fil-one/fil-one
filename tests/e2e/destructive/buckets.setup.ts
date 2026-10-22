@@ -30,10 +30,14 @@ for (const { role, needsActiveSubscription } of SEED_PLAN) {
         return;
       }
 
-      setup.setTimeout(ACCOUNT_STATE_TIMEOUT_MS);
+      // The step changes the account state twice, so it gets twice the budget
+      // of a single change.
+      setup.setTimeout(2 * ACCOUNT_STATE_TIMEOUT_MS);
       const userId = requireUserId(role);
-      await setAccountState(userId, 'paid');
       try {
+        // The Lambda writes the `paid` billing row before it syncs the tenants,
+        // so a failed sync leaves the row changed and the `finally` restores it.
+        await setAccountState(userId, 'paid');
         await ensureBucketInEachRegion(page, role);
       } finally {
         await setAccountState(userId, role);
