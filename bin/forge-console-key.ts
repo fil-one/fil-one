@@ -1,25 +1,26 @@
 #!/usr/bin/env node
 
-// Re-issue the per-tenant Forge console access key so it carries the bucket
-// versioning and object-lock actions.
+// Rotate the per-tenant Forge console access key to a new version carrying the
+// current CONSOLE_KEY_PERMISSIONS list.
 //
 // The console talks to each Forge region's S3 gateway with one service key per
 // tenant, created during tenant setup and stashed at
 // /filone/<stage>/<orchestratorId>-s3/access-key/<tenantId> — see
-// packages/backend/src/lib/orchestrator/tenant-setup.ts. Since fil-forge/hilt#102
-// the gateway authorizes GET/PUT ?versioning and ?object-lock on their own
-// actions, and keys minted before CONSOLE_KEY_PERMISSIONS gained them get a 403
-// on every bucket page. The Management API cannot update a key and key names
-// are unique within a tenant, so the key cannot be replaced in place. `rotate`
-// creates a second key named `filone-console-v2` and points SSM at it; `prune`
-// deletes the old `filone-console` key afterwards.
+// packages/backend/src/lib/orchestrator/tenant-setup.ts. A key carries the
+// permissions it was created with, so when CONSOLE_KEY_PERMISSIONS gains an
+// action, keys minted before it are refused that action. The Management API
+// cannot update a key and key names are unique within a tenant, so the key
+// cannot be replaced in place. The key's name carries a version
+// (lib/console-key-version.ts): tenant setup creates `filone-console`, version
+// 1. `rotate` creates version N+1 beside the version N the console signs with
+// and points SSM at it; `prune` deletes version N-1 afterwards.
 //
 // Usage:
-//   node bin/forge-console-key.ts rotate <stage> [--region <region>] [--org <orgId>] [--dry-run]
+//   node bin/forge-console-key.ts rotate <stage> [--region <region>] [--org <orgId>] [--only-if-missing-perms] [--dry-run]
 //   node bin/forge-console-key.ts prune  <stage> [--region <region>] [--org <orgId>] [--dry-run]
 //
-//   node bin/forge-console-key.ts rotate staging --dry-run
-//   node bin/forge-console-key.ts rotate staging
+//   node bin/forge-console-key.ts rotate staging --only-if-missing-perms --dry-run
+//   node bin/forge-console-key.ts rotate staging --only-if-missing-perms
 //   node bin/forge-console-key.ts prune  staging
 //
 // Every Forge region the stage offers is processed (getAvailableRegions in
@@ -31,24 +32,27 @@
 // every container that started before the rotation is gone. Lambda containers
 // cache the SSM value for their whole lifetime (getConsoleS3Credentials in
 // packages/backend/src/lib/s3-credentials.ts has no TTL), so a warm container
-// keeps signing with the v1 key until it recycles; the next deploy replaces
+// keeps signing with version N until it recycles; the next deploy replaces
 // them all. Both keys are valid until the prune.
 //
-// `rotate` skips a tenant whose SSM-referenced key already carries the full
+// `rotate` re-issues every tenant's key. With `--only-if-missing-perms` it
+// skips a tenant whose SSM-referenced key already carries the full
 // CONSOLE_KEY_PERMISSIONS list, so re-runs and tenants provisioned after the
-// change are cheap. It writes SSM only after the new key answers a GET on its id
-// and signs an S3 ListBuckets (plus a GetBucketVersioning when the tenant has a
-// bucket). A tenant whose verification fails keeps the key it already has.
+// change are cheap. It refuses a tenant that still holds a console key older
+// than version N, because `prune` deletes only version N-1 and the older key
+// would never be cleaned up: prune that tenant first. It writes SSM only after
+// the new key answers a GET on its id and signs an S3 ListBuckets (plus a
+// GetBucketVersioning when the tenant has a bucket). A tenant whose
+// verification fails keeps the key it already has.
 //
 // The Management API takes no idempotency key on access-key creation (see
 // management-openapi.yaml, "Idempotency"): a create it already committed comes
 // back as a 409 on the name, so there is nothing to replay.
 //
-// `prune` deletes v1 only for a tenant whose SSM-referenced key exists and
-// carries the full list. A tenant provisioned after the change signs with a v1
-// key that already has everything, and keeps it. Any other state means the
-// rotation has not landed for that tenant: it keeps its working v1 key, is
-// reported, and makes the command exit non-zero.
+// `prune` deletes version N-1 only for a tenant whose SSM-referenced key,
+// version N, exists. A tenant that signs with version 1 has nothing to prune.
+// A tenant whose SSM parameter is missing or names a key the API does not have
+// keeps every key, is reported, and makes the command exit non-zero.
 //
 // Environment, one pair per Forge network (the Lambda env names, see forgeEnv in
 // sst.config.ts for each stage's URL):
@@ -81,20 +85,19 @@ import {
   type Client,
   type CreatedAccessKey,
 } from '@filone/orchestrator-client';
-import {
-  CONSOLE_KEY_NAME,
-  CONSOLE_KEY_PERMISSIONS,
-} from '@filone/backend/src/lib/orchestrator/tenant-setup.ts';
+import { CONSOLE_KEY_PERMISSIONS } from '@filone/backend/src/lib/orchestrator/tenant-setup.ts';
 import { ORCHESTRATOR_ID_BY_REGION } from '@filone/backend/src/lib/service-orchestrator-ids.ts';
 import { getAvailableRegions, getS3Endpoint, S3Region } from '@filone/shared';
+import {
+  findOlderConsoleKeys,
+  findPrunableConsoleKey,
+  getConsoleKeyName,
+  getNextConsoleKeyVersion,
+} from './lib/console-key-version.ts';
 import { findTable } from './lib/sst-state.ts';
 
 const USAGE =
-  'Usage: node bin/forge-console-key.ts <rotate|prune> <stage> [--region <region>] [--org <orgId>] [--dry-run]';
-
-// The key `rotate` creates. RESERVED_KEY_NAME_PREFIX in @filone/shared keeps
-// customers off the whole `filone-console` prefix.
-const CONSOLE_KEY_NAME_V2 = `${CONSOLE_KEY_NAME}-v2`;
+  'Usage: node bin/forge-console-key.ts <rotate|prune> <stage> [--region <region>] [--org <orgId>] [--only-if-missing-perms] [--dry-run]';
 
 interface ForgeNetwork {
   apiUrlEnv: string;
@@ -137,6 +140,10 @@ if (!stage || stage.startsWith('--')) exitWithUsage('Missing <stage>.');
 const orgFilter = readFlag('org');
 const regionFilter = readFlag('region');
 const dryRun = process.argv.includes('--dry-run');
+const onlyIfMissingPermissions = process.argv.includes('--only-if-missing-perms');
+if (onlyIfMissingPermissions && command !== 'rotate') {
+  exitWithUsage('--only-if-missing-perms applies to rotate only.');
+}
 
 const stageForgeRegions = getAvailableRegions(stage).filter((r) => FORGE_NETWORKS[r]);
 if (stageForgeRegions.length === 0) {
@@ -181,7 +188,9 @@ if (!process.env.AWS_PROFILE) {
   process.exit(1);
 }
 
-console.error(`Command: ${command}${dryRun ? ' (dry run)' : ''}`);
+console.error(
+  `Command: ${command}${onlyIfMissingPermissions ? ' --only-if-missing-perms' : ''}${dryRun ? ' (dry run)' : ''}`,
+);
 console.error(`Stage: ${stage}`);
 console.error(`Regions: ${regions.join(', ')}`);
 
@@ -249,7 +258,7 @@ process.exit(failed > 0 ? 1 : 0);
 
 // ── Commands ────────────────────────────────────────────────────
 
-/** Returns true when a new v2 key was created for this tenant. */
+/** Returns true when a new key version was created for this tenant. */
 async function rotateTenant(ctx: RegionContext, orgId: string, tenantId: string): Promise<boolean> {
   const where = formatLabel(ctx, orgId, tenantId);
   const currentAccessKeyId = await readSsmAccessKeyId(ctx, tenantId);
@@ -257,54 +266,57 @@ async function rotateTenant(ctx: RegionContext, orgId: string, tenantId: string)
     ? await getAccessKey(ctx, tenantId, currentAccessKeyId)
     : undefined;
 
-  if (currentKey && getMissingPermissions(currentKey).length === 0) {
+  if (onlyIfMissingPermissions && currentKey && getMissingPermissions(currentKey).length === 0) {
     console.error(`${where}: already on a key with the full permission list — skipping.`);
     return false;
   }
-  if (currentKey?.name === CONSOLE_KEY_NAME_V2) {
+
+  const nextVersion = getNextConsoleKeyVersion(currentKey?.name);
+  const nextName = getConsoleKeyName(nextVersion);
+  const existingKeys = await listAccessKeys(ctx, tenantId);
+
+  const olderKeys = findOlderConsoleKeys(existingKeys, nextVersion - 1);
+  if (olderKeys.length > 0) {
     throw new Error(
-      `SSM already points at ${CONSOLE_KEY_NAME_V2} (${currentKey.accessKeyId}), which lacks ` +
-        `${getMissingPermissions(currentKey).join(', ')}. A further rotation needs a new key name.`,
+      `${olderKeys.map((k) => `${k.name} (${k.accessKeyId})`).join(', ')} still exists beside ` +
+        `${getConsoleKeyName(nextVersion - 1)}, and a prune after this rotation would leave it ` +
+        'behind. Run `prune` for this tenant first. Nothing was changed.',
     );
   }
 
-  // A v2 key whose secret is not the one in SSM is unusable: the API returns
-  // the secret only on create. It can only come from a crash between the create
-  // and the SSM write, so delete it and mint a fresh one.
-  const existingKeys = await listAccessKeys(ctx, tenantId);
-  const staleV2 = existingKeys.find(
-    (k) =>
-      k.type === 'service' &&
-      k.name === CONSOLE_KEY_NAME_V2 &&
-      k.accessKeyId !== currentAccessKeyId,
+  // A key with the next name whose secret is not the one in SSM is unusable:
+  // the API returns the secret only on create. It can only come from a crash
+  // between the create and the SSM write, so delete it and mint a fresh one.
+  const staleKey = existingKeys.find(
+    (k) => k.type === 'service' && k.name === nextName && k.accessKeyId !== currentAccessKeyId,
   );
-  if (staleV2) {
+  if (staleKey) {
     // Our DynamoDB rows tell a customer key from a leftover; deleting a key the
     // customer is using would break their integration.
     const customerKeyIds = await findCustomerAccessKeyIds(orgId);
-    if (customerKeyIds.has(staleV2.accessKeyId)) {
+    if (customerKeyIds.has(staleKey.accessKeyId)) {
       throw new Error(
-        `${CONSOLE_KEY_NAME_V2} (${staleV2.accessKeyId}) is a customer key on this tenant, ` +
+        `${nextName} (${staleKey.accessKeyId}) is a customer key on this tenant, ` +
           'not a leftover from a failed rotation. Nothing was changed.',
       );
     }
     console.error(
-      `${where}: ${CONSOLE_KEY_NAME_V2} exists (${staleV2.accessKeyId}) but SSM points elsewhere — ` +
+      `${where}: ${nextName} exists (${staleKey.accessKeyId}) but SSM points elsewhere — ` +
         'its secret is unrecoverable, deleting it.',
     );
-    if (!dryRun) await deleteAccessKey(ctx, tenantId, staleV2.accessKeyId);
+    if (!dryRun) await deleteAccessKey(ctx, tenantId, staleKey.accessKeyId);
   }
 
   if (dryRun) {
     console.error(
-      `${where}: [dry-run] would create ${CONSOLE_KEY_NAME_V2}, verify it, and repoint ` +
+      `${where}: [dry-run] would create ${nextName}, verify it, and repoint ` +
         `${getSsmParameterName(ctx, tenantId)}`,
     );
     return true;
   }
 
-  const created = await createV2Key(ctx, tenantId);
-  await verifyNewKey(ctx, tenantId, created);
+  const created = await createConsoleKey(ctx, tenantId, nextName);
+  await verifyNewKey(ctx, tenantId, nextName, created);
 
   await ssm.send(
     new PutParameterCommand({
@@ -319,25 +331,19 @@ async function rotateTenant(ctx: RegionContext, orgId: string, tenantId: string)
   );
 
   console.error(
-    `${where}: created ${CONSOLE_KEY_NAME_V2} (${created.accessKeyId}), verified it against the ` +
+    `${where}: created ${nextName} (${created.accessKeyId}), verified it against the ` +
       'management API and S3, and repointed SSM. Warm Lambda containers keep using the old key ' +
       'until they recycle.',
   );
   return true;
 }
 
-/** Returns true when the v1 key was deleted for this tenant. */
+/** Returns true when version N-1 was deleted for this tenant. */
 async function pruneTenant(ctx: RegionContext, orgId: string, tenantId: string): Promise<boolean> {
   const where = formatLabel(ctx, orgId, tenantId);
-  const existingKeys = await listAccessKeys(ctx, tenantId);
-  const v1 = existingKeys.find((k) => k.type === 'service' && k.name === CONSOLE_KEY_NAME);
-  if (!v1) {
-    console.error(`${where}: no ${CONSOLE_KEY_NAME} key — nothing to prune.`);
-    return false;
-  }
 
-  // v1 is the credential that still works, so it goes only once the one
-  // replacing it is real and complete.
+  // Version N-1 may be the credential that still works, so it goes only once
+  // the version N replacing it is real.
   const currentAccessKeyId = await readSsmAccessKeyId(ctx, tenantId);
   if (!currentAccessKeyId) {
     throw new Error(
@@ -351,27 +357,24 @@ async function pruneTenant(ctx: RegionContext, orgId: string, tenantId: string):
       `SSM points at ${currentAccessKeyId}, which the API answers with a 404. Run \`rotate\` for this tenant first.`,
     );
   }
-  const missing = getMissingPermissions(currentKey);
-  if (missing.length > 0) {
-    throw new Error(
-      `SSM points at ${currentKey.name} (${currentAccessKeyId}), which lacks ${missing.join(', ')}. ` +
-        'Run `rotate` for this tenant first.',
-    );
-  }
-  if (v1.accessKeyId === currentAccessKeyId) {
+
+  const previousKey = findPrunableConsoleKey(await listAccessKeys(ctx, tenantId), currentKey.name);
+  if (!previousKey) {
     console.error(
-      `${where}: the console signs with ${CONSOLE_KEY_NAME}, which carries the full list — keeping it.`,
+      `${where}: the console signs with ${currentKey.name}; no key one version below it — nothing to prune.`,
     );
     return false;
   }
 
   if (dryRun) {
-    console.error(`${where}: [dry-run] would delete ${CONSOLE_KEY_NAME} (${v1.accessKeyId})`);
+    console.error(
+      `${where}: [dry-run] would delete ${previousKey.name} (${previousKey.accessKeyId})`,
+    );
     return true;
   }
 
-  await deleteAccessKey(ctx, tenantId, v1.accessKeyId);
-  console.error(`${where}: deleted ${CONSOLE_KEY_NAME} (${v1.accessKeyId}).`);
+  await deleteAccessKey(ctx, tenantId, previousKey.accessKeyId);
+  console.error(`${where}: deleted ${previousKey.name} (${previousKey.accessKeyId}).`);
   return true;
 }
 
@@ -420,12 +423,16 @@ async function deleteAccessKey(
 
 // The loop's catch prefixes region, org and tenant, so this only has to say
 // what failed and what the operator does about it.
-async function createV2Key(ctx: RegionContext, tenantId: string): Promise<CreatedAccessKey> {
+async function createConsoleKey(
+  ctx: RegionContext,
+  tenantId: string,
+  name: string,
+): Promise<CreatedAccessKey> {
   const { data, error, response } = await postTenantsByTenantIdAccessKeys({
     client: ctx.client,
     path: { tenantId },
     body: {
-      name: CONSOLE_KEY_NAME_V2,
+      name,
       permissions: [...CONSOLE_KEY_PERMISSIONS],
       buckets: [],
       expiresAt: null,
@@ -434,7 +441,7 @@ async function createV2Key(ctx: RegionContext, tenantId: string): Promise<Create
   });
   if (error || !data) {
     throw new Error(
-      `could not create ${CONSOLE_KEY_NAME_V2} (HTTP ${response?.status ?? 'none'}) — ` +
+      `could not create ${name} (HTTP ${response?.status ?? 'none'}) — ` +
         `${formatError(error)}. SSM was not written.`,
     );
   }
@@ -449,6 +456,7 @@ async function createV2Key(ctx: RegionContext, tenantId: string): Promise<Create
 async function verifyNewKey(
   ctx: RegionContext,
   tenantId: string,
+  name: string,
   created: CreatedAccessKey,
 ): Promise<void> {
   if (!created.accessKeyId || !created.secretAccessKey) {
@@ -456,21 +464,25 @@ async function verifyNewKey(
   }
   if (!(await getAccessKey(ctx, tenantId, created.accessKeyId))) {
     throw new Error(
-      `the API created ${CONSOLE_KEY_NAME_V2} (${created.accessKeyId}) and then 404s on it. ` +
+      `the API created ${name} (${created.accessKeyId}) and then 404s on it. ` +
         'SSM was not written; the tenant keeps signing with the key it has.',
     );
   }
-  await verifyS3Access(ctx, created);
+  await verifyS3Access(ctx, name, created);
 }
 
 // ── S3 data plane ───────────────────────────────────────────────
 
 /**
  * Signs a ListBuckets with the new credentials, then a GetBucketVersioning on
- * the first bucket when there is one: the action the old key is denied, which
- * proves the gateway honours the new grant.
+ * the first bucket when there is one: an action the gateway authorizes on its
+ * own (fil-forge/hilt#102), which proves it honours the key's grant list.
  */
-async function verifyS3Access(ctx: RegionContext, key: CreatedAccessKey): Promise<void> {
+async function verifyS3Access(
+  ctx: RegionContext,
+  name: string,
+  key: CreatedAccessKey,
+): Promise<void> {
   const s3 = new S3Client({
     region: ctx.region,
     endpoint: ctx.s3EndpointUrl,
@@ -489,7 +501,7 @@ async function verifyS3Access(ctx: RegionContext, key: CreatedAccessKey): Promis
     } catch (err) {
       if (attempt === attempts) {
         throw new Error(
-          `${CONSOLE_KEY_NAME_V2} (${key.accessKeyId}) failed S3 verification after ${attempts} ` +
+          `${name} (${key.accessKeyId}) failed S3 verification after ${attempts} ` +
             `attempts — ${formatError(err)}. SSM was not written.`,
         );
       }
