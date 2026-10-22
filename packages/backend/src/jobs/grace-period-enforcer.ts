@@ -131,17 +131,7 @@ async function cancelSubscriptionAndDisableTenant(
   // The row is behind Stripe: a subscription that still bills means the
   // customer is paying, and disabling them is not this job's call.
   if (subscription && BILLING_STATUSES.has(subscription.status)) {
-    console.error(
-      '[grace-period-enforcer] Grace expired but Stripe still bills the subscription, skipping',
-      {
-        userId: candidate.userId,
-        orgId: candidate.orgId,
-        subscriptionId: subscription.id,
-        status: subscription.status,
-      },
-    );
-    emitGraceExpiredWithLiveSubscription(subscription.status);
-    return 'skipped';
+    return skipLiveSubscription(candidate, subscription);
   }
 
   assertRegionSyncSucceeded(
@@ -151,6 +141,15 @@ async function cancelSubscriptionAndDisableTenant(
   // Nothing is billed at a cancel that ends a grace period: a trial owes
   // nothing, and an unpaid subscription's open invoices stay open.
   if (subscription && CANCELABLE_STATUSES.has(subscription.status)) {
+    // Looked up again: a reactivation can land while the tenant is disabled,
+    // and may have re-enabled it before this run's disable reached it.
+    const current = await retrieveIfExists(subscription.id);
+    if (current && BILLING_STATUSES.has(current.status)) {
+      assertRegionSyncSucceeded(
+        await syncTenantStatusInProvisionedRegions(candidate.orgId, 'active'),
+      );
+      return skipLiveSubscription(candidate, current);
+    }
     await getStripeClient().subscriptions.cancel(subscription.id, {
       invoice_now: false,
       prorate: false,
@@ -178,6 +177,23 @@ async function cancelSubscriptionAndDisableTenant(
     subscriptionId: candidate.subscriptionId,
   });
   return 'canceled';
+}
+
+function skipLiveSubscription(
+  candidate: Candidate,
+  subscription: Stripe.Subscription,
+): CandidateOutcome {
+  console.error(
+    '[grace-period-enforcer] Grace expired but Stripe still bills the subscription, skipping',
+    {
+      userId: candidate.userId,
+      orgId: candidate.orgId,
+      subscriptionId: subscription.id,
+      status: subscription.status,
+    },
+  );
+  emitGraceExpiredWithLiveSubscription(subscription.status);
+  return 'skipped';
 }
 
 async function retrieveIfExists(subscriptionId: string): Promise<Stripe.Subscription | undefined> {
