@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import type { ListBucketsResponse } from '@filone/shared';
 
+import { ANALYTICS_CONCURRENCY } from '../components/BucketStorageLine.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { BucketsPage } from './BucketsPage.js';
@@ -324,3 +325,55 @@ describe('BucketsPage degraded regions', () => {
     expect(await screen.findByText(DEGRADED_MESSAGE)).toBeInTheDocument();
   });
 });
+
+describe('BucketsPage storage line', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it(`asks for the analytics of at most ${ANALYTICS_CONCURRENCY} buckets at a time`, async () => {
+    mockBucketsWithPendingAnalytics(ANALYTICS_CONCURRENCY + 3);
+    renderPage();
+    await waitFor(() => expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY));
+
+    // Give any request over the limit the chance to go out.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+    expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY);
+  });
+
+  it("asks for the next bucket's analytics once an earlier one answers", async () => {
+    const answers = mockBucketsWithPendingAnalytics(ANALYTICS_CONCURRENCY + 3);
+    renderPage();
+    await waitFor(() => expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY));
+
+    act(() => answers[0]());
+
+    await waitFor(() => expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY + 1));
+  });
+});
+
+/**
+ * A list of buckets whose analytics requests stay pending until the test
+ * answers them. Returns one answer function per request, in request order.
+ */
+function mockBucketsWithPendingAnalytics(bucketCount: number): Array<() => void> {
+  const buckets = Array.from({ length: bucketCount }, (_, index) => ({
+    ...BUCKETS.buckets[0],
+    bucketName: `any-bucket-${index}`,
+  }));
+  const answers: Array<() => void> = [];
+  mockApiRequest.mockImplementation((path: string, options?: { signal?: AbortSignal }) => {
+    if (!path.includes('/analytics')) return Promise.resolve({ buckets });
+    return new Promise((resolve, reject) => {
+      answers.push(() => resolve(EMPTY_ANALYTICS));
+      // Rejects on abort as fetch does.
+      options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+    });
+  });
+  return answers;
+}
+
+function analyticsCalls() {
+  return mockApiRequest.mock.calls.filter(([path]) => String(path).includes('/analytics'));
+}
