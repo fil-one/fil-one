@@ -5,7 +5,7 @@ import { Route } from './invite.accept.js';
 import {
   hasPendingInviteToken,
   resetTakenInviteToken,
-  takeInviteToken,
+  getCachedInviteToken,
 } from '../lib/invite-token.js';
 
 const TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -35,7 +35,7 @@ describe('the accept route’s beforeLoad', () => {
     runBeforeLoad();
 
     expect(window.location.hash).toBe('');
-    expect(takeInviteToken()).toBe(TOKEN);
+    expect(getCachedInviteToken()).toBe(TOKEN);
   });
 
   it('strips the fragment before anything could have called the API', () => {
@@ -86,6 +86,6 @@ describe('the accept route’s beforeLoad', () => {
 
     runBeforeLoad();
 
-    expect(takeInviteToken()).toBeNull();
+    expect(getCachedInviteToken()).toBeNull();
   });
 });

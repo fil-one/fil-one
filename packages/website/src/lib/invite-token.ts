@@ -49,12 +49,12 @@ export function readAndStripInviteTokenFromHash(): string | null {
  */
 let inMemoryToken: string | null = null;
 
-/** The token `takeInviteToken` last returned, until the next stash. */
-let stashedToken: string | null = null;
+/** The token `getCachedInviteToken` last returned, until the next `cacheInviteToken`. */
+let cachedInviteToken: string | null = null;
 
-export function stashInviteToken(token: string): void {
-  // A stash starts a new hand-over, so the next take reads storage and clears it.
-  stashedToken = null;
+export function cacheInviteToken(token: string): void {
+  // A new token to cache, so the next `getCachedInviteToken` reads storage and clears it.
+  cachedInviteToken = null;
   try {
     sessionStorage.setItem(STASH_KEY, token);
   } catch {
@@ -80,29 +80,29 @@ export function hasPendingInviteToken(): boolean {
 }
 
 /**
- * Take the stashed token, clearing it from storage.
+ * Get the cached token, clearing it from storage.
  *
- * Idempotent until the next stash: the route takes it in `beforeLoad`, so
+ * Idempotent until the next `cacheInviteToken`: the route gets it in `beforeLoad`, so
  * that storage is clear before any redirect can be thrown, and the component
  * asks again when it renders. Memoizing the answer means those two are the same
  * token rather than a token and a null, and clearing storage first means a page
  * that then fails to render cannot leave the app bouncing back here forever.
  */
-export function takeInviteToken(): string | null {
-  if (stashedToken !== null) return stashedToken;
+export function getCachedInviteToken(): string | null {
+  if (cachedInviteToken !== null) return cachedInviteToken;
   try {
     const stored = sessionStorage.getItem(STASH_KEY);
     if (stored !== null) sessionStorage.removeItem(STASH_KEY);
-    stashedToken = stored ?? inMemoryToken;
+    cachedInviteToken = stored ?? inMemoryToken;
   } catch {
-    stashedToken = inMemoryToken;
+    cachedInviteToken = inMemoryToken;
   }
   inMemoryToken = null;
-  return stashedToken;
+  return cachedInviteToken;
 }
 
 /** Test seam: forget the token this page load has already taken. */
 export function resetTakenInviteToken(): void {
-  stashedToken = null;
+  cachedInviteToken = null;
   inMemoryToken = null;
 }

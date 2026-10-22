@@ -4,8 +4,8 @@ import {
   hasPendingInviteToken,
   readAndStripInviteTokenFromHash,
   resetTakenInviteToken,
-  stashInviteToken,
-  takeInviteToken,
+  cacheInviteToken,
+  getCachedInviteToken,
 } from './invite-token.js';
 
 const TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -70,39 +70,39 @@ describe('invite-token', () => {
 
   describe('the stash', () => {
     it('reports a token waiting and hands it over exactly once', () => {
-      stashInviteToken(TOKEN);
+      cacheInviteToken(TOKEN);
       expect(hasPendingInviteToken()).toBe(true);
 
-      expect(takeInviteToken()).toBe(TOKEN);
+      expect(getCachedInviteToken()).toBe(TOKEN);
       // Storage is cleared on the way out, so nothing sends the app back here.
       expect(sessionStorage.getItem('filone:pendingInviteToken')).toBeNull();
       expect(hasPendingInviteToken()).toBe(false);
     });
 
     it('answers the same token when asked again in one page load', () => {
-      stashInviteToken(TOKEN);
+      cacheInviteToken(TOKEN);
 
       // The route takes it in `beforeLoad`; the component asks again on render.
-      expect(takeInviteToken()).toBe(TOKEN);
-      expect(takeInviteToken()).toBe(TOKEN);
+      expect(getCachedInviteToken()).toBe(TOKEN);
+      expect(getCachedInviteToken()).toBe(TOKEN);
     });
 
     it('clears storage again when a token taken earlier in the page load is stashed and taken again', () => {
-      stashInviteToken(TOKEN);
-      takeInviteToken();
+      cacheInviteToken(TOKEN);
+      getCachedInviteToken();
 
       // The accept page stashes again when it is refused for an unverified
       // email, then comes back to the route after `/verify-email` without a
       // reload. A token left in storage sends every later visit to the app
       // route straight back to the accept page.
-      stashInviteToken(TOKEN);
-      expect(takeInviteToken()).toBe(TOKEN);
+      cacheInviteToken(TOKEN);
+      expect(getCachedInviteToken()).toBe(TOKEN);
       expect(hasPendingInviteToken()).toBe(false);
     });
 
     it('has nothing to hand over when nothing was stashed', () => {
       expect(hasPendingInviteToken()).toBe(false);
-      expect(takeInviteToken()).toBeNull();
+      expect(getCachedInviteToken()).toBeNull();
     });
 
     it('keeps the token in memory when storage refuses it', () => {
@@ -113,13 +113,13 @@ describe('invite-token', () => {
         throw new Error('storage disabled');
       });
 
-      expect(() => stashInviteToken(TOKEN)).not.toThrow();
+      expect(() => cacheInviteToken(TOKEN)).not.toThrow();
       // Nothing is waiting for another document to pick up — memory does not
       // outlive this one — but the accept that needs no login round trip has
       // its token, which is the difference between the link working in this
       // browser and never working in it.
       expect(hasPendingInviteToken()).toBe(false);
-      expect(takeInviteToken()).toBe(TOKEN);
+      expect(getCachedInviteToken()).toBe(TOKEN);
     });
 
     it('answers with no token when storage is unavailable and nothing was stashed', () => {
@@ -127,7 +127,7 @@ describe('invite-token', () => {
         throw new Error('storage disabled');
       });
 
-      expect(takeInviteToken()).toBeNull();
+      expect(getCachedInviteToken()).toBeNull();
     });
   });
 });
