@@ -78,6 +78,7 @@ export const CONSOLE_KEY_PERMISSIONS = [
   's3:GetEncryptionConfiguration',
   's3:PutEncryptionConfiguration',
   's3:PutBucketTagging',
+  's3:PutBucketCORS',
 ] as const;
 
 const dynamo = getDynamoClient();

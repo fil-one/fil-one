@@ -352,6 +352,7 @@ describe('ensureTenantReady', () => {
       's3:GetEncryptionConfiguration',
       's3:PutEncryptionConfiguration',
       's3:PutBucketTagging',
+      's3:PutBucketCORS',
     ]);
   });
 
