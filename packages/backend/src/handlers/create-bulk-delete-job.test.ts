@@ -314,6 +314,29 @@ describe('create-bulk-delete-job', () => {
       expect(mockResolveMemberAccess).not.toHaveBeenCalled();
     });
 
+    it('records the Member on the job so the worker can re-check their access', async () => {
+      mockResolveMemberAccess.mockResolvedValue(
+        grantActionsOnBucket('my-bucket', [
+          's3:ListBucketVersions',
+          's3:DeleteObject',
+          's3:DeleteObjectVersion',
+        ]),
+      );
+
+      await baseHandler(eventAs(OrgRole.Member));
+
+      expect(mockCreate.mock.calls[0][0]).toMatchObject({ memberId: 'any-user' });
+    });
+
+    it.each([OrgRole.Owner, OrgRole.Admin])(
+      'records no member on a job an %s starts',
+      async (role) => {
+        await baseHandler(eventAs(role));
+
+        expect(mockCreate.mock.calls[0][0].memberId).toBeUndefined();
+      },
+    );
+
     it.each([OrgRole.Owner, OrgRole.Admin])(
       'queues the job without an access lookup for an %s',
       async (role) => {
