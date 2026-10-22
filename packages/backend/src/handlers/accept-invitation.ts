@@ -42,14 +42,15 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * The one org route with no org gate, and it has to be: the caller is not a
  * member of the inviting org yet, so a membership check here would refuse every
  * invitation there is. Authorization is the token plus a session whose email
- * matches the invitation — the token alone must not admit whoever a forwarded
- * email reaches.
+ * matches the invitation.
  *
- * The session's address need not be verified yet. The invitation reached that
- * inbox and the caller signed up as that address, which proves it as well as
- * Auth0's verification email would, so an unverified caller is marked verified
- * in Auth0 before the transaction runs. If that call fails the accept is
- * refused, so no member ever holds an unverified address.
+ * The session's address need not be verified yet: a valid token plus a session
+ * signed up as the invited address is taken as proof of that address. So
+ * whoever holds a forwarded or leaked link can sign up as the invited address
+ * and join. What still guards it: the session's address must match the
+ * invitation, and for an unverified session Auth0 must hold that same address
+ * before it is marked verified. The mark lands before the transaction, and a
+ * failure refuses the accept, so no member holds an unverified address.
  *
  * What the request never touches is as load-bearing as what it does. No
  * entitlement row, no Stripe call, no billing read: an invitation must not
