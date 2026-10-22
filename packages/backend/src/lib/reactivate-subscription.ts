@@ -89,8 +89,29 @@ async function updateLiveSubscription(
     case 'unpaid':
       await settleOpenInvoices(stripe, subscription, paymentMethodId);
       return stripe.subscriptions.retrieve(id, { expand: EXPAND });
+    case 'paused':
+      return resumeSubscription(stripe, id);
     default:
       return discountFollows ? stripe.subscriptions.retrieve(id, { expand: EXPAND }) : attached;
+  }
+}
+
+/**
+ * Resumes a paused subscription on a new billing period starting now. Stripe
+ * charges the resumption invoice to the card just attached and leaves the
+ * subscription paused if the charge fails; the caller sees its status and
+ * answers 402.
+ */
+async function resumeSubscription(stripe: Stripe, id: string): Promise<Stripe.Subscription> {
+  try {
+    return await stripe.subscriptions.resume(id, {
+      billing_cycle_anchor: { type: 'now' },
+      payment_behavior: 'resume_on_payment_success',
+      expand: EXPAND,
+    });
+  } catch (err) {
+    if ((err as { type?: string }).type !== 'StripeCardError') throw err;
+    return stripe.subscriptions.retrieve(id, { expand: EXPAND });
   }
 }
 
