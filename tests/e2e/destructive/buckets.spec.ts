@@ -33,7 +33,7 @@ async function createBucketWithKey(page: Page, bucketName: string, region: Regio
 // (/buckets/<name>?region=<region>), which is the stable per-region hook.
 // Upload tests reuse existing buckets rather than creating new ones because
 // the account-wide bucket limit is 100 and buckets are not yet deletable. The
-// `seed-buckets` project (buckets.setup.ts) creates a bucket per region for
+// `destructive-seed-buckets` project (buckets.setup.ts) creates a bucket per region for
 // every role that has none, so reaching the assertion below means the seeding
 // did not run or did not cover this region.
 async function openFirstBucketInRegion(page: Page, region: Region): Promise<string> {

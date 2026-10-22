@@ -30,40 +30,36 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
+    // Project names follow `<suite>-<browser>`, where the suite is the
+    // directory under tests/e2e, so `--project='<suite>-*'` selects a suite.
+    //
     // setup for disruptive tests
     {
-      name: 'setup',
+      name: 'destructive-setup',
+      testDir: './tests/e2e/destructive',
       testMatch: /auth\.setup\.ts/,
     },
     // Seeds a bucket per region for the roles that need one. Separate from the
-    // `setup` project because it reuses the storage state that project writes.
+    // setup project because it reuses the storage state that project writes.
     {
-      name: 'seed-buckets',
+      name: 'destructive-seed-buckets',
+      testDir: './tests/e2e/destructive',
       testMatch: /buckets\.setup\.ts/,
-      dependencies: ['setup'],
+      dependencies: ['destructive-setup'],
     },
-    // The staging-only suites, per browser. Smoke runs in its own project below.
-    {
-      name: 'full-chromium',
-      testDir: './tests/e2e',
-      testIgnore: /(multi-org|policies|smoke)\//,
-      use: { ...devices['Desktop Chrome'] },
-      dependencies: ['seed-buckets'],
-    },
-    {
-      name: 'full-firefox',
-      testDir: './tests/e2e',
-      testIgnore: /(multi-org|policies|smoke)\//,
-      use: { ...devices['Desktop Firefox'] },
-      dependencies: ['seed-buckets'],
-    },
-    {
-      name: 'full-webkit',
-      testDir: './tests/e2e',
-      testIgnore: /(multi-org|policies|smoke)\//,
-      use: { ...devices['Desktop Safari'] },
-      dependencies: ['seed-buckets'],
-    },
+    // The staging-only suite, per browser.
+    ...(
+      [
+        ['destructive-chromium', 'Desktop Chrome'],
+        ['destructive-firefox', 'Desktop Firefox'],
+        ['destructive-webkit', 'Desktop Safari'],
+      ] as const
+    ).map(([name, device]) => ({
+      name,
+      testDir: './tests/e2e/destructive',
+      use: { ...devices[device] },
+      dependencies: ['destructive-seed-buckets'],
+    })),
     // The multi-org suite, on its own accounts. Serial: the specs share them.
     {
       name: 'multi-org-setup',
@@ -74,7 +70,7 @@ export default defineConfig({
     // they run again after one setup.
     ...(
       [
-        ['multi-org', 'Desktop Chrome'],
+        ['multi-org-chromium', 'Desktop Chrome'],
         ['multi-org-firefox', 'Desktop Firefox'],
         ['multi-org-webkit', 'Desktop Safari'],
       ] as const
@@ -100,7 +96,8 @@ export default defineConfig({
       ? [
           {
             name: 'policies-setup',
-            testMatch: /policies\/policies\.setup\.ts/,
+            testDir: './tests/e2e/policies',
+            testMatch: /policies\.setup\.ts/,
             // The seat test activates the billing row the owner's login creates.
             fullyParallel: false,
             workers: 1,
@@ -113,7 +110,7 @@ export default defineConfig({
           // tests in a file stay in order.
           ...(
             [
-              ['policies', 'Desktop Chrome', /@serial/],
+              ['policies-chromium', 'Desktop Chrome', /@serial/],
               ['policies-firefox', 'Desktop Firefox', /@serial|@api/],
               ['policies-webkit', 'Desktop Safari', /@serial|@api/],
             ] as const
@@ -129,7 +126,7 @@ export default defineConfig({
           // above has finished.
           ...(
             [
-              ['policies-serial', 'Desktop Chrome', undefined],
+              ['policies-serial-chromium', 'Desktop Chrome', undefined],
               ['policies-serial-firefox', 'Desktop Firefox', /@api/],
               ['policies-serial-webkit', 'Desktop Safari', /@api/],
             ] as const
@@ -142,13 +139,15 @@ export default defineConfig({
             fullyParallel: false,
             workers: 1,
             dependencies:
-              i === 0 ? ['policies', 'policies-firefox', 'policies-webkit'] : [all[i - 1][0]],
+              i === 0
+                ? ['policies-chromium', 'policies-firefox', 'policies-webkit']
+                : [all[i - 1][0]],
           })),
         ]
       : []),
     // smoke tests executed in production
     {
-      name: 'smoke',
+      name: 'smoke-chromium',
       testDir: './tests/e2e/smoke',
       use: { ...devices['Desktop Chrome'] },
     },

@@ -5,141 +5,15 @@ on:
 
 jobs:
   e2e:
-    # One job per suite, each logging in as its own accounts, so the suites
-    # run at once. Each suite runs every browser in one Playwright run, one
-    # test at a time, because the browsers share the suite's accounts.
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - suite: main
-            browsers: chromium firefox webkit
-            args: --project=full-chromium --project=full-firefox --project=full-webkit --project=smoke
-          - suite: multi-org
-            browsers: chromium firefox webkit
-            args: --project=multi-org --project=multi-org-firefox --project=multi-org-webkit
-          - suite: policies
-            browsers: chromium firefox webkit
-            args: --project=policies --project=policies-firefox --project=policies-webkit --project=policies-serial --project=policies-serial-firefox --project=policies-serial-webkit --workers=2
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Each suite's group is shared with the same suite's job in
-    # e2e-staging.yaml: a suite resets its accounts' BillingTable rows and
-    # org membership, so two overlapping runs of it break each other.
-    # When several post-deploy runs wait, only the newest one stays queued;
-    # it tests the latest deploy, which includes the earlier commits.
-    concurrency:
-      group: e2e-staging-${{ matrix.suite }}
-      cancel-in-progress: false
-      # queue: max would run every waiting job in turn, each testing the
-      # same latest deploy and delaying the newest commit's production
-      # deploy. The newest waiting run alone covers them all.
-      queue: single
-    environment: staging
+    uses: ./.github/workflows/e2e-suites.yaml
     permissions:
       id-token: write
       contents: read
-    env:
-      SST_STAGE: staging
-      AWS_REGION: us-east-2
-      BASE_URL: https://staging.fil.one
-      E2E_PAID_EMAIL: ${{ secrets.E2E_PAID_EMAIL }}
-      E2E_PAID_PASSWORD: ${{ secrets.E2E_PAID_PASSWORD }}
-      E2E_PAID_USER_ID: ${{ secrets.E2E_PAID_USER_ID }}
-      E2E_UNPAID_EMAIL: ${{ secrets.E2E_UNPAID_EMAIL }}
-      E2E_UNPAID_PASSWORD: ${{ secrets.E2E_UNPAID_PASSWORD }}
-      E2E_UNPAID_USER_ID: ${{ secrets.E2E_UNPAID_USER_ID }}
-      E2E_TRIAL_EMAIL: ${{ secrets.E2E_TRIAL_EMAIL }}
-      E2E_TRIAL_PASSWORD: ${{ secrets.E2E_TRIAL_PASSWORD }}
-      E2E_TRIAL_USER_ID: ${{ secrets.E2E_TRIAL_USER_ID }}
-      E2E_ORG_OWNER_EMAIL: ${{ secrets.E2E_ORG_OWNER_EMAIL }}
-      E2E_ORG_OWNER_PASSWORD: ${{ secrets.E2E_ORG_OWNER_PASSWORD }}
-      E2E_ORG_OWNER_AUTH0_ID: ${{ secrets.E2E_ORG_OWNER_AUTH0_ID }}
-      E2E_ORG_MEMBER_EMAIL: ${{ secrets.E2E_ORG_MEMBER_EMAIL }}
-      E2E_ORG_MEMBER_PASSWORD: ${{ secrets.E2E_ORG_MEMBER_PASSWORD }}
-      E2E_ORG_MEMBER_AUTH0_ID: ${{ secrets.E2E_ORG_MEMBER_AUTH0_ID }}
-      E2E_ORG_FRESH_EMAIL: ${{ secrets.E2E_ORG_FRESH_EMAIL }}
-      E2E_ORG_FRESH_PASSWORD: ${{ secrets.E2E_ORG_FRESH_PASSWORD }}
-      E2E_ORG_FRESH_AUTH0_ID: ${{ secrets.E2E_ORG_FRESH_AUTH0_ID }}
-      E2E_POLICY_OWNER_EMAIL: ${{ secrets.E2E_POLICY_OWNER_EMAIL }}
-      E2E_POLICY_OWNER_PASSWORD: ${{ secrets.E2E_POLICY_OWNER_PASSWORD }}
-      E2E_POLICY_OWNER_USER_ID: ${{ secrets.E2E_POLICY_OWNER_USER_ID }}
-      E2E_POLICY_ADMIN_EMAIL: ${{ secrets.E2E_POLICY_ADMIN_EMAIL }}
-      E2E_POLICY_ADMIN_PASSWORD: ${{ secrets.E2E_POLICY_ADMIN_PASSWORD }}
-      E2E_POLICY_ADMIN_USER_ID: ${{ secrets.E2E_POLICY_ADMIN_USER_ID }}
-      E2E_POLICY_MEMBER_EMAIL: ${{ secrets.E2E_POLICY_MEMBER_EMAIL }}
-      E2E_POLICY_MEMBER_PASSWORD: ${{ secrets.E2E_POLICY_MEMBER_PASSWORD }}
-      E2E_POLICY_MEMBER_USER_ID: ${{ secrets.E2E_POLICY_MEMBER_USER_ID }}
-      E2E_POLICY_READONLY_EMAIL: ${{ secrets.E2E_POLICY_READONLY_EMAIL }}
-      E2E_POLICY_READONLY_PASSWORD: ${{ secrets.E2E_POLICY_READONLY_PASSWORD }}
-      E2E_POLICY_READONLY_USER_ID: ${{ secrets.E2E_POLICY_READONLY_USER_ID }}
-      E2E_POLICY_LEAVER_EMAIL: ${{ secrets.E2E_POLICY_LEAVER_EMAIL }}
-      E2E_POLICY_LEAVER_PASSWORD: ${{ secrets.E2E_POLICY_LEAVER_PASSWORD }}
-      E2E_POLICY_LEAVER_USER_ID: ${{ secrets.E2E_POLICY_LEAVER_USER_ID }}
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps ${{ matrix.browsers }}
-
-      # auth.setup.ts re-seeds BillingTable rows for the test users via direct
-      # DynamoDB writes (see tests/e2e/billing-reset.ts). The test:e2e script
-      # wraps Playwright in `sst shell` so SST Resource bindings (BillingTable
-      # name, etc.) resolve to the staging stage.
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: us-east-2
-
-      - name: Run E2E tests
-        run: pnpm test:e2e ${{ matrix.args }}
-
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-report-staging-${{ matrix.suite }}-${{ github.run_id }}
-          path: playwright-report/
-          retention-days: 14
-
-      - name: Notify Slack on failure
-        if: failure()
-        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
-        with:
-          method: chat.postMessage
-          token: ${{ secrets.SLACK_BOT_TOKEN }}
-          payload: |
-            {
-              "channel": "filone-alerts",
-              "text": ${{ toJSON(format('E2E tests ({5} suite) failed after staging deploy. Commit: {0} by @{1}. Details: {2}/{3}/actions/runs/{4}', github.sha, github.actor, github.server_url, github.repository, github.run_id, matrix.suite)) }},
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": ${{ toJSON(format(':warning: *E2E tests ({3} suite) failed after staging deploy* · <{0}/{1}/actions/runs/{2}|Details>', github.server_url, github.repository, github.run_id, matrix.suite)) }}
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": ${{ toJSON(format('Commit: `{0}` by <https://github.com/{1}|@{1}>', github.sha, github.actor)) }}
-                  }
-                }
-              ]
-            }
+    secrets: inherit
+    with:
+      base_url: https://staging.fil.one
+      failure_title: E2E tests failed after staging deploy
+      failure_detail: "${{ format('Commit: `{0}` by <https://github.com/{1}|@{1}>', github.sha, github.actor) }}"
 
   integration:
     runs-on: ubuntu-latest
