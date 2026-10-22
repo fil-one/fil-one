@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
   hasPendingInviteToken,
+  hasSignUpHint,
   readAndStripInviteTokenFromHash,
   resetTakenInviteToken,
   cacheInviteToken,
@@ -59,6 +60,26 @@ describe('invite-token', () => {
 
     it('answers with none when there is no fragment at all', () => {
       expect(readAndStripInviteTokenFromHash()).toBeNull();
+    });
+
+    it.each([
+      { fragment: `token=${TOKEN}&signup=1`, expected: true },
+      { fragment: `token=${TOKEN}`, expected: false },
+    ])('reports a sign-up hint of $expected for #$fragment', ({ fragment, expected }) => {
+      window.history.replaceState(null, '', `/invite/accept#${fragment}`);
+
+      expect(readAndStripInviteTokenFromHash()).toBe(TOKEN);
+      expect(hasSignUpHint()).toBe(expected);
+    });
+
+    it('keeps the sign-up hint once the fragment is gone', () => {
+      window.history.replaceState(null, '', `/invite/accept#token=${TOKEN}&signup=1`);
+      readAndStripInviteTokenFromHash();
+
+      // `beforeLoad` runs again on first load and finds no fragment; it must
+      // redirect to the same place the first run did.
+      readAndStripInviteTokenFromHash();
+      expect(hasSignUpHint()).toBe(true);
     });
 
     it('decodes a token the link had to escape', () => {

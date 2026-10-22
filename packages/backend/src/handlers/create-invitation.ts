@@ -10,6 +10,7 @@ import {
 } from '@filone/shared';
 import type { CreateInvitationResponse, ErrorResponse, OrgRole } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
+import { hasAuth0UserWithEmail } from '../lib/auth0-management.ts';
 import { sendInvitationEmail } from '../lib/invite-mailer.ts';
 import {
   hashInviteToken,
@@ -164,15 +165,16 @@ export async function baseHandler(
 
   await revokeDeferred(later);
 
+  const [orgName, signUp] = await Promise.all([resolveOrgName(orgId), isSignUpLikely(emailNorm)]);
   const emailSent = await sendInvitationEmail({
     to: email,
     emailNorm,
     orgId,
     inviteId: invitation.inviteId,
-    orgName: await resolveOrgName(orgId),
+    orgName,
     inviterName: name,
     inviterEmail,
-    acceptUrl: acceptUrl(token),
+    acceptUrl: acceptUrl({ token, signUp }),
     expiresAt: invitation.expiresAt,
   });
   // Stamped on the row, not just returned: the console's pending list is where
@@ -227,6 +229,23 @@ function newInvitation({
 }
 
 /**
+ * Whether the invitee has no account yet, so the link should open sign-up.
+ *
+ * Decided here because the console, before login, holds only an opaque token
+ * and no endpoint will look an invitation up for an anonymous caller. A failed
+ * lookup answers false: sign-in still offers sign-up, and the invitation does
+ * not wait on Auth0.
+ */
+async function isSignUpLikely(emailNorm: string): Promise<boolean> {
+  try {
+    return !(await hasAuth0UserWithEmail(emailNorm));
+  } catch (err) {
+    console.error('[create-invitation] account lookup failed, linking to sign-in', err);
+    return false;
+  }
+}
+
+/**
  * Where the invitation link points: the console's accept route, which stashes
  * the token and bounces through login before calling the accept endpoint.
  *
@@ -237,12 +256,17 @@ function newInvitation({
  * `location.hash`. Settled here rather than later because the first emailed link
  * fixes the shape for as long as that mail sits in an inbox.
  *
+ * `signup=1` beside the token tells the console to send a signed-out caller to
+ * sign-up rather than sign-in.
+ *
  * `WEBSITE_URL` rather than `resolveOrigin`, which honours a request header on
  * non-production stages. An origin an inviter can choose is an origin an
  * attacker can choose, and this URL goes to somebody else's inbox.
  */
-function acceptUrl(token: string): string {
-  return `${process.env.WEBSITE_URL}/invite/accept#token=${encodeURIComponent(token)}`;
+function acceptUrl({ token, signUp }: { token: string; signUp: boolean }): string {
+  const fragment = new URLSearchParams({ token });
+  if (signUp) fragment.set('signup', '1');
+  return `${process.env.WEBSITE_URL}/invite/accept#${fragment}`;
 }
 
 /**

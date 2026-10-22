@@ -87,6 +87,26 @@ export async function getAuth0UserEmail(sub: string): Promise<string | undefined
 }
 
 /**
+ * Whether Auth0 holds any user, on any connection, with this email.
+ *
+ * Auth0 matches the address case-sensitively and stores it lowercased, so pass
+ * a normalized address.
+ */
+export async function hasAuth0UserWithEmail(email: string): Promise<boolean> {
+  const domain = getMgmtDomain();
+  const token = await getManagementToken();
+  const resp = await fetch(
+    `https://${domain}/api/v2/users-by-email?email=${encodeURIComponent(email)}&fields=user_id&include_fields=true`,
+    { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(3000) },
+  );
+
+  await throwIfNotOk(resp, 'Auth0 users-by-email failed');
+
+  const users = (await resp.json()) as unknown[];
+  return users.length > 0;
+}
+
+/**
  * The user's current picture URL, or undefined when Auth0 has none (or no such
  * user). Read before an avatar change so the upload it replaces can be deleted.
  */

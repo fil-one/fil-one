@@ -25,6 +25,7 @@ import {
   deleteAllAuthenticators,
   deleteRecoveryCode,
   getConnectionType,
+  hasAuth0UserWithEmail,
   MFA_GUARDIAN_TYPES,
 } from './auth0-management.ts';
 
@@ -65,6 +66,36 @@ describe('getConnectionType', () => {
 
   it('returns unknown for sub without pipe', () => {
     expect(getConnectionType('nopipe')).toBe('unknown');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasAuth0UserWithEmail
+// ---------------------------------------------------------------------------
+
+describe('hasAuth0UserWithEmail', () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  it.each([
+    { found: [{ user_id: 'auth0|any-user' }], expected: true },
+    { found: [], expected: false },
+  ])('answers $expected when Auth0 finds $found.length users', async ({ found, expected }) => {
+    setupFetchMock([{ match: '/users-by-email', response: Response.json(found) }]);
+
+    await expect(hasAuth0UserWithEmail('any@example.com')).resolves.toBe(expected);
+    expect(mockFetch.mock.calls.map(([url]) => String(url))).toContain(
+      'https://test.auth0.com/api/v2/users-by-email?email=any%40example.com&fields=user_id&include_fields=true',
+    );
+  });
+
+  it('throws when Auth0 refuses the lookup', async () => {
+    setupFetchMock([
+      { match: '/users-by-email', response: new Response('forbidden', { status: 403 }) },
+    ]);
+
+    await expect(hasAuth0UserWithEmail('any@example.com')).rejects.toThrow(
+      'Auth0 users-by-email failed (403): forbidden',
+    );
   });
 });
 
