@@ -44,6 +44,11 @@ vi.mock('../lib/member-principals.ts', () => ({
   registerMemberPrincipal: (args: unknown) => mockRegisterMemberPrincipal(args),
 }));
 
+const mockMarkAuth0EmailVerified = vi.fn(async (_sub: string) => {});
+vi.mock('../lib/auth0-management.ts', () => ({
+  markAuth0EmailVerified: (sub: string) => mockMarkAuth0EmailVerified(sub),
+}));
+
 import { handler } from './accept-invitation.ts';
 import { IamRegionRefusedError } from '../lib/errors.ts';
 import { OrgKeys } from '../lib/org-membership.ts';
@@ -257,6 +262,11 @@ function stubSession() {
     .resolves({ Item: { name: { S: 'Acme Corp' } } });
 }
 
+/** A session whose ID token says the address has not been verified yet. */
+function stubUnverifiedSession(email = EMAIL) {
+  mockJwtVerify.mockResolvedValue({ payload: { sub: MOCK_SUB, email, email_verified: false } });
+}
+
 function body(result: unknown) {
   return JSON.parse((result as { body: string }).body);
 }
@@ -268,6 +278,7 @@ function body(result: unknown) {
 describe('POST /api/invitations/accept handler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockMarkAuth0EmailVerified.mockReset();
     ddbMock.reset();
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -569,7 +580,7 @@ describe('POST /api/invitations/accept handler', () => {
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
-  it('refuses a session whose verified email is not the invited address', async () => {
+  it('refuses a session whose email is not the invited address', async () => {
     // The token alone must not admit whoever a forwarded email reaches.
     stubInvitation({ emailNorm: 'someone.else@example.com' });
 
@@ -590,19 +601,79 @@ describe('POST /api/invitations/accept handler', () => {
     expect(result).toMatchObject({ statusCode: 200 });
   });
 
-  it('refuses a session whose email is not verified, in the chain', async () => {
-    mockJwtVerify.mockResolvedValue({
-      payload: { sub: MOCK_SUB, email: EMAIL, email_verified: false },
+  it('leaves Auth0 alone for a session whose address is already verified', async () => {
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(mockMarkAuth0EmailVerified).not.toHaveBeenCalled();
+  });
+
+  it('joins an unverified session whose address is the invited one', async () => {
+    // The invitation reaching that inbox proves the address, so the invitee
+    // does not need Auth0's verification email as well.
+    stubUnverifiedSession('INVITEE@EXAMPLE.COM');
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(body(result)).toMatchObject({ orgId: INVITING_ORG_ID, alreadyMember: false });
+  });
+
+  it('marks the unverified address verified in Auth0 before writing the membership', async () => {
+    // A member must never hold an unverified address, so the join waits on Auth0.
+    stubUnverifiedSession();
+    const order: string[] = [];
+    mockMarkAuth0EmailVerified.mockImplementation(async (sub: string) => {
+      order.push(`verify ${sub}`);
     });
+    ddbMock.on(TransactWriteItemsCommand).callsFake(() => {
+      order.push('transaction');
+      return {};
+    });
+
+    await handler(acceptEvent(), buildContext());
+
+    expect(order).toStrictEqual([`verify ${MOCK_SUB}`, 'transaction']);
+  });
+
+  it('records and stamps the address it has just verified', async () => {
+    stubUnverifiedSession();
+
+    await handler(acceptEvent(), buildContext());
+
+    expect(auditedEvent()).toMatchObject({
+      actor: { kind: 'user', id: USER_ID, email: EMAIL },
+    });
+    expect(profileStamps()).toMatchObject([
+      { ExpressionAttributeValues: { ':email': { S: EMAIL } } },
+    ]);
+  });
+
+  it('refuses an unverified session whose email is not the invited address, verifying nothing', async () => {
+    stubUnverifiedSession();
+    stubInvitation({ emailNorm: 'someone.else@example.com' });
 
     const result = await handler(acceptEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 403 });
-    // Which layer refused matters: this is the shared verification gate, not the
-    // handler's address comparison, and the console's remedy for the two is
-    // different — verify your address, versus sign in as somebody else.
-    expect(body(result).code).toBe(ApiErrorCode.EMAIL_NOT_VERIFIED);
+    expect(body(result).code).toBe(ApiErrorCode.INVITE_EMAIL_MISMATCH);
+    expect(mockMarkAuth0EmailVerified).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  it('refuses the accept, writing nothing, when Auth0 will not mark the address verified', async () => {
+    // Nothing is written, so the caller can retry the same link.
+    stubUnverifiedSession();
+    mockMarkAuth0EmailVerified.mockRejectedValue(new Error('Auth0 update user failed (503)'));
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 502 });
+    expect(body(result)).toStrictEqual({
+      message: 'We could not confirm your email address. Please try again.',
+    });
+    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+    expect(profileStamps()).toHaveLength(0);
   });
 
   it('refuses a verified session that carries no address at all', async () => {

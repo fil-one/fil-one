@@ -154,6 +154,14 @@ export async function sendVerificationEmail(sub: string): Promise<void> {
 }
 
 /**
+ * Mark the user's email verified, for a caller that has proved the address some
+ * other way than Auth0's own verification email.
+ */
+export async function markAuth0EmailVerified(sub: string): Promise<void> {
+  await updateAuth0User(sub, { email_verified: true });
+}
+
+/**
  * Initiate an Auth0 password reset email for a database-connection user.
  */
 export async function initiatePasswordReset(email: string, clientId: string): Promise<void> {
