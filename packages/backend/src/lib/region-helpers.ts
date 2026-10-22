@@ -61,8 +61,9 @@ const STATUS_SYNC_RETRY: RetryOptions = { retries: 3 };
 export async function syncTenantStatusInProvisionedRegions(
   orgId: string,
   desired: TenantStatus,
+  options?: { consistent?: boolean },
 ): Promise<RegionSyncOutcome[]> {
-  const ready = await getProvisionedRegions(orgId);
+  const ready = await getProvisionedRegions(orgId, options);
 
   return Promise.all(
     ready.map(({ orchestrator, tenantId }) =>

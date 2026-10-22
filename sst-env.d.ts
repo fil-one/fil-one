@@ -22,6 +22,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "AccountStateTestHelper": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ActivateSubscription": {
       "name": string
       "type": "sst.aws.Function"
