@@ -4,8 +4,8 @@ import { Route as rootRoute } from './__root.js';
 import { AcceptInvitationPage } from '../pages/AcceptInvitationPage.js';
 import {
   readAndStripInviteTokenFromHash,
-  stashInviteToken,
-  takeInviteToken,
+  cacheInviteToken,
+  getCachedInviteToken,
 } from '../lib/invite-token.js';
 
 /**
@@ -24,7 +24,7 @@ export const Route = createRoute({
   path: '/invite/accept',
   beforeLoad: () => {
     const fromLink = readAndStripInviteTokenFromHash();
-    if (fromLink) stashInviteToken(fromLink);
+    if (fromLink) cacheInviteToken(fromLink);
 
     // No `returnTo` in the auth flow — every login lands on `/dashboard` — so
     // the token stays stashed across the bounce and the app route sends the
@@ -36,11 +36,11 @@ export const Route = createRoute({
     // Taken here rather than on render, so storage is clear before any later
     // redirect could be thrown: a page that then failed to render would
     // otherwise leave the app bouncing back to it forever.
-    takeInviteToken();
+    getCachedInviteToken();
   },
   component: AcceptInvitationRoute,
 });
 
 function AcceptInvitationRoute() {
-  return <AcceptInvitationPage token={takeInviteToken()} />;
+  return <AcceptInvitationPage token={getCachedInviteToken()} />;
 }

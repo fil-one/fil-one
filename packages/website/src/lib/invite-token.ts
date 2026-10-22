@@ -49,7 +49,12 @@ export function readAndStripInviteTokenFromHash(): string | null {
  */
 let inMemoryToken: string | null = null;
 
-export function stashInviteToken(token: string): void {
+/** The token `getCachedInviteToken` last returned, until the next `cacheInviteToken`. */
+let cachedInviteToken: string | null = null;
+
+export function cacheInviteToken(token: string): void {
+  // A new token to cache, so the next `getCachedInviteToken` reads storage and clears it.
+  cachedInviteToken = null;
   try {
     sessionStorage.setItem(STASH_KEY, token);
   } catch {
@@ -74,32 +79,30 @@ export function hasPendingInviteToken(): boolean {
   }
 }
 
-let taken: string | null = null;
-
 /**
- * Take the stashed token, clearing it from storage.
+ * Get the cached token, clearing it from storage.
  *
- * Idempotent for the life of the page: the route takes it in `beforeLoad`, so
+ * Idempotent until the next `cacheInviteToken`: the route gets it in `beforeLoad`, so
  * that storage is clear before any redirect can be thrown, and the component
  * asks again when it renders. Memoizing the answer means those two are the same
  * token rather than a token and a null, and clearing storage first means a page
  * that then fails to render cannot leave the app bouncing back here forever.
  */
-export function takeInviteToken(): string | null {
-  if (taken !== null) return taken;
+export function getCachedInviteToken(): string | null {
+  if (cachedInviteToken !== null) return cachedInviteToken;
   try {
     const stored = sessionStorage.getItem(STASH_KEY);
     if (stored !== null) sessionStorage.removeItem(STASH_KEY);
-    taken = stored ?? inMemoryToken;
+    cachedInviteToken = stored ?? inMemoryToken;
   } catch {
-    taken = inMemoryToken;
+    cachedInviteToken = inMemoryToken;
   }
   inMemoryToken = null;
-  return taken;
+  return cachedInviteToken;
 }
 
 /** Test seam: forget the token this page load has already taken. */
 export function resetTakenInviteToken(): void {
-  taken = null;
+  cachedInviteToken = null;
   inMemoryToken = null;
 }
