@@ -131,7 +131,7 @@ export async function baseHandler(
       bucketName,
       prefix,
       scope,
-      memberId,
+      startedBy: userId,
     });
 
     try {

@@ -469,10 +469,11 @@ export interface BulkDeleteJobRecord {
   prefix: string;
   scope: BulkDeleteScope;
   /**
-   * The scoped member who started the job, whose bucket access the worker
-   * re-checks before each run. Absent for an Owner or Admin.
+   * The user who started the job. The worker re-reads their role, and for a
+   * scoped member their bucket access, before each run. Absent on jobs queued
+   * before it was recorded.
    */
-  memberId?: string;
+  startedBy?: string;
   status: BulkDeleteJobStatus;
   deletedCount: number;
   failedCount: number;

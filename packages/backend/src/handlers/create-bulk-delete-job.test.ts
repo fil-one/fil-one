@@ -359,26 +359,18 @@ describe('create-bulk-delete-job', () => {
       expect(mockResolveMemberAccess).not.toHaveBeenCalled();
     });
 
-    it('records the Member on the job so the worker can re-check their access', async () => {
-      mockResolveMemberAccess.mockResolvedValue(
-        grantActionsOnBucket('my-bucket', [
-          's3:ListBucketVersions',
-          's3:DeleteObject',
-          's3:DeleteObjectVersion',
-        ]),
-      );
-
-      await baseHandler(eventAs(OrgRole.Member));
-
-      expect(mockCreate.mock.calls[0][0]).toMatchObject({ memberId: 'any-user' });
-    });
-
-    it.each([OrgRole.Owner, OrgRole.Admin])(
-      'records no member on a job an %s starts',
+    // The worker re-reads the starter's role before each run, so every job
+    // records who started it, scoped or not.
+    it.each([OrgRole.Member, OrgRole.Owner, OrgRole.Admin])(
+      'records the %s who starts the job',
       async (role) => {
+        mockResolveMemberAccess.mockResolvedValue(
+          grantActionsOnBucket('my-bucket', ['s3:ListBucketVersions', 's3:DeleteObjectVersion']),
+        );
+
         await baseHandler(eventAs(role));
 
-        expect(mockCreate.mock.calls[0][0].memberId).toBeUndefined();
+        expect(mockCreate.mock.calls[0][0]).toMatchObject({ startedBy: 'any-user' });
       },
     );
 

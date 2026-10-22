@@ -159,6 +159,7 @@ const createArgs = {
   bucketName: 'bucket',
   prefix: '',
   scope: BulkDeleteScope.AllVersions,
+  startedBy: 'any-user',
 };
 
 function conditionalFailure() {
@@ -191,23 +192,14 @@ describe('createBulkDeleteJob', () => {
     expect(input.ConditionExpression).toBe('attribute_not_exists(sk)');
   });
 
-  it('records the scoped member who started the job', async () => {
+  it('records the user who started the job', async () => {
     ddbMock.on(PutItemCommand).resolves({});
 
-    const record = await createBulkDeleteJob({ ...createArgs, memberId: 'any-member' });
+    const record = await createBulkDeleteJob(createArgs);
 
-    expect(record).toMatchObject({ memberId: 'any-member' });
+    expect(record).toMatchObject({ startedBy: 'any-user' });
     const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-    expect(unmarshall(item)).toMatchObject({ memberId: 'any-member' });
-  });
-
-  it('writes no member for a job an unscoped caller started', async () => {
-    ddbMock.on(PutItemCommand).resolves({});
-
-    await createBulkDeleteJob(createArgs);
-
-    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
-    expect(item).not.toHaveProperty('memberId');
+    expect(unmarshall(item)).toMatchObject({ startedBy: 'any-user' });
   });
 
   it('surfaces the running job when the same idempotency key is submitted twice', async () => {

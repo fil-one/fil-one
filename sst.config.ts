@@ -965,7 +965,8 @@ export default $config({
       handler: 'packages/backend/src/jobs/bulk-delete-worker.handler',
       // Linking the queue covers both directions: consuming its messages and
       // enqueueing the continuation for a job too large for one invocation.
-      link: [bulkDeleteTable, userInfoTable, bulkDeleteQueue, ...managementApiTokens],
+      // OrgTable holds the starter's membership, re-read before each run.
+      link: [bulkDeleteTable, userInfoTable, orgTable, bulkDeleteQueue, ...managementApiTokens],
       environment: orchestratorEnv,
       timeout: '900 seconds',
       memory: '512 MB',

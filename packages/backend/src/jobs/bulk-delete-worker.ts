@@ -19,7 +19,7 @@
 
 import type { Context, SQSEvent, SQSRecord } from 'aws-lambda';
 
-import { BulkDeleteScope, isTerminalBulkDeleteStatus } from '@filone/shared';
+import { BulkDeleteScope, isTerminalBulkDeleteStatus, roleHasPermission } from '@filone/shared';
 
 import { canBulkDelete } from '../lib/bulk-delete-access.ts';
 import {
@@ -35,6 +35,8 @@ import {
   type BulkDeleteWorkerPayload,
 } from '../lib/bulk-delete-queue.ts';
 import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
+import { getScopedMemberId } from '../lib/member-scope.ts';
+import { resolveMembership } from '../lib/org-membership.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { createS3Client } from '../lib/s3-client.ts';
@@ -166,6 +168,7 @@ async function runPages(
   onProgress: (job: BulkDeleteJobRecord) => void,
 ): Promise<RunOutcome> {
   const { orchestrator, tenantId } = await resolveTenant(initial);
+  const memberId = await resolveStarterScope(initial);
   const s3 = createS3Client(await orchestrator.getS3ClientContext(tenantId));
   let job = initial;
 
@@ -179,7 +182,7 @@ async function runPages(
   // The tenant's credentials delete without any policy evaluation, so the
   // starting member's access is re-checked before this run deletes anything:
   // access revoked after the job was queued stops it.
-  const access = await canBulkDelete(orchestrator, tenantId, job.memberId, {
+  const access = await canBulkDelete(orchestrator, tenantId, memberId, {
     bucketName: job.bucketName,
     scope: job.scope,
     getVersioningStatus,
@@ -225,6 +228,23 @@ async function runPages(
     // while this is the exact budget Lambda will enforce.
     if (getRemainingTimeInMillis() <= DEADLINE_BUFFER_MS) return { job, exhausted: false };
   }
+}
+
+/**
+ * The member the starter's deletion is scoped to, or undefined for a starter
+ * the console serves unscoped, read from their current role: a role change
+ * after the job was queued applies to its next run. Fails the job when the
+ * starter is no longer a member or no longer holds `objects.delete`.
+ */
+async function resolveStarterScope(job: BulkDeleteJobRecord): Promise<string | undefined> {
+  // Queued before the starter was recorded.
+  if (!job.startedBy) return undefined;
+  const membership = await resolveMembership(job.orgId, job.startedBy);
+  if (!membership || !roleHasPermission(membership.role, 'objects.delete')) {
+    // A role change will not be undone by redelivery.
+    throw new NonRetryableBulkDeleteError('Your role no longer permits deleting objects');
+  }
+  return getScopedMemberId(membership.role, job.startedBy);
 }
 
 /**
