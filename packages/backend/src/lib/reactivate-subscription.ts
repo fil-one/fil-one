@@ -76,6 +76,8 @@ async function updateLiveSubscription(
   });
   // The discount gets its own update so it is in place before the next step
   // generates or pays an invoice; bundled, the invoice ordering is ambiguous.
+  // It applies to invoices from here on: an overdue invoice was finalized
+  // before the code was accepted, and is paid at its finalized amount.
   if (discountFollows) {
     await stripe.subscriptions.update(id, {
       discounts: [{ promotion_code: promotionCodeId }],
