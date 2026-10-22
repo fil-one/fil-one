@@ -8,6 +8,7 @@ const mockSubscriptionsRetrieve = vi.fn();
 const mockSubscriptionsUpdate = vi.fn();
 const mockSubscriptionsCreate = vi.fn();
 const mockSubscriptionsList = vi.fn();
+const mockSubscriptionsResume = vi.fn();
 const mockInvoicesList = vi.fn();
 const mockInvoicesFinalize = vi.fn();
 const mockInvoicesPay = vi.fn();
@@ -20,6 +21,7 @@ const stripe = {
     update: mockSubscriptionsUpdate,
     create: mockSubscriptionsCreate,
     list: mockSubscriptionsList,
+    resume: mockSubscriptionsResume,
   },
   invoices: {
     list: mockInvoicesList,
@@ -62,6 +64,7 @@ function writes(): string[] {
   const calls: [string, ReturnType<typeof vi.fn>][] = [
     ['update', mockSubscriptionsUpdate],
     ['create', mockSubscriptionsCreate],
+    ['resume', mockSubscriptionsResume],
     ['finalize', mockInvoicesFinalize],
     ['pay', mockInvoicesPay],
   ];
@@ -152,6 +155,32 @@ describe('createOrUpdateSubscription', () => {
     const result = await reactivate(buildRecord());
 
     expect(result).toMatchObject({ ok: true, value: { id: 'sub_named', status: 'past_due' } });
+  });
+
+  it('resumes the named subscription with the new card when Stripe reports it paused', async () => {
+    mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription('sub_named', 'paused'));
+    mockSubscriptionsResume.mockResolvedValue(stripeSubscription('sub_named', 'active'));
+
+    const result = await reactivate(buildRecord());
+
+    expect(result).toMatchObject({ ok: true, value: { id: 'sub_named', status: 'active' } });
+    expect(writes()).toStrictEqual(['update:sub_named', 'resume:sub_named']);
+    expect(mockSubscriptionsResume).toHaveBeenCalledWith('sub_named', {
+      billing_cycle_anchor: { type: 'now' },
+      payment_behavior: 'resume_on_payment_success',
+      expand: expect.any(Array),
+    });
+  });
+
+  it('returns the still-paused subscription when the new card is declined on resume', async () => {
+    mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription('sub_named', 'paused'));
+    mockSubscriptionsResume.mockRejectedValue(
+      Object.assign(new Error('Your card was declined.'), { type: 'StripeCardError' }),
+    );
+
+    const result = await reactivate(buildRecord());
+
+    expect(result).toMatchObject({ ok: true, value: { id: 'sub_named', status: 'paused' } });
   });
 
   it.each(['canceled', 'incomplete_expired'])(
