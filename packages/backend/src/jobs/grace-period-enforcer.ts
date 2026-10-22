@@ -29,7 +29,7 @@ const CANCELABLE_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set([
 ]);
 
 /** Statuses that mean the customer is paying, whatever the row says. */
-const BILLING_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set(['active', 'trialing']);
+const LIVE_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set(['active', 'trialing']);
 
 type CandidateOutcome = 'canceled' | 'write_locked' | 'skipped';
 
@@ -130,7 +130,7 @@ async function cancelSubscriptionAndDisableTenant(
 
   // The row is behind Stripe: a subscription that still bills means the
   // customer is paying, and disabling them is not this job's call.
-  if (subscription && BILLING_STATUSES.has(subscription.status)) {
+  if (subscription && LIVE_STATUSES.has(subscription.status)) {
     return skipLiveSubscription(candidate, subscription);
   }
 
@@ -144,7 +144,7 @@ async function cancelSubscriptionAndDisableTenant(
     // Looked up again: a reactivation can land while the tenant is disabled,
     // and may have re-enabled it before this run's disable reached it.
     const current = await retrieveIfExists(subscription.id);
-    if (current && BILLING_STATUSES.has(current.status)) {
+    if (current && LIVE_STATUSES.has(current.status)) {
       assertRegionSyncSucceeded(
         await syncTenantStatusInProvisionedRegions(candidate.orgId, 'active'),
       );
