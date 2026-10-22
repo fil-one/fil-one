@@ -4,7 +4,7 @@ import { isRedirect } from '@tanstack/react-router';
 import type { MeResponse } from '@filone/shared';
 
 import { Route } from './_app.js';
-import { stashInviteToken } from '../lib/invite-token.js';
+import { cacheInviteToken } from '../lib/invite-token.js';
 import { queryClient } from '../lib/query-client.js';
 
 /** `beforeLoad` is called by the router with a context bag this route ignores. */
@@ -27,7 +27,7 @@ describe('the app layout’s beforeLoad', () => {
     // The login bounce lands every caller on `/dashboard` — there is no
     // `returnTo` in the auth flow — so this is the return trip for somebody who
     // was mid-acceptance when it happened.
-    stashInviteToken('a'.repeat(32));
+    cacheInviteToken('a'.repeat(32));
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
     const thrown = await runBeforeLoad().catch((err: unknown) => err);
@@ -41,7 +41,7 @@ describe('the app layout’s beforeLoad', () => {
 
   it('sends a signed-out caller to login instead, however that stash got there', async () => {
     setCookie('');
-    stashInviteToken('a'.repeat(32));
+    cacheInviteToken('a'.repeat(32));
 
     const thrown = await runBeforeLoad().catch((err: unknown) => err);
 

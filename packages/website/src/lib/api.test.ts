@@ -307,6 +307,24 @@ describe('apiRequest — a switch in flight', () => {
     vi.restoreAllMocks();
   });
 
+  /** The calls to `path`, leaving out the `/me` that `switchToOrg` sends itself. */
+  function callsTo(path: string) {
+    return vi
+      .mocked(fetch)
+      .mock.calls.filter(([url]) => typeof url === 'string' && url.endsWith(`/api${path}`));
+  }
+
+  /** A fresh response per call, since `switchToOrg`'s own `/me` reads one too. */
+  function respondWith(body: unknown) {
+    vi.mocked(fetch).mockImplementation(
+      async () =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+  }
+
   it('issues nothing once the tab is on its way to another org', async () => {
     const { api, stash } = await freshApi();
     stash.switchToOrg(ORG_B);
@@ -317,7 +335,7 @@ describe('apiRequest — a switch in flight', () => {
     // The answer would be discarded by the navigation either way; held rather
     // than rejected so no error renders over a page that is disappearing.
     expect(settled).toBe('pending');
-    expect(fetch).not.toHaveBeenCalled();
+    expect(callsTo('/buckets')).toStrictEqual([]);
   });
 
   it('sends a held request in the org still on screen once the switch rolls back', async () => {
@@ -329,12 +347,7 @@ describe('apiRequest — a switch in flight', () => {
     routerNavigate.mockRejectedValue(new Error('navigation blocked'));
     const { api, stash } = await freshApi();
     stash.setActiveOrgId(ORG_A);
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ buckets: [] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
+    respondWith({ buckets: [] });
 
     stash.switchToOrg(ORG_B);
     const held = api.apiRequest('/buckets');
@@ -342,7 +355,7 @@ describe('apiRequest — a switch in flight', () => {
     await expect(held).resolves.toStrictEqual({ buckets: [] });
     // The rollback put ORG_A back before the request read the stash, so the
     // call names the org the page is still showing.
-    const sent = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
+    const sent = callsTo('/buckets')[0]?.[1]?.headers as Headers;
     expect(sent.get(ORG_ID_HEADER)).toBe(ORG_A);
   });
 
@@ -368,7 +381,7 @@ describe('apiRequest — a switch in flight', () => {
       new Promise((resolve) => setTimeout(() => resolve('pending'), 20)),
     ]);
     expect(settled).toBe('pending');
-    expect(fetch).not.toHaveBeenCalled();
+    expect(callsTo('/org')).toStrictEqual([]);
   });
 
   it('sends a read held through the switch under the org it landed in', async () => {
@@ -378,12 +391,7 @@ describe('apiRequest — a switch in flight', () => {
     routerNavigate.mockImplementation(() => new Promise<void>((resolve) => (land = resolve)));
     const { api, stash } = await freshApi();
     stash.setActiveOrgId(ORG_A);
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ buckets: [] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
+    respondWith({ buckets: [] });
 
     stash.switchToOrg(ORG_B);
     const held = api.apiRequest('/buckets');
@@ -391,7 +399,7 @@ describe('apiRequest — a switch in flight', () => {
     land();
 
     await expect(held).resolves.toStrictEqual({ buckets: [] });
-    const sent = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
+    const sent = callsTo('/buckets')[0]?.[1]?.headers as Headers;
     expect(sent.get(ORG_ID_HEADER)).toBe(ORG_B);
   });
 
@@ -400,18 +408,13 @@ describe('apiRequest — a switch in flight', () => {
     routerNavigate.mockRejectedValue(new Error('navigation blocked'));
     const { api, stash } = await freshApi();
     stash.setActiveOrgId(ORG_A);
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({}), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
+    respondWith({});
 
     stash.switchToOrg(ORG_B);
     const held = api.apiRequest('/org', { method: 'PATCH', body: '{"name":"Renamed"}' });
 
     await expect(held).resolves.toStrictEqual({});
-    const sent = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
+    const sent = callsTo('/org')[0]?.[1]?.headers as Headers;
     expect(sent.get(ORG_ID_HEADER)).toBe(ORG_A);
   });
 
@@ -423,12 +426,7 @@ describe('apiRequest — a switch in flight', () => {
     // navigation waits on this response, and this response waits on the
     // navigation settling.
     const { api, stash } = await freshApi();
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ orgId: ORG_B, memberships: [] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
+    respondWith({ orgId: ORG_B, memberships: [] });
     routerNavigate.mockImplementation(() => api.getMe({ skipSwitchWait: true }));
 
     stash.switchToOrg(ORG_B);

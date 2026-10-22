@@ -35,7 +35,7 @@ export const Stacked: Story = {
           </Button>
         }
       />
-      <div className="h-px bg-[#e1e4ea]" />
+      <div className="h-px bg-zinc-200" />
       <SettingRow
         label="Password"
         description="Change your account password"

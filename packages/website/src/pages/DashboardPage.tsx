@@ -68,7 +68,7 @@ function statusBadgeProps(status: SubscriptionStatus): { label: string; color: B
 function DashboardSkeleton() {
   return (
     <div className="p-8 animate-pulse">
-      <div className="mb-6 h-8 w-40 rounded bg-zinc-200" />
+      <div className="mb-6 h-8 w-40 rounded-md bg-zinc-200" />
       <div className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
         <div className="h-[157px] rounded-xl bg-zinc-100" />
         <div className="h-[157px] rounded-xl bg-zinc-100" />

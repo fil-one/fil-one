@@ -75,7 +75,7 @@ export function AddBucketKeyModal({
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
               <div className="mb-3 flex items-center gap-2">
                 <LightbulbIcon size={16} className="text-zinc-500" />
-                <span className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">
                   Good to know
                 </span>
               </div>

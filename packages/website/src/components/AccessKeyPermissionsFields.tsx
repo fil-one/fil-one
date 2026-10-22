@@ -21,21 +21,9 @@ import {
 } from '@filone/shared';
 
 import { usePermissions } from '../lib/use-permissions.js';
+import { PERMISSION_OPTIONS } from '../lib/access-key-permission-options.js';
 import { Checkbox } from './Checkbox';
 import { CheckboxRow } from './CheckboxRow.js';
-
-type PermissionOption = {
-  value: ObjectPermission;
-  label: string;
-  description: string;
-};
-
-const PERMISSION_OPTIONS: PermissionOption[] = [
-  { value: 'read', label: 'Read', description: 'Download and retrieve objects' },
-  { value: 'write', label: 'Write', description: 'Upload and overwrite objects' },
-  { value: 'list', label: 'List', description: 'Browse and list objects' },
-  { value: 'delete', label: 'Delete', description: 'Permanently remove objects' },
-];
 
 type AccessKeyPermissionsFieldsProps = {
   value: AccessKeyPermission[];
@@ -184,7 +172,7 @@ function Section({
 }) {
   return (
     <div className="flex flex-col" data-testid={testId}>
-      <p className="mb-1 px-3 text-meta font-semibold uppercase tracking-wider text-zinc-400">
+      <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wider text-zinc-400">
         {title}
       </p>
       {children}

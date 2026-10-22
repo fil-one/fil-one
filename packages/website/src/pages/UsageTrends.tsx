@@ -86,7 +86,7 @@ function ChartTooltip({
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 shadow-md">
-      <p className="mb-0.5 text-xs font-semibold uppercase tracking-wider text-zinc-400">
+      <p className="mb-0.5 text-xs font-medium uppercase tracking-wider text-zinc-400">
         {formatLabel(label as string)}
       </p>
       <p className="text-xs text-zinc-700">
@@ -111,7 +111,7 @@ function ChartCard({ label, value, children }: ChartCardProps) {
     <Card>
       <div className="mb-3 flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wider text-zinc-500">{label}</span>
-        <span className="text-ui font-semibold text-zinc-900">{value}</span>
+        <span className="text-ui font-medium text-zinc-900">{value}</span>
       </div>
       <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
         {children}

@@ -18,6 +18,10 @@ const SIZES: Record<InputSize, { control: string; caret: { inset: string; size: 
     control: 'h-(--control-height-md) pr-9 pl-3 text-sm',
     caret: { inset: 'right-3', size: 14 },
   },
+  lg: {
+    control: 'h-(--control-height-lg) pr-10 pl-4 text-sm',
+    caret: { inset: 'right-4', size: 14 },
+  },
 };
 
 type SelectProps = {

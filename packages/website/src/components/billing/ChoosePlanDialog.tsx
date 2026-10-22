@@ -61,7 +61,7 @@ export function ChoosePlanDialog({
           <div className="flex flex-col rounded-xl border-2 border-brand-200 bg-brand-50 p-5">
             <p className="text-xs uppercase text-zinc-500">Pay as you go</p>
             <div className="mt-2 flex items-baseline gap-1.5">
-              <span className="text-2xl font-bold text-zinc-950">$5.99</span>
+              <span className="text-2xl font-medium text-zinc-950">$5.99</span>
               <span className="text-sm text-zinc-500">TB/month</span>
             </div>
             <p className="mt-2 text-xs leading-[18px] text-zinc-600">
@@ -109,7 +109,7 @@ export function ChoosePlanDialog({
           <div className="flex flex-col rounded-xl border border-zinc-200 bg-white p-5">
             <p className="text-xs uppercase text-zinc-500">Business plan</p>
             <div className="mt-2">
-              <span className="text-2xl font-bold text-zinc-950">Custom pricing</span>
+              <span className="text-2xl font-medium text-zinc-950">Custom pricing</span>
             </div>
             <p className="mt-2 text-xs leading-[18px] text-zinc-600">
               Ideal for enterprises with predictable storage needs or compliance-driven
