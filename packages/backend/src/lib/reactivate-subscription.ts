@@ -38,12 +38,12 @@ export async function createOrUpdateSubscription(
   params: CreateOrUpdateSubscriptionParams,
 ): Promise<Result<Stripe.Subscription>> {
   const { stripe, record } = params;
-  const named = record.subscriptionId
+  const subscription = record.subscriptionId
     ? await retrieveIfExists(stripe, record.subscriptionId)
     : undefined;
 
-  if (named && LIVE_STATUSES.has(named.status)) {
-    return proceed(await updateLiveSubscription(params, named));
+  if (subscription && LIVE_STATUSES.has(subscription.status)) {
+    return proceed(await updateLiveSubscription(params, subscription));
   }
   return createSubscription(params);
 }
