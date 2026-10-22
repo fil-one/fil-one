@@ -101,7 +101,13 @@ describe('errorHandlerMiddleware', () => {
         orchestratorId: 'any-orchestrator',
         tenantId: 'any-tenant',
       });
-      const deadline = AbortSignal.timeout(100);
+      // Fires once the request is in flight, with the reason AbortSignal.timeout
+      // gives, without making the test wait out a timer.
+      const deadlineController = new AbortController();
+      neverAnsweringServer.once('request', () =>
+        deadlineController.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+      );
+      const deadline = deadlineController.signal;
       const error = await deleteBucket(s3, 'any-bucket', { signal: deadline }).catch(
         (err: Error) => err,
       );
