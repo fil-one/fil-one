@@ -34,6 +34,7 @@ import {
   getSubscription,
   updateSubscriptionByUser,
 } from '../lib/subscription-store.ts';
+import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
 import {
   emitBillingRowMissing,
   emitDunningEscalation,
@@ -357,6 +358,8 @@ async function updateBillingRecord({
   }
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 // The grace period a cancellation starts, sized by the row's status: a trial
 // gets 7 days, a paying org 30. A row with canceledAt keeps its dates, since an
 // earlier delivery of this event already set them. Null when the row's grace
@@ -389,12 +392,6 @@ async function getGraceWindow(
   // the clock covers one that arrives without it.
   const canceledAt = subscription.ended_at ? new Date(subscription.ended_at * 1000) : now;
 
-  // An expired trial's grace period started before Stripe ended the trial,
-  // which it does when that grace runs out; the deletion does not start another.
-  if (stored?.subscriptionStatus === SubscriptionStatus.GracePeriod && stored.gracePeriodEndsAt) {
-    return { canceledAt: canceledAt.toISOString(), gracePeriodEndsAt: stored.gracePeriodEndsAt };
-  }
-
   // A `canceled` row left here has no deadline, and nothing on it says the org
   // was paying, so it gets a trial's grace.
   const wasTrialing =
@@ -402,12 +399,35 @@ async function getGraceWindow(
     stored?.subscriptionStatus === SubscriptionStatus.GracePeriod ||
     stored?.subscriptionStatus === SubscriptionStatus.Canceled;
   const graceDays = wasTrialing ? TRIAL_GRACE_DAYS : PAID_GRACE_DAYS;
+  const graceFromCancel = canceledAt.getTime() + graceDays * DAY_MS;
+
+  // A trial canceled before it ends gets its 7 days from the cancel.
+  const trialGraceEnd = getTrialGraceEnd(stored);
+  const gracePeriodEnd =
+    trialGraceEnd === undefined ? graceFromCancel : Math.min(trialGraceEnd, graceFromCancel);
   return {
     canceledAt: canceledAt.toISOString(),
-    gracePeriodEndsAt: new Date(
-      canceledAt.getTime() + graceDays * 24 * 60 * 60 * 1000,
-    ).toISOString(),
+    gracePeriodEndsAt: new Date(gracePeriodEnd).toISOString(),
   };
+}
+
+/**
+ * When a trial row's grace period ends: 7 days after the trial, the deadline the
+ * row already carries if the console moved it into grace. Stripe's trial runs
+ * until then, so a trial left without a card is deleted at the deadline rather
+ * than starting another grace period. The row may still read `trialing` if
+ * nobody used the console since. Undefined for a row that is not a trial's.
+ */
+function getTrialGraceEnd(stored: SubscriptionRecord | undefined): number | undefined {
+  if (
+    stored?.subscriptionStatus !== SubscriptionStatus.Trialing &&
+    stored?.subscriptionStatus !== SubscriptionStatus.GracePeriod
+  ) {
+    return undefined;
+  }
+  if (stored.gracePeriodEndsAt) return new Date(stored.gracePeriodEndsAt).getTime();
+  if (stored.trialEndsAt) return new Date(stored.trialEndsAt).getTime() + TRIAL_GRACE_DAYS * DAY_MS;
+  return undefined;
 }
 
 async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Promise<void> {
