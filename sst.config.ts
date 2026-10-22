@@ -1455,9 +1455,11 @@ export default $config({
       // by id, never the accept URL, because the URL carries the token.
       // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
       // than from the request, since the link goes to somebody else's inbox.
+      // The Auth0 runtime credentials look up whether the invitee has an account,
+      // which decides whether the link opens sign-up or sign-in.
       'create-invitation': {
-        extraEnv: { WEBSITE_URL: siteUrl },
-        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+        extraEnv: { WEBSITE_URL: siteUrl, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        extraLink: [...mgmtRuntimeResources, ...(sendGridApiKey ? [sendGridApiKey] : [])],
       },
 
       // ── Usage and dashboard ────────────────────────────────────────
