@@ -487,8 +487,9 @@ export default $config({
               defaultRouteSettings: {
                 detailedMetricsEnabled: true,
                 // The AWS provider sends an unset throttling limit as 0, and a
-                // limit of 0 answers every request with 429. These match the
-                // default account quota in us-east-2.
+                // limit of 0 answers every request with 429, see
+                // https://github.com/hashicorp/terraform-provider-aws/issues/27674.
+                // These match the default account quota in us-east-2.
                 throttlingBurstLimit: 5000,
                 throttlingRateLimit: 10000,
               },
