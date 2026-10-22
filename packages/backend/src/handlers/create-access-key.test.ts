@@ -89,6 +89,9 @@ const USER_1 = '00000000-0000-0000-0000-000000000001';
 
 const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
+/** The options a call bounded by the request deadline receives. */
+const WITH_DEADLINE = { signal: expect.any(AbortSignal) };
+
 function validBody({
   keyName,
   region = 'eu-west-1',
@@ -252,13 +255,17 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
-      keyName: 'My Key',
-      permissions: ['read', 'write', 'list', 'delete'],
-      granularPermissions: undefined,
-      buckets: undefined,
-      expiresAt: null,
-    });
+    expect(mockIssueAccessKey).toHaveBeenCalledWith(
+      'aurora-t-1',
+      {
+        keyName: 'My Key',
+        permissions: ['read', 'write', 'list', 'delete'],
+        granularPermissions: undefined,
+        buckets: undefined,
+        expiresAt: null,
+      },
+      WITH_DEADLINE,
+    );
   });
 
   it('stores access key in DynamoDB without the secret', async () => {
@@ -355,13 +362,17 @@ describe('create-access-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
-      keyName: 'My Key',
-      permissions: ['read', 'write', 'list', 'delete'],
-      granularPermissions: undefined,
-      buckets: undefined,
-      expiresAt: null,
-    });
+    expect(mockIssueAccessKey).toHaveBeenCalledWith(
+      'aurora-t-1',
+      {
+        keyName: 'My Key',
+        permissions: ['read', 'write', 'list', 'delete'],
+        granularPermissions: undefined,
+        buckets: undefined,
+        expiresAt: null,
+      },
+      WITH_DEADLINE,
+    );
     const body = JSON.parse(result.body!);
     expect(body.keyName).toBe('My Key');
   });
@@ -385,6 +396,7 @@ describe('create-access-key baseHandler', () => {
     expect(mockIssueAccessKey).toHaveBeenCalledWith(
       'aurora-t-1',
       expect.objectContaining({ expiresAt: '2026-06-01' }),
+      WITH_DEADLINE,
     );
   });
 
@@ -477,7 +489,7 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1');
+    expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1', WITH_DEADLINE);
   });
 
   it('throws when the orchestrator fails', async () => {
@@ -776,6 +788,73 @@ describe('create-access-key baseHandler', () => {
     expect(item.region.S).toBe('us-east-1');
   });
 
+  describe('the request deadline', () => {
+    beforeEach(() => {
+      stubWrites();
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+    });
+
+    it.each([
+      { call: 'ensureTenantReady', mock: mockEnsureTenantReady },
+      { call: 'issueAccessKey', mock: mockIssueAccessKey },
+    ])('passes the request deadline to $call', async ({ mock }) => {
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+      await baseHandler(event);
+
+      expect(mock.mock.calls[0]!.at(-1).signal).toBe(event.requestContext.deadline);
+    });
+
+    it('passes the request deadline to the lookup that recovers a duplicate', async () => {
+      mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+      mockFindAccessKeyByName.mockResolvedValue({
+        id: 'aurora-key-1',
+        accessKeyId: 'AKIA1234567890',
+        createdAt: '2026-03-10T00:00:00Z',
+      });
+
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+      await baseHandler(event);
+
+      expect(mockFindAccessKeyByName.mock.calls[0]!.at(-1).signal).toBe(
+        event.requestContext.deadline,
+      );
+    });
+
+    it.each([
+      { call: 'ensureTenantReady', mock: mockEnsureTenantReady, result: 'aurora-t-1' },
+      { call: 'issueAccessKey', mock: mockIssueAccessKey, result: issuedAccessKey() },
+    ])('names $call as the step in flight while it runs', async ({ call, mock, result }) => {
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+      let stepInFlight: string | undefined;
+      mock.mockImplementation(async () => {
+        stepInFlight = event.requestContext.deadlineStep;
+        return result;
+      });
+
+      await baseHandler(event);
+
+      expect(stepInFlight).toBe(call);
+    });
+
+    // The vendor already minted the key, so a deadline that has fired must not
+    // stop the delete that takes it back.
+    it('discards a key whose row never landed without the deadline', async () => {
+      ddbMock
+        .on(TransactWriteItemsCommand)
+        .rejects(cancelledWith(['ConditionalCheckFailed', 'None', 'None', 'None']));
+      mockDeleteAccessKey.mockResolvedValue(undefined);
+
+      const event = buildEvent({
+        body: validBody({ keyName: 'My Key' }),
+        userInfo: USER_INFO,
+        requestContext: { deadline: AbortSignal.abort() },
+      });
+      await baseHandler(event);
+
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', 'aurora-key-1');
+    });
+  });
+
   describe('region', () => {
     beforeEach(() => {
       stubWrites();
@@ -862,6 +941,7 @@ describe('create-access-key baseHandler', () => {
         expect.objectContaining({
           permissions: ['read', 'CreateBucket', 'DeleteBucket'],
         }),
+        WITH_DEADLINE,
       );
     });
 
@@ -1287,11 +1367,15 @@ describe('create-access-key baseHandler', () => {
       );
 
       expect(result.statusCode).toBe(201);
-      expect(mockIssueAccessKey).toHaveBeenCalledWith('tenant-9', {
-        keyName: 'laptop',
-        principalId: USER_1,
-        expiresAt: null,
-      });
+      expect(mockIssueAccessKey).toHaveBeenCalledWith(
+        'tenant-9',
+        {
+          keyName: 'laptop',
+          principalId: USER_1,
+          expiresAt: null,
+        },
+        WITH_DEADLINE,
+      );
     });
 
     it("syncs the caller's principal before minting", async () => {
@@ -1414,7 +1498,12 @@ describe('create-access-key baseHandler', () => {
       it("looks the existing key up under the caller's principal", async () => {
         await baseHandler(buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }));
 
-        expect(mockFindAccessKeyByName).toHaveBeenCalledWith('tenant-9', 'laptop', USER_1);
+        expect(mockFindAccessKeyByName).toHaveBeenCalledWith(
+          'tenant-9',
+          'laptop',
+          USER_1,
+          WITH_DEADLINE,
+        );
       });
 
       it("records the recovered row bound to the caller's principal", async () => {
@@ -1455,13 +1544,17 @@ describe('create-access-key baseHandler', () => {
           secretAccessKey: 'secret-abc-123',
           createdAt: '2026-03-10T13:36:07.752371Z',
         });
-        expect(mockIssueAccessKey).toHaveBeenCalledWith('tenant-9', {
-          keyName: 'laptop',
-          permissions: ['read', 'list'],
-          granularPermissions: undefined,
-          buckets: ['photos'],
-          expiresAt: null,
-        });
+        expect(mockIssueAccessKey).toHaveBeenCalledWith(
+          'tenant-9',
+          {
+            keyName: 'laptop',
+            permissions: ['read', 'list'],
+            granularPermissions: undefined,
+            buckets: ['photos'],
+            expiresAt: null,
+          },
+          WITH_DEADLINE,
+        );
       });
 
       it("records the service key's scope on the row", async () => {
