@@ -21,6 +21,7 @@ import type { Context, SQSEvent, SQSRecord } from 'aws-lambda';
 
 import { BulkDeleteScope, isTerminalBulkDeleteStatus } from '@filone/shared';
 
+import { canBulkDelete } from '../lib/bulk-delete-access.ts';
 import {
   applyPageResult,
   failJob,
@@ -209,6 +210,10 @@ async function runPages(
  * Resolve the tenant's S3 credentials for the job's region. Every backend
  * (Aurora, FTH, Forge) supplies these through the same orchestrator method, so
  * the worker needs no per-region knowledge.
+ *
+ * Re-checks the starting member's bucket access first, since those credentials
+ * delete without any policy evaluation: access revoked after the job was queued
+ * stops it before this run deletes anything.
  */
 async function resolveClientContext(job: BulkDeleteJobRecord) {
   const orchestrator = getOrchestratorForRegion(job.region);
@@ -216,6 +221,13 @@ async function resolveClientContext(job: BulkDeleteJobRecord) {
   if (!tenantId) {
     // Provisioning will not appear by itself between deliveries.
     throw new NonRetryableBulkDeleteError(`Tenant is not provisioned in region ${job.region}`);
+  }
+  const access = await canBulkDelete(orchestrator, tenantId, job.memberId, job);
+  if (!access.ok) {
+    // A policy change will not be undone by redelivery.
+    throw new NonRetryableBulkDeleteError(
+      `Your access to ${job.bucketName} no longer permits bulk deletion`,
+    );
   }
   return orchestrator.getS3ClientContext(tenantId);
 }

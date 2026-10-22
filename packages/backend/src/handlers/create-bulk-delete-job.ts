@@ -14,6 +14,7 @@ import {
   type ErrorResponse,
 } from '@filone/shared';
 
+import { canBulkDelete, type BulkDeleteRefusalReason } from '../lib/bulk-delete-access.ts';
 import {
   BulkDeleteJobExistsError,
   createBulkDeleteJob,
@@ -28,6 +29,7 @@ import {
   tenantNotReadyResponse,
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
+import { getScopedMemberId } from '../lib/member-scope.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -37,10 +39,35 @@ import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
+/**
+ * The response refusing a member's bulk deletion. A bucket outside their
+ * policies answers like a bucket that does not exist, since a distinct code
+ * would confirm it exists.
+ */
+function buildBulkDeleteRefusalResponse(
+  reason: BulkDeleteRefusalReason,
+  bucketName: string,
+): APIGatewayProxyStructuredResultV2 {
+  switch (reason) {
+    case 'bucket-not-granted':
+      return new ResponseBuilder()
+        .status(404)
+        .body<ErrorResponse>({ message: 'Bucket not found' })
+        .build();
+    case 'action-not-granted':
+      return new ResponseBuilder()
+        .status(403)
+        .body<ErrorResponse>({
+          message: `Your access to ${bucketName} does not permit bulk deletion.`,
+        })
+        .build();
+  }
+}
+
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId, membership } = getUserInfo(event);
   const bucketName = event.pathParameters?.name;
 
   if (!bucketName) {
@@ -79,6 +106,10 @@ export async function baseHandler(
 
   const { prefix, scope, idempotencyKey } = parsed.data;
 
+  const memberId = getScopedMemberId(membership?.role, userId);
+  const access = await canBulkDelete(orchestrator, tenantId, memberId, { bucketName, scope });
+  if (!access.ok) return buildBulkDeleteRefusalResponse(access.reason, bucketName);
+
   // The job id is derived from the request (bucket, prefix, scope and the
   // idempotency key), so a resubmit of the same request lands on the existing
   // row instead of starting a second deletion. See deriveBulkDeleteJobId.
@@ -90,6 +121,7 @@ export async function baseHandler(
       bucketName,
       prefix,
       scope,
+      memberId,
     });
 
     try {

@@ -50,6 +50,8 @@ export interface CreateJobArgs {
   bucketName: string;
   prefix: string;
   scope: BulkDeleteScope;
+  /** The scoped member starting the job; absent for an Owner or Admin. */
+  memberId?: string;
   now?: Date;
 }
 
@@ -90,7 +92,7 @@ export function deriveBulkDeleteJobId(
  * existing job is returned to the caller instead of a second deletion starting.
  */
 export async function createBulkDeleteJob(args: CreateJobArgs): Promise<BulkDeleteJobRecord> {
-  const { orgId, region, bucketName, prefix, scope, now = new Date() } = args;
+  const { orgId, region, bucketName, prefix, scope, memberId, now = new Date() } = args;
   const jobId = deriveBulkDeleteJobId(args);
   const timestamp = now.toISOString();
 
@@ -103,6 +105,7 @@ export async function createBulkDeleteJob(args: CreateJobArgs): Promise<BulkDele
     bucketName,
     prefix,
     scope,
+    ...(memberId && { memberId }),
     status: BulkDeleteJobStatus.Pending,
     deletedCount: 0,
     failedCount: 0,
