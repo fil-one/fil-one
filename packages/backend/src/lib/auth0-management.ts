@@ -20,7 +20,8 @@ export async function throwIfNotOk(resp: Response, label: string): Promise<void>
 // Management tokens are not user-specific, so caching is safe.
 let cachedMgmtToken: { token: string; expiresAt: number } | null = null;
 
-async function getManagementToken(): Promise<string> {
+/** `signal` lets a caller bound the token request along with its own. */
+async function getManagementToken(signal?: AbortSignal): Promise<string> {
   const now = Date.now();
   if (cachedMgmtToken && now < cachedMgmtToken.expiresAt) {
     return cachedMgmtToken.token;
@@ -36,6 +37,7 @@ async function getManagementToken(): Promise<string> {
       client_secret: Resource.Auth0MgmtRuntimeClientSecret.value,
       audience: `https://${domain}/api/v2/`,
     }),
+    signal,
   });
 
   await throwIfNotOk(resp, 'Auth0 management token request failed');
@@ -84,6 +86,28 @@ export async function getAuth0UserEmail(sub: string): Promise<string | undefined
 
   const data = (await resp.json()) as { email?: string };
   return data.email;
+}
+
+/**
+ * Whether Auth0 holds any user, on any connection, with this email.
+ *
+ * Auth0 matches the address case-sensitively and stores it lowercased, so pass
+ * a normalized address.
+ */
+export async function hasAuth0UserWithEmail(email: string): Promise<boolean> {
+  const domain = getMgmtDomain();
+  // One deadline for the token and the lookup together.
+  const signal = AbortSignal.timeout(5000);
+  const token = await getManagementToken(signal);
+  const resp = await fetch(
+    `https://${domain}/api/v2/users-by-email?email=${encodeURIComponent(email)}&fields=user_id&include_fields=true`,
+    { headers: { Authorization: `Bearer ${token}` }, signal },
+  );
+
+  await throwIfNotOk(resp, 'Auth0 users-by-email failed');
+
+  const users = (await resp.json()) as unknown[];
+  return users.length > 0;
 }
 
 /**

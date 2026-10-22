@@ -18,7 +18,19 @@ const STASH_KEY = 'filone:pendingInviteToken';
  */
 
 /**
- * Take the token out of the URL fragment and strip the fragment.
+ * Whether the last fragment read asked for sign-up (`signup=1`), which the
+ * backend adds when the invited address has no account yet.
+ *
+ * Memory only: the accept route's `beforeLoad` runs twice on first load and
+ * the second run finds the fragment gone, yet both must redirect to the same
+ * place. The login redirect reloads the document, so the hint lasts exactly
+ * that one redirect.
+ */
+let signUpHinted = false;
+
+/**
+ * Take the token, and the sign-up hint beside it, out of the URL fragment and
+ * strip the fragment.
  *
  * The strip happens whether or not a token was found: a fragment that did not
  * parse is still a fragment somebody pasted, and it is not this page's to keep.
@@ -29,12 +41,18 @@ export function readAndStripInviteTokenFromHash(): string | null {
   const hash = window.location.hash;
   if (hash.length < 2) return null;
 
-  const token = new URLSearchParams(hash.slice(1)).get('token')?.trim();
+  const params = new URLSearchParams(hash.slice(1));
+  const token = params.get('token')?.trim();
+  signUpHinted = params.get('signup') === '1';
 
   const { pathname, search } = window.location;
   window.history.replaceState(window.history.state, '', `${pathname}${search}`);
 
   return token ? token : null;
+}
+
+export function hasSignUpHint(): boolean {
+  return signUpHinted;
 }
 
 /**
@@ -101,8 +119,9 @@ export function getCachedInviteToken(): string | null {
   return cachedInviteToken;
 }
 
-/** Test seam: forget the token this page load has already taken. */
+/** Test seam: forget the token and sign-up hint this page load has already taken. */
 export function resetTakenInviteToken(): void {
   cachedInviteToken = null;
   inMemoryToken = null;
+  signUpHinted = false;
 }
