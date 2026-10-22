@@ -193,6 +193,20 @@ export function unexpectedFailureResponse(
     .build();
 }
 
+/**
+ * 504 rather than 500: the request deadline fired before the storage service
+ * answered, so the backend, acting as its gateway, ran out of time. The same
+ * request may succeed once the service recovers.
+ */
+export function storageTimeoutResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(504)
+    .body<ErrorResponse>({
+      message: 'The storage service took too long to respond. Please try again.',
+    })
+    .build();
+}
+
 export function badRequestResponse(message: string): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(400).body<ErrorResponse>({ message }).build();
 }
