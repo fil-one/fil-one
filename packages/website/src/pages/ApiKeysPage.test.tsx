@@ -160,6 +160,37 @@ describe('ApiKeysPage — who may revoke', () => {
   });
 });
 
+describe('ApiKeysPage: an empty key list', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApiRequest.mockResolvedValue({ keys: [] });
+  });
+
+  it('tells a Member the list holds only the keys they created', async () => {
+    renderPage(OrgRole.Member);
+
+    expect(
+      await screen.findByText(
+        'You can only see the keys you create. Admins see every key in the organization.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'invites an %s to create a key, with no word on whose keys are listed',
+    async (role) => {
+      renderPage(role);
+
+      expect(
+        await screen.findByText(
+          'Generate credentials to connect your applications via S3-compatible API',
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/You can only see the keys you create/)).not.toBeInTheDocument();
+    },
+  );
+});
+
 describe('ApiKeysPage — a disabled account', () => {
   const CANCELED = 'Your subscription has been canceled. Please reactivate to regain access.';
 
