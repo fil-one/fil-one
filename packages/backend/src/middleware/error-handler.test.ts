@@ -40,10 +40,24 @@ describe('errorHandlerMiddleware', () => {
     });
   });
 
-  it('sets a 504 response when the request deadline has fired', async () => {
+  it.each([
+    // What fetch rejects with.
+    { condition: 'is the deadline abort', wrap: (abort: Error) => abort },
+    // What the AWS SDK rejects with, then wrapped once more by the orchestrator.
+    {
+      condition: 'wraps the deadline abort as its cause',
+      wrap: (abort: Error) =>
+        new Error('Failed to fetch bucket', {
+          cause: Object.assign(new Error('Request aborted', { cause: abort }), {
+            name: 'AbortError',
+          }),
+        }),
+    },
+  ])('sets a 504 response when the error $condition', async ({ wrap }) => {
+    const deadline = AbortSignal.abort(new DOMException('deadline', 'TimeoutError'));
     const { onError } = errorHandlerMiddleware();
-    const request = buildErrorRequest(new Error('The operation was aborted due to timeout'));
-    request.event = buildEvent({ requestContext: { deadline: AbortSignal.abort() } });
+    const request = buildErrorRequest(wrap(deadline.reason));
+    request.event = buildEvent({ requestContext: { deadline } });
 
     await onError!(request);
 
@@ -56,11 +70,16 @@ describe('errorHandlerMiddleware', () => {
   });
 
   it.each([
+    // A handler settled the aborted call itself, then failed for another reason.
+    {
+      condition: 'has fired but did not cause the error',
+      deadline: AbortSignal.abort(new DOMException('deadline', 'TimeoutError')),
+    },
     { condition: 'has not fired', deadline: new AbortController().signal },
     { condition: 'is not attached', deadline: undefined },
   ])('sets a 500 response when the request deadline $condition', async ({ deadline }) => {
     const { onError } = errorHandlerMiddleware();
-    const request = buildErrorRequest(new Error('db connection failed'));
+    const request = buildErrorRequest(new Error('any-failure'));
     request.event = buildEvent({ requestContext: { deadline } });
 
     await onError!(request);

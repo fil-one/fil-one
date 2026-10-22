@@ -61,14 +61,34 @@ export function errorHandlerMiddleware(): MiddlewareObj<
       request.error,
     );
 
-    // Once the request deadline has fired, the request is out of time whatever
-    // error surfaced: the abort itself or a failure that followed from it.
-    request.response = requestContext?.deadline?.aborted
+    request.response = isCausedByDeadline(request.error, requestContext?.deadline)
       ? storageTimeoutResponse()
       : unexpectedFailureResponse();
   };
 
   return { onError };
+}
+
+// Deeper than any wrapping the clients and the orchestrator add, and a bound
+// keeps a cyclic `cause` chain from hanging the error handler.
+const MAX_CAUSE_DEPTH = 10;
+
+/**
+ * Whether the error is the request deadline's own abort or wraps it as a
+ * `cause`. `fetch` rejects with the signal's `reason` itself; the AWS SDK and
+ * the orchestrator wrap it. Matching that object, rather than any fired
+ * deadline, keeps the 500 for an error a handler threw after it had already
+ * dealt with an aborted call, such as a fan-out that settled one region's
+ * timeout and then failed for another reason.
+ */
+function isCausedByDeadline(error: unknown, deadline: AbortSignal | undefined): boolean {
+  if (!deadline?.aborted) return false;
+  let current = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && current instanceof Error; depth++) {
+    if (current === deadline.reason) return true;
+    current = current.cause;
+  }
+  return false;
 }
 
 /**
