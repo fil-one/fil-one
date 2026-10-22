@@ -114,8 +114,9 @@ type BucketPolicy = {
     // fixes the tenant, so the account field is empty), or '*' for every member
     Principal: { AWS: string[] } | '*';
     Action: string[]; // the s3 vocabulary below, or ['s3:*'] for all of it
-    // The bucket itself: arn:aws:s3:::<bucket> for the three bucket actions
-    // (s3:ListBucket*), arn:aws:s3:::<bucket>/* for object actions, both for s3:*
+    // The bucket itself: arn:aws:s3:::<bucket> for the bucket listings and
+    // configuration reads (s3:ListBucket*, s3:GetBucket*),
+    // arn:aws:s3:::<bucket>/* for object actions, both for s3:*
     Resource: string[];
   }[];
 };
@@ -166,10 +167,14 @@ A statement may carry eleven of an access key's fifteen permissions: read,
 write, list, delete, and the seven granular data-protection permissions. On the
 wire those are fourteen actions, because the storage system names the three
 multipart-upload actions separately from the read, write and list they belong
-to. `CreateBucket` and `DeleteBucket` are excluded because a key holding
-`CreateBucket` creates buckets outside the policy that granted it. The two
-bucket-configuration reads are excluded because the storage system has no such
-actions; it authorizes those reads from `ListBucket`. The three bucket-policy
+to. A statement may also carry ten actions with no access-key counterpart,
+which the storage system authorizes on their own (fil-forge/libforge#86): the
+three object-tagging actions, `GetObjectAttributes`, and six reads of the
+bucket's configuration (ACL, CORS, location, default object lock, tags,
+versioning). `CreateBucket` and `DeleteBucket` are excluded because a key
+holding `CreateBucket` creates buckets outside the policy that granted it. The
+bucket-configuration writes are excluded because each changes the bucket for
+every principal. The three bucket-policy
 actions are excluded because a key holding `PutBucketPolicy` rewrites the policy
 that granted it; only the console's own key holds them. Bucket creation stays
 where M1 puts it, as the org-level `buckets.create`.
