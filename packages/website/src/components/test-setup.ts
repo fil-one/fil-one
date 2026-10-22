@@ -31,3 +31,19 @@ if (!('ResizeObserver' in globalThis)) {
     disconnect(): void {}
   };
 }
+
+/**
+ * The tests mix jsdom's `EventTarget` with Node's real `process`, a pairing no
+ * browser has. p-queue extends the global `EventTarget` and, when it finds
+ * Node's `events` module through `process`, passes itself to
+ * `events.setMaxListeners`, which rejects any `EventTarget` that is not Node's
+ * own. Constructing a queue then throws.
+ *
+ * Node recognises its own `EventTarget` by this registered symbol on the
+ * constructor, so setting it lets the call through. If Node ever checks
+ * differently, the queue throws again and the tests fail loudly.
+ *
+ * Remove once p-queue releases a fix for
+ * https://github.com/sindresorhus/p-queue/issues/257.
+ */
+Object.assign(globalThis.EventTarget, { [Symbol.for('nodejs.event_target')]: true });
