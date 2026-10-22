@@ -93,6 +93,9 @@ importers:
       '@filone/aurora-portal-client':
         specifier: workspace:*
         version: link:../packages/aurora-portal-client
+      '@filone/orchestrator-client':
+        specifier: workspace:*
+        version: link:../packages/orchestrator-client
       sst:
         specifier: ^4.17.2
         version: 4.17.2
