@@ -56,8 +56,6 @@ All API traffic — Management API and S3 Gateway alike — must be served over 
 
 FilOne sets a deadline on the Management API and S3 Gateway calls it makes while serving an interactive console read (usage, activity, bucket list, bucket details, bucket analytics) or a bucket deletion. A call still unanswered at its deadline is aborted and treated as failed, so endpoints should answer these requests within a few seconds.
 
-The console's bucket list reads each bucket's analytics separately and caps how many of those reads, retries included, run at once on an open page. An org with many buckets therefore sends no more concurrent analytics calls than an org with a few. Its list takes longer to fill.
-
 ### Versioning
 
 The Management API is unversioned at this stage. Future breaking revisions will be introduced via a `/v2` URL prefix or HTTP content negotiation; partners do not need to plan for versioning today.
