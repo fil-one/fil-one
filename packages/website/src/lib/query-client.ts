@@ -31,20 +31,6 @@ export function defaultRetry(failureCount: number, error: unknown): boolean {
 }
 
 /**
- * `defaultRetry`, minus the retry after a server error.
- *
- * For reads the console sends many of at once, such as one per bucket row. A
- * 5xx there usually means the backend gave up waiting on its upstream, and an
- * immediate retry of every failed row doubles the load on an upstream that is
- * already too slow to answer.
- */
-export function retryExceptServerErrors(failureCount: number, error: unknown): boolean {
-  const status = (error as { status?: number })?.status;
-  if (status !== undefined && status >= 500) return false;
-  return defaultRetry(failureCount, error);
-}
-
-/**
  * Whether an error is one of the two role denials.
  *
  * `ForbiddenRoleError` and `NotAMemberError` both carry their API code, and the

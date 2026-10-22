@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider, type DefaultOptions } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import type { ListBucketsResponse } from '@filone/shared';
 
 import { ANALYTICS_CONCURRENCY } from '../components/BucketStorageLine.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
-import { defaultRetry } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { BucketsPage } from './BucketsPage.js';
 
@@ -98,11 +97,8 @@ const DEGRADED: ListBucketsResponse = {
 
 const DEGRADED_MESSAGE = 'Cannot list buckets in the us-east-1 region. Please try again later.';
 
-function renderPage(
-  role: OrgRole = OrgRole.Owner,
-  queryDefaults: DefaultOptions['queries'] = { retry: false },
-) {
-  const client = new QueryClient({ defaultOptions: { queries: queryDefaults } });
+function renderPage(role: OrgRole = OrgRole.Owner) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // Delete is gated on `buckets.delete`, so the caller's role has to be in the
   // cache before the rows render or the control is absent for the wrong reason.
   seedPermissions(client, role);
@@ -354,23 +350,6 @@ describe('BucketsPage storage line', () => {
     act(() => answers[0]());
 
     await waitFor(() => expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY + 1));
-  });
-
-  it('does not ask again for analytics that failed with a server error', async () => {
-    mockApiRequest.mockImplementation((path: string) =>
-      path.includes('/analytics')
-        ? Promise.reject(Object.assign(new Error('any server error'), { status: 500 }))
-        : Promise.resolve(BUCKETS),
-    );
-    // The console's own retry policy, without the delay between attempts.
-    renderPage(OrgRole.Owner, { retry: defaultRetry, retryDelay: 0 });
-    await screen.findByText('my-bucket');
-
-    await waitFor(() =>
-      expect(screen.queryByLabelText('Loading storage for my-bucket')).not.toBeInTheDocument(),
-    );
-
-    expect(analyticsCalls()).toHaveLength(1);
   });
 });
 

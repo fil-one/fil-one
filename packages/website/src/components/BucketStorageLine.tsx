@@ -7,7 +7,7 @@ import type { BucketAnalyticsResponse, S3Region } from '@filone/shared';
 import { formatBytes } from '@filone/shared';
 
 import { apiRequest } from '../lib/api.js';
-import { queryKeys, retryExceptServerErrors } from '../lib/query-client.js';
+import { queryKeys } from '../lib/query-client.js';
 
 const FIVE_MINUTES = 5 * 60 * 1000;
 
@@ -35,12 +35,12 @@ const analyticsQueue = new PQueue({ concurrency: ANALYTICS_CONCURRENCY });
  * with the bucket detail page (so navigating there is warm), and holds for five
  * minutes since storage totals move slowly.
  *
- * The rows share one queue of `ANALYTICS_CONCURRENCY` requests, and a row whose
- * read fails with a server error is not retried. An org with hundreds of
- * buckets would otherwise send hundreds of requests the moment the table
- * renders, and twice that when the backend times out on them. React Query
- * aborts a query's signal once the last component using it unmounts, so leaving
- * the page drops the requests still queued and cancels the ones in flight.
+ * The rows share one queue of `ANALYTICS_CONCURRENCY` requests, because an org
+ * with hundreds of buckets would otherwise send hundreds of requests the moment
+ * the table renders. A retry runs the query function again, so it waits in the
+ * same queue. React Query aborts a query's signal once the last component using
+ * it unmounts, so leaving the page drops the requests still queued and cancels
+ * the ones in flight.
  */
 export function BucketStorageLine({
   bucketName,
@@ -63,7 +63,6 @@ export function BucketStorageLine({
       );
     },
     staleTime: FIVE_MINUTES,
-    retry: retryExceptServerErrors,
   });
 
   if (isPending) {
