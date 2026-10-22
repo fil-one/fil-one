@@ -1133,8 +1133,6 @@ describe('stripe-event-worker handler', () => {
       ).toBe(true);
     });
 
-    // metadata.orgId is written at customer creation; the entry point falls back to
-    // the billing row for customers that predate it.
     it('passes no orgId through when the customer metadata carries none', async () => {
       setupStripeEvent(
         'customer.deleted',
