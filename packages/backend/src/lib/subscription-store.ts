@@ -106,7 +106,8 @@ export async function getSubscription(
 export const BILLING_IDENTITY_PROJECTION = 'stripeCustomerId, subscriptionId';
 
 /** The attributes a cancellation reads to size the grace period it starts. */
-export const GRACE_STATE_PROJECTION = 'subscriptionStatus, canceledAt, gracePeriodEndsAt';
+export const GRACE_STATE_PROJECTION =
+  'subscriptionStatus, canceledAt, gracePeriodEndsAt, trialEndsAt';
 
 /** The attributes every row carries about who it belongs to. */
 export function ownerAttributes({
