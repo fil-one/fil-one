@@ -133,10 +133,11 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
 
-      # auth.setup.ts re-seeds BillingTable rows for the test users via direct
-      # DynamoDB writes (see tests/e2e/billing-reset.ts). The test:e2e script
-      # wraps Playwright in `sst shell` so SST Resource bindings (BillingTable
-      # name, etc.) resolve to the staging stage.
+      # auth.setup.ts re-seeds the test users' billing rows and tenant status by
+      # invoking the stage's AccountStateTestHelper Lambda (see
+      # tests/e2e/destructive/account-state.util.ts). The test:e2e script wraps
+      # Playwright in `sst shell` so SST Resource bindings (the Lambda's name,
+      # etc.) resolve to the staging stage.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
