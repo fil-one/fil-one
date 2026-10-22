@@ -25,7 +25,10 @@ import {
 //
 // Cross-run note: these specs mutate shared staging state, and the suite runs
 // with one worker in CI (`workers: isCI ? 1 : undefined`). A local run with
-// parallel workers races them against each other.
+// parallel workers races them against each other. Both describes below move the
+// same account into the same organization, so the file runs them one at a time.
+
+test.describe.configure({ mode: 'serial' });
 
 const HOST = 'unpaid';
 const INVITEE = 'trial';
@@ -135,6 +138,96 @@ test.describe('trial user joins a second organization', () => {
     await expect(memberRow(page, hostUserId)).toHaveCount(0);
   });
 });
+
+// A new registrant's address is unverified when Auth0 hands them back, so the
+// accept call refuses them and the page sends them through `/verify-email`
+// before it redeems the invitation. The trial account is already verified, so
+// the refusal and the unverified `/me` are served here; every other request,
+// the second accept among them, goes to the real API. The detour is a
+// client-side navigation in one document, which is what the existing test,
+// with its single full load into a verified session, never exercises.
+test.describe('newly registered user joins an organization after verifying their email', () => {
+  test.use({ storageState: STORAGE_STATE[INVITEE] });
+
+  const hostUserId = requireUserId(HOST);
+  const inviteeUserId = requireUserId(INVITEE);
+
+  let hostOrgId: string;
+  let hostOrgName: string;
+  let invitation: SeededInvitation;
+
+  test.beforeAll(async () => {
+    hostOrgId = await resolvePersonalOrgId(hostUserId);
+    hostOrgName = await readOrgName(hostOrgId);
+    invitation = await seedInvitation({
+      orgId: hostOrgId,
+      email: requireEmail(INVITEE),
+      role: 'member',
+      invitedBy: hostUserId,
+    });
+  });
+
+  test.afterAll(async () => {
+    await runCleanup([
+      {
+        label: 'accepted membership',
+        run: () => deleteMembership({ orgId: hostOrgId, userId: inviteeUserId }),
+      },
+      {
+        label: 'invitation rows',
+        run: () =>
+          deleteInvitation({
+            orgId: hostOrgId,
+            inviteId: invitation.inviteId,
+            tokenHash: invitation.tokenHash,
+          }),
+      },
+    ]);
+  });
+
+  test('lands in the organization after continuing from the welcome panel', async ({ page }) => {
+    let emailVerified = false;
+
+    await page.route(apiPath('/api/me'), async (route) => {
+      const response = await route.fetch();
+      const me = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({ response, json: { ...me, emailVerified } });
+    });
+
+    let refusedOnce = false;
+    await page.route(apiPath('/api/invitations/accept'), async (route) => {
+      if (refusedOnce) return route.fallback();
+      refusedOnce = true;
+      await route.fulfill({
+        status: 403,
+        json: { message: 'Email verification required', code: 'EMAIL_NOT_VERIFIED' },
+      });
+    });
+
+    await page.goto(`/invite/accept#token=${encodeURIComponent(invitation.token)}`);
+    await expect(page.getByTestId('accept-unverified')).toBeVisible();
+
+    await page.locator('#accept-verify-email-button').click();
+    await expect(page.locator('#verify-email-heading')).toBeVisible();
+
+    // The address is confirmed in another tab; this one checks back.
+    emailVerified = true;
+    await page.locator('#verify-email-check-button').click();
+
+    await expect(page.getByTestId('accept-success')).toContainText(`Welcome to ${hostOrgName}`);
+
+    // Asserted on the app shell rather than the URL: a tab sent back to the
+    // accept page passes through `/dashboard` on the way, which a URL wait
+    // accepts, while the accept page never renders the shell's switcher.
+    await page.locator('#accept-continue-button').click();
+    await expect(page.getByTestId('org-switcher-button')).toContainText(hostOrgName);
+  });
+});
+
+/** Matches one API path exactly, leaving the dev server's source modules of the same name alone. */
+function apiPath(pathname: string) {
+  return (url: URL) => url.pathname === pathname;
+}
 
 function memberRow(page: Page, userId: string) {
   return page.locator(`[data-testid="member-row"][data-member-id="${userId}"]`);

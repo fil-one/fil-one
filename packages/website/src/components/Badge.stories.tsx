@@ -92,7 +92,7 @@ export const WithTooltip: Story = {
     size: 'sm',
     description: (
       <>
-        <p className="mb-1 text-meta font-semibold uppercase tracking-wider text-zinc-400">
+        <p className="mb-1 text-meta font-medium uppercase tracking-wider text-zinc-400">
           Data protection
         </p>
         <ul className="flex flex-col gap-0.5">
@@ -115,7 +115,7 @@ export const AllVariants: Story = {
         ] as { label: string; variant: BadgeVariant; strength: BadgeStrength }[]
       ).map(({ label, variant, strength }) => (
         <div key={label} className="flex flex-col gap-4">
-          <p className="text-meta font-semibold uppercase tracking-wider text-zinc-600">{label}</p>
+          <p className="text-meta font-medium uppercase tracking-wider text-zinc-600">{label}</p>
           {(['green', 'blue', 'red', 'amber', 'grey'] as BadgeColor[]).map((color) => (
             <div key={color} className="flex flex-col gap-2">
               <p className="text-meta font-medium uppercase tracking-wider text-zinc-500">

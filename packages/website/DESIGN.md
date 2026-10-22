@@ -134,8 +134,7 @@ Do not use `font-bold`.
 
 **Why:** The console already leans this way (173 `font-medium` against 12 explicit
 `font-normal`), and a restricted weight set is most of what makes dense interfaces read as
-calm. At 13px, the visual step from 400 to 500 is enough; 600 and 700 shout. The 8 remaining
-`font-bold` uses are the exception to remove.
+calm. At 13px, the visual step from 400 to 500 is enough; 600 and 700 shout.
 
 **Check:** No `font-bold` in `src`. `font-semibold` only on a page-level `h1`.
 
