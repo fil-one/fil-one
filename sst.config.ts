@@ -1427,10 +1427,12 @@ export default $config({
       // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
       // than from the request, since the link goes to somebody else's inbox.
       // OrgLogoBucketName, to check the joined org's logo is one of its uploads.
+      // The Auth0 runtime credentials, to mark an unverified invitee's address
+      // verified through the Management API.
       'accept-invitation': {
         // Registers the new member as a principal on each ready iam region.
-        extraEnv: orchestratorEnv,
-        extraLink: [orgLogoBucketName],
+        extraEnv: { ...orchestratorEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        extraLink: [...mgmtRuntimeResources, orgLogoBucketName],
       },
       // The only route that sends mail. `SendGridApiKey` exists on staging and
       // production alone; every other stage sends no email and logs the invitation
