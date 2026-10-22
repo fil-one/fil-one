@@ -79,7 +79,12 @@ export type UpdateTenantStatusRequest = {
  * * `s3:DeleteBucket` — delete a bucket.
  * * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
  * `s3:DeleteBucketPolicy` — read, write and delete a bucket's
- * policy. A bucket policy never grants
+ * policy. `s3:GetBucketPolicyStatus` — read whether the policy
+ * makes the bucket public. A bucket policy never grants
+ * them; only a service key holds them.
+ * * `s3:GetEncryptionConfiguration`,
+ * `s3:PutEncryptionConfiguration` — read, set and remove a
+ * bucket's default encryption. A bucket policy never grants
  * them; only a service key holds them.
  * * `s3:GetBucketVersioning`, `s3:PutBucketVersioning` — read and
  * set a bucket's versioning state.
@@ -90,9 +95,10 @@ export type UpdateTenantStatusRequest = {
  * * `s3:GetBucketLocation`, `s3:GetBucketAcl`, `s3:GetBucketCORS`,
  * `s3:GetBucketTagging` — read a bucket's region, ACL, CORS
  * configuration and tags.
+ * * `s3:PutBucketTagging` — set and remove a bucket's tags.
  *
- * A bucket policy may grant the reads; the two writes are held
- * only by a service key.
+ * A bucket policy may grant the versioning, object-lock and
+ * configuration reads; the writes are held only by a service key.
  *
  * **Object-level** — operating on objects within buckets. The
  * basic actions (`s3:GetObject`, `s3:PutObject`, `s3:ListBucket`,
@@ -161,7 +167,11 @@ export type AccessKeyPermission =
   | 's3:GetObjectAttributes'
   | 's3:GetObjectTagging'
   | 's3:PutObjectTagging'
-  | 's3:DeleteObjectTagging';
+  | 's3:DeleteObjectTagging'
+  | 's3:GetBucketPolicyStatus'
+  | 's3:GetEncryptionConfiguration'
+  | 's3:PutEncryptionConfiguration'
+  | 's3:PutBucketTagging';
 
 /**
  * Caller-supplied, opaque, unique within the tenant. FilOne uses

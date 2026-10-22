@@ -348,6 +348,10 @@ describe('ensureTenantReady', () => {
       's3:GetObjectTagging',
       's3:PutObjectTagging',
       's3:DeleteObjectTagging',
+      's3:GetBucketPolicyStatus',
+      's3:GetEncryptionConfiguration',
+      's3:PutEncryptionConfiguration',
+      's3:PutBucketTagging',
     ]);
   });
 

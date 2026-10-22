@@ -11,6 +11,7 @@ const BUCKET_CONFIGURATION_READS = [
   's3:GetBucketAcl',
   's3:GetBucketCORS',
   's3:GetBucketTagging',
+  's3:GetEncryptionConfiguration',
 ];
 
 // Maps FilOne permission values onto the contract's s3:* action enum. Close

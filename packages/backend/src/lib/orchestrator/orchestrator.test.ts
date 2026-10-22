@@ -1071,6 +1071,7 @@ describe('issueAccessKey', () => {
       's3:GetBucketAcl',
       's3:GetBucketCORS',
       's3:GetBucketTagging',
+      's3:GetEncryptionConfiguration',
       's3:PutObject',
       's3:AbortMultipartUpload',
       's3:PutObjectTagging',
