@@ -663,8 +663,7 @@ describe('usage-reporting-worker', () => {
     });
 
     it('reconciles a row that names no user, since the deletion is keyed by org', async () => {
-      // The user id feeds the deletion trigger's legacy fallback and its logs
-      // and nowhere else. Skipping on a missing one left the tenant enabled for
+      // The user id feeds the deletion trigger's logs and nowhere else. Skipping on a missing one left the tenant enabled for
       // a customer Stripe had deleted, and promised a next run that would find
       // the same absent attribute and skip again.
       mockGetTenantUsageMetrics.mockResolvedValue(oneTbUsage);
