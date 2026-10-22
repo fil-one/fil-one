@@ -716,6 +716,30 @@ describe('grace-period-enforcer', () => {
       },
     );
 
+    it('neither cancels nor leaves disabled a subscription that recovered during the disable', async () => {
+      // A reactivation can land between the first look at Stripe and the
+      // cancel, and re-enable the tenant before this run's disable reaches it.
+      mockSubscriptionsRetrieve
+        .mockResolvedValueOnce({ id: 'sub_any', status: 'past_due' })
+        .mockResolvedValue({ id: 'sub_any', status: 'active' });
+      aurora.getTenantStatus
+        .mockResolvedValueOnce({ kind: 'ok', status: 'active' })
+        .mockResolvedValueOnce({ kind: 'ok', status: 'disabled' });
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+      await handler();
+
+      expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
+      expect(canceledUpdates()).toStrictEqual([]);
+      expect(aurora.updateTenantStatus.mock.calls).toStrictEqual([
+        [tenantFor('aurora'), 'disabled'],
+        [tenantFor('aurora'), 'active'],
+      ]);
+      errorSpy.mockRestore();
+      stdoutSpy.mockRestore();
+    });
+
     it('keeps the row in grace when the Stripe cancel fails', async () => {
       mockSubscriptionsRetrieve.mockResolvedValue({ id: 'sub_any', status: 'paused' });
       mockSubscriptionsCancel.mockRejectedValue(new Error('Stripe unavailable'));
