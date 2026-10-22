@@ -148,7 +148,7 @@ pnpm exec playwright install --with-deps
 | `E2E_UNPAID_EMAIL` / `E2E_UNPAID_PASSWORD` / `E2E_UNPAID_USER_ID` | Unpaid test user                                      |
 | `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`    | Trial test user                                       |
 
-In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`) so the billing-state reset can write to the staging `BillingTable`.
+In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`) so the billing-state reset can write to the staging `BillingTable`. The E2E jobs in both workflows share the `e2e-staging` concurrency group, so only one Playwright run touches staging at a time. A nightly or manual run of `e2e-staging.yaml` skips itself while a push to main has reached `deploy-staging` and its post-deploy E2E job has not finished, because that job tests the same suite.
 
 #### Seeded buckets per region
 
@@ -196,6 +196,12 @@ The seed values come from [tests/e2e/billing-reset.ts](tests/e2e/billing-reset.t
 - **trial** → `trialing`, `trialEndsAt` = now + 14d
 
 The reset writes directly to DynamoDB (mirrors the integration-test pattern in [tests/integration/helpers.ts](tests/integration/helpers.ts)). It does **not** sync with Stripe — the local DB is the source of truth for `subscriptionStatus`, and Stripe state is allowed to drift for these test users.
+
+#### Account state helper Lambda
+
+`AccountStateTestHelper` ([packages/backend/src/jobs/account-state-test-helper.ts](packages/backend/src/jobs/account-state-test-helper.ts)) puts an E2E test account into a known state with one call. It takes `{ userId, state }`, where `state` is `paid`, `unpaid`, `trial`, `disabled`, `paid_grace_period` or `trial_grace_period`. It writes the subscription status and dates to the account's org billing row, then sets the tenant status in every region the org is provisioned in. `disabled` cancels the subscription and disables the tenants, in the order the grace-period enforcer uses. The two grace period states write `grace_period` and write-lock the tenants: `paid_grace_period` is a subscription canceled a day ago, with the 30-day paid grace period, and `trial_grace_period` is a trial that ended a day ago, with the 7-day trial grace period. The other states leave the tenants active. The Lambda returns the org id and each region's sync outcome.
+
+It can disable any account's tenants, so it is deployed to every stage except production, and the handler refuses to run when `FILONE_STAGE` is `production`.
 
 #### How auth works
 

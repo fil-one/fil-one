@@ -114,7 +114,7 @@ function Refused({
           {sessionEmail ? (
             <>
               You&rsquo;re signed in as{' '}
-              <span className="font-semibold text-zinc-900">{sessionEmail}</span>.
+              <span className="font-medium text-zinc-900">{sessionEmail}</span>.
             </>
           ) : (
             'This invitation was sent to a different address than the account you are signed in with.'
@@ -141,7 +141,7 @@ function Refused({
           Your email isn&rsquo;t verified yet, so this invitation is on hold. Verify it and
           we&rsquo;ll bring you straight back here.
         </p>
-        <Button variant="primary" href="/verify-email">
+        <Button id="accept-verify-email-button" variant="primary" href="/verify-email">
           Verify your email
         </Button>
       </Panel>

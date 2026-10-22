@@ -28,7 +28,7 @@ export function StatCard({ label, value, limit, usage, progress, size, className
       <div className={cn('flex items-baseline', isLarge ? 'gap-1.5' : 'gap-1')}>
         <span
           className={cn(
-            'font-semibold text-zinc-950',
+            'font-medium text-zinc-950',
             isLarge ? 'text-3xl tracking-tight' : 'text-xl',
           )}
         >

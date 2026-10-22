@@ -6,6 +6,7 @@ import { OrgDeletingError } from '../lib/org-profile.ts';
 import {
   ResponseBuilder,
   accountDeletedResponse,
+  storageTimeoutResponse,
   unexpectedFailureResponse,
 } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
@@ -48,7 +49,8 @@ export function errorHandlerMiddleware(): MiddlewareObj<
     // userInfo is only present when the error occurred after authMiddleware;
     // apiRequestId is the API Gateway request id, correlating with the API
     // access logs (the Lambda-injected requestId in the JSON envelope differs).
-    const userInfo = (request.event as Partial<AuthenticatedEvent>).requestContext?.userInfo;
+    const requestContext = (request.event as Partial<AuthenticatedEvent>).requestContext;
+    const userInfo = requestContext?.userInfo;
     console.error(
       'Unhandled handler error:',
       {
@@ -59,10 +61,34 @@ export function errorHandlerMiddleware(): MiddlewareObj<
       request.error,
     );
 
-    request.response = unexpectedFailureResponse();
+    request.response = isCausedByDeadline(request.error, requestContext?.deadline)
+      ? storageTimeoutResponse()
+      : unexpectedFailureResponse();
   };
 
   return { onError };
+}
+
+// Deeper than any wrapping the clients and the orchestrator add, and a bound
+// keeps a cyclic `cause` chain from hanging the error handler.
+const MAX_CAUSE_DEPTH = 10;
+
+/**
+ * Whether the error is the request deadline's own abort or wraps it as a
+ * `cause`. `fetch` rejects with the signal's `reason` itself; the AWS SDK and
+ * the orchestrator wrap it. Matching that object, rather than any fired
+ * deadline, keeps the 500 for an error a handler threw after it had already
+ * dealt with an aborted call, such as a fan-out that settled one region's
+ * timeout and then failed for another reason.
+ */
+function isCausedByDeadline(error: unknown, deadline: AbortSignal | undefined): boolean {
+  if (!deadline?.aborted) return false;
+  let current = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && current instanceof Error; depth++) {
+    if (current === deadline.reason) return true;
+    current = current.cause;
+  }
+  return false;
 }
 
 /**

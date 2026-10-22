@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { useReducer } from 'react';
 import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import {
   createMemoryHistory,
@@ -55,11 +56,32 @@ function renderApp() {
     path: '/dashboard',
     component: function Dashboard() {
       const { data: me } = useQuery({ queryKey: queryKeys.me, queryFn: () => getMe() });
-      return <div data-testid="dashboard">{me?.orgName}</div>;
+      const [, rerender] = useReducer((n: number) => n + 1, 0);
+      return (
+        <>
+          <div data-testid="dashboard">{me?.orgName}</div>
+          {/* Like `CreateOrganizationDialog`: it switches, then closes itself,
+              which re-renders this page while the cache is empty. */}
+          <button
+            type="button"
+            onClick={() => {
+              switchToOrg(ORG_B, 'get-started', { orgName: 'Globex' });
+              rerender();
+            }}
+          >
+            Create organization
+          </button>
+        </>
+      );
     },
   });
+  const getStartedRoute = createRoute({
+    getParentRoute: () => appRoute,
+    path: '/get-started',
+    component: () => <div data-testid="get-started" />,
+  });
   const router = createRouter({
-    routeTree: rootRoute.addChildren([appRoute.addChildren([dashboardRoute])]),
+    routeTree: rootRoute.addChildren([appRoute.addChildren([dashboardRoute, getStartedRoute])]),
     history: createMemoryHistory({ initialEntries: ['/dashboard'] }),
   });
   holder.router = router;
@@ -120,5 +142,31 @@ describe('switching orgs from the dashboard', () => {
 
     expect(await screen.findByTestId('dashboard')).toHaveTextContent('Acme');
     expect(screen.queryByTestId('billing-gate')).not.toBeInTheDocument();
+  });
+
+  // A browser can render between the switch and its navigation, since the
+  // router is imported lazily. `beforeLoad` then joins the `/me` that render
+  // started, so that fetch must not wait for the navigation to finish.
+  it('lands on the new page when the old one re-renders before the switch navigates', async () => {
+    setActiveOrgId(ORG_A);
+    renderApp();
+    expect(await screen.findByTestId('dashboard')).toHaveTextContent('Acme');
+
+    const router = holder.router as { navigate: (options: unknown) => Promise<void> };
+    holder.router = {
+      navigate: async (options: unknown) => {
+        // Held until the old page has re-rendered onto the emptied cache's `/me`.
+        await vi.waitFor(() =>
+          expect(
+            queryClient.getQueryCache().find({ queryKey: queryKeys.me })?.getObserversCount(),
+          ).toBeGreaterThan(0),
+        );
+        return router.navigate(options);
+      },
+    };
+    fireEvent.click(screen.getByRole('button', { name: 'Create organization' }));
+
+    await vi.waitFor(() => expect(isSwitchingOrg()).toBe(false));
+    expect(await screen.findByTestId('get-started')).toBeInTheDocument();
   });
 });

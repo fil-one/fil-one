@@ -22,14 +22,14 @@ export function truncateVersionId(versionId: string, length = 8): string {
 export function VersionRowBadge({ version }: { version: S3ObjectVersion }) {
   if (version.isDeleteMarker) {
     return (
-      <Badge color="red" size="sm" weight="semibold">
+      <Badge color="red" size="sm">
         Delete marker
       </Badge>
     );
   }
   if (version.isLatest) {
     return (
-      <Badge color="green" size="sm" weight="semibold">
+      <Badge color="green" size="sm">
         Latest
       </Badge>
     );
@@ -86,7 +86,7 @@ function VersionRow({
       <td className="px-3 py-2 font-mono text-zinc-700">
         {truncatedId}
         {isCurrent && (
-          <span className="ml-1.5 text-meta font-semibold text-brand-600">(viewing)</span>
+          <span className="ml-1.5 text-meta font-medium text-brand-600">(viewing)</span>
         )}
       </td>
       <td className="px-3 py-2">
