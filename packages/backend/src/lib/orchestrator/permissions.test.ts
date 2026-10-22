@@ -44,6 +44,7 @@ describe('buildPermissions', () => {
   it.each([
     ['GetBucketVersioning', 's3:GetBucketVersioning'],
     ['GetBucketObjectLockConfiguration', 's3:GetBucketObjectLockConfiguration'],
+    ['PutBucketCORS', 's3:PutBucketCORS'],
   ] as const)('grants %s as %s', (permission, action) => {
     expect(buildPermissions([permission])).toStrictEqual(['s3:ListAllMyBuckets', action]);
   });

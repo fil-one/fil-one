@@ -36,6 +36,7 @@ const BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
   DeleteBucket: ['s3:DeleteBucket'],
   GetBucketVersioning: ['s3:GetBucketVersioning'],
   GetBucketObjectLockConfiguration: ['s3:GetBucketObjectLockConfiguration'],
+  PutBucketCORS: ['s3:PutBucketCORS'],
 };
 
 const GRANULAR_PERMISSIONS: Record<GranularPermission, string> = {

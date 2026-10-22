@@ -529,6 +529,9 @@ const FTH_BASE_PERMISSIONS: Record<AccessKeyPermission, readonly string[]> = {
   DeleteBucket: ['s3:DeleteBucket'],
   GetBucketVersioning: ['s3:GetBucketVersioning'],
   GetBucketObjectLockConfiguration: ['s3:GetBucketObjectLockConfiguration'],
+  // A bucket-configuration write exists only on a Forge gateway; the request
+  // schema refuses it for every other region, so it never reaches FTH.
+  PutBucketCORS: [],
 };
 
 const FTH_GRANULAR_PERMISSIONS: Record<GranularPermission, string> = {
