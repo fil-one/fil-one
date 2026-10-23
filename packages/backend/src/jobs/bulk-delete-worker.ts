@@ -38,6 +38,7 @@ import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
 import { getScopedMemberId } from '../lib/member-scope.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { createS3Client } from '../lib/s3-client.ts';
 import {
@@ -156,6 +157,11 @@ export async function processJob(
   }
 }
 
+interface ResolvedTenant {
+  orchestrator: RegionOrchestrator;
+  tenantId: string;
+}
+
 interface RunOutcome {
   job: BulkDeleteJobRecord;
   /** True when the listing walk finished; false when the time budget ran out. */
@@ -167,44 +173,32 @@ async function runPages(
   getRemainingTimeInMillis: RemainingTimeFn,
   onProgress: (job: BulkDeleteJobRecord) => void,
 ): Promise<RunOutcome> {
-  const { orchestrator, tenantId } = await resolveTenant(initial);
-  const memberId = await resolveStarterScope(initial);
-  const s3 = createS3Client(await orchestrator.getS3ClientContext(tenantId));
+  const tenant = await resolveTenant(initial);
+  const s3 = createS3Client(await tenant.orchestrator.getS3ClientContext(tenant.tenantId));
   let job = initial;
 
   // Only AllVersions ever sees a literal "null" version id (Current lists by
   // key only), and a job's bucket doesn't change mid-run, so this is resolved
-  // at most once per invocation, shared by the access check and the walk.
+  // at most once per invocation, shared by the access checks and the walk.
   let versioningStatus: Promise<BucketVersioningStatus> | undefined;
   const getVersioningStatus = () =>
     (versioningStatus ??= getBucketVersioningStatus(s3, job.bucketName));
 
-  // The tenant's credentials delete without any policy evaluation, so the
-  // starting member's access is re-checked before this run deletes anything:
-  // access revoked after the job was queued stops it.
-  const access = await canBulkDelete(orchestrator, tenantId, memberId, {
-    bucketName: job.bucketName,
-    scope: job.scope,
-    getVersioningStatus,
-  });
-  if (!access.ok) {
-    // A policy change will not be undone by redelivery.
-    throw new NonRetryableBulkDeleteError(
-      `Your access to ${job.bucketName} no longer permits bulk deletion`,
-    );
-  }
-
-  const bucketVersioningStatus =
-    job.scope === BulkDeleteScope.AllVersions ? await getVersioningStatus() : undefined;
-
   for (;;) {
+    // The tenant's credentials delete without any policy evaluation, so the
+    // starter's role and access are re-checked before every page: a change
+    // made after the job was queued, or mid-run, stops it within a page.
+    await assertStarterMayDelete(tenant, job, getVersioningStatus);
+
     const page = await enumerateDeletionPage({
       s3,
       bucket: job.bucketName,
       prefix: job.prefix,
       scope: job.scope,
       ...(job.cursor && { cursor: job.cursor }),
-      ...(bucketVersioningStatus && { bucketVersioningStatus }),
+      ...(job.scope === BulkDeleteScope.AllVersions && {
+        bucketVersioningStatus: await getVersioningStatus(),
+      }),
       maxKeys: PAGE_SIZE,
     });
 
@@ -231,17 +225,38 @@ async function runPages(
 }
 
 /**
+ * Fail the job when its starter may no longer run it: their current role must
+ * hold `objects.delete`, and a scoped member's bucket policies must still cover
+ * the deletion. Neither will be undone by redelivery.
+ */
+async function assertStarterMayDelete(
+  { orchestrator, tenantId }: ResolvedTenant,
+  job: BulkDeleteJobRecord,
+  getVersioningStatus: () => Promise<BucketVersioningStatus>,
+): Promise<void> {
+  const memberId = await resolveStarterScope(job);
+  const access = await canBulkDelete(orchestrator, tenantId, memberId, {
+    bucketName: job.bucketName,
+    scope: job.scope,
+    getVersioningStatus,
+  });
+  if (!access.ok) {
+    throw new NonRetryableBulkDeleteError(
+      `Your access to ${job.bucketName} no longer permits bulk deletion`,
+    );
+  }
+}
+
+/**
  * The member the starter's deletion is scoped to, or undefined for a starter
- * the console serves unscoped, read from their current role: a role change
- * after the job was queued applies to its next run. Fails the job when the
- * starter is no longer a member or no longer holds `objects.delete`.
+ * the console serves unscoped, read from their current role. Fails the job when
+ * the starter is no longer a member or no longer holds `objects.delete`.
  */
 async function resolveStarterScope(job: BulkDeleteJobRecord): Promise<string | undefined> {
   // Queued before the starter was recorded.
   if (!job.startedBy) return undefined;
   const membership = await resolveMembership(job.orgId, job.startedBy);
   if (!membership || !roleHasPermission(membership.role, 'objects.delete')) {
-    // A role change will not be undone by redelivery.
     throw new NonRetryableBulkDeleteError('Your role no longer permits deleting objects');
   }
   return getScopedMemberId(membership.role, job.startedBy);
@@ -252,7 +267,7 @@ async function resolveStarterScope(job: BulkDeleteJobRecord): Promise<string | u
  * supplies its S3 credentials through the same orchestrator method, so the
  * worker needs no per-region knowledge.
  */
-async function resolveTenant(job: BulkDeleteJobRecord) {
+async function resolveTenant(job: BulkDeleteJobRecord): Promise<ResolvedTenant> {
   const orchestrator = getOrchestratorForRegion(job.region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(job.orgId));
   if (!tenantId) {

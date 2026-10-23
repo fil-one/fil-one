@@ -307,16 +307,65 @@ describe('bulk-delete worker', () => {
       expect(lastSavedJob().status).toBe(BulkDeleteJobStatus.Completed);
     });
 
-    it("reads the bucket's versioning once for both the access check and the walk", async () => {
+    it("reads the bucket's versioning once a run, though access is checked before every page", async () => {
       mockGetJob.mockResolvedValue(memberJob());
       mockResolveMemberAccess.mockResolvedValue([
         { bucketName: 'bucket', actions: allVersionsActions },
       ]);
+      mockEnumerate
+        .mockResolvedValueOnce({ targets: [{ key: 'a.txt' }], nextCursor: { keyMarker: 'a.txt' } })
+        .mockResolvedValueOnce({ targets: [{ key: 'b.txt' }] });
 
       await processJob(payload, FIRST_DELIVERY, generousBudget);
 
+      expect(mockResolveMemberAccess).toHaveBeenCalledTimes(2);
       expect(getBucketVersioningStatus).toHaveBeenCalledTimes(1);
     });
+
+    // Revoked mid-run, after the first page: the check before the second page
+    // stops the job, and the first page's progress is kept.
+    it.each([
+      {
+        revocation: 'the starter is demoted to ReadOnly',
+        revoke: () =>
+          mockResolveMembership
+            .mockResolvedValueOnce({ role: OrgRole.Member })
+            .mockResolvedValueOnce({ role: OrgRole.ReadOnly }),
+        error: 'Your role no longer permits deleting objects',
+      },
+      {
+        revocation: "the bucket's policy stops granting the starter",
+        revoke: () =>
+          mockResolveMemberAccess
+            .mockResolvedValueOnce([{ bucketName: 'bucket', actions: allVersionsActions }])
+            .mockResolvedValueOnce([]),
+        error: 'Your access to bucket no longer permits bulk deletion',
+      },
+    ])(
+      'stops before the next page when $revocation between two pages',
+      async ({ revoke, error }) => {
+        mockGetJob.mockResolvedValue(memberJob());
+        mockResolveMemberAccess.mockResolvedValue([
+          { bucketName: 'bucket', actions: allVersionsActions },
+        ]);
+        revoke();
+        mockEnumerate.mockResolvedValueOnce({
+          targets: [{ key: 'a.txt' }],
+          nextCursor: { keyMarker: 'a.txt' },
+        });
+        mockDelete.mockResolvedValue({ deleted: 1, failures: [] });
+
+        await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+        expect(mockEnumerate).toHaveBeenCalledTimes(1);
+        expect(mockDelete).toHaveBeenCalledTimes(1);
+        expect(lastSavedJob()).toMatchObject({
+          status: BulkDeleteJobStatus.Failed,
+          deletedCount: 1,
+          error,
+        });
+      },
+    );
 
     it.each([
       // A role change leaves bucket policies alone, so the policy still grants.
