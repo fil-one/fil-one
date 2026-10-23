@@ -12,7 +12,7 @@ import { Resource } from 'sst';
 import { readAccessKeyMintSeq } from './access-key-mint-seq.ts';
 import type { KeyMintFence } from './access-key-mint-seq.ts';
 import { getDynamoClient } from './ddb-client.ts';
-import { AccessKeyKeys, accessKeyOrchestratorId } from './dynamo-records.ts';
+import { AccessKeyKeys, getAccessKeyOrchestratorId } from './dynamo-records.ts';
 import { regionsForOrchestrator } from './service-orchestrator-ids.ts';
 import type { AccessKeyRecord } from './dynamo-records.ts';
 
@@ -214,7 +214,7 @@ function toMemberAccessKey(record: Partial<AccessKeyRecord>): MemberAccessKey {
   return {
     id: sk.slice(AccessKeyKeys.keySkPrefix().length),
     keyName: record.keyName ?? '',
-    orchestratorId: accessKeyOrchestratorId(record),
+    orchestratorId: getAccessKeyOrchestratorId(record),
     createdAt: record.createdAt ?? '',
     ...(record.accessKeyId ? { accessKeyId: record.accessKeyId } : {}),
     ...(record.createdBy ? { createdBy: record.createdBy } : {}),
