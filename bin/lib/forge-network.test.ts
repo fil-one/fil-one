@@ -3,6 +3,7 @@ import type { GetFunctionConfigurationCommand } from '@aws-sdk/client-lambda';
 import { S3Region } from '@filone/shared';
 
 import {
+  applyShellOverrides,
   getNetworkForRegion,
   isForgeNetworkName,
   parseSecretList,
@@ -34,6 +35,44 @@ describe('parseSecretList', () => {
 
   it('returns undefined when the output has no header for the stage', () => {
     expect(parseSecretList('AnySecret=any-value\n', 'any-stage', 'AnySecret')).toBeUndefined();
+  });
+
+  it('returns the fallback value when the stage has no value of its own', () => {
+    const withFallback = ['# fallback', 'AnySecret=fallback-value', '', '# filone/any-stage', ''];
+    expect(parseSecretList(withFallback.join('\n'), 'any-stage', 'AnySecret')).toBe(
+      'fallback-value',
+    );
+  });
+
+  it("returns the stage's value over the fallback value", () => {
+    const withBoth = [
+      '# fallback',
+      'AnySecret=fallback-value',
+      '',
+      '# filone/any-stage',
+      'AnySecret=stage-value',
+      '',
+    ];
+    expect(parseSecretList(withBoth.join('\n'), 'any-stage', 'AnySecret')).toBe('stage-value');
+  });
+});
+
+describe('applyShellOverrides', () => {
+  it.each([
+    { shell: { ANY_URL: 'http://localhost:1' }, expected: 'http://localhost:1' },
+    { shell: {}, expected: 'http://deployed:1' },
+    // An empty variable is treated as unset.
+    { shell: { ANY_URL: '' }, expected: 'http://deployed:1' },
+  ])('returns $expected when the shell has $shell', ({ shell, expected }) => {
+    expect(applyShellOverrides({ ANY_URL: 'http://deployed:1' }, shell)).toStrictEqual({
+      ANY_URL: expected,
+    });
+  });
+
+  it('ignores shell variables the deployed environment was not asked for', () => {
+    expect(applyShellOverrides({ ANY_URL: undefined }, { OTHER: 'other-value' })).toStrictEqual({
+      ANY_URL: undefined,
+    });
   });
 });
 

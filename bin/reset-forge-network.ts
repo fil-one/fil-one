@@ -29,8 +29,11 @@
 // Credentials: table and function names come from `sst state export`, and
 // every AWS call uses your ambient credentials, so confirm they target the
 // right account first. The Management API URL is read from the deployed
-// AccountDeletionWorker's environment, and the token from the stage's SST
-// secret (ForgeManagementApiToken or ForgeDevManagementApiToken). The token is
+// AccountDeletionWorker's environment; a variable of the same name in your
+// shell (FORGE_MANAGEMENT_API_URL, FORGE_DEV_MANAGEMENT_API_URL) overrides it,
+// which a SMELT=true stage needs to reach smelt on localhost. The token comes
+// from the stage's SST secret (ForgeManagementApiToken or
+// ForgeDevManagementApiToken), or the app's fallback for it. The token is
 // never printed or written to the backup. Besides what
 // reset-region-provisioning.ts needs, the role must call
 // lambda:GetFunctionConfiguration and read the stage's SST secrets.
@@ -59,13 +62,8 @@ import { FORGE_NETWORKS, isForgeNetworkName, resolveForgeApi } from './lib/forge
 import type { AccountPlan } from './lib/region-reset.ts';
 import { assertRegionAllowed } from './lib/region-reset.ts';
 import { runRegionReset } from './lib/region-reset-run.ts';
-import { requireAwsProfile } from './lib/sst-state.ts';
-import {
-  assertStageResources,
-  awsRegionForStage,
-  exportStageState,
-  resolveStageTables,
-} from './lib/stage.ts';
+import { findTable, requireAwsProfile } from './lib/sst-state.ts';
+import { assertStageResources, exportStageState, resolveStageTables } from './lib/stage.ts';
 
 const USAGE =
   'Usage: node bin/reset-forge-network.ts --network <network> --stage <stage> [--dry-run] [--yes] [--backup <path>]';
@@ -110,7 +108,9 @@ const tables = resolveStageTables(
 );
 assertStageResources(stage, tables);
 
-const awsRegion = awsRegionForStage(stage);
+// From the table's ARN: a personal stage lives wherever AWS_REGION pointed when
+// it was deployed, not where it points now.
+const { region: awsRegion } = findTable(stage, '::UserInfoTableTable', resources);
 const forgeApi = await resolveForgeApi(
   stage,
   network,

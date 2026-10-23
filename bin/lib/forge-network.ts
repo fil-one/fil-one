@@ -7,9 +7,14 @@
 //
 // The API URL is read from the deployed AccountDeletionWorker's environment
 // (forgeEnv in sst.config.ts), so a script talks to the endpoint the stage
-// actually runs, smelt override included. The state export is not used for the
-// value itself because pulumi may store a function's environment as a secret.
-// The token comes from the stage's SST secret and is held in memory only.
+// actually runs. The state export is not used for the value itself because
+// pulumi may store a function's environment as a secret. A variable of the same
+// name in the operator's shell wins. Under SMELT=true the Lambda holds
+// host.docker.internal URLs, which only floci's containers are sure to resolve;
+// a script on the host then needs FORGE_DEV_MANAGEMENT_API_URL and
+// FORGE_DEV_S3_ENDPOINT_URL pointing at localhost.
+// The token comes from the stage's SST secret, or the app's fallback for it,
+// and is held in memory only.
 
 import { execFileSync } from 'node:child_process';
 import {
@@ -99,7 +104,7 @@ export async function resolveForgeApi(
   }
 
   const names = [network.apiUrlEnv, ...(network.s3EndpointEnv ? [network.s3EndpointEnv] : [])];
-  const env = await readLambdaEnv(lambda, functionName, names);
+  const env = applyShellOverrides(await readLambdaEnv(lambda, functionName, names), process.env);
   const baseUrl = env[network.apiUrlEnv];
   if (!baseUrl) {
     console.error(
@@ -134,7 +139,21 @@ export async function readLambdaEnv(
 }
 
 /**
- * One secret's value for a stage, from `sst secret list`.
+ * The deployed values, each replaced by a non-empty variable of the same name
+ * from `shellEnv`.
+ */
+export function applyShellOverrides(
+  deployed: Record<string, string | undefined>,
+  shellEnv: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(deployed).map(([name, value]) => [name, shellEnv[name] || value]),
+  );
+}
+
+/**
+ * One secret's value for a stage, from `sst secret list`: the stage's own, or
+ * the app's fallback when the stage has none, as the deployed stage resolves it.
  *
  * The command prints every secret on the stage, so neither its output nor the
  * error carrying it is ever printed.
@@ -154,7 +173,7 @@ export function readStageSecret(stage: string, name: string): string {
   const value = parseSecretList(output, stage, name);
   if (!value) {
     console.error(
-      `Stage "${stage}" has no ${name} secret. Set it with\n` +
+      `Stage "${stage}" has no ${name} secret and there is no fallback. Set it with\n` +
         `  pnpm exec sst secret set ${name} --stage ${stage}`,
     );
     process.exit(1);
@@ -163,22 +182,25 @@ export function readStageSecret(stage: string, name: string): string {
 }
 
 /**
- * The value of `name` in `sst secret list` output, which prints a
- * `# filone/<stage>` header followed by `Name=value` lines. Only lines under
- * the header for `stage` count.
+ * The value of `name` in `sst secret list` output, which prints the app's
+ * fallback secrets under `# fallback` and the stage's own under
+ * `# filone/<stage>`, each followed by `Name=value` lines. The stage's value
+ * wins over the fallback; lines under any other header are ignored.
  */
 export function parseSecretList(output: string, stage: string, name: string): string | undefined {
-  const header = `# filone/${stage}`;
-  let inStageSection = false;
+  const stageHeader = `# filone/${stage}`;
+  const values: { stage?: string; fallback?: string } = {};
+  let section: 'stage' | 'fallback' | undefined;
   for (const line of output.split('\n')) {
     if (line.startsWith('#')) {
-      inStageSection = line.trim() === header;
+      const header = line.trim();
+      section = header === stageHeader ? 'stage' : header === '# fallback' ? 'fallback' : undefined;
       continue;
     }
     const separator = line.indexOf('=');
-    if (inStageSection && separator !== -1 && line.slice(0, separator) === name) {
-      return line.slice(separator + 1).trimEnd();
+    if (section && separator !== -1 && line.slice(0, separator) === name) {
+      values[section] = line.slice(separator + 1).trimEnd();
     }
   }
-  return undefined;
+  return values.stage ?? values.fallback;
 }

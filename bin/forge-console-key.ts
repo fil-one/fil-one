@@ -56,9 +56,13 @@
 //
 // Each region's Management API URL, and the dev network's S3 endpoint override
 // for a local smelt gateway, are read from the deployed AccountDeletionWorker's
-// environment. The tokens come from the stage's ForgeManagementApiToken and
-// ForgeDevManagementApiToken secrets via `sst secret list`; they are never
-// printed. Only the regions the run covers are looked up.
+// environment. A variable of the same name in your shell overrides it; a
+// SMELT=true stage needs FORGE_DEV_MANAGEMENT_API_URL=http://localhost:15110
+// and FORGE_DEV_S3_ENDPOINT_URL=http://localhost:15130, since the Lambda holds
+// host.docker.internal URLs. The tokens come from the stage's
+// ForgeManagementApiToken and ForgeDevManagementApiToken secrets, or the app's
+// fallbacks, via `sst secret list`; they are never printed. Only the regions
+// the run covers are looked up.
 //
 // Talks to AWS directly using your ambient AWS credentials (no `sst shell`).
 // Resource names come from `sst state export`. The role must also call

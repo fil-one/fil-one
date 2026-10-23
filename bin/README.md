@@ -230,8 +230,18 @@ node bin/reset-forge-network.ts --network staging --stage staging
 Forge cannot list tenants, and other stages share the network, so the tenants
 are the `{orchestratorId}TenantId` values in the stage's UserInfoTable. The
 Management API URL comes from the deployed `AccountDeletionWorker`'s
-environment and the token from the stage's secret, so no environment variables
-are needed. The token is never printed or written to the backup.
+environment and the token from the stage's secret (or the app's fallback), so
+no environment variables are needed. The token is never printed or written to
+the backup.
+
+A stage deployed with `SMELT=true` stores `host.docker.internal` URLs, which
+the host may not resolve. Set the Lambda's variable in your shell to override
+it:
+
+```bash
+FORGE_DEV_MANAGEMENT_API_URL=http://localhost:15110 \
+  node bin/reset-forge-network.ts --network dev --stage $USER --dry-run
+```
 
 Each account's tenant is disabled and deleted first, with retries; a tenant
 that is already gone counts as deleted. When the deletion still fails, the

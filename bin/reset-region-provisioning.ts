@@ -68,8 +68,8 @@ import {
 } from '@filone/backend/src/lib/service-orchestrator-ids.ts';
 import { assertRegionAllowed } from './lib/region-reset.ts';
 import { runRegionReset } from './lib/region-reset-run.ts';
-import { requireAwsProfile } from './lib/sst-state.ts';
-import { assertStageResources, awsRegionForStage, resolveStageTables } from './lib/stage.ts';
+import { findTable, requireAwsProfile } from './lib/sst-state.ts';
+import { assertStageResources, exportStageState, resolveStageTables } from './lib/stage.ts';
 
 const USAGE =
   'Usage: node bin/reset-region-provisioning.ts --stage <stage> --region <region> [--dry-run] [--yes] [--backup <path>]';
@@ -102,13 +102,17 @@ const backupPath =
 
 requireAwsProfile();
 
-const tables = resolveStageTables(stage, {
-  userInfo: '::UserInfoTableTable',
-  ragIndexer: '::RagIndexerTableTable',
-});
+const resources = exportStageState(stage);
+const tables = resolveStageTables(
+  stage,
+  { userInfo: '::UserInfoTableTable', ragIndexer: '::RagIndexerTableTable' },
+  resources,
+);
 assertStageResources(stage, tables);
 
-const awsRegion = awsRegionForStage(stage);
+// From the table's ARN: a personal stage lives wherever AWS_REGION pointed when
+// it was deployed, not where it points now.
+const { region: awsRegion } = findTable(stage, '::UserInfoTableTable', resources);
 
 console.log(
   `${dryRun ? 'DRY-RUN — ' : ''}Un-provisioning region ${region} (orchestrator "${orchestratorId}", attribute ${orchestratorId}TenantId)`,
