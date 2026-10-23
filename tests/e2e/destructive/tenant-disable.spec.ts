@@ -133,9 +133,15 @@ test.describe('account with tenants changed after presigning', () => {
 
     for (const region of REGIONS) {
       test(`rejects a presigned PUT minted before the tenant was write-locked (${region})`, async () => {
+        // https://linear.app/filecoin-foundation/issue/FIL-1612
         test.skip(
           region === 'us-east-1',
           'FTH (us-east-1) has a bug and does not implement this mechanism yet',
+        );
+        // https://linear.app/filecoin-foundation/issue/FIL-1613
+        test.skip(
+          region === 'eu-central-3' || region === 'us-east-9',
+          `Forge (${region}) does not implement this mechanism yet`,
         );
 
         const { url, expiresAt } = presignedUploads.get(region)!;
@@ -213,9 +219,15 @@ test.describe('account with tenants changed after presigning', () => {
 
     for (const region of REGIONS) {
       test(`rejects a presigned GET minted before the tenant was disabled (${region})`, async () => {
+        // https://linear.app/filecoin-foundation/issue/FIL-1612
         test.skip(
           region === 'us-east-1',
           'FTH (us-east-1) has a bug and does not implement this mechanism yet',
+        );
+        // https://linear.app/filecoin-foundation/issue/FIL-1613
+        test.skip(
+          region === 'eu-central-3' || region === 'us-east-9',
+          `Forge (${region}) does not implement this mechanism yet`,
         );
 
         const { url } = presignedObjects.get(region)!;
