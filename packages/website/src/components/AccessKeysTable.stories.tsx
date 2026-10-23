@@ -191,6 +191,19 @@ export const WithoutKeyManagement: Story = {
   },
 };
 
+/**
+ * The empty state the API keys page gives a Member, whose list holds only the
+ * keys they created while the org may hold others.
+ */
+export const EmptyOwnKeysOnly: Story = {
+  args: {
+    keys: [],
+    onCreateOpen: () => {},
+    emptyDescription:
+      'You can only see the keys you create. Admins see every key in the organization.',
+  },
+};
+
 /** The empty state for a role that cannot mint keys either. */
 export const EmptyWithoutKeyCreation: Story = {
   args: {
