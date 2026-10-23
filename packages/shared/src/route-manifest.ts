@@ -40,9 +40,9 @@ export type RouteCategory =
  *
  * `'invite-token'` marks the one route whose caller is, by definition, not yet a
  * member of the org it acts on: accepting an invitation. Its authorization is
- * the single-use token in the body plus a session whose verified email is the
- * invited address, both checked in the handler; a membership gate in the chain
- * would refuse every invitation there is. Deliberately not `'self'`, which is
+ * the single-use token in the body plus a session whose email is the invited
+ * address, both checked in the handler, which then marks that address verified;
+ * a membership gate in the chain would refuse every invitation there is. Deliberately not `'self'`, which is
  * for routes that touch no org state at all — accepting creates a membership.
  *
  * Two `'in-handler'` routes are membership-only: creating an additional org,
@@ -424,9 +424,8 @@ const MANIFEST = [
   },
   // Outside the org gate, and it has to be: the caller is not a member of the
   // inviting org yet, so a membership check here would refuse every invitation
-  // there is. The token plus a session whose verified email matches the
-  // invitation is the whole authorization, and neither is something a role can
-  // grant.
+  // there is. The token plus a session whose email matches the invitation is
+  // the whole authorization, and neither is something a role can grant.
   {
     method: 'POST',
     path: '/api/invitations/accept',

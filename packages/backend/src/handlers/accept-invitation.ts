@@ -5,6 +5,7 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { AcceptInvitationSchema, ApiErrorCode, OrgRole } from '@filone/shared';
 import type { AcceptInvitationResponse, ErrorResponse } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
+import { getAuth0UserEmail, markAuth0EmailVerified } from '../lib/auth0-management.ts';
 import {
   isInvitationUsable,
   normalizeInviteEmail,
@@ -29,7 +30,7 @@ import {
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
-import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
 import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
@@ -40,9 +41,16 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  *
  * The one org route with no org gate, and it has to be: the caller is not a
  * member of the inviting org yet, so a membership check here would refuse every
- * invitation there is. Authorization is the token plus a session whose VERIFIED
- * email matches the invitation — the token alone must not admit whoever a
- * forwarded email reaches.
+ * invitation there is. Authorization is the token plus a session whose email
+ * matches the invitation.
+ *
+ * The session's address need not be verified yet: a valid token plus a session
+ * signed up as the invited address is taken as proof of that address. So
+ * whoever holds a forwarded or leaked link can sign up as the invited address
+ * and join. What still guards it: the session's address must match the
+ * invitation, and for an unverified session Auth0 must hold that same address
+ * before it is marked verified. The mark lands before the transaction, and a
+ * failure refuses the accept, so no member holds an unverified address.
  *
  * What the request never touches is as load-bearing as what it does. No
  * entitlement row, no Stripe call, no billing read: an invitation must not
@@ -65,7 +73,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  *   invitation, so an invitation cannot outlive its issuer's authority,
  * - and the audit event.
  *
- * After it lands, the accepter's verified address is stamped on their
+ * After it lands, the accepter's now-verified address is stamped on their
  * `USER#{userId}/PROFILE` row. That is the row a removal reads to find the
  * invitations addressed TO the member it is removing, and acceptance is one of
  * only two moments the control plane learns a verified address.
@@ -73,8 +81,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { userId } = getUserInfo(event);
-  const verifiedEmail = getVerifiedEmail(event);
+  const { sub, userId, email, emailVerified } = getUserInfo(event);
 
   const parsed = parseJsonBody(event.body, AcceptInvitationSchema);
   if ('error' in parsed) return parsed.error;
@@ -85,7 +92,7 @@ export async function baseHandler(
   // saying the link is done and offering to ask for another.
   if (!invitation || !isInvitationUsable(invitation)) return notFoundResponse();
 
-  if (!verifiedEmail || normalizeInviteEmail(verifiedEmail) !== invitation.emailNorm) {
+  if (!email || normalizeInviteEmail(email) !== invitation.emailNorm) {
     return emailMismatchResponse();
   }
 
@@ -93,6 +100,16 @@ export async function baseHandler(
     resolveMembership(invitation.orgId, userId),
     accepterOrgFence(userId, invitation.orgId),
   ]);
+
+  const verificationFailure = await verifyInvitedAddress({
+    sub,
+    userId,
+    emailVerified,
+    emailNorm: invitation.emailNorm,
+  });
+  if (verificationFailure) return verificationFailure;
+  const verifiedEmail = email;
+
   const items = existing ? [] : joinItems(invitation, userId);
   const labels = existing ? [] : joinLabels(invitation);
 
@@ -136,6 +153,42 @@ export async function baseHandler(
     role: existing?.role ?? invitation.role,
     alreadyMember: Boolean(existing),
   });
+}
+
+/**
+ * Mark the caller's address verified in Auth0, unless it already is. Runs
+ * before the join so that a failure leaves no member with an unverified
+ * address, and answers that failure so the caller can retry the same link.
+ *
+ * Auth0's current address is checked first: the ID token may predate an email
+ * change, and the verification applies to whatever Auth0 holds now.
+ */
+async function verifyInvitedAddress({
+  sub,
+  userId,
+  emailVerified,
+  emailNorm,
+}: {
+  sub: string;
+  userId: string;
+  emailVerified: boolean;
+  emailNorm: string;
+}): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  if (emailVerified) return undefined;
+  try {
+    const heldEmail = await getAuth0UserEmail(sub);
+    if (!heldEmail || normalizeInviteEmail(heldEmail) !== emailNorm) {
+      return emailMismatchResponse();
+    }
+    await markAuth0EmailVerified(sub);
+    return undefined;
+  } catch (err) {
+    console.error('[accept-invitation] Could not mark the invited address verified', {
+      userId,
+      error: err,
+    });
+    return emailVerificationFailedResponse();
+  }
 }
 
 /**
@@ -191,7 +244,7 @@ function acceptedEvent({
 }: {
   invitation: InvitationRecord;
   userId: string;
-  verifiedEmail?: string;
+  verifiedEmail: string;
   alreadyMember: boolean;
 }) {
   return auditEvent({
@@ -243,7 +296,7 @@ async function acceptFailureResponse(
       // idempotent answer has to carry the retirement it promised, or a link the
       // caller has already used stays live for a fortnight.
       await retireAfterRace({ invitation, userId, verifiedEmail });
-      if (verifiedEmail) await rememberVerifiedEmail(userId, verifiedEmail);
+      await rememberVerifiedEmail(userId, verifiedEmail);
       return await acceptedResponse({ invitation, role: existing.role, alreadyMember: true });
     }
   }
@@ -268,7 +321,7 @@ async function acceptFailureResponse(
 interface AcceptContext {
   invitation: InvitationRecord;
   userId: string;
-  verifiedEmail?: string;
+  verifiedEmail: string;
   /** The accepter's own org, when the transaction fenced it. */
   accepterOrgId?: string;
 }
@@ -387,6 +440,16 @@ function emailMismatchResponse(): APIGatewayProxyStructuredResultV2 {
     .build();
 }
 
+/** Nothing was written, so the same link works on a retry. */
+function emailVerificationFailedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(502)
+    .body<ErrorResponse>({
+      message: 'We could not confirm your email address. Please try again.',
+    })
+    .build();
+}
+
 function inviterAuthorityResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(403)
@@ -408,8 +471,7 @@ function ownerCountUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
 
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
-  // The verified-email gate stays on: the whole check here is that the session's
-  // VERIFIED address is the one the invitation went to.
-  .use(authMiddleware())
+  // The handler verifies the address itself, from the invitation reaching it.
+  .use(authMiddleware({ requireVerifiedEmail: false }))
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());
