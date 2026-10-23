@@ -991,7 +991,8 @@ export default $config({
       handler: 'packages/backend/src/jobs/bulk-delete-worker.handler',
       // Linking the queue covers both directions: consuming its messages and
       // enqueueing the continuation for a job too large for one invocation.
-      link: [bulkDeleteTable, userInfoTable, bulkDeleteQueue, ...managementApiTokens],
+      // OrgTable holds the starter's membership, re-read before each run.
+      link: [bulkDeleteTable, userInfoTable, orgTable, bulkDeleteQueue, ...managementApiTokens],
       environment: orchestratorEnv,
       timeout: '900 seconds',
       memory: '512 MB',
@@ -1240,6 +1241,8 @@ export default $config({
         extraEnv: { ...fthEnv, ...forgeEnv },
         // Linking the queue grants the send; the handler only enqueues the job.
         extraLink: [bulkDeleteQueue],
+        // Reads the bucket's versioning with the tenant's console S3 key.
+        permissions: s3DataPlanePermissions,
       },
       presign: {
         extraEnv: { ...fthEnv, ...forgeEnv },
