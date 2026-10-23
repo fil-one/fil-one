@@ -21,7 +21,9 @@ export default defineConfig({
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
   workers: isCI ? 1 : undefined,
-  reporter: 'html',
+  // The html reporter prints nothing, so Playwright adds its own terminal
+  // reporter: one dot per test on CI. CI logs list each test by name instead.
+  reporter: isCI ? [['list'], ['html']] : 'html',
   use: {
     baseURL,
     ignoreHTTPSErrors: true,
