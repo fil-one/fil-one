@@ -179,14 +179,14 @@ async function runPages(
 
   // A job's bucket doesn't change mid-run, so its versioning is read once per
   // invocation, for the access checks and the walk.
-  const bucketVersioningStatus = await getBucketVersioningStatus(s3, job.bucketName);
+  const versioningStatus = await getBucketVersioningStatus(s3, job.bucketName);
   const memberId = job.startedBy;
 
   for (;;) {
     // The tenant's credentials delete without any policy evaluation, so the
     // starter's role and access are re-checked before every page: a change
     // made after the job was queued, or mid-run, stops it within a page.
-    await assertMemberCanDelete(tenant, job, memberId, bucketVersioningStatus);
+    await assertMemberCanDelete(tenant, job, memberId, versioningStatus);
 
     const page = await enumerateDeletionPage({
       s3,
@@ -196,7 +196,9 @@ async function runPages(
       ...(job.cursor && { cursor: job.cursor }),
       // Only AllVersions ever sees a literal "null" version id; Current lists
       // by key only.
-      ...(job.scope === BulkDeleteScope.AllVersions && { bucketVersioningStatus }),
+      ...(job.scope === BulkDeleteScope.AllVersions && {
+        bucketVersioningStatus: versioningStatus,
+      }),
       maxKeys: PAGE_SIZE,
     });
 
@@ -232,7 +234,7 @@ async function assertMemberCanDelete(
   { orchestrator, tenantId }: ResolvedTenant,
   job: BulkDeleteJobRecord,
   memberId: string | undefined,
-  bucketVersioningStatus: BucketVersioningStatus,
+  versioningStatus: BucketVersioningStatus,
 ): Promise<void> {
   // Queued before the starter was recorded.
   if (!memberId) return;
@@ -247,7 +249,7 @@ async function assertMemberCanDelete(
     {
       bucketName: job.bucketName,
       scope: job.scope,
-      versioningStatus: bucketVersioningStatus,
+      versioningStatus,
     },
   );
   if (!access.ok) {
