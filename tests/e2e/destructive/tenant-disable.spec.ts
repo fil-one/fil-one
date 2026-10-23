@@ -3,6 +3,7 @@ import { test, expect, request, type APIRequestContext } from '@playwright/test'
 import { STORAGE_STATE, requireUserId } from './roles.util.ts';
 import { REGIONS, type Region } from './regions.util.ts';
 import { ACCOUNT_STATE_TIMEOUT_MS, setAccountState } from './account-state.util.ts';
+import { readBucketList } from './buckets.util.ts';
 
 // Disabling an account must cut off the presigned URLs it already handed out
 // (FIL-413). A presigned GET is redeemed at the region's storage provider and
@@ -123,13 +124,7 @@ test.describe('disabled account', () => {
 
 /** The first bucket the account has in each region; buckets.setup.ts seeds one. */
 async function findBucketInEachRegion(api: APIRequestContext): Promise<Map<Region, string>> {
-  const response = await api.get('/api/buckets');
-  if (!response.ok()) {
-    throw new Error(`GET /api/buckets returned ${response.status()}: ${await response.text()}`);
-  }
-  const { buckets } = (await response.json()) as {
-    buckets: Array<{ bucketName: string; region: string }>;
-  };
+  const buckets = await readBucketList(await api.get('/api/buckets'));
 
   const bucketByRegion = new Map<Region, string>();
   for (const region of REGIONS) {
