@@ -5,8 +5,8 @@ import type { UsageResponse, TenantStatus } from '@filone/shared';
 import { countAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
-import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
-import type { TenantInfo } from '../lib/service-orchestrator.ts';
+import { type ProvisionedTenant, getProvisionedTenants } from '../lib/region-helpers.ts';
+import type { RegionOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
 import {
   getRequestDeadline,
   requestDeadlineMiddleware,
@@ -42,10 +42,10 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     countAccessKeysInScope(orgId, keyScope(event)),
   );
 
-  // The dashboard aggregates usage across every region the org is provisioned
-  // in, so resolve the ready tenant on each available orchestrator.
-  const regions = await trackRequestStep(event, 'getProvisionedRegions', () =>
-    getProvisionedRegions(orgId),
+  // The dashboard aggregates usage across every network the org is provisioned
+  // on, so resolve the ready tenant on each available orchestrator.
+  const regions = await trackRequestStep(event, 'getProvisionedNetworks', () =>
+    getProvisionedTenants(orgId),
   );
 
   if (regions.length === 0) {
@@ -138,7 +138,7 @@ function aggregateRegionUsages(regionUsages: RegionUsage[], accessKeyCount: numb
 
 async function fetchRegionUsage(
   event: AuthenticatedEvent,
-  { orchestrator, tenantId }: ProvisionedRegion,
+  { orchestrator, tenantId }: ProvisionedTenant,
   window: { from: Date; to: Date },
   signal: AbortSignal,
 ): Promise<RegionUsage> {
