@@ -69,6 +69,15 @@ export function GetDataBackDialog({ target, onClose }: GetDataBackDialogProps) {
   const warmCost = getWarmPeriodCost(bytes);
   const standardMonthly = getStandardMonthlyCost(bytes);
   const frozenMonthly = getMonthlyCost(bytes, COLD_PRICE_PER_TB_MONTH);
+  const permanentCosts: RowCosts = {
+    now: formatUsd(earlyCharge),
+    monthly: formatUsd(standardMonthly),
+    monthlyNote: `was ${formatUsd(frozenMonthly)}`,
+  };
+  const termNote =
+    earlyCharge > 0
+      ? `The one-off charge covers the rest of your ${MIN_TERM_DAYS}-day freeze.`
+      : `No one-off charge: your ${MIN_TERM_DAYS}-day minimum has passed.`;
 
   function handleConfirm() {
     if (!state) return;
@@ -100,17 +109,24 @@ export function GetDataBackDialog({ target, onClose }: GetDataBackDialogProps) {
   return (
     <Modal open={target !== null} onClose={onClose} size="md" testId="get-data-back-dialog">
       <div onKeyDown={handleKeyDown}>
-        <ModalHeader onClose={onClose} description="Choose how long to restore the data.">
-          Restore {bucketName}
+        <ModalHeader
+          onClose={onClose}
+          description={
+            canWarm
+              ? 'Choose how long to restore the data.'
+              : 'Move it back to standard storage for good.'
+          }
+        >
+          {canWarm ? `Restore ${bucketName}` : `Restore ${bucketName} permanently`}
         </ModalHeader>
         <ModalBody>
           <CostColumnsHeader />
-          <div
-            className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 text-ui"
-            role="radiogroup"
-            aria-label="How to restore"
-          >
-            {canWarm && (
+          {canWarm ? (
+            <div
+              className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 text-ui"
+              role="radiogroup"
+              aria-label="How to restore"
+            >
               <OptionRow
                 value="warm"
                 checked={selected === 'warm'}
@@ -121,22 +137,29 @@ export function GetDataBackDialog({ target, onClose }: GetDataBackDialogProps) {
                 monthly={formatUsd(frozenMonthly)}
                 monthlyNote="no change"
               />
-            )}
-            <OptionRow
-              value="unfreeze"
-              checked={selected === 'unfreeze'}
-              onChange={() => setChoice('unfreeze')}
-              title="Restore permanently"
-              description={
-                earlyCharge > 0
-                  ? `Back to standard storage. The one-off charge covers the rest of your ${MIN_TERM_DAYS}-day freeze.`
-                  : 'Moves back to standard storage.'
-              }
-              now={formatUsd(earlyCharge)}
-              monthly={formatUsd(standardMonthly)}
-              monthlyNote={`was ${formatUsd(frozenMonthly)}`}
-            />
-          </div>
+              <OptionRow
+                value="unfreeze"
+                checked={selected === 'unfreeze'}
+                onChange={() => setChoice('unfreeze')}
+                title="Restore permanently"
+                description={`Back to standard storage. ${termNote}`}
+                {...permanentCosts}
+              />
+            </div>
+          ) : (
+            // Already restored, so permanent is the only way left: a plain row,
+            // since a lone radio button offers a choice that isn't there.
+            <div className="flex items-start gap-3 rounded-lg border border-zinc-200 px-4 py-3 text-ui">
+              <span className="flex-1">
+                <CostRowText
+                  title="Standard storage"
+                  description={termNote}
+                  costs={permanentCosts}
+                />
+              </span>
+              <CostRowAmounts costs={permanentCosts} />
+            </div>
+          )}
           {/* After the choice, where it applies to whichever option was picked. */}
           <div className="mt-3">
             <Alert

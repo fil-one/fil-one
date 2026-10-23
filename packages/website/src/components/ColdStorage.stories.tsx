@@ -8,7 +8,7 @@ import { ColdStorageStatus } from './ColdStorageStatus';
 import { FreezeBucketDialog } from './FreezeBucketDialog';
 import { GetDataBackDialog } from './GetDataBackDialog';
 import { ExtendRestoreDialog } from './ExtendRestoreDialog';
-import { freezeBucket, setLargeBucket } from '../lib/cold-storage-prototype.js';
+import { freezeBucket, setLargeBucket, warmBucket } from '../lib/cold-storage-prototype.js';
 
 /**
  * The cold storage prototype (FIL-1608), one story per screen and state. The
@@ -128,4 +128,28 @@ export const ExtendRestore: Story = {
       onConfirm={() => {}}
     />
   ),
+};
+
+const RESTORED = 'client-deliveries';
+
+/** Restoring an already-restored bucket permanently: the one way left, without a radio. */
+export const RestorePermanentlyOnly: Story = {
+  render: function Render() {
+    useState(() => {
+      setLargeBucket(RESTORED, REGION);
+      freezeBucket(RESTORED, REGION, 70e12);
+      warmBucket(RESTORED, REGION, {
+        status: 'frozen',
+        frozenAt: now,
+        termEndsAt: now + 90 * DAY,
+        bytes: 70e12,
+      });
+    });
+    return (
+      <GetDataBackDialog
+        target={{ bucketName: RESTORED, region: REGION, preselect: 'unfreeze' }}
+        onClose={() => {}}
+      />
+    );
+  },
 };
