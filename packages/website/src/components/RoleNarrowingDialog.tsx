@@ -187,7 +187,8 @@ function AccessKeyRow({ accessKey }: { accessKey: AccessKeySummary }) {
           )}
         </span>
         <span className="text-xs text-zinc-500">
-          {formatRegion(accessKey.region)} · created {accessKey.createdAt.slice(0, 10)}
+          {accessKey.regions.map(formatRegion).join(', ')} · created{' '}
+          {accessKey.createdAt.slice(0, 10)}
           {carries}
         </span>
       </span>

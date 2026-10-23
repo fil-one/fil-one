@@ -22,7 +22,7 @@ const KEYS: AccessKey[] = [
     status: 'active',
     permissions: ['read', 'write', 'list'],
     bucketScope: 'all',
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
   },
   {
     id: '2',
@@ -35,7 +35,7 @@ const KEYS: AccessKey[] = [
     permissions: ['read', 'write', 'list', 'delete'],
     bucketScope: 'specific',
     buckets: ['fgrc-ltda', 'filipa-1'],
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
   },
   {
     id: '3',
@@ -46,7 +46,7 @@ const KEYS: AccessKey[] = [
     status: 'active',
     permissions: ['read', 'list'],
     bucketScope: 'all',
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
   },
   {
     id: '4',
@@ -58,7 +58,7 @@ const KEYS: AccessKey[] = [
     permissions: ['read', 'write', 'list'],
     bucketScope: 'specific',
     buckets: ['test-bucket-forge-us-east'],
-    region: S3Region.UsEast9,
+    regions: [S3Region.UsEast9],
   },
   {
     id: '5',
@@ -68,7 +68,7 @@ const KEYS: AccessKey[] = [
     accessKeyId: 'z6Mkj3sQvqR63MfKNVgJJzCf29000000000000000000000',
     createdAt: '2026-09-20T10:00:00Z',
     status: 'active',
-    region: S3Region.EuCentral3,
+    regions: [S3Region.EuCentral3],
   },
 ];
 
@@ -106,7 +106,7 @@ export const SearchOnly: Story = {
   args: {
     keys: KEYS.filter((key) => key.type === 'service' && key.status === 'active').map((key) => ({
       ...key,
-      region: S3Region.EuWest1,
+      regions: [S3Region.EuWest1],
     })),
   },
 };
