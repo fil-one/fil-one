@@ -96,7 +96,11 @@ export interface FilOneOrchestratorConfig {
    * (registry entry, sst.config IAM blocks) must honor the same derivations.
    */
   id: string;
-  region: S3Region;
+  /**
+   * The regions the network serves. Its tenant is region-free, so they share
+   * the tenant, the console key and the bucket listing.
+   */
+  regions: S3Region[];
   /** Deployment stage — explicit (rather than read from process.env) so instances are testable. */
   stage: string;
   /** S3 gateway endpoint for the data plane, e.g. `https://s3.{region}.filonecontent.com`. */
@@ -118,7 +122,7 @@ const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
 export class FilOneOrchestrator implements ServiceOrchestrator {
   readonly id: string;
-  readonly region: S3Region;
+  readonly regions: S3Region[];
 
   private readonly config: FilOneOrchestratorConfig;
   private readonly client: Client;
@@ -128,7 +132,10 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   constructor(config: FilOneOrchestratorConfig) {
     this.config = config;
     this.id = config.id;
-    this.region = config.region;
+    if (config.regions.length === 0) {
+      throw new Error(`Orchestrator "${config.id}" must serve at least one region.`);
+    }
+    this.regions = config.regions;
     this.client = resolveClient(config);
     const { id, stage } = config;
     this.setupDeps = { client: this.client, id, stage };
@@ -171,7 +178,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     );
     return {
       endpointUrl: this.config.s3EndpointUrl,
-      region: this.region,
+      region: this.regions[0]!,
       credentials,
       forcePathStyle: true,
       orchestratorId: this.id,
@@ -352,7 +359,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     // for the one bucket the detail page actually needs them for.
     return buckets.map((b) => ({
       bucketName: b.name,
-      region: this.region,
+      region: this.regions[0]!,
       createdAt: b.createdAt,
       isPublic: false,
       // The contract mandates server-side encryption by default.
@@ -402,7 +409,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
 
     return {
       bucketName,
-      region: this.region,
+      region: this.regions[0]!,
       isPublic: false,
       versioning,
       encrypted: true,

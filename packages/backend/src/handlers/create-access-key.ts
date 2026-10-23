@@ -63,6 +63,7 @@ import {
   requestDeadlineMiddleware,
 } from '../middleware/request-deadline.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
+import { orchestratorSupportsIamMethods } from '../lib/service-orchestrator-ids.ts';
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
@@ -290,7 +291,7 @@ function checkServiceKeyAuthority(
   // A principal-bound key carries no authority to check.
   if (!('permissions' in request)) return undefined;
   const denied = checkCreatorAuthority(event, request);
-  if (denied || !supportsIamMethods(orchestrator.region)) return denied;
+  if (denied || !orchestratorSupportsIamMethods(orchestrator)) return denied;
   return requirePermission(
     event,
     'keys.create_service',

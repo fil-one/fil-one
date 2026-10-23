@@ -82,7 +82,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
     console.error('[get-usage] Failed to fetch usage', {
       orgId,
       tenantId,
-      region: orchestrator.region,
+      orchestratorId: orchestrator.id,
       err: result.reason,
     });
   });
@@ -145,17 +145,17 @@ async function fetchRegionUsage(
 ): Promise<RegionUsage> {
   const { from, to } = window;
   const [metrics, info, buckets] = await Promise.all([
-    trackRequestStep(event, `getTenantUsageMetrics:${orchestrator.region}`, () =>
+    trackRequestStep(event, `getTenantUsageMetrics:${orchestrator.id}`, () =>
       orchestrator.getTenantUsageMetrics(
         tenantId,
         { from: from.toISOString(), to: to.toISOString(), interval: '1d' },
         { signal },
       ),
     ),
-    trackRequestStep(event, `getTenantInfo:${orchestrator.region}`, () =>
+    trackRequestStep(event, `getTenantInfo:${orchestrator.id}`, () =>
       orchestrator.getTenantInfo(tenantId, { signal }),
     ),
-    trackRequestStep(event, `listBuckets:${orchestrator.region}`, () =>
+    trackRequestStep(event, `listBuckets:${orchestrator.id}`, () =>
       orchestrator.listBuckets(tenantId, undefined, { signal }),
     ),
   ]);

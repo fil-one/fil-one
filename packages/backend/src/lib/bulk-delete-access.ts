@@ -7,6 +7,7 @@
 import { BulkDeleteScope, supportsIamMethods, type PolicyAction } from '@filone/shared';
 
 import type { BucketVersioningStatus } from './s3-bucket-operations.ts';
+import { orchestratorSupportsIamMethods } from './service-orchestrator-ids.ts';
 import type { RegionOrchestrator, ServiceOrchestrator } from './service-orchestrator.ts';
 
 /**
@@ -56,9 +57,9 @@ export async function canBulkDelete(
   memberId: string | undefined,
   target: BulkDeleteTarget,
 ): Promise<BulkDeleteAccess> {
-  if (!memberId || !supportsIamMethods(orchestrator.region)) return { ok: true };
-  // Every region serving the iam access model has a ServiceOrchestrator, which
-  // the compiler cannot tell from the region check.
+  if (!memberId || !orchestratorSupportsIamMethods(orchestrator)) return { ok: true };
+  // Every network serving the iam access model has a ServiceOrchestrator, which
+  // the compiler cannot tell from the access-model check.
   const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(
     tenantId,
     memberId,
