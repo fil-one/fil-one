@@ -308,15 +308,13 @@ describe('ensureTenantReady', () => {
     });
   });
 
-  it('requests the bucket-policy actions but no bucket-configuration actions for the console key', async () => {
+  it('requests every action in the contract enum for the console key', async () => {
     stubHappyPath();
 
     await ensureTenantReady(deps, orgId);
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    // Every action in the contract enum. It carries no bucket-configuration
-    // actions: the versioning and object-lock reads classify as ListBucket
-    // (fil-one/RFC#30) and there are no writes.
+    // The console key holds every action in the contract enum.
     expect(permissions).toStrictEqual([
       's3:CreateBucket',
       's3:ListAllMyBuckets',
@@ -338,6 +336,23 @@ describe('ensureTenantReady', () => {
       's3:GetBucketPolicy',
       's3:PutBucketPolicy',
       's3:DeleteBucketPolicy',
+      's3:GetBucketVersioning',
+      's3:PutBucketVersioning',
+      's3:GetBucketObjectLockConfiguration',
+      's3:PutBucketObjectLockConfiguration',
+      's3:GetBucketLocation',
+      's3:GetBucketAcl',
+      's3:GetBucketCORS',
+      's3:GetBucketTagging',
+      's3:GetObjectAttributes',
+      's3:GetObjectTagging',
+      's3:PutObjectTagging',
+      's3:DeleteObjectTagging',
+      's3:GetBucketPolicyStatus',
+      's3:GetEncryptionConfiguration',
+      's3:PutEncryptionConfiguration',
+      's3:PutBucketTagging',
+      's3:PutBucketCORS',
     ]);
   });
 

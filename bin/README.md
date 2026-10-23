@@ -230,6 +230,7 @@ cannot stops before the scan.
 | `aurora-demo.ts`                   | Demo script for Aurora S3 operations                                                                                                                                                                           |
 | `account-deletion.ts`              | Report an org's account-deletion state, and start or re-drive the teardown worker                                                                                                                              |
 | `fth-console-key.ts`               | Re-issue the per-tenant FTH console access key as `filone-console-v2`, prune the old key, and repair a tenant whose key FTH reported creating but does not have                                                |
+| `forge-console-key.ts`             | Rotate the per-tenant console access key in every Forge region of a non-production stage to the next `filone-console-vN` (optionally only where it lacks permissions), and prune version N-1                   |
 | `fth-s3-env.ts`                    | Print FTH (us-east-1) S3 environment variables for one org, without `sst shell`                                                                                                                                |
 | `check-ci-unit-tests.ts`           | Fail when `.github/workflows/packages-ci.yaml` does not unit-test exactly the packages `pnpm test:unit` tests; runs in pre-commit and in CI's `lint` job                                                       |
 

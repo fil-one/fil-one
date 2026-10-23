@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { test, expect, type Page } from '@playwright/test';
 import type { CreateAccessKeyResponse, PolicyAction } from '@filone/shared';
 import { resolvePersonalOrgId, runCleanup } from '../destructive/invite.util.ts';
@@ -9,6 +10,7 @@ import {
   allow,
   getCredentials,
   listObjects,
+  putObject,
   grantAllToOwner,
   emptyAndDeleteBucket,
   buildCreatorPolicy,
@@ -58,6 +60,11 @@ async function createBucketGrantingMember(actions: PolicyAction[]): Promise<stri
     await owner.replaceStatements(bucket, [grantAllToOwner(ownerId), allow([memberId], actions)]);
   }
   return bucket;
+}
+
+async function putObjectsAsOwner(bucket: string, keys: string[]): Promise<void> {
+  const s3 = await createS3ClientWithNewKey(owner, createdKeys);
+  for (const key of keys) await putObject(s3, bucket, key);
 }
 
 async function listObjectKeysAsOwner(bucket: string): Promise<string[]> {
@@ -134,6 +141,59 @@ test.describe('as the member', { tag: '@serial' }, () => {
     const bucket = await createBucketGrantingMember(['s3:ListBucket', 's3:GetObject']);
     await uploadObjectInUi(page, bucket, 'member-upload.txt');
     await expect(page.locator('#upload-retry-button')).toBeVisible();
+    expect(await listObjectKeysAsOwner(bucket)).toEqual([]);
+  });
+
+  // The bucket page of a bucket the policy leaves the member out of reads as
+  // missing (M3), so Empty bucket is never offered; this sends the request the
+  // button would, which is what the route has to refuse.
+  test('M6. Empty bucket answers a member the policy does not name like a missing bucket, and deletes nothing', async () => {
+    const bucket = await createBucketGrantingMember([]);
+    await putObjectsAsOwner(bucket, ['a.txt', 'b.txt']);
+
+    const member = await ConsoleApi.open('member', orgId);
+    try {
+      const res = await member.send('POST', `/buckets/${bucket}/bulk-delete?region=${REGION}`, {
+        idempotencyKey: randomUUID(),
+      });
+      expect({ status: res.status(), body: await res.json() }).toStrictEqual({
+        status: 404,
+        body: { message: 'Bucket not found' },
+      });
+    } finally {
+      await member.dispose();
+    }
+    expect(await listObjectKeysAsOwner(bucket)).toEqual(['a.txt', 'b.txt']);
+  });
+
+  // Empty bucket deletes every version. On a bucket that never enabled
+  // versioning, the default, that takes listing versions and plain deletes, so
+  // the grant leaves out s3:DeleteObjectVersion.
+  test('M7. a member granted list and delete empties the bucket', async ({ page }) => {
+    // Room for the setup and for the job to finish on top of it.
+    test.setTimeout(120_000);
+    const bucket = await createBucketGrantingMember([
+      's3:ListBucket',
+      's3:ListBucketVersions',
+      's3:DeleteObject',
+    ]);
+    await putObjectsAsOwner(bucket, ['a.txt', 'b.txt']);
+
+    await openBucket(page, bucket);
+    await expect(page.locator('[data-testid="object-row"]')).toHaveCount(2);
+    await page.locator('#empty-bucket-button').click();
+    await page.locator('#empty-bucket-confirm').fill(bucket);
+    const started = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/buckets/${bucket}/bulk-delete`) && r.request().method() === 'POST',
+    );
+    await page.locator('#empty-bucket-confirm-button').click();
+    expect((await started).status()).toBe(202);
+
+    // The worker runs off a queue. Once the job finishes, the page reloads the
+    // listing; the dialog's own outcome is gone as soon as the bucket is empty,
+    // since the page offers Empty bucket only while there are objects.
+    await expect(page.locator('[data-testid="object-row"]')).toHaveCount(0, { timeout: 60_000 });
     expect(await listObjectKeysAsOwner(bucket)).toEqual([]);
   });
 });

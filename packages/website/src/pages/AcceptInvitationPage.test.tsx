@@ -89,8 +89,11 @@ function apiError(message: string, status: number, code?: string): Error {
 }
 
 describe('AcceptInvitationPage', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    // An answer one test gives `/me` must not reach the next one.
+    const { getMe } = await import('../lib/api.js');
+    vi.mocked(getMe).mockReset();
   });
 
   it('says the link is no longer valid when there is no token to redeem', async () => {
@@ -133,6 +136,45 @@ describe('AcceptInvitationPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Continue to Acme' }));
     expect(mockSwitchToOrg).toHaveBeenCalledWith('org-9');
+  });
+
+  it('refreshes the session’s claims once the accept lands, before offering to continue', async () => {
+    // The accept verified the address, but the session's ID token still says
+    // otherwise until it is refreshed, and `_app.tsx` would send the new member
+    // to /verify-email.
+    let accept: (result: unknown) => void = () => {};
+    mockAccept.mockReturnValue(new Promise((resolve) => (accept = resolve)));
+    const { getMe } = await import('../lib/api.js');
+    let refreshed: (me: unknown) => void = () => {};
+    vi.mocked(getMe).mockReturnValue(new Promise((resolve) => (refreshed = resolve)) as never);
+    renderPage();
+
+    await waitFor(() => expect(mockAccept).toHaveBeenCalledWith(TOKEN));
+    // Never beside the accept: the two would race over an expired session.
+    expect(getMe).not.toHaveBeenCalled();
+
+    accept({ orgId: 'org-9', orgName: 'Acme', role: OrgRole.Member, alreadyMember: false });
+    await waitFor(() =>
+      expect(getMe).toHaveBeenCalledWith({ forceRefresh: true, skipOrgReconcile: true }),
+    );
+    expect(screen.queryByTestId('accept-success')).not.toBeInTheDocument();
+
+    refreshed({ email: 'invitee@example.com', emailVerified: true });
+    expect(await screen.findByTestId('accept-success')).toBeInTheDocument();
+  });
+
+  it('still welcomes the new member when refreshing the session’s claims fails', async () => {
+    mockAccept.mockResolvedValue({
+      orgId: 'org-9',
+      orgName: 'Acme',
+      role: OrgRole.Member,
+      alreadyMember: false,
+    });
+    const { getMe } = await import('../lib/api.js');
+    vi.mocked(getMe).mockRejectedValue(apiError('Bad gateway', 502));
+    renderPage();
+
+    expect(await screen.findByTestId('accept-success')).toHaveTextContent('Welcome to Acme');
   });
 
   it('treats a second acceptance as the success it is', async () => {

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { S3Region, supportsBucketManagement } from '../constants.ts';
+import { S3Region, supportsIamMethods, supportsBucketManagement } from '../constants.ts';
 
 /**
  * Whether the key still authenticates. `expired` is computed by the server at
@@ -32,11 +32,21 @@ export const BUCKET_INFO_PERMISSIONS = [
 ] as const;
 export type BucketInfoPermission = (typeof BUCKET_INFO_PERMISSIONS)[number];
 
+/**
+ * Bucket-configuration write permissions. Selectable only in a region that
+ * serves the `iam` access model (a Forge gateway), where the gateway stores a
+ * bucket's own CORS document; the other regions have no operation for it.
+ * Standalone top-level permissions like {@link BUCKET_PERMISSIONS}.
+ */
+export const BUCKET_CONFIG_PERMISSIONS = ['PutBucketCORS'] as const;
+export type BucketConfigPermission = (typeof BUCKET_CONFIG_PERMISSIONS)[number];
+
 /** All permissions selectable on an access key: object operations plus bucket management. */
 export const ACCESS_KEY_PERMISSIONS = [
   ...OBJECT_PERMISSIONS,
   ...BUCKET_PERMISSIONS,
   ...BUCKET_INFO_PERMISSIONS,
+  ...BUCKET_CONFIG_PERMISSIONS,
 ] as const;
 export type AccessKeyPermission = (typeof ACCESS_KEY_PERMISSIONS)[number];
 
@@ -52,6 +62,13 @@ export function isBucketInfoPermission(
   permission: AccessKeyPermission,
 ): permission is BucketInfoPermission {
   return (BUCKET_INFO_PERMISSIONS as readonly string[]).includes(permission);
+}
+
+/** Type guard: is this permission a (Forge-only) bucket-configuration write permission? */
+export function isBucketConfigPermission(
+  permission: AccessKeyPermission,
+): permission is BucketConfigPermission {
+  return (BUCKET_CONFIG_PERMISSIONS as readonly string[]).includes(permission);
 }
 
 /** Type guard: is this permission an object-level permission? */
@@ -141,6 +158,16 @@ export const BUCKET_INFO_PERMISSION_LABELS: Record<
   },
 };
 
+export const BUCKET_CONFIG_PERMISSION_LABELS: Record<
+  BucketConfigPermission,
+  { label: string; description: string }
+> = {
+  PutBucketCORS: {
+    label: 'Set bucket CORS',
+    description: 'Set or remove the cross-origin rules of buckets',
+  },
+};
+
 export const ACCESS_KEY_BUCKET_SCOPES = ['all', 'specific'] as const;
 export type AccessKeyBucketScope = (typeof ACCESS_KEY_BUCKET_SCOPES)[number];
 
@@ -209,6 +236,13 @@ export const CreateAccessKeySchema = z
     (data) => !data.permissions.some(isBucketPermission) || supportsBucketManagement(data.region),
     {
       message: 'Bucket management permissions are not supported in the selected region',
+      path: ['permissions'],
+    },
+  )
+  .refine(
+    (data) => !data.permissions.some(isBucketConfigPermission) || supportsIamMethods(data.region),
+    {
+      message: 'Bucket configuration permissions are not supported in the selected region',
       path: ['permissions'],
     },
   );

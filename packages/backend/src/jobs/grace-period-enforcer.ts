@@ -112,9 +112,7 @@ async function cancelSubscriptionAndDisableTenant(candidate: Candidate, now: Dat
   assertRegionSyncSucceeded(
     await syncTenantStatusInProvisionedRegions(candidate.orgId, 'disabled'),
   );
-  // Transition DynamoDB status to canceled, on both keys — a cancel that
-  // reached only the row this scan happened to pick would leave the twin in
-  // grace_period, and the next run would see the org again.
+  // Transition DynamoDB status to canceled.
   await updateSubscriptionByUser(candidate, {
     UpdateExpression: 'SET subscriptionStatus = :status, updatedAt = :now',
     ExpressionAttributeValues: {

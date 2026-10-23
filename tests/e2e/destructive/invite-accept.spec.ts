@@ -139,14 +139,14 @@ test.describe('trial user joins a second organization', () => {
   });
 });
 
-// A new registrant's address is unverified when Auth0 hands them back, so the
-// accept call refuses them and the page sends them through `/verify-email`
-// before it redeems the invitation. The trial account is already verified, so
-// the refusal and the unverified `/me` are served here; every other request,
-// the second accept among them, goes to the real API. The detour is a
-// client-side navigation in one document, which is what the existing test,
-// with its single full load into a verified session, never exercises.
-test.describe('newly registered user joins an organization after verifying their email', () => {
+// A new registrant's address is unverified when Auth0 hands them back. The
+// accept verifies it, and the page refreshes the session's claims before the
+// welcome panel offers a way on, so the app shell does not send the new member
+// to `/verify-email`. The trial account is already verified, so the unverified
+// `/me` is served here until the page asks for a refreshed token, which stands
+// in for the claim Auth0 now holds; every other request, the accept among them,
+// goes to the real API. The handler's Auth0 call is covered by its unit tests.
+test.describe('newly registered user joins an organization without a separate email verification', () => {
   test.use({ storageState: STORAGE_STATE[INVITEE] });
 
   const hostUserId = requireUserId(HOST);
@@ -191,34 +191,18 @@ test.describe('newly registered user joins an organization after verifying their
     await page.route(apiPath('/api/me'), async (route) => {
       const response = await route.fetch();
       const me = (await response.json()) as Record<string, unknown>;
+      if (new URL(route.request().url()).searchParams.get('forceRefresh') === '1') {
+        emailVerified = true;
+      }
       await route.fulfill({ response, json: { ...me, emailVerified } });
     });
 
-    let refusedOnce = false;
-    await page.route(apiPath('/api/invitations/accept'), async (route) => {
-      if (refusedOnce) return route.fallback();
-      refusedOnce = true;
-      await route.fulfill({
-        status: 403,
-        json: { message: 'Email verification required', code: 'EMAIL_NOT_VERIFIED' },
-      });
-    });
-
     await page.goto(`/invite/accept#token=${encodeURIComponent(invitation.token)}`);
-    await expect(page.getByTestId('accept-unverified')).toBeVisible();
-
-    await page.locator('#accept-verify-email-button').click();
-    await expect(page.locator('#verify-email-heading')).toBeVisible();
-
-    // The address is confirmed in another tab; this one checks back.
-    emailVerified = true;
-    await page.locator('#verify-email-check-button').click();
-
     await expect(page.getByTestId('accept-success')).toContainText(`Welcome to ${hostOrgName}`);
+    expect(emailVerified).toBe(true);
 
-    // Asserted on the app shell rather than the URL: a tab sent back to the
-    // accept page passes through `/dashboard` on the way, which a URL wait
-    // accepts, while the accept page never renders the shell's switcher.
+    // Asserted on the app shell rather than the URL: a tab sent to
+    // `/verify-email` never renders the shell's switcher.
     await page.locator('#accept-continue-button').click();
     await expect(page.getByTestId('org-switcher-button')).toContainText(hostOrgName);
   });
