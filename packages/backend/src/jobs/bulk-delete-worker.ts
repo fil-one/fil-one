@@ -184,8 +184,10 @@ async function runPages(
   for (;;) {
     // The tenant's credentials delete without any policy evaluation, so the
     // starter's role and access are re-checked before every page: a change
-    // made after the job was queued, or mid-run, stops it within a page.
-    await assertCanDelete(tenant, job, bucketVersioningStatus);
+    // made after the job was queued, or mid-run, stops it within a page. The
+    // member id comes from the current role, so it is read each time too.
+    const memberId = await resolveStarterScope(job);
+    await assertMemberCanDelete(tenant, job, memberId, bucketVersioningStatus);
 
     const page = await enumerateDeletionPage({
       s3,
@@ -222,16 +224,16 @@ async function runPages(
 }
 
 /**
- * Fail the job when its starter may no longer run it: their current role must
- * hold `objects.delete`, and a scoped member's bucket policies must still cover
- * the deletion. Neither will be undone by redelivery.
+ * Fail the job when the scoped member's bucket policies no longer cover the
+ * deletion; an unscoped starter (no member id) passes. A policy change will not
+ * be undone by redelivery.
  */
-async function assertCanDelete(
+async function assertMemberCanDelete(
   { orchestrator, tenantId }: ResolvedTenant,
   job: BulkDeleteJobRecord,
+  memberId: string | undefined,
   bucketVersioningStatus: BucketVersioningStatus,
 ): Promise<void> {
-  const memberId = await resolveStarterScope(job);
   const access = await canBulkDelete(orchestrator, tenantId, memberId, {
     bucketName: job.bucketName,
     scope: job.scope,
