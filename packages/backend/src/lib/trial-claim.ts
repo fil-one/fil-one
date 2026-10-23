@@ -13,8 +13,6 @@
 
 import { listMemberships } from './org-membership.ts';
 import type { SubscriptionRecord } from './dynamo-records.ts';
-import { emitTrialClaimBlockedByLegacyRow } from './stripe-webhook-metrics.ts';
-import { legacyRowExists, getSubscription } from './subscription-store.ts';
 import { ensureTrialEntitlement } from './trial-entitlement.ts';
 import type { UserInfo } from './user-context.ts';
 
@@ -26,9 +24,7 @@ export type TrialClaimOutcome =
   /** Somebody else's org, or one of several — the claim is not spendable here. */
   | 'not-own-org'
   /** Eligible to claim, but the entitlement is already spent (or the email is unverified). */
-  | 'not-entitled'
-  /** The backfill missed this account: billing stands on the user's pre-re-key row and not on the org's. */
-  | 'legacy-row';
+  | 'not-entitled';
 
 /**
  * Whether the trial claim is still open for a stored record.
@@ -66,46 +62,6 @@ export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialCla
   if (apiKeySession) return 'api-key-session';
 
   if (!(await isSoloPersonalOrg(userInfo))) return 'not-own-org';
-
-  // Here rather than at a call site, and immediately before the mint. The claim
-  // mints a Stripe customer and a subscription; if a pre-re-key `CUSTOMER#` row
-  // is still standing for this user, the backfill missed their account and this
-  // org already has billing that nothing reading the org key can see. Minting
-  // would give one account two Stripe customers, two subscriptions and two
-  // meters, which no later run can undo. Any route that can reach this function
-  // can reach that outcome, so the refusal cannot live in one of them — and
-  // every path that mints runs through this line, because the mint is the next
-  // one.
-  //
-  // The row is the user's, so it says nothing about an org they were invited
-  // to: refusing before the ownership test answered "billing is unavailable" —
-  // a 503, the on-call's signal — for a member simply opening a second org, and
-  // the runbook's cleanup precondition reads that denial rate.
-  //
-  // A dead check once the runbook's dated cleanup has deleted those rows, and
-  // it goes with them.
-  //
-  // A standing `CUSTOMER#` row on its own does not say the backfill missed the
-  // account: the flip gate requires the twin, so during the dual-write window
-  // the common case is a row on both keys. The refusal is about billing this
-  // org has that nothing reading the org key can see, so it asks the org key
-  // and refuses only when the answer is nothing. Otherwise the org row is what
-  // the claim reads anyway — `createBillingTrial` upgrades it in place and
-  // reuses its `stripeCustomerId`, so no second Stripe customer can be minted.
-  if (await legacyRowExists(userId)) {
-    const orgRow = await getSubscription(orgId, {
-      consistentRead: true,
-      projectionExpression: 'pk',
-    });
-    if (!orgRow) {
-      emitTrialClaimBlockedByLegacyRow();
-      console.error(
-        '[trial-claim] Refusing to mint a trial: a pre-re-key CUSTOMER# row exists and the org row does not',
-        { userId, orgId },
-      );
-      return 'legacy-row';
-    }
-  }
 
   const entitled = await ensureTrialEntitlement({
     sub,
