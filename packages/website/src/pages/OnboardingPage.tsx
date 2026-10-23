@@ -18,6 +18,12 @@ import { PageLayout } from '../components/PageLayout';
 type TaskProps = {
   title: string;
   description: string;
+  /**
+   * Path to the task's illustration. Kept under `/static/`, one of the paths
+   * the CloudFront rewrite (`spa-rewrite.js`) passes through to the bucket;
+   * anywhere else below the root it would be served the app shell.
+   */
+  illustration: string;
   children: React.ReactNode;
 };
 
@@ -26,16 +32,39 @@ type TaskProps = {
  * hairline-divider pattern as `UsageCard`'s stat columns, so the two read as
  * one unit rather than two unrelated actions.
  *
- * The action sits on the same row as the heading, so the button reads as
- * answering the heading rather than trailing behind the description.
+ * The action sits on the same row as the heading, at the illustration's
+ * trailing edge, so the button reads as answering the heading rather than
+ * trailing behind the description.
+ *
+ * The illustration sits in a frame with `Card`'s border and radius, filled a
+ * step darker than the page so it reads as artwork set into the page rather
+ * than as one more card like the ones below. It keeps a fixed height and its
+ * own aspect ratio, centred, while the column's width varies with the
+ * viewport. A narrow column crops only the faded dot grid at its sides; a
+ * wide one leaves blank space there, which the grid already fades into.
+ *
+ * The image is positioned absolutely so its width never counts toward the
+ * column's: in the flow, it would hold the column open at the drawing's full
+ * width rather than be cropped. `max-w-none` lifts the base styles'
+ * `max-width: 100%` on images, which would shrink the drawing instead. The
+ * alt text is empty because the drawing says nothing the heading does not.
  */
-function Task({ title, description, children }: TaskProps) {
+function Task({ title, description, illustration, children }: TaskProps) {
   return (
-    <div className="flex flex-1 flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <Heading tag="h2" size="md" description={description}>
-        {title}
-      </Heading>
-      {children}
+    <div className="flex flex-1 flex-col gap-4">
+      <div className="relative h-56 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100">
+        <img
+          src={illustration}
+          alt=""
+          className="absolute left-1/2 h-full w-auto max-w-none -translate-x-1/2"
+        />
+      </div>
+      <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <Heading tag="h2" size="md" description={description}>
+          {title}
+        </Heading>
+        {children}
+      </div>
     </div>
   );
 }
@@ -104,7 +133,11 @@ export function OnboardingPage({ hasBucket, hasKey, mayInvite }: OnboardingPageP
     >
       <div className="mt-10 flex flex-col divide-y divide-zinc-200 sm:flex-row sm:divide-x sm:divide-y-0">
         <div className="pb-8 sm:flex-1 sm:pr-8 sm:pb-0">
-          <Task title="Create a bucket" description="Buckets hold your objects.">
+          <Task
+            title="Create a bucket"
+            description="Buckets hold your objects."
+            illustration="/static/illustrations/create-bucket.svg"
+          >
             <Button variant="primary" size="sm" href="/buckets/create">
               {hasBucket ? 'Create another bucket' : 'Create bucket'}
             </Button>
@@ -114,6 +147,7 @@ export function OnboardingPage({ hasBucket, hasKey, mayInvite }: OnboardingPageP
           <Task
             title="Create an API key"
             description="An API key is needed to connect an S3 client."
+            illustration="/static/illustrations/create-api-key.svg"
           >
             <Button variant="primary" size="sm" href="/api-keys/create">
               {hasKey ? 'Create another key' : 'Create API key'}
