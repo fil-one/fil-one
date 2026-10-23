@@ -101,13 +101,17 @@ test.describe('disabled account', () => {
 
       const { url } = presignedObjects.get(region)!;
 
+      const startedAt = Date.now();
       await expect
         .poll(
           async () => {
             const response = await fetch(url);
+            console.log(
+              `${region}: ${response.status} after ${Math.round((Date.now() - startedAt) / 1000)} s`,
+            );
             return { status: response.status, body: await response.text() };
           },
-          { timeout: REJECTION_POLL_TIMEOUT_MS },
+          { timeout: REJECTION_POLL_TIMEOUT_MS, intervals: [10_000] },
         )
         .toMatchObject({ status: 403 });
     });
