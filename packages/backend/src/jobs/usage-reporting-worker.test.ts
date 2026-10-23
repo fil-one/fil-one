@@ -78,7 +78,7 @@ const {
     mockFthUpdateTenantStatus,
     auroraOrchestrator: {
       id: 'aurora',
-      region: 'eu-west-1',
+      regions: ['eu-west-1'],
       isTenantReady: mockAuroraIsTenantReady,
       getTenantUsageMetrics: mockGetTenantUsageMetrics,
       getTenantStatus: mockAuroraGetTenantStatus,
@@ -86,7 +86,7 @@ const {
     },
     fthOrchestrator: {
       id: 'fth',
-      region: 'us-east-1',
+      regions: ['us-east-1'],
       isTenantReady: mockFthIsTenantReady,
       getTenantUsageMetrics: mockGetTenantUsageMetrics,
       getTenantStatus: mockFthGetTenantStatus,
@@ -240,7 +240,7 @@ describe('usage-reporting-worker', () => {
     await expect(handler(basePayload)).rejects.toThrow('Aurora timeout');
   });
 
-  it('annotates usage metrics failures with org, region, and tenantId', async () => {
+  it('annotates usage metrics failures with org, orchestrator, and tenantId', async () => {
     mockGetTenantUsageMetrics.mockRejectedValue(
       new Error('FTH API request failed (403): client out of scope'),
     );
@@ -250,7 +250,7 @@ describe('usage-reporting-worker', () => {
     await expect(handler(basePayload)).rejects.toMatchObject({
       message: 'FTH API request failed (403): client out of scope',
       orgId: 'org-1',
-      region: 'us-east-1',
+      orchestratorId: 'fth',
       tenantId: 'fth-tenant-456',
     });
   });

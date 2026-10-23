@@ -83,7 +83,9 @@ export async function handler(
     // tenantId is required to build each region's S3 client; a region the org is
     // not provisioned in has no tenant and its buckets cannot be indexed.
     const tenantByRegion = new Map<S3Region, string>(
-      regions.map(({ orchestrator, tenantId }) => [orchestrator.region, tenantId]),
+      regions.flatMap(({ orchestrator, tenantId }) =>
+        orchestrator.regions.map((region): [S3Region, string] => [region, tenantId]),
+      ),
     );
     const bucketsByRegion = groupBucketsByRegion(buckets);
 
