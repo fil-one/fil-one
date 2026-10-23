@@ -2,7 +2,7 @@ import { test as setup, expect } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { STORAGE_STATE, type Role } from './roles.util.ts';
-import { resetBillingState } from './billing-reset.util.ts';
+import { ACCOUNT_STATE_TIMEOUT_MS, setAccountState } from './account-state.util.ts';
 import { grantEmailBeta } from './invite.util.ts';
 import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
@@ -54,10 +54,12 @@ const roles: ReadonlyArray<{
 
 for (const role of roles) {
   setup(`authenticate as ${role.name}`, async ({ page }) => {
-    // Re-seed the BillingTable record so dashboard tests see deterministic
-    // state. Trial periods elapse and `past_due` can advance to `canceled`
-    // between scheduled runs, so the prior run's state is not safe to reuse.
-    await resetBillingState(role.name, role.userId);
+    // Re-seed the account's billing row and tenant status so dashboard tests
+    // see deterministic state. Trial periods elapse and `past_due` can advance
+    // to `canceled` between scheduled runs, so the prior run's state is not
+    // safe to reuse.
+    setup.setTimeout(ACCOUNT_STATE_TIMEOUT_MS);
+    await setAccountState(role.userId, role.name);
     await grantEmailBeta(role.email);
 
     await page.goto('/');
