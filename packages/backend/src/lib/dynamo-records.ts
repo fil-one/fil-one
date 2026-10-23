@@ -59,7 +59,7 @@ export const DEFAULT_ACCESS_KEY_REGION: S3Region = S3Region.EuWest1;
  * was minted in, which is the one region its network served at the time; the
  * oldest rows name neither and are Aurora's.
  */
-export function accessKeyOrchestratorId(
+export function getAccessKeyOrchestratorId(
   record: Pick<AccessKeyRecord, 'orchestratorId' | 'region'>,
 ): string {
   if (record.orchestratorId) return record.orchestratorId;
@@ -73,11 +73,11 @@ export function accessKeyOrchestratorId(
  * Every region an access key works in on this stage: the regions of the
  * network holding it. Empty only for a network the stage does not offer.
  */
-export function accessKeyRegions(
+export function getAccessKeyRegions(
   record: Pick<AccessKeyRecord, 'orchestratorId' | 'region'>,
   stage: StageLike,
 ): S3Region[] {
-  return regionsForOrchestrator(accessKeyOrchestratorId(record), stage);
+  return regionsForOrchestrator(getAccessKeyOrchestratorId(record), stage);
 }
 
 /** UserInfoTable — pk: ORG#{orgId}, sk: ACCESSKEY#{id} */
@@ -92,7 +92,7 @@ export interface AccessKeyRecord {
    * The storage network (orchestrator id) holding the credential. A key is
    * network-wide: it works at every region the network serves, which is why a
    * row carries this and no region. Absent on rows written before keys were
-   * recorded this way; see {@link accessKeyOrchestratorId} for how they resolve.
+   * recorded this way; see {@link getAccessKeyOrchestratorId} for how they resolve.
    */
   orchestratorId?: string;
   /**
