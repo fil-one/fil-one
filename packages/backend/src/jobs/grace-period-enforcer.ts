@@ -2,7 +2,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
 import {
   assertTenantSyncSucceeded,
-  syncTenantStatusInProvisionedTenants,
+  syncTenantStatusInProvisionedNetworks,
 } from '../lib/region-helpers.ts';
 import { scanSubscriptions, updateSubscriptionByUser } from '../lib/subscription-store.ts';
 
@@ -110,7 +110,7 @@ async function scanGracePeriodCandidates(nowMs: number): Promise<Candidate[]> {
 // cancel proceeds).
 async function cancelSubscriptionAndDisableTenant(candidate: Candidate, now: Date): Promise<void> {
   assertTenantSyncSucceeded(
-    await syncTenantStatusInProvisionedTenants(candidate.orgId, 'disabled'),
+    await syncTenantStatusInProvisionedNetworks(candidate.orgId, 'disabled'),
   );
   // Transition DynamoDB status to canceled.
   await updateSubscriptionByUser(candidate, {
@@ -133,7 +133,7 @@ async function cancelSubscriptionAndDisableTenant(candidate: Candidate, now: Dat
 // lock calls are skipped and a tenant that is already `disabled` is never
 // downgraded back to `write-locked`.
 async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateOutcome> {
-  const outcomes = await syncTenantStatusInProvisionedTenants(candidate.orgId, 'write-locked');
+  const outcomes = await syncTenantStatusInProvisionedNetworks(candidate.orgId, 'write-locked');
 
   if (outcomes.length === 0) {
     console.warn('[grace-period-enforcer] No ready tenant on any orchestrator, skipping', {

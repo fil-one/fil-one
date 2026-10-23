@@ -21,7 +21,7 @@ import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
-import { type ProvisionedTenant, getProvisionedTenants } from '../lib/region-helpers.ts';
+import { type ProvisionedNetwork, getProvisionedNetworks } from '../lib/region-helpers.ts';
 import { reportMetric } from '../lib/metrics.ts';
 
 const dynamo = getDynamoClient();
@@ -97,10 +97,10 @@ export async function baseHandler(
   const signal = getRequestDeadline(event);
   // The dashboard aggregates activity across every network the org is provisioned
   // on, so resolve the ready tenant on each available orchestrator.
-  const { result: regions, durationMs: resolveRegionsMs } = await timed(
+  const { result: networks, durationMs: resolveNetworksMs } = await timed(
     event,
-    'resolveRegions',
-    () => getProvisionedTenants(orgId),
+    'resolveNetworks',
+    () => getProvisionedNetworks(orgId),
   );
 
   const [
@@ -108,7 +108,7 @@ export async function baseHandler(
     { result: keyActivities, durationMs: keyActivitiesMs },
   ] = await Promise.all([
     timed(event, 'fetchBucketActivities', () =>
-      fetchBucketActivities(event, orgId, regions, signal),
+      fetchBucketActivities(event, orgId, networks, signal),
     ),
     // Timed only when it runs: a phase duration emitted for a fetch that was
     // skipped reports a 0ms DynamoDB query that never happened.
@@ -139,13 +139,13 @@ export async function baseHandler(
   // emits neither the metric nor this line; the request-deadline log names it.
   console.log('[get-activity] completed', {
     orgId,
-    regionCount: regions.length,
-    orchestrators: regions.map((r) => r.orchestrator.id),
+    networkCount: networks.length,
+    orchestrators: networks.map((n) => n.orchestrator.id),
     bucketActivityCount: bucketActivities.length,
     keyActivityCount: keyActivities.length,
     durationsMs: {
       total: Math.round(totalMs),
-      resolveRegions: Math.round(resolveRegionsMs),
+      resolveNetworks: Math.round(resolveNetworksMs),
       fetchBucketActivities: Math.round(bucketActivitiesMs),
       fetchAccessKeyActivities: Math.round(keyActivitiesMs),
     },
@@ -157,11 +157,11 @@ export async function baseHandler(
 async function fetchBucketActivities(
   event: AuthenticatedEvent,
   orgId: string,
-  regions: ProvisionedTenant[],
+  networks: ProvisionedNetwork[],
   signal: AbortSignal,
 ): Promise<RecentActivity[]> {
   const perRegion = await Promise.all(
-    regions.map(({ orchestrator, tenantId }) =>
+    networks.map(({ orchestrator, tenantId }) =>
       trackRequestStep(event, `listBuckets:${orchestrator.id}`, () =>
         listBucketActivities(orgId, orchestrator, tenantId, signal),
       ),

@@ -2,7 +2,7 @@ import { PAID_GRACE_DAYS, Stage, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@f
 import type { TenantStatus } from '@filone/shared';
 import {
   assertTenantSyncSucceeded,
-  syncTenantStatusInProvisionedTenants,
+  syncTenantStatusInProvisionedNetworks,
   type TenantSyncOutcome,
 } from '../lib/region-helpers.ts';
 import { listMemberships } from '../lib/org-membership.ts';
@@ -197,7 +197,7 @@ async function resolveHomeOrgId(userId: string): Promise<string> {
 
 async function syncTenants(orgId: string, status: TenantStatus): Promise<TenantSyncOutcome[]> {
   // Consistent, so a region provisioned moments ago is not skipped.
-  const outcomes = await syncTenantStatusInProvisionedTenants(orgId, status, { consistent: true });
+  const outcomes = await syncTenantStatusInProvisionedNetworks(orgId, status, { consistent: true });
   assertTenantSyncSucceeded(outcomes);
   return outcomes;
 }
