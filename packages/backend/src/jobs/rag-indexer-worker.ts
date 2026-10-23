@@ -11,7 +11,7 @@
 import type { Context } from 'aws-lambda';
 import { Resource } from 'sst';
 import { S3VectorsStore, type VectorStore } from '@filone/rag-shared';
-import { getProvisionedTenants } from '../lib/region-helpers.ts';
+import { getProvisionedNetworks } from '../lib/region-helpers.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { createS3Client } from '../lib/s3-client.ts';
 import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.ts';
@@ -74,17 +74,19 @@ export async function handler(
       return;
     }
 
-    const regions = await getProvisionedTenants(orgId);
-    if (regions.length === 0) {
-      console.warn(`${LOG} Org not provisioned in any available region, skipping`, { orgId });
+    const networks = await getProvisionedNetworks(orgId);
+    if (networks.length === 0) {
+      console.warn(`${LOG} Org not provisioned on any available network, skipping`, { orgId });
       emitWorkerInvocation('success', Date.now() - start, { regionsProcessed, regionFailures });
       return;
     }
 
-    // tenantId is required to build each region's S3 client; a region the org is
-    // not provisioned in has no tenant and its buckets cannot be indexed.
+    // Indexing is genuinely per region: a bucket lives in one, and its S3 client
+    // signs for that region's gateway. A network's tenant serves every region it
+    // covers, so each one maps to that tenant; a region the org is not
+    // provisioned in has none and its buckets cannot be indexed.
     const tenantByRegion = new Map<S3Region, string>(
-      regions.flatMap(({ orchestrator, tenantId }) =>
+      networks.flatMap(({ orchestrator, tenantId }) =>
         orchestrator.regions.map((region) => [region, tenantId] as const),
       ),
     );

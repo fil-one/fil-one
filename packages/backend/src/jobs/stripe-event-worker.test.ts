@@ -29,11 +29,11 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => [],
 }));
 
-const mockSyncTenantStatusInProvisionedTenants = vi.fn();
+const mockSyncTenantStatusInProvisionedNetworks = vi.fn();
 vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/region-helpers.ts')>()),
-  syncTenantStatusInProvisionedTenants: (...args: unknown[]) =>
-    mockSyncTenantStatusInProvisionedTenants(...args),
+  syncTenantStatusInProvisionedNetworks: (...args: unknown[]) =>
+    mockSyncTenantStatusInProvisionedNetworks(...args),
 }));
 
 const mockCustomersRetrieve = vi.fn();
@@ -208,7 +208,7 @@ function updatedKeys() {
   return updateInputs().map((input) => input.Key);
 }
 
-// Per-region failure as reported by syncTenantStatusInProvisionedTenants,
+// Per-region failure as reported by syncTenantStatusInProvisionedNetworks,
 // which never throws.
 function regionSyncFailure(cause: Error) {
   return [
@@ -239,8 +239,8 @@ describe('stripe-event-worker handler', () => {
     currentEvent = {};
     mockCustomersRetrieve.mockReset();
     mockPaymentMethodsRetrieve.mockReset();
-    mockSyncTenantStatusInProvisionedTenants.mockReset();
-    mockSyncTenantStatusInProvisionedTenants.mockResolvedValue([]);
+    mockSyncTenantStatusInProvisionedNetworks.mockReset();
+    mockSyncTenantStatusInProvisionedNetworks.mockResolvedValue([]);
     mockStartDeletion.mockReset();
     reportMetricMock.mockReset();
   });
@@ -708,7 +708,7 @@ describe('stripe-event-worker handler', () => {
       await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedTenants).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
       expect(supersededEmissions()).toHaveLength(1);
     });
 
@@ -1048,7 +1048,7 @@ describe('stripe-event-worker handler', () => {
       await expect(deliver()).rejects.toThrow(MissingOrgIdError);
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedTenants).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
     });
 
     describe('when the customer is already deleted', () => {
@@ -1117,7 +1117,7 @@ describe('stripe-event-worker handler', () => {
 
       await deliver();
 
-      expect(mockSyncTenantStatusInProvisionedTenants).toHaveBeenCalledWith(
+      expect(mockSyncTenantStatusInProvisionedNetworks).toHaveBeenCalledWith(
         MOCK_ORG_ID,
         'write-locked',
       );
@@ -1126,7 +1126,7 @@ describe('stripe-event-worker handler', () => {
     it('fails the delivery when Aurora WRITE_LOCK fails, so SQS retries it', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
-      mockSyncTenantStatusInProvisionedTenants.mockResolvedValue(
+      mockSyncTenantStatusInProvisionedNetworks.mockResolvedValue(
         regionSyncFailure(new Error('Aurora API error')),
       );
 
@@ -1237,7 +1237,7 @@ describe('stripe-event-worker handler', () => {
       await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toStrictEqual([]);
-      expect(mockSyncTenantStatusInProvisionedTenants).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
       expect(mockCustomersRetrieve).not.toHaveBeenCalled();
     });
   });
@@ -1428,7 +1428,7 @@ describe('stripe-event-worker handler', () => {
       // cancellation once per attempt.
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
-      mockSyncTenantStatusInProvisionedTenants.mockResolvedValue(
+      mockSyncTenantStatusInProvisionedNetworks.mockResolvedValue(
         regionSyncFailure(new Error('Aurora API error')),
       );
 

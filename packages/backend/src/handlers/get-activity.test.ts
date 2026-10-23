@@ -454,7 +454,7 @@ describe('get-activity baseHandler', () => {
       expect(emittedPhases().sort()).toStrictEqual([
         'fetchAccessKeyActivities',
         'fetchBucketActivities',
-        'resolveRegions',
+        'resolveNetworks',
       ]);
       for (const event of emittedMetrics('GetActivityPhaseDuration')) {
         expect(event._aws.CloudWatchMetrics[0].Dimensions).toStrictEqual([['handler', 'phase']]);
@@ -495,7 +495,7 @@ describe('get-activity baseHandler', () => {
       expect(emittedMetrics('GetActivityDuration')).toStrictEqual([]);
     });
 
-    it('emits only the resolveRegions error phase when region resolution fails', async () => {
+    it('emits only the resolveNetworks error phase when network resolution fails', async () => {
       ddbMock.on(QueryCommand).resolves({ Items: [] });
       mockGetAvailableOrchestrators.mockImplementation(() => {
         throw new Error('registry down');
@@ -505,7 +505,7 @@ describe('get-activity baseHandler', () => {
         'registry down',
       );
 
-      expect(emittedPhases()).toStrictEqual(['resolveRegions:error']);
+      expect(emittedPhases()).toStrictEqual(['resolveNetworks:error']);
       expect(emittedMetrics('GetActivityDuration')).toStrictEqual([]);
     });
 
