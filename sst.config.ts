@@ -1304,15 +1304,21 @@ export default $config({
       // rather than for every org; a member holding hundreds needs a worker,
       // which is FIL-1017 follow-up work. A timeout during the pass is safe by
       // design — the role is unwritten and the retry finds fewer keys.
+      // `WEBSITE_URL` on the routes that send revocation email locates the logo
+      // the email loads (email-layout.ts).
       'update-member-role': {
-        extraEnv: orchestratorEnv,
+        extraEnv: { ...orchestratorEnv, WEBSITE_URL: siteUrl },
         permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
         timeout: '30 seconds',
       },
       // Removing a member drops their principal on every ready `iam` region.
-      // Needs the orchestrator environment to reach those regions at all.
-      'remove-member': { extraEnv: orchestratorEnv },
+      // Needs the orchestrator environment to reach those regions at all, and
+      // the SendGrid key to tell the member which of their keys were revoked.
+      'remove-member': {
+        extraEnv: { ...orchestratorEnv, WEBSITE_URL: siteUrl },
+        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+      },
 
       // ── RAG ────────────────────────────────────────────────────────
       // RAG query playground (FIL-554): embed the question, vector-search the
@@ -1420,10 +1426,11 @@ export default $config({
       // ── Organization ───────────────────────────────────────────────
       // Ownership transfer reads the caller's MFA enrollments to decide whether a
       // fresh sign-in is enough of a step-up, so it needs the Management API
-      // credentials the account routes already carry.
+      // credentials the account routes already carry. The previous owner's
+      // privileged keys are revoked, and they are told by email.
       'transfer-ownership': {
-        extraLink: mgmtRuntimeResources,
-        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        extraLink: [...mgmtRuntimeResources, ...(sendGridApiKey ? [sendGridApiKey] : [])],
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain, WEBSITE_URL: siteUrl },
       },
       // Presigns a POST into OrgLogoBucket.
       'presign-org-logo': {
@@ -1510,7 +1517,7 @@ export default $config({
           deletionCodeHmacKey,
           ...(sendGridApiKey ? [sendGridApiKey] : []),
         ],
-        extraEnv: { ACCOUNT_DELETION_ENABLED: accountDeletionEnabled },
+        extraEnv: { ACCOUNT_DELETION_ENABLED: accountDeletionEnabled, WEBSITE_URL: siteUrl },
       },
       'confirm-account-deletion': {
         // The org-name read, salt read and step-up enrollment lookup do not fit the

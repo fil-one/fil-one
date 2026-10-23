@@ -1,5 +1,13 @@
 import validator from 'validator';
 import { DELETION_CODE_TTL_MINUTES } from '@filone/shared';
+import {
+  EMAIL_COLORS,
+  EMAIL_MONO_FONT_STACK,
+  renderEmailLayout,
+  renderEmphasis,
+  renderMetaParagraph,
+  renderParagraph,
+} from './email-layout.ts';
 import { sendMail } from './mailer.ts';
 
 /**
@@ -26,13 +34,21 @@ export async function sendDeletionCodeEmail(params: {
     '',
     "If you didn't request this, ignore this email and consider changing your password.",
   ].join('\n');
-  const html = `
-    <p>You requested to permanently delete your Fil One account and organization <strong>${validator.escape(params.orgName)}</strong>.</p>
-    <p>Your verification code is:</p>
-    <p style="font-size:28px;font-weight:bold;letter-spacing:6px;font-family:monospace">${params.code}</p>
-    <p>This code expires in ${DELETION_CODE_TTL_MINUTES} minutes.</p>
-    <p>If you didn't request this, ignore this email and consider changing your password.</p>
-  `;
+  const html = renderEmailLayout({
+    heading: 'Your account deletion code',
+    // Never the code: the preview line shows on lock screens, which is why the
+    // subject leaves it out too.
+    preheader: 'Use this code to confirm deleting your Fil One account.',
+    contentHtml: [
+      renderParagraph(
+        `You requested to permanently delete your Fil One account and organization ${renderEmphasis(params.orgName)}.`,
+      ),
+      renderCode(params.code),
+      renderMetaParagraph(`This code expires in ${DELETION_CODE_TTL_MINUTES} minutes.`),
+    ].join('\n'),
+    footer: "If you didn't request this, ignore this email and consider changing your password.",
+    consoleUrl: process.env.WEBSITE_URL,
+  });
 
   const result = await sendMail(
     { to: params.to, subject, text, html, fromName: 'Fil One' },
@@ -58,4 +74,9 @@ export async function sendDeletionCodeEmail(params: {
       ? `SendGrid send failed (${result.status}): ${result.body}`
       : 'SendGrid send failed',
   );
+}
+
+/** The code on a zinc-50 panel, spaced so it reads and copies digit by digit. */
+function renderCode(code: string): string {
+  return `<div style="margin:24px 0 0;padding:16px;background-color:${EMAIL_COLORS.zinc50};border:1px solid ${EMAIL_COLORS.zinc200};border-radius:8px;text-align:center;font-family:${EMAIL_MONO_FONT_STACK};font-size:28px;line-height:36px;font-weight:500;letter-spacing:6px;color:${EMAIL_COLORS.zinc900};">${validator.escape(code)}</div>`;
 }
