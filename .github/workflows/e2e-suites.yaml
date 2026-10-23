@@ -18,6 +18,77 @@ on:
         description: 'Slack alert context line (mrkdwn)'
         required: true
         type: string
+    # Callers pass each secret by name rather than `secrets: inherit`, so
+    # this workflow sees only the credentials the suites use.
+    secrets:
+      E2E_PAID_EMAIL:
+        required: true
+      E2E_PAID_PASSWORD:
+        required: true
+      E2E_PAID_USER_ID:
+        required: true
+      E2E_UNPAID_EMAIL:
+        required: true
+      E2E_UNPAID_PASSWORD:
+        required: true
+      E2E_UNPAID_USER_ID:
+        required: true
+      E2E_TRIAL_EMAIL:
+        required: true
+      E2E_TRIAL_PASSWORD:
+        required: true
+      E2E_TRIAL_USER_ID:
+        required: true
+      E2E_ORG_OWNER_EMAIL:
+        required: true
+      E2E_ORG_OWNER_PASSWORD:
+        required: true
+      E2E_ORG_OWNER_AUTH0_ID:
+        required: true
+      E2E_ORG_MEMBER_EMAIL:
+        required: true
+      E2E_ORG_MEMBER_PASSWORD:
+        required: true
+      E2E_ORG_MEMBER_AUTH0_ID:
+        required: true
+      E2E_ORG_FRESH_EMAIL:
+        required: true
+      E2E_ORG_FRESH_PASSWORD:
+        required: true
+      E2E_ORG_FRESH_AUTH0_ID:
+        required: true
+      E2E_POLICY_OWNER_EMAIL:
+        required: true
+      E2E_POLICY_OWNER_PASSWORD:
+        required: true
+      E2E_POLICY_OWNER_USER_ID:
+        required: true
+      E2E_POLICY_ADMIN_EMAIL:
+        required: true
+      E2E_POLICY_ADMIN_PASSWORD:
+        required: true
+      E2E_POLICY_ADMIN_USER_ID:
+        required: true
+      E2E_POLICY_MEMBER_EMAIL:
+        required: true
+      E2E_POLICY_MEMBER_PASSWORD:
+        required: true
+      E2E_POLICY_MEMBER_USER_ID:
+        required: true
+      E2E_POLICY_READONLY_EMAIL:
+        required: true
+      E2E_POLICY_READONLY_PASSWORD:
+        required: true
+      E2E_POLICY_READONLY_USER_ID:
+        required: true
+      E2E_POLICY_LEAVER_EMAIL:
+        required: true
+      E2E_POLICY_LEAVER_PASSWORD:
+        required: true
+      E2E_POLICY_LEAVER_USER_ID:
+        required: true
+      SLACK_BOT_TOKEN:
+        required: true
 
 jobs:
   suite:

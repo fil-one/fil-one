@@ -215,7 +215,7 @@ The `.auth/` directory is gitignored — the JSON files are regenerated on every
 2. Add the role's desired subscription state to `DESIRED_STATE` in [tests/e2e/billing-reset.ts](tests/e2e/billing-reset.ts).
 3. Add the role to the `roles` array in [tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) (with `email`, `password`, `userId`).
 4. Add `E2E_<ROLE>_EMAIL`, `E2E_<ROLE>_PASSWORD`, `E2E_<ROLE>_USER_ID` to `REQUIRED_CREDENTIAL_VARS` in [playwright.config.ts](playwright.config.ts).
-5. Add the same three vars to the `env:` block in [.github/workflows/e2e-suites.yaml](.github/workflows/e2e-suites.yaml), and provision the corresponding GitHub secrets.
+5. Add the same three vars to [.github/workflows/e2e-suites.yaml](.github/workflows/e2e-suites.yaml), under `on.workflow_call.secrets` and in the job's `env:` block, pass them under `secrets:` from both callers ([.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)), and provision the corresponding GitHub secrets. `actionlint` reports a secret a caller forgot to pass.
 6. If the role needs a seeded bucket per region, add it to `SEED_PLAN` in [tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts), with `needsActiveSubscription: true` when its desired subscription state blocks writes.
 
 #### Multi-org suite
