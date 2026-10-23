@@ -6,6 +6,16 @@ Monorepo for the Fil One product and its supporting packages.
 
 For any UI work in `packages/website` (the console, the authenticated product; the directory name is legacy), follow [packages/website/DESIGN.md](packages/website/DESIGN.md) and the loader in [packages/website/CLAUDE.md](packages/website/CLAUDE.md).
 
+## Documentation
+
+A user-facing change is not done until [docs.fil.one](https://docs.fil.one) matches it. User-facing means anything a customer can see or rely on: console labels, screens and flows, S3 API behaviour, limits, pricing, plans, regions, error messages, and security properties.
+
+- Update the docs in [FilecoinFoundationWeb/filone-docs](https://github.com/FilecoinFoundationWeb/filone-docs) as part of the task, following that repo's `AGENTS.md`, and link the docs PR in this PR's description.
+- If the change needs no docs update, say why in the PR description.
+- If the change is behind a feature flag or beta gate, don't open a docs PR yet: a public docs PR announces the feature. Add the `docs:gated` label and note the docs work for launch.
+
+The Docs sync workflow ([docs/DocsSync.md](docs/DocsSync.md)) checks every PR as a safety net. When the description links a filone-docs PR, it only comments and drafts nothing.
+
 ## Code conventions
 
 ### Naming
