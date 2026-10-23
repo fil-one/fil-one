@@ -75,11 +75,21 @@ export async function baseHandler(
 
   const buckets: BucketSummary[] = [];
   const unavailableRegions: S3Region[] = [];
+  // Failed legs are counted apart from regions: one failed network may account
+  // for several unavailable regions, and the all-failed check below is per leg.
+  let failedLegs = 0;
   settled.forEach((result, index) => {
     if (result.status === 'fulfilled') {
       // Bucket Intelligence keeps its Lance datasets in companion buckets on
       // Forge storage; they hold no user data and are not the user's to manage.
-      buckets.push(...result.value.filter((bucket) => !isRagCompanionBucket(bucket.bucketName)));
+      // A network answers for every region it serves, so a region filter is
+      // applied to its buckets here rather than by skipping the leg.
+      buckets.push(
+        ...result.value.filter(
+          (bucket) =>
+            !isRagCompanionBucket(bucket.bucketName) && (!region || bucket.region === region),
+        ),
+      );
       return;
     }
     const { orchestrator, tenantId } = ready[index];
@@ -92,14 +102,19 @@ export async function baseHandler(
       tenantId,
       error: result.reason,
     });
-    unavailableRegions.push(...orchestrator.regions);
+    failedLegs++;
+    // Every region the network serves is unavailable with it, or just the one
+    // asked for when the request was narrowed to it.
+    unavailableRegions.push(
+      ...orchestrator.regions.filter((served) => !region || served === region),
+    );
   });
 
-  // Every provisioned region is down: an empty 200 renders as "No buckets yet" over a real
+  // Every provisioned network is down: an empty 200 renders as "No buckets yet" over a real
   // outage. Returned rather than thrown so the message survives, since the error-handler
   // middleware replaces any throw with the generic 500. The `> 0` guard keeps an org with no
-  // provisioned regions on the 200 path.
-  if (unavailableRegions.length > 0 && unavailableRegions.length === ready.length) {
+  // provisioned networks on the 200 path.
+  if (failedLegs > 0 && failedLegs === ready.length) {
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({ message: listBucketsUnavailableMessage(unavailableRegions) })
