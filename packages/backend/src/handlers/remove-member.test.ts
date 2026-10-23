@@ -34,10 +34,10 @@ vi.mock('jose', () => ({
 // suite has no reason to stand up.
 const mockDeleteAccessKey = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  getOrchestratorForRegion: (region: string) => ({
-    id: region === 'us-east-1' ? 'fth' : 'aurora',
-    region,
-    isTenantReady: () => `tenant:${region}`,
+  findOrchestratorById: (id: string) => ({
+    id,
+    regions: [id === 'fth' ? 'us-east-1' : 'eu-west-1'],
+    isTenantReady: () => `tenant:${id}`,
     deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
   }),
 }));
@@ -775,8 +775,8 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     expect(result).toMatchObject({ statusCode: 200 });
     expect(mockDeleteAccessKey.mock.calls).toStrictEqual([
-      ['tenant:us-east-1', 'key-0'],
-      ['tenant:us-east-1', 'key-1'],
+      ['tenant:fth', 'key-0'],
+      ['tenant:fth', 'key-1'],
     ]);
     // The admin doing this is not the key holder, so the response is the only
     // place they learn which credentials the removal destroyed.

@@ -23,7 +23,7 @@ function serviceKey(overrides: Partial<ServiceAccessKey>): ServiceAccessKey {
     status: 'active',
     permissions: ['read'],
     bucketScope: 'all',
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
     ...overrides,
   };
 }
@@ -37,7 +37,7 @@ function personalKey(overrides: Partial<PrincipalAccessKey>): PrincipalAccessKey
     accessKeyId: 'ANYACCESSKEYID000000',
     createdAt: '2026-01-01T00:00:00Z',
     status: 'active',
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
     ...overrides,
   };
 }
@@ -91,8 +91,8 @@ describe('filterAccessKeys', () => {
 
   it('keeps only the keys in the chosen region', () => {
     const keys = [
-      serviceKey({ keyName: 'eu', region: S3Region.EuWest1 }),
-      serviceKey({ keyName: 'us', region: S3Region.UsEast1 }),
+      serviceKey({ keyName: 'eu', regions: [S3Region.EuWest1] }),
+      serviceKey({ keyName: 'us', regions: [S3Region.UsEast1] }),
     ];
     const filters = { ...EMPTY_ACCESS_KEY_FILTERS, region: S3Region.UsEast1 };
     expect(keyNames(filterAccessKeys(keys, filters))).toStrictEqual(['us']);
@@ -115,9 +115,9 @@ describe('filterAccessKeys', () => {
 
   it('applies every filter together', () => {
     const keys = [
-      serviceKey({ keyName: 'prod-eu', region: S3Region.EuWest1 }),
-      serviceKey({ keyName: 'prod-us', region: S3Region.UsEast1 }),
-      serviceKey({ keyName: 'dev-us', region: S3Region.UsEast1 }),
+      serviceKey({ keyName: 'prod-eu', regions: [S3Region.EuWest1] }),
+      serviceKey({ keyName: 'prod-us', regions: [S3Region.UsEast1] }),
+      serviceKey({ keyName: 'dev-us', regions: [S3Region.UsEast1] }),
     ];
     const filters = { ...EMPTY_ACCESS_KEY_FILTERS, query: 'prod', region: S3Region.UsEast1 };
     expect(keyNames(filterAccessKeys(keys, filters))).toStrictEqual(['prod-us']);
@@ -127,9 +127,9 @@ describe('filterAccessKeys', () => {
 describe('accessKeyRegions', () => {
   it('lists each region once, ordered by its display name', () => {
     const keys = [
-      serviceKey({ region: S3Region.UsEast1 }),
-      serviceKey({ region: S3Region.EuWest1 }),
-      serviceKey({ region: S3Region.UsEast1 }),
+      serviceKey({ regions: [S3Region.UsEast1] }),
+      serviceKey({ regions: [S3Region.EuWest1] }),
+      serviceKey({ regions: [S3Region.UsEast1] }),
     ];
     expect(accessKeyRegions(keys)).toStrictEqual([S3Region.EuWest1, S3Region.UsEast1]);
   });
