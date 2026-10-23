@@ -2,12 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
-import {
-  S3_REGION,
-  SetBucketRagEnabledSchema,
-  isSupportedRegion,
-  supportsIamMethods,
-} from '@filone/shared';
+import { S3_REGION, SetBucketRagEnabledSchema, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import type { RegionOrchestrator, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.ts';
@@ -31,6 +26,7 @@ import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { ragAccessMiddleware } from '../middleware/rag-access.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
+import { orchestratorSupportsIamMethods } from '../lib/service-orchestrator-ids.ts';
 
 /** The `{ enabled }` body, or the 400 that says what is wrong with it. */
 function parseEnabledBody(
@@ -71,7 +67,7 @@ async function checkIndexingAccess(
   bucketName: string,
   memberId: string | undefined,
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  if (!memberId || !supportsIamMethods(orchestrator.region)) return undefined;
+  if (!memberId || !orchestratorSupportsIamMethods(orchestrator)) return undefined;
   const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(
     tenantId,
     memberId,

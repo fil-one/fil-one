@@ -140,7 +140,7 @@ export async function baseHandler(
   console.log('[get-activity] completed', {
     orgId,
     regionCount: regions.length,
-    regions: regions.map((r) => r.orchestrator.region),
+    orchestrators: regions.map((r) => r.orchestrator.id),
     bucketActivityCount: bucketActivities.length,
     keyActivityCount: keyActivities.length,
     durationsMs: {
@@ -162,7 +162,7 @@ async function fetchBucketActivities(
 ): Promise<RecentActivity[]> {
   const perRegion = await Promise.all(
     regions.map(({ orchestrator, tenantId }) =>
-      trackRequestStep(event, `listBuckets:${orchestrator.region}`, () =>
+      trackRequestStep(event, `listBuckets:${orchestrator.id}`, () =>
         listBucketActivities(orgId, orchestrator, tenantId, signal),
       ),
     ),
@@ -181,7 +181,7 @@ async function listBucketActivities(
   try {
     const buckets = await orchestrator.listBuckets(tenantId, undefined, { signal });
     const durationMs = performance.now() - start;
-    reportDuration('ListBucketsDuration', { region: orchestrator.region }, durationMs);
+    reportDuration('ListBucketsDuration', { orchestrator: orchestrator.id }, durationMs);
     // bucketCount vs durationMs exposes the per-bucket cost: a duration that
     // grows with bucketCount points at an N+1 in the orchestrator's listBuckets.
     // This line ships only on non-production stages: production logs at WARN
@@ -191,7 +191,7 @@ async function listBucketActivities(
     console.log('[get-activity] listed buckets', {
       orgId,
       tenantId,
-      region: orchestrator.region,
+      orchestratorId: orchestrator.id,
       bucketCount: buckets.length,
       durationMs: Math.round(durationMs),
     });
@@ -209,13 +209,13 @@ async function listBucketActivities(
       console.warn('[get-activity] AccessDenied listing buckets — tenant may have no buckets yet', {
         orgId,
         tenantId,
-        region: orchestrator.region,
+        orchestratorId: orchestrator.id,
       });
     } else {
       console.error('[get-activity] Failed to list buckets', {
         orgId,
         tenantId,
-        region: orchestrator.region,
+        orchestratorId: orchestrator.id,
         err,
       });
     }

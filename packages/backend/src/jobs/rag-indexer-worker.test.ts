@@ -88,7 +88,7 @@ const S3_CTX: S3ClientContext = {
 function makeOrchestrator(id: string, region: S3Region) {
   return {
     id,
-    region,
+    regions: [region],
     getS3ClientContext: vi.fn().mockResolvedValue(S3_CTX),
   };
 }
@@ -106,7 +106,7 @@ function provisioned(orchestrator: ReturnType<typeof makeOrchestrator>, tenantId
 function useRegions(regions: ProvisionedRegion[]) {
   mockGetProvisionedRegions.mockResolvedValue(regions);
   mockGetOrchestratorForRegion.mockImplementation((region: S3Region) => {
-    const match = regions.find((r) => r.orchestrator.region === region);
+    const match = regions.find((r) => r.orchestrator.regions.includes(region));
     if (!match) throw new Error(`no orchestrator registered for region ${region}`);
     return match.orchestrator;
   });
