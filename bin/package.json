@@ -24,6 +24,7 @@
     "@filone/backend": "workspace:*",
     "@filone/rag-shared": "workspace:*",
     "@filone/shared": "workspace:*",
+    "aws-sdk-client-mock": "^4.1.0",
     "vitest": "^5.0.5",
     "yaml": "^2.8.3"
   }
