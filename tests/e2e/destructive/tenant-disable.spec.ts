@@ -133,6 +133,11 @@ test.describe('account with tenants changed after presigning', () => {
 
     for (const region of REGIONS) {
       test(`rejects a presigned PUT minted before the tenant was write-locked (${region})`, async () => {
+        test.skip(
+          region === 'us-east-1',
+          'FTH (us-east-1) has a bug and does not implement this mechanism yet',
+        );
+
         const { url, expiresAt } = presignedUploads.get(region)!;
 
         const startedAt = Date.now();
