@@ -68,6 +68,12 @@ export type RowActions = {
   /** Whether the plan allows share links; when not, Share stays visible but disabled. */
   canShare: boolean;
   onShare: (key: string, versionId: string) => void;
+  /**
+   * Why download and share are off, when they are: the cold storage prototype
+   * sets it while a bucket is frozen. The buttons stay in place, disabled, with
+   * this as their tooltip, so the row says what to do rather than hiding it.
+   */
+  lockedReason?: string;
   /** Absent for a role without `objects.delete` — the control is not rendered. */
   onRequestDelete?: (key: string, versionId: string) => void;
   onNavigate: (key: string, versionId: string) => void;
@@ -95,7 +101,7 @@ function VersionActions({
   actions: RowActions;
   label: string;
 }) {
-  const { downloading, onDownload, canShare, onShare, onRequestDelete } = actions;
+  const { downloading, onDownload, canShare, onShare, onRequestDelete, lockedReason } = actions;
   return (
     <div className="flex items-center justify-end gap-1">
       {!version.isDeleteMarker &&
@@ -108,9 +114,10 @@ function VersionActions({
           <IconButton
             icon={DownloadSimpleIcon}
             aria-label={`Download ${label}`}
-            tooltip="Download"
+            tooltip={lockedReason ?? 'Download'}
             tooltipSide="top"
             size="md"
+            disabled={lockedReason !== undefined}
             onClick={() => onDownload(groupKey, version.versionId)}
           />
         ))}
@@ -119,10 +126,10 @@ function VersionActions({
         <IconButton
           icon={LinkIcon}
           aria-label={`Share ${label}`}
-          tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
+          tooltip={lockedReason ?? (canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP)}
           tooltipSide="top"
           size="md"
-          disabled={!canShare}
+          disabled={lockedReason !== undefined || !canShare}
           onClick={() => onShare(groupKey, version.versionId)}
         />
       )}

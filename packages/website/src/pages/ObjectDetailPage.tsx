@@ -20,6 +20,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
 import { IconButton } from '../components/IconButton';
 import { ShareObjectModal } from '../components/ShareObjectModal';
+import { useColdStorage } from '../lib/cold-storage-prototype.js';
 import { Spinner } from '../components/Spinner';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
 import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
@@ -163,6 +164,11 @@ export function ObjectDetailPage({
 
   const mayDelete = useHasPermission('objects.delete');
   const canShare = useCanShareObjects();
+  // Cold storage prototype: a frozen or restoring bucket's objects can't be
+  // downloaded or shared yet, and any bucket in cold storage is read-only.
+  const coldState = useColdStorage(bucketName, region);
+  const lockedReason =
+    coldState && coldState.status !== 'warm' ? 'Restore the bucket first' : undefined;
 
   // The confirmation goes with the Delete control it was opened from.
   const [confirmDeleteOpen, setConfirmDeleteOpen] = usePermittedDialog(false, mayDelete);
@@ -263,20 +269,21 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             id="object-download-button"
             icon={DownloadSimpleIcon}
             aria-label="Download object"
-            tooltip="Download"
+            tooltip={lockedReason ?? 'Download'}
             tooltipSide="bottom"
+            disabled={lockedReason !== undefined}
             onClick={() => void objectActions.downloadObject(objectKey, versionId)}
           />
           <IconButton
             id="object-share-button"
             icon={LinkIcon}
             aria-label="Share object"
-            tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
+            tooltip={lockedReason ?? (canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP)}
             tooltipSide="bottom"
-            disabled={!canShare}
+            disabled={lockedReason !== undefined || !canShare}
             onClick={() => setShareOpen(true)}
           />
-          {mayDelete && (
+          {mayDelete && !coldState && (
             <IconButton
               id="object-delete-button"
               icon={TrashIcon}

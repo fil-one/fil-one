@@ -5,6 +5,8 @@ import {
   FolderOpenIcon,
   LinkSimpleIcon,
   MagnifyingGlassIcon,
+  SnowflakeIcon,
+  ThermometerIcon,
   TrashIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
@@ -19,6 +21,7 @@ import { Tooltip } from './Tooltip';
 import { BucketsToolbar } from './BucketsToolbar';
 import { BucketActionMenu } from './BucketActionMenu';
 import { BucketStorageLine } from './BucketStorageLine';
+import { ColdStorageStatus } from './ColdStorageStatus';
 import { useToast } from './Toast';
 import { FILONE_STAGE } from '../env.js';
 import { useHasPermission } from '../lib/use-permissions.js';
@@ -31,6 +34,18 @@ import {
   type BucketSortKey,
   nextBucketSort,
 } from '../lib/bucket-table.js';
+import {
+  FREEZE_BLOCK_HINTS,
+  useBucketBytes,
+  useColdStorage,
+  useFreezeBlock,
+} from '../lib/cold-storage-prototype.js';
+
+/** Opens the page's cold storage dialogs for one bucket (FIL-1608 prototype). */
+export type ColdStorageHandlers = {
+  onFreeze: (bucketName: string, region: S3Region) => void;
+  onGetDataBack: (bucketName: string, region: S3Region) => void;
+};
 
 /**
  * Columns dropped below `sm`. Four columns plus cell padding overflow a phone, and
@@ -52,6 +67,7 @@ type BucketsTableProps = {
   regions: string[];
   matchCount: number;
   totalCount: number;
+  coldStorage: ColdStorageHandlers;
 };
 
 export function BucketsTable({
@@ -65,6 +81,7 @@ export function BucketsTable({
   regions,
   matchCount,
   totalCount,
+  coldStorage,
 }: BucketsTableProps) {
   // Short lists are scannable as they are, so they keep plain, inert headers.
   const sortProps = (key: BucketSortKey) =>
@@ -120,7 +137,12 @@ export function BucketsTable({
           </Table.Header>
           <Table.Body>
             {buckets.map((bucket) => (
-              <BucketRow key={bucket.bucketName} bucket={bucket} onDelete={onDelete} />
+              <BucketRow
+                key={bucket.bucketName}
+                bucket={bucket}
+                onDelete={onDelete}
+                coldStorage={coldStorage}
+              />
             ))}
           </Table.Body>
         </Table>
@@ -137,12 +159,16 @@ function BucketRowActions({
   bucket,
   region,
   onDelete,
+  coldStorage,
 }: {
   bucket: Bucket;
-  region: string;
+  region: S3Region;
   onDelete: (name: string, region: string) => void;
+  coldStorage: ColdStorageHandlers;
 }) {
   const navigate = useNavigate();
+  const coldState = useColdStorage(bucket.bucketName, region);
+  const freezeBlock = useFreezeBlock(useBucketBytes(bucket.bucketName, region));
   const { copy } = useCopyToClipboard();
   const { toast } = useToast();
   const mayDelete = useHasPermission('buckets.delete');
@@ -161,9 +187,33 @@ function BucketRowActions({
             void navigate({
               to: '/buckets/$bucketName',
               params: { bucketName: bucket.bucketName },
-              search: { region: region as S3Region },
+              search: { region },
             }),
         },
+        // Get data back stands in for Freeze once the bucket is frozen. A warm or
+        // waiting bucket already has a way back in progress, so it gets neither.
+        // A role that can't freeze never sees the item, like Delete below. Size
+        // and plan can change, so those show it disabled with the reason.
+        ...(coldState === null && freezeBlock !== 'role'
+          ? [
+              {
+                label: 'Freeze bucket',
+                icon: SnowflakeIcon,
+                onSelect: () => coldStorage.onFreeze(bucket.bucketName, region),
+                disabled: freezeBlock !== null,
+                hint: freezeBlock ? FREEZE_BLOCK_HINTS[freezeBlock] : undefined,
+              },
+            ]
+          : []),
+        ...(coldState?.status === 'frozen'
+          ? [
+              {
+                label: 'Restore',
+                icon: ThermometerIcon,
+                onSelect: () => coldStorage.onGetDataBack(bucket.bucketName, region),
+              },
+            ]
+          : []),
         {
           label: 'Copy bucket name',
           icon: CopyIcon,
@@ -172,7 +222,7 @@ function BucketRowActions({
         {
           label: 'Copy S3 endpoint',
           icon: LinkSimpleIcon,
-          onSelect: () => copyValue('S3 endpoint', getS3Endpoint(region as S3Region, FILONE_STAGE)),
+          onSelect: () => copyValue('S3 endpoint', getS3Endpoint(region, FILONE_STAGE)),
         },
         // Deletion is `buckets.delete`: Owner and Admin only. The item is
         // absent for everyone else rather than disabled — a disabled Delete
@@ -195,11 +245,15 @@ function BucketRowActions({
 function BucketRow({
   bucket,
   onDelete,
+  coldStorage,
 }: {
   bucket: Bucket;
   onDelete: (name: string, region: string) => void;
+  coldStorage: ColdStorageHandlers;
 }) {
-  const region = bucket.region ?? S3_REGION;
+  // The listing types region as a plain string; every bucket it returns is in a served region.
+  const region = (bucket.region ?? S3_REGION) as S3Region;
+  const coldState = useColdStorage(bucket.bucketName, region);
 
   return (
     <Table.Row data-testid="bucket-row" data-bucket-name={bucket.bucketName}>
@@ -238,13 +292,20 @@ function BucketRow({
         </div>
         {/* The secondary line reserves its height in every state, so a row whose
             storage read fails doesn't sit shorter than its neighbours. */}
-        <div className="mt-1 flex min-h-4 items-center gap-1.5 text-xs text-zinc-500 tabular-nums">
+        <div className="mt-1 flex min-h-4 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-500 tabular-nums">
           {/* Region rides here below `sm`, where its column is hidden. */}
           <span className="flex items-center gap-1.5 sm:hidden">
             <RegionFlag region={region} />
             {region}
           </span>
-          <BucketStorageLine bucketName={bucket.bucketName} region={region as S3Region} />
+          <BucketStorageLine bucketName={bucket.bucketName} region={region} />
+          {/* Cold storage prototype: only a bucket in cold storage says so. */}
+          {coldState && (
+            <>
+              <span aria-hidden="true">·</span>
+              <ColdStorageStatus state={coldState} />
+            </>
+          )}
         </div>
       </Table.Cell>
       <Table.Cell className={`text-xs ${SECONDARY_COLUMN}`}>
@@ -261,7 +322,12 @@ function BucketRow({
         {formatDate(bucket.createdAt)}
       </Table.Cell>
       <Table.Cell className="text-right">
-        <BucketRowActions bucket={bucket} region={region} onDelete={onDelete} />
+        <BucketRowActions
+          bucket={bucket}
+          region={region}
+          onDelete={onDelete}
+          coldStorage={coldStorage}
+        />
       </Table.Cell>
     </Table.Row>
   );
