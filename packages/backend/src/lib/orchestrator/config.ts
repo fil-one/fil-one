@@ -17,9 +17,13 @@ export interface FilOneOrchestratorConfig {
   regions: NonEmptyArray<S3Region>;
   /** Deployment stage — explicit (rather than read from process.env) so instances are testable. */
   stage: string;
-  /** S3 gateway endpoint for the data plane, e.g. `https://s3.{region}.filonecontent.com`. */
-  s3EndpointUrl: string;
-  /** The same gateway as browsers reach it, when that differs from `s3EndpointUrl`. */
+  /**
+   * S3 gateway endpoint for the data plane, overriding the one derived from the
+   * region with `getS3Endpoint`. A network serving several regions has an
+   * endpoint per region, so only a single-region network can set this.
+   */
+  s3EndpointUrl?: string;
+  /** The same gateway as browsers reach it, when that differs from the endpoint. */
   s3PresignEndpointUrl?: string;
   /**
    * Control-plane Management API access: either connection settings (the

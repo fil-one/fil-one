@@ -54,7 +54,7 @@ export async function baseHandler(
   // Enforce tenant/org scope: a bucket the caller's tenant does not own is 404.
   const bucket = await orchestrator.getBucket(
     tenantId,
-    bucketName,
+    { region, bucketName },
     getScopedMemberId(membership?.role, userId),
   );
   if (!bucket) {

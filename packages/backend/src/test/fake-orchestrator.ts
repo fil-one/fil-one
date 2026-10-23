@@ -8,6 +8,7 @@ import type {
 import { S3Region, type TenantStatus } from '@filone/shared';
 import { delegateIamMethods, FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 import { canMemberAccessBucket } from '../lib/orchestrator/member-access.ts';
+import type { BucketRef } from '../lib/bucket-orchestrator.ts';
 
 export interface FakeOrchestrator {
   id: string;
@@ -123,7 +124,7 @@ export function stubMemberScopedGetBucket(
   bucket: BucketDetails,
 ): void {
   orchestrator.getBucket.mockImplementation(
-    async (tenantId: string, bucketName: string, memberId?: string) =>
+    async (tenantId: string, { bucketName }: BucketRef, memberId?: string) =>
       memberId && !(await canMemberAccessBucket(iam, { tenantId, userId: memberId, bucketName }))
         ? null
         : bucket,
