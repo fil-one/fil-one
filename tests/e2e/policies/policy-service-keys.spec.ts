@@ -82,52 +82,60 @@ test.afterAll(async () => {
   await Promise.all(ROLES.map((r) => apiByRole[r].dispose()));
 });
 
-test('S1. an owner service key accesses its scoped bucket despite a deny-all policy, and no other bucket', async () => {
-  const inScope = await createTrackedBucket();
-  const outOfScope = await createTrackedBucket();
-  // A deny naming everyone locks every principal out. A service key is not one.
-  await apiByRole.owner.replaceStatements(inScope, [
-    grantAllToOwner(userIdByRole.owner),
-    deny('*', ['s3:*']),
-  ]);
+test(
+  'an owner service key accesses its scoped bucket despite a deny-all policy, and no other bucket',
+  { tag: '@api' },
+  async () => {
+    const inScope = await createTrackedBucket();
+    const outOfScope = await createTrackedBucket();
+    // A deny naming everyone locks every principal out. A service key is not one.
+    await apiByRole.owner.replaceStatements(inScope, [
+      grantAllToOwner(userIdByRole.owner),
+      deny('*', ['s3:*']),
+    ]);
 
-  const key = await createServiceKey('owner', [inScope]);
-  expect(key).not.toHaveProperty('principalId');
+    const key = await createServiceKey('owner', [inScope]);
+    expect(key).not.toHaveProperty('principalId');
 
-  const s3 = createS3Client(key);
-  expect(await getS3Outcome(putObject(s3, inScope, SEEDED_KEY))).toBe('ok');
-  expect(await getS3Outcome(listObjects(s3, inScope))).toBe('ok');
-  // Outside its list the key is refused.
-  expect(await getS3Outcome(listObjects(s3, outOfScope))).toBe('403 AccessDenied');
-});
+    const s3 = createS3Client(key);
+    expect(await getS3Outcome(putObject(s3, inScope, SEEDED_KEY))).toBe('ok');
+    expect(await getS3Outcome(listObjects(s3, inScope))).toBe('ok');
+    // Outside its list the key is refused.
+    expect(await getS3Outcome(listObjects(s3, outOfScope))).toBe('403 AccessDenied');
+  },
+);
 
-test('S2. an admin may create a service key; a member and a readonly user may not', async () => {
-  const bucket = await createTrackedBucket();
-  await createServiceKey('admin', [bucket]);
+test(
+  'an admin may create a service key; a member and a readonly user may not',
+  { tag: '@api' },
+  async () => {
+    const bucket = await createTrackedBucket();
+    await createServiceKey('admin', [bucket]);
 
-  const member = await apiByRole.member.send(
-    'POST',
-    '/access-keys',
-    buildServiceKeyRequest([bucket]),
-  );
-  expect([member.status(), ((await member.json()) as { message: string }).message]).toEqual([
-    403,
-    'Only an Owner or an Admin can create a service key on this region.',
-  ]);
-  // A readonly user cannot mint a key of any kind; the chain refuses first.
-  const readonly = await apiByRole.readonly.send(
-    'POST',
-    '/access-keys',
-    buildServiceKeyRequest([bucket]),
-  );
-  expect(readonly.status()).toBe(403);
-});
+    const member = await apiByRole.member.send(
+      'POST',
+      '/access-keys',
+      buildServiceKeyRequest([bucket]),
+    );
+    expect([member.status(), ((await member.json()) as { message: string }).message]).toEqual([
+      403,
+      'Only an Owner or an Admin can create a service key on this region.',
+    ]);
+    // A readonly user cannot mint a key of any kind; the chain refuses first.
+    const readonly = await apiByRole.readonly.send(
+      'POST',
+      '/access-keys',
+      buildServiceKeyRequest([bucket]),
+    );
+    expect(readonly.status()).toBe(403);
+  },
+);
 
 test.describe('the key form', () => {
   test.describe('as the owner', () => {
     test.use({ storageState: STORAGE_STATE.owner });
 
-    test('S3. offers a service key, and asks for its permissions and buckets', async ({ page }) => {
+    test('offers a service key, and asks for its permissions and buckets', async ({ page }) => {
       await page.goto('/api-keys/create');
       await page.locator('#key-name').fill(`policy-e2e-svc-ui-${randomUUID().slice(0, 8)}`);
       await page.locator('#key-region').click();
@@ -164,7 +172,7 @@ test.describe('the key form', () => {
       await page.addInitScript((id) => sessionStorage.setItem('filone:activeOrgId', id), orgId);
     });
 
-    test('S4. offers a member no choice: their key follows the policies', async ({ page }) => {
+    test('offers a member no choice: their key follows the policies', async ({ page }) => {
       await page.goto('/api-keys/create');
       await page.locator('#key-name').fill('policy-e2e-svc-member');
       await page.locator('#key-region').click();

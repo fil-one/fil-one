@@ -12,11 +12,11 @@ on:
 
 jobs:
   # A concurrency group keeps one waiting job, and a newcomer cancels it.
-  # A run of this workflow joining the e2e-staging group while a post-deploy
-  # run waits would cancel that run and skip its production deploy. This
-  # workflow therefore skips itself while a push to main has reached
-  # deploy-staging and its test-staging e2e job has not finished; that job
-  # runs the same suite. A pipeline still in lint or unit tests does not
+  # A run of this workflow joining a suite's e2e-staging-<suite> group while
+  # a post-deploy run waits would cancel that run and skip its production
+  # deploy. This workflow therefore skips itself while a push to main has
+  # reached deploy-staging and any of its test-staging e2e jobs has not
+  # finished; those jobs run the same suites. A pipeline still in lint or unit tests does not
   # count, because it may fail before it tests staging. If the GitHub API
   # fails, the suite runs anyway.
   check-deploy-pipeline:
@@ -33,10 +33,10 @@ jobs:
           AWAITS_STAGING_E2E: >-
             .jobs
             | (map(select(.name == "deploy-staging")) | .[0]) as $deploy
-            | (map(select(.name == "test-staging / e2e")) | .[0]) as $e2e
+            | map(select(.name | startswith("test-staging / e2e"))) as $e2e
             | $deploy != null
               and ($deploy.status != "completed" or $deploy.conclusion == "success")
-              and ($e2e == null or $e2e.status != "completed")
+              and ($e2e == [] or any($e2e[]; .status != "completed"))
         run: |
           busy=false
           if ! run_ids=$(gh api "repos/${{ github.repository }}/actions/workflows/packages-ci.yaml/runs?branch=main&event=push&per_page=20" \
@@ -59,30 +59,11 @@ jobs:
   e2e:
     needs: [check-deploy-pipeline]
     if: needs.check-deploy-pipeline.outputs.busy == 'false'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Shared with the e2e job in test-staging.yaml, which runs after each
-    # staging deploy. Both suites reset the same accounts on staging, so
-    # runs wait in line. A waiting nightly run must not cancel a post-deploy
-    # run, hence no cancel-in-progress.
-    # A staging deploy (group deploy-staging in packages-ci.yaml) can still
-    # land during a run. Deploys take about two minutes and are followed by
-    # their own post-deploy run, so we accept the rare mixed-version failure.
-    concurrency:
-      group: e2e-staging
-      cancel-in-progress: false
-      # Keep only the newest waiting job. check-deploy-pipeline skips this
-      # job while a post-deploy run may be waiting, so it never cancels one.
-      queue: single
-    environment: staging
+    uses: ./.github/workflows/e2e-suites.yaml
     permissions:
       id-token: write
-      actions: write
       contents: read
-    env:
-      SST_STAGE: staging
-      AWS_REGION: us-east-2
-      BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'https://staging.fil.one' }}
+    secrets:
       E2E_PAID_EMAIL: ${{ secrets.E2E_PAID_EMAIL }}
       E2E_PAID_PASSWORD: ${{ secrets.E2E_PAID_PASSWORD }}
       E2E_PAID_USER_ID: ${{ secrets.E2E_PAID_USER_ID }}
@@ -116,78 +97,11 @@ jobs:
       E2E_POLICY_LEAVER_EMAIL: ${{ secrets.E2E_POLICY_LEAVER_EMAIL }}
       E2E_POLICY_LEAVER_PASSWORD: ${{ secrets.E2E_POLICY_LEAVER_PASSWORD }}
       E2E_POLICY_LEAVER_USER_ID: ${{ secrets.E2E_POLICY_LEAVER_USER_ID }}
-
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # Pin the first pnpm/action-setup commit that declares a Node 24 runtime.
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps
-
-      # auth.setup.ts re-seeds the test users' billing rows and tenant status by
-      # invoking the stage's AccountStateTestHelper Lambda (see
-      # tests/e2e/destructive/account-state.util.ts). The test:e2e script wraps
-      # Playwright in `sst shell` so SST Resource bindings (the Lambda's name,
-      # etc.) resolve to the staging stage.
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: us-east-2
-
-      - name: Run E2E tests
-        run: pnpm test:e2e
-
-      # The bucket policy suite needs its own five accounts; it runs once the
-      # E2E_POLICY_* secrets are set (tests/e2e/policies/README.md).
-      - name: Run bucket policy E2E tests
-        if: env.E2E_POLICY_OWNER_EMAIL != ''
-        run: pnpm test:e2e:policies
-
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        if: ${{ !cancelled() }}
-        with:
-          name: playwright-report-staging-${{ github.run_id }}
-          path: playwright-report/
-          retention-days: 14
-
-      - name: Notify Slack on failure
-        if: failure()
-        uses: slackapi/slack-github-action@dcb1066f776dd043e64d0e8ba94ca15cc7e1875d # v4.0.0
-        with:
-          method: chat.postMessage
-          token: ${{ secrets.SLACK_BOT_TOKEN }}
-          payload: |
-            {
-              "channel": "filone-alerts",
-              "text": "E2E test run failed (${{ env.BASE_URL }}). Details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": ":warning: *E2E test run failed* · <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Details>"
-                  }
-                },
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "Deployment tested: `${{ env.BASE_URL }}`"
-                  }
-                }
-              ]
-            }
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+    with:
+      base_url: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'https://staging.fil.one' }}
+      failure_title: E2E test run failed
+      failure_detail: "${{ format('Deployment tested: `{0}`', github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || 'https://staging.fil.one') }}"
 
   dispatch-telemetry:
     needs: [e2e]
