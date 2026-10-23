@@ -7,6 +7,7 @@
 import pRetry from 'p-retry';
 import { S3Region, getS3Endpoint, type TenantStatus } from '@filone/shared';
 import type {
+  NonEmptyArray,
   AccessKeyPermission,
   GranularPermission,
   RetentionDurationType,
@@ -90,7 +91,7 @@ function toBucketProtection(data: BucketBucketResponse): BucketProtection {
 
 export const auroraOrchestrator = {
   id: 'aurora',
-  regions: [S3Region.EuWest1 as S3RegionType],
+  regions: [S3Region.EuWest1 as S3RegionType] as NonEmptyArray<S3RegionType>,
 
   async ensureTenantReady(
     orgId: string,
@@ -207,7 +208,7 @@ export const auroraOrchestrator = {
       .filter((b): b is typeof b & { name: string; createdAt: string } => !!b.name && !!b.createdAt)
       .map((b) => ({
         bucketName: b.name,
-        region: auroraOrchestrator.regions[0]!,
+        region: auroraOrchestrator.regions[0],
         createdAt: b.createdAt,
         isPublic: false,
         encrypted: b.flags?.includes('encrypted') ?? true,
@@ -243,7 +244,7 @@ export const auroraOrchestrator = {
 
     return {
       bucketName: data.name ?? bucketName,
-      region: auroraOrchestrator.regions[0]!,
+      region: auroraOrchestrator.regions[0],
       createdAt: data.createdAt,
       isPublic: false,
       versioning: data.versioning ?? false,

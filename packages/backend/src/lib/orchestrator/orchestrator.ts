@@ -15,12 +15,20 @@
 //     `filone-console` system key stashed in SSM during setup.
 
 import pRetry from 'p-retry';
-import type { BucketPolicy, MemberBucketAccess, S3Region, TenantStatus } from '@filone/shared';
+import type {
+  NonEmptyArray,
+  BucketPolicy,
+  MemberBucketAccess,
+  S3Region,
+  TenantStatus,
+} from '@filone/shared';
 import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
 } from './tenant-setup.ts';
 import { buildIssueAccessKeyRequestBody, describeAccessKeyBody } from './access-key-body.ts';
+import type { FilOneOrchestratorConfig } from './config.ts';
+export type { FilOneOrchestratorConfig } from './config.ts';
 import { withWriteRetry } from './policy-writes.ts';
 import { extractApiCode, extractApiMessage } from './api-message.ts';
 import {
@@ -87,34 +95,6 @@ import {
 } from './members.ts';
 import { fetchBucketUsageMetrics, fetchTenantInfo, fetchTenantUsageMetrics } from './usage.ts';
 
-export interface FilOneOrchestratorConfig {
-  /**
-   * Orchestrator id (e.g. 'forge'). Must be stable: it drives the PROFILE
-   * attribute the tenant id is stored under (`${id}TenantId`), the SSM path
-   * segment for console S3 credentials (`/filone/<stage>/${id}-s3/...`), and
-   * the metrics apiName dimension (`${id}-management`). Future wiring
-   * (registry entry, sst.config IAM blocks) must honor the same derivations.
-   */
-  id: string;
-  /**
-   * The regions the network serves. Its tenant is region-free, so they share
-   * the tenant, the console key and the bucket listing.
-   */
-  regions: S3Region[];
-  /** Deployment stage — explicit (rather than read from process.env) so instances are testable. */
-  stage: string;
-  /** S3 gateway endpoint for the data plane, e.g. `https://s3.{region}.filonecontent.com`. */
-  s3EndpointUrl: string;
-  /** The same gateway as browsers reach it, when that differs from `s3EndpointUrl`. */
-  s3PresignEndpointUrl?: string;
-  /**
-   * Control-plane Management API access: either connection settings (the
-   * factory builds and instruments a client) or a pre-built client (used by
-   * tests and advanced callers; NOT auto-instrumented).
-   */
-  api: { client: Client } | { baseUrl: string; accessToken: string; fetch?: typeof fetch };
-}
-
 // Versioning / object-lock are applied as separate, idempotent S3 calls after the
 // bucket is created. Retry them so a transient S3 blip doesn't leave the bucket
 // partially configured (which would surface as a dead-end BucketConfigurationError).
@@ -122,7 +102,7 @@ const BUCKET_CONFIG_RETRY = { retries: 3 } as const;
 
 export class FilOneOrchestrator implements ServiceOrchestrator {
   readonly id: string;
-  readonly regions: S3Region[];
+  readonly regions: NonEmptyArray<S3Region>;
 
   private readonly config: FilOneOrchestratorConfig;
   private readonly client: Client;
@@ -132,9 +112,6 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   constructor(config: FilOneOrchestratorConfig) {
     this.config = config;
     this.id = config.id;
-    if (config.regions.length === 0) {
-      throw new Error(`Orchestrator "${config.id}" must serve at least one region.`);
-    }
     this.regions = config.regions;
     this.client = resolveClient(config);
     const { id, stage } = config;
@@ -178,7 +155,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     );
     return {
       endpointUrl: this.config.s3EndpointUrl,
-      region: this.regions[0]!,
+      region: this.regions[0],
       credentials,
       forcePathStyle: true,
       orchestratorId: this.id,
@@ -359,7 +336,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     // for the one bucket the detail page actually needs them for.
     return buckets.map((b) => ({
       bucketName: b.name,
-      region: this.regions[0]!,
+      region: this.regions[0],
       createdAt: b.createdAt,
       isPublic: false,
       // The contract mandates server-side encryption by default.
@@ -409,7 +386,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
 
     return {
       bucketName,
-      region: this.regions[0]!,
+      region: this.regions[0],
       isPublic: false,
       versioning,
       encrypted: true,

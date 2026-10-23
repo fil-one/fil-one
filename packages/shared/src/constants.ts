@@ -17,6 +17,12 @@ export type StageLike = Stage | (string & {});
 
 export const DOCS_URL = 'https://docs.filone.com';
 
+/**
+ * A list with at least one element, so a first read needs no `!` and no runtime
+ * check. Used for the regions a storage network serves, which is never empty.
+ */
+export type NonEmptyArray<T> = [T, ...T[]];
+
 /** Available S3 regions. */
 export const S3Region = {
   EuWest1: 'eu-west-1',
