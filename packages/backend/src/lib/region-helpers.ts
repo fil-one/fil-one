@@ -5,22 +5,22 @@ import type { RegionOrchestrator } from './service-orchestrator.ts';
 import type { TenantStatus } from '@filone/shared/src/api/tenants.ts';
 
 /**
- * A tenant the org holds on one orchestrator. An orchestrator is a storage
- * network serving one or more regions, and its tenant is region-free: this is
- * one entry per network, never one per region, so a loop over it touches each
- * tenant once.
+ * A storage network the org is provisioned on, and the tenant it holds there.
+ * An orchestrator is one network serving one or more regions, and its tenant is
+ * region-free: this is one entry per network, never one per region, so a loop
+ * over it touches each tenant once.
  */
-export interface ProvisionedTenant {
+export interface ProvisionedNetwork {
   orchestrator: RegionOrchestrator;
   tenantId: string;
 }
 
-export async function getProvisionedTenants(
+export async function getProvisionedNetworks(
   orgId: string,
   // Account teardown snapshots tenant ids from here; a stale read there would
   // orphan a live tenant permanently.
   options?: { consistent?: boolean },
-): Promise<ProvisionedTenant[]> {
+): Promise<ProvisionedNetwork[]> {
   const orchestrators = getAvailableOrchestrators();
   if (orchestrators.length === 0) return [];
   const orgProfile = await getOrgProfile(
@@ -32,7 +32,7 @@ export async function getProvisionedTenants(
       const tenantId = orchestrator.isTenantReady(orgProfile);
       return tenantId ? { orchestrator, tenantId } : null;
     })
-    .filter((t): t is ProvisionedTenant => t !== null);
+    .filter((t): t is ProvisionedNetwork => t !== null);
 }
 
 export interface TenantSyncOutcome {
@@ -44,7 +44,7 @@ export interface TenantSyncOutcome {
 
 // Re-raises per-tenant sync failures as a single error. Callers that need a
 // failed sync to abort the surrounding operation (so it is retried as a whole)
-// pass the outcomes of syncTenantStatusInProvisionedTenants through this.
+// pass the outcomes of syncTenantStatusInProvisionedNetworks through this.
 export function assertTenantSyncSucceeded(outcomes: TenantSyncOutcome[]): void {
   const failed = outcomes.filter((o) => o.outcome === 'error');
   if (failed.length > 0) {
@@ -64,12 +64,12 @@ const STATUS_SYNC_RETRY: RetryOptions = { retries: 3 };
 // differs. A tenant that fails to update still differs on the next run, so
 // partial failures self-heal. Never throws — per-tenant failures are reported
 // as `error` outcomes so callers can record them.
-export async function syncTenantStatusInProvisionedTenants(
+export async function syncTenantStatusInProvisionedNetworks(
   orgId: string,
   desired: TenantStatus,
   options?: { consistent?: boolean },
 ): Promise<TenantSyncOutcome[]> {
-  const ready = await getProvisionedTenants(orgId, options);
+  const ready = await getProvisionedNetworks(orgId, options);
 
   return Promise.all(
     ready.map(({ orchestrator, tenantId }) =>

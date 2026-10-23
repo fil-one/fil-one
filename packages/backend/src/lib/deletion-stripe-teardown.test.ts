@@ -17,7 +17,8 @@ const mockReportOrgUsage = vi.fn(async () => {
 // Both reach service-orchestrator-registry, which resolves SST Resource values at
 // import time and cannot load under a stubbed Resource.
 vi.mock('./region-helpers.ts', () => ({
-  syncTenantStatusInProvisionedTenants: (...args: unknown[]) => mockDisableTenants(...(args as [])),
+  syncTenantStatusInProvisionedNetworks: (...args: unknown[]) =>
+    mockDisableTenants(...(args as [])),
 }));
 vi.mock('./org-usage-report.ts', () => ({
   reportOrgUsage: (...args: unknown[]) => mockReportOrgUsage(...(args as [])),

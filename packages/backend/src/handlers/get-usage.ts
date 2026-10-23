@@ -6,7 +6,7 @@ import { isRagCompanionBucket } from '@filone/shared';
 import { countAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
-import { type ProvisionedTenant, getProvisionedTenants } from '../lib/region-helpers.ts';
+import { type ProvisionedNetwork, getProvisionedNetworks } from '../lib/region-helpers.ts';
 import type { RegionOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
 import {
   getRequestDeadline,
@@ -38,18 +38,18 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   const { orgId } = getUserInfo(event);
 
   // Access keys live in DynamoDB, not in any region's orchestrator, so this is
-  // independent of how many regions answer below, including none.
+  // independent of how many networks answer below, including none.
   const accessKeyCount = await trackRequestStep(event, 'countAccessKeysInScope', () =>
     countAccessKeysInScope(orgId, keyScope(event)),
   );
 
   // The dashboard aggregates usage across every network the org is provisioned
   // on, so resolve the ready tenant on each available orchestrator.
-  const regions = await trackRequestStep(event, 'getProvisionedNetworks', () =>
-    getProvisionedTenants(orgId),
+  const networks = await trackRequestStep(event, 'getProvisionedNetworks', () =>
+    getProvisionedNetworks(orgId),
   );
 
-  if (regions.length === 0) {
+  if (networks.length === 0) {
     const response: UsageResponse = {
       storage: { usedBytes: 0 },
       egress: { usedBytes: 0 },
@@ -67,8 +67,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // Swallow per-orchestrator errors so one region's outage still renders the
   // rest: settle every fetch, log the failures, and keep the successes.
   const settled = await Promise.allSettled(
-    regions.map((region) =>
-      fetchRegionUsage(event, region, { from: thirtyDaysAgo, to: now }, signal),
+    networks.map((network) =>
+      fetchRegionUsage(event, network, { from: thirtyDaysAgo, to: now }, signal),
     ),
   );
 
@@ -78,7 +78,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       regionUsages.push(result.value);
       return;
     }
-    const { orchestrator, tenantId } = regions[i];
+    const { orchestrator, tenantId } = networks[i];
     console.error('[get-usage] Failed to fetch usage', {
       orgId,
       tenantId,
@@ -105,7 +105,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 
 // Folds the per-region usages into the dashboard totals. Counts are summed;
 // storage/egress are pre-reduced per region (see `fetchRegionUsage`); status
-// collapses to the most-restrictive across regions.
+// collapses to the most-restrictive across networks.
 //
 // Buckets are summed from each region's live listing rather than the
 // orchestrator's `bucketCount` quota snapshot: the snapshot lags a freshly
@@ -139,7 +139,7 @@ function aggregateRegionUsages(regionUsages: RegionUsage[], accessKeyCount: numb
 
 async function fetchRegionUsage(
   event: AuthenticatedEvent,
-  { orchestrator, tenantId }: ProvisionedTenant,
+  { orchestrator, tenantId }: ProvisionedNetwork,
   window: { from: Date; to: Date },
   signal: AbortSignal,
 ): Promise<RegionUsage> {
@@ -179,11 +179,11 @@ async function fetchRegionUsage(
 }
 
 // Returns the most-restrictive status present, or `undefined` when none of the
-// regions report a status we model.
+// networks report a status we model.
 function pickMostRestrictiveStatus(
   statuses: (TenantStatus | undefined)[],
 ): TenantStatus | undefined {
-  // Tenant statuses ordered most- to least-restrictive: when regions disagree,
+  // Tenant statuses ordered most- to least-restrictive: when networks disagree,
   // the dashboard reflects the most restrictive status in effect anywhere.
   return (['disabled', 'write-locked', 'active'] as const).find((s) => statuses.includes(s));
 }

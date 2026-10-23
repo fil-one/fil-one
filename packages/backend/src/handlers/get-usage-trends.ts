@@ -10,7 +10,7 @@ import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
-import { type ProvisionedTenant, getProvisionedTenants } from '../lib/region-helpers.ts';
+import { type ProvisionedNetwork, getProvisionedNetworks } from '../lib/region-helpers.ts';
 
 /**
  * How a period is bucketed.
@@ -85,14 +85,14 @@ export async function baseHandler(
 
   // The dashboard aggregates usage across every network the org is provisioned
   // on, so resolve the ready tenant on each available orchestrator.
-  const regions = await getProvisionedTenants(orgId);
+  const networks = await getProvisionedNetworks(orgId);
 
-  const response: UsageTrendsResponse = await buildTimeSeries(regions, period, signal);
+  const response: UsageTrendsResponse = await buildTimeSeries(networks, period, signal);
   return new ResponseBuilder().status(200).body(response).build();
 }
 
 async function buildTimeSeries(
-  regions: ProvisionedTenant[],
+  networks: ProvisionedNetwork[],
   period: UsageTrendsPeriod,
   signal: AbortSignal,
 ): Promise<UsageTrendsResponse> {
@@ -102,15 +102,15 @@ async function buildTimeSeries(
   granularity.rewind(from, points - 1);
   granularity.toStartOfBucket(from);
 
-  // Fetch each region's series and index them by bucket, then sum across
-  // regions per bucket for the org-wide trend.
+  // Fetch each network's series and index them by bucket, then sum across
+  // networks per bucket for the org-wide trend.
   const perRegion = await Promise.all(
-    regions.map(({ orchestrator, tenantId }) =>
+    networks.map(({ orchestrator, tenantId }) =>
       fetchSamplesByBucket({ orchestrator, tenantId, from, to: now, granularity, signal }),
     ),
   );
 
-  // Build the full range with gap-filling, summing all regions for each bucket.
+  // Build the full range with gap-filling, summing all networks for each bucket.
   const storage: UsageDataPoint[] = [];
   const objects: UsageDataPoint[] = [];
   const egress: UsageDataPoint[] = [];
