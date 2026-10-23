@@ -12,7 +12,7 @@ import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.ts';
 import { getSubscription } from '../lib/subscription-store.ts';
 import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
-import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.ts';
+import { saveBillingRecord, unlockAllProvisionedTenants } from '../lib/billing-activation.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
@@ -139,7 +139,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 
   // 6. Persist billing record and unlock the tenant on every orchestrator
   await saveBillingRecord({ orgId, userId }, subscription, paymentMethodId, mappedStatus);
-  await unlockAllProvisionedRegions(orgId);
+  await unlockAllProvisionedTenants(orgId);
 
   const response: ActivateSubscriptionResponse = {
     subscription: {

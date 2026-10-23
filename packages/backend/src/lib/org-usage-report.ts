@@ -1,5 +1,5 @@
 import { GB_BYTES } from '@filone/shared';
-import { getProvisionedRegions } from './region-helpers.ts';
+import { getProvisionedTenants } from './region-helpers.ts';
 import type { TenantUsageMetrics } from './service-orchestrator.ts';
 import { getStripeClient, isStripeResourceMissing } from './stripe-client.ts';
 import {
@@ -25,7 +25,7 @@ export interface OrgUsageReport {
 }
 
 /**
- * Meters an org's storage across its provisioned regions and submits it to
+ * Meters an org's storage across its provisioned tenants and submits it to
  * Stripe. Returns undefined when the org is provisioned nowhere.
  *
  * Two callers: the 12-hourly cron, and account teardown, which reports the
@@ -51,10 +51,10 @@ export async function reportOrgUsage(params: {
 
   // Each region resolves its own tenant id (side-effect-free), is fetched
   // independently, then aggregated and reported at the org level.
-  const orgRegions = await getProvisionedRegions(orgId);
+  const orgRegions = await getProvisionedTenants(orgId);
 
   if (orgRegions.length === 0) {
-    console.warn(`${LOG} Org not provisioned in any available region, skipping`, { orgId });
+    console.warn(`${LOG} Org not provisioned on any available network, skipping`, { orgId });
     return undefined;
   }
 
