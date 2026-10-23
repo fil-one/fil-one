@@ -17,6 +17,7 @@
 // production at import time.
 
 import { getS3Endpoint, S3Region } from '@filone/shared';
+import type { NonEmptyArray } from '@filone/shared';
 import { FilOneOrchestrator } from '../orchestrator/orchestrator.ts';
 import type { ServiceOrchestrator } from '../service-orchestrator.ts';
 
@@ -37,7 +38,7 @@ export interface ForgeManagementApi {
  */
 export function createForgeOrchestrator(
   id: string,
-  regions: S3Region[],
+  regions: NonEmptyArray<S3Region>,
   api: ForgeManagementApi,
   s3: { endpointUrl?: string; presignEndpointUrl?: string } = {},
 ): ServiceOrchestrator {
@@ -46,7 +47,7 @@ export function createForgeOrchestrator(
     id,
     regions,
     stage,
-    s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(regions[0]!, stage),
+    s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(regions[0], stage),
     s3PresignEndpointUrl: s3.presignEndpointUrl,
     api,
   });

@@ -85,7 +85,7 @@ export async function handler(
     // not provisioned in has no tenant and its buckets cannot be indexed.
     const tenantByRegion = new Map<S3Region, string>(
       regions.flatMap(({ orchestrator, tenantId }) =>
-        orchestrator.regions.map((region): [S3Region, string] => [region, tenantId]),
+        orchestrator.regions.map((region) => [region, tenantId] as const),
       ),
     );
     const bucketsByRegion = groupBucketsByRegion(buckets);
