@@ -177,18 +177,15 @@ async function runPages(
   const s3 = createS3Client(await tenant.orchestrator.getS3ClientContext(tenant.tenantId));
   let job = initial;
 
-  // Only AllVersions ever sees a literal "null" version id (Current lists by
-  // key only), and a job's bucket doesn't change mid-run, so this is resolved
-  // at most once per invocation, shared by the access checks and the walk.
-  let versioningStatus: Promise<BucketVersioningStatus> | undefined;
-  const getVersioningStatus = () =>
-    (versioningStatus ??= getBucketVersioningStatus(s3, job.bucketName));
+  // A job's bucket doesn't change mid-run, so its versioning is read once per
+  // invocation, for the access checks and the walk.
+  const bucketVersioningStatus = await getBucketVersioningStatus(s3, job.bucketName);
 
   for (;;) {
     // The tenant's credentials delete without any policy evaluation, so the
     // starter's role and access are re-checked before every page: a change
     // made after the job was queued, or mid-run, stops it within a page.
-    await assertStarterMayDelete(tenant, job, getVersioningStatus);
+    await assertCanDelete(tenant, job, bucketVersioningStatus);
 
     const page = await enumerateDeletionPage({
       s3,
@@ -196,9 +193,9 @@ async function runPages(
       prefix: job.prefix,
       scope: job.scope,
       ...(job.cursor && { cursor: job.cursor }),
-      ...(job.scope === BulkDeleteScope.AllVersions && {
-        bucketVersioningStatus: await getVersioningStatus(),
-      }),
+      // Only AllVersions ever sees a literal "null" version id; Current lists
+      // by key only.
+      ...(job.scope === BulkDeleteScope.AllVersions && { bucketVersioningStatus }),
       maxKeys: PAGE_SIZE,
     });
 
@@ -229,16 +226,16 @@ async function runPages(
  * hold `objects.delete`, and a scoped member's bucket policies must still cover
  * the deletion. Neither will be undone by redelivery.
  */
-async function assertStarterMayDelete(
+async function assertCanDelete(
   { orchestrator, tenantId }: ResolvedTenant,
   job: BulkDeleteJobRecord,
-  getVersioningStatus: () => Promise<BucketVersioningStatus>,
+  bucketVersioningStatus: BucketVersioningStatus,
 ): Promise<void> {
   const memberId = await resolveStarterScope(job);
   const access = await canBulkDelete(orchestrator, tenantId, memberId, {
     bucketName: job.bucketName,
     scope: job.scope,
-    getVersioningStatus,
+    getVersioningStatus: async () => bucketVersioningStatus,
   });
   if (!access.ok) {
     throw new NonRetryableBulkDeleteError(
