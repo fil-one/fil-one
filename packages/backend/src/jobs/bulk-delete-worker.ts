@@ -247,7 +247,7 @@ async function assertMemberCanDelete(
     {
       bucketName: job.bucketName,
       scope: job.scope,
-      getVersioningStatus: async () => bucketVersioningStatus,
+      versioningStatus: bucketVersioningStatus,
     },
   );
   if (!access.ok) {

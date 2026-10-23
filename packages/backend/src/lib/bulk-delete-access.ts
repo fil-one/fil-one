@@ -15,12 +15,9 @@ import type { RegionOrchestrator, ServiceOrchestrator } from './service-orchestr
  * versioning: every version there is the literal "null" one, which the worker
  * drops to issue plain object deletes.
  */
-async function getRequiredActions({
-  scope,
-  getVersioningStatus,
-}: BulkDeleteTarget): Promise<PolicyAction[]> {
+function getRequiredActions({ scope, versioningStatus }: BulkDeleteTarget): PolicyAction[] {
   if (scope === BulkDeleteScope.Current) return ['s3:ListBucket', 's3:DeleteObject'];
-  return (await getVersioningStatus()) === 'Never'
+  return versioningStatus === 'Never'
     ? ['s3:ListBucketVersions', 's3:DeleteObject']
     : ['s3:ListBucketVersions', 's3:DeleteObjectVersion'];
 }
@@ -45,8 +42,7 @@ export type BulkDeleteAccess = BulkDeleteAllowed | BulkDeleteRefused;
 export interface BulkDeleteTarget {
   bucketName: string;
   scope: BulkDeleteScope;
-  /** Read only for an all-versions delete the member check applies to. */
-  getVersioningStatus: () => Promise<BucketVersioningStatus>;
+  versioningStatus: BucketVersioningStatus;
 }
 
 /**
@@ -69,7 +65,7 @@ export async function canBulkDelete(
   );
   const granted = access.find((entry) => entry.bucketName === target.bucketName)?.actions;
   if (!granted) return { ok: false, reason: 'bucket-not-granted' };
-  const required = await getRequiredActions(target);
+  const required = getRequiredActions(target);
   if (!required.every((action) => granted.includes(action))) {
     return { ok: false, reason: 'action-not-granted' };
   }

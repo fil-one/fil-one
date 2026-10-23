@@ -7,6 +7,7 @@ import {
   OrgRole,
   S3Region,
 } from '@filone/shared';
+import { NoSuchBucket } from '@aws-sdk/client-s3';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
 import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
@@ -185,6 +186,21 @@ describe('create-bulk-delete-job', () => {
     expect(mockCreate).not.toHaveBeenCalled();
   });
 
+  it('answers 404 for a bucket that does not exist, and queues nothing', async () => {
+    mockGetBucketVersioningStatus.mockRejectedValueOnce(
+      new NoSuchBucket({ $metadata: {}, message: 'The specified bucket does not exist' }),
+    );
+
+    const result = await baseHandler(event({ idempotencyKey }));
+
+    expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+      statusCode: 404,
+      body: { message: 'Bucket not found' },
+    });
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
+  });
+
   it('refuses when the tenant is not provisioned', async () => {
     mockIsTenantReady.mockReturnValue(undefined);
     const result = await baseHandler(event({ idempotencyKey }));
@@ -300,18 +316,6 @@ describe('create-bulk-delete-job', () => {
       },
     );
 
-    it("reads the bucket's versioning only for an all-versions delete", async () => {
-      mockResolveMemberAccess.mockResolvedValue(
-        grantActionsOnBucket('my-bucket', ['s3:ListBucket', 's3:DeleteObject']),
-      );
-
-      await baseHandler(
-        eventAs(OrgRole.Member, { idempotencyKey, scope: BulkDeleteScope.Current }),
-      );
-
-      expect(mockGetBucketVersioningStatus).not.toHaveBeenCalled();
-    });
-
     it("looks up the Member's access by tenant and user id", async () => {
       mockResolveMemberAccess.mockResolvedValue([]);
 
@@ -381,7 +385,6 @@ describe('create-bulk-delete-job', () => {
 
         expect(result.statusCode).toBe(202);
         expect(mockResolveMemberAccess).not.toHaveBeenCalled();
-        expect(mockGetBucketVersioningStatus).not.toHaveBeenCalled();
       },
     );
   });

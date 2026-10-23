@@ -1215,6 +1215,8 @@ export default $config({
         extraEnv: { ...fthEnv, ...forgeEnv },
         // Linking the queue grants the send; the handler only enqueues the job.
         extraLink: [bulkDeleteQueue],
+        // Reads the bucket's versioning with the tenant's console S3 key.
+        permissions: s3DataPlanePermissions,
       },
       presign: {
         extraEnv: { ...fthEnv, ...forgeEnv },
