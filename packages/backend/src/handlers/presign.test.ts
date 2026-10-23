@@ -26,7 +26,7 @@ const mockGetS3ClientContext = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
-  region: 'eu-west-1',
+  regions: ['eu-west-1'],
   isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   getS3ClientContext: (...args: unknown[]) => mockGetS3ClientContext(...args),
 };
@@ -558,7 +558,7 @@ describe('presign baseHandler', () => {
     const iamOrchestrator = {
       ...mockOrchestrator,
       // The region table says us-east-9 serves the `iam` access model.
-      region: 'us-east-9',
+      regions: ['us-east-9'],
       ...delegateIamMethods(new FakeIamOrchestrator()),
       resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args),
     };
