@@ -48,6 +48,25 @@ describe('AccessKeysTable: permission detail', () => {
     });
   });
 
+  it('counts a bucket-configuration write, alone or beside object permissions', () => {
+    renderWithProviders(
+      <AccessKeysTable keys={[makeKey({ permissions: ['PutBucketCORS'] })]} showPermissions />,
+    );
+    expect(screen.getByTestId('permission-badge-details')).toMatchObject({
+      textContent: '+1',
+      ariaLabel: 'Show all 1 permissions',
+    });
+  });
+
+  it('counts a bucket-configuration write with the other extras', () => {
+    const keys = [makeKey({ permissions: ['read', 'GetBucketVersioning', 'PutBucketCORS'] })];
+    renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
+    expect(screen.getByTestId('permission-badge-details')).toMatchObject({
+      textContent: '+2',
+      ariaLabel: 'Show all 3 permissions',
+    });
+  });
+
   it('drops the details trigger when the key carries only object permissions', () => {
     const keys = [makeKey({ permissions: ['read', 'write'] })];
     renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
@@ -63,6 +82,20 @@ describe('AccessKeysTable: permission detail', () => {
     expect(
       screen.getByTestId('access-key-details-drawer-section-bucket-management'),
     ).toHaveTextContent('Read bucket versioning');
+  });
+
+  it.each([
+    ['alone', ['PutBucketCORS']],
+    ['beside object permissions', ['read', 'PutBucketCORS']],
+  ] as const)('shows a bucket-configuration write in the drawer, %s', (_, permissions) => {
+    const keys = [makeKey({ permissions: [...permissions] })];
+    renderWithProviders(<AccessKeysTable keys={keys} showPermissions />);
+
+    fireEvent.click(screen.getByTestId('permission-badge-details'));
+
+    expect(
+      screen.getByTestId('access-key-details-drawer-section-bucket-management'),
+    ).toHaveTextContent('Set bucket CORS');
   });
 });
 

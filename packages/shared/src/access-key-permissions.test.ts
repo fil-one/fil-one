@@ -44,6 +44,7 @@ describe('the console permission behind each key permission', () => {
     ['DeleteBucket', 'buckets.delete'],
     ['GetBucketVersioning', 'buckets.read'],
     ['GetBucketObjectLockConfiguration', 'buckets.read'],
+    ['PutBucketCORS', 'buckets.policy_manage'],
   ] as const)('maps %s to %s', (keyPermission, consolePermission) => {
     expect(ACCESS_KEY_PERMISSION_REQUIREMENT[keyPermission]).toBe(consolePermission);
   });

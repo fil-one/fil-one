@@ -42,8 +42,8 @@
 // than version N, because `prune` deletes only version N-1 and the older key
 // would never be cleaned up: prune that tenant first. It writes SSM only after
 // the new key answers a GET on its id and signs an S3 ListBuckets (plus a
-// GetBucketVersioning when the tenant has a bucket). A tenant whose
-// verification fails keeps the key it already has.
+// GetBucketVersioning and a GetBucketCors when the tenant has a bucket). A
+// tenant whose verification fails keeps the key it already has.
 //
 // The Management API takes no idempotency key on access-key creation (see
 // management-openapi.yaml, "Idempotency"): a create it already committed comes
@@ -72,7 +72,12 @@ import {
   ScanCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
-import { GetBucketVersioningCommand, ListBucketsCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetBucketCorsCommand,
+  GetBucketVersioningCommand,
+  ListBucketsCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { GetParameterCommand, PutParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
@@ -474,9 +479,12 @@ async function verifyNewKey(
 // ── S3 data plane ───────────────────────────────────────────────
 
 /**
- * Signs a ListBuckets with the new credentials, then a GetBucketVersioning on
- * the first bucket when there is one: an action the gateway authorizes on its
- * own (fil-forge/hilt#102), which proves it honours the key's grant list.
+ * Signs a ListBuckets with the new credentials, then a GetBucketVersioning and
+ * a GetBucketCors on the first bucket when there is one: actions the gateway
+ * authorizes on their own (fil-forge/hilt#102, #107), which proves it honours
+ * the key's grant list. The CORS read is authorized before the gateway looks
+ * for a document, so a bucket without one answers NoSuchCORSConfiguration
+ * past the check, and that counts as a pass.
  */
 async function verifyS3Access(
   ctx: RegionContext,
@@ -496,7 +504,12 @@ async function verifyS3Access(
     try {
       const { Buckets } = await s3.send(new ListBucketsCommand({}));
       const bucket = Buckets?.[0]?.Name;
-      if (bucket) await s3.send(new GetBucketVersioningCommand({ Bucket: bucket }));
+      if (bucket) {
+        await s3.send(new GetBucketVersioningCommand({ Bucket: bucket }));
+        await s3.send(new GetBucketCorsCommand({ Bucket: bucket })).catch((err: unknown) => {
+          if (!(err instanceof Error && err.name === 'NoSuchCORSConfiguration')) throw err;
+        });
+      }
       return;
     } catch (err) {
       if (attempt === attempts) {

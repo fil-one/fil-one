@@ -14,6 +14,7 @@ import {
   CreateAccessKeySchema,
   CreatePrincipalAccessKeySchema,
   GRANULAR_PERMISSION_MAP,
+  isBucketConfigPermission,
   isBucketPermission,
   isObjectPermission,
   supportsBucketManagement,
@@ -70,9 +71,15 @@ export function useAccessKeyForm({
     if (prevRegionRef.current === region) return;
     prevRegionRef.current = region;
     setSelectedBuckets([]);
-    // Drop bucket-management permissions when the new region can't support them.
+    // Drop bucket-management permissions when the new region can't support
+    // them, and the bucket-configuration writes when it is not a Forge
+    // region. A permission left behind would keep the form unsubmittable
+    // with nothing visible to clear, since its checkbox is disabled.
     if (!supportsBucketManagement(region)) {
       setPermissions((prev) => prev.filter((p) => !isBucketPermission(p)));
+    }
+    if (!supportsIamMethods(region)) {
+      setPermissions((prev) => prev.filter((p) => !isBucketConfigPermission(p)));
     }
   }, [region]);
 

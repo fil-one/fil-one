@@ -2,7 +2,11 @@ import { ArrowsClockwiseIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 import { Fragment } from 'react';
 
 import type { AccessKey, ServiceAccessKey } from '@filone/shared';
-import { isBucketInfoPermission, isBucketPermission } from '@filone/shared';
+import {
+  isBucketConfigPermission,
+  isBucketInfoPermission,
+  isBucketPermission,
+} from '@filone/shared';
 
 import { Badge } from './Badge';
 import type { RowAction } from './RowActionsMenu';
@@ -72,8 +76,12 @@ export function PermissionBadges({
   const objectPermissions = PERMISSION_OPTIONS.filter((o) => permissions.includes(o.value));
   const bucketManagement = permissions.filter(isBucketPermission);
   const bucketInfo = permissions.filter(isBucketInfoPermission);
+  const bucketConfig = permissions.filter(isBucketConfigPermission);
   const extraCount =
-    (accessKey.granularPermissions?.length ?? 0) + bucketManagement.length + bucketInfo.length;
+    (accessKey.granularPermissions?.length ?? 0) +
+    bucketManagement.length +
+    bucketInfo.length +
+    bucketConfig.length;
 
   return (
     // From `xl`, wide enough for Read, Write, List and Delete side by side.
