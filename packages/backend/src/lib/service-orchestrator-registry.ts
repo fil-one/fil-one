@@ -9,7 +9,10 @@ import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
 import type { S3Endpoint } from './orchestrator/config.ts';
 import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
 import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
-import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
+import {
+  ORCHESTRATOR_ID_BY_REGION,
+  getRegionsForOrchestrator,
+} from './service-orchestrator-ids.ts';
 import type {
   LegacyServiceOrchestrator,
   RegionOrchestrator,
@@ -28,15 +31,54 @@ import type {
 let fthOrchestrator: LegacyServiceOrchestrator | undefined;
 const forgeOrchestrators = new Map<string, ServiceOrchestrator>();
 
-function getForgeOrchestrator(
-  id: string,
-  regions: NonEmptyArray<S3Region>,
-  api: () => ForgeManagementApi,
-  s3Endpoints?: Partial<Record<S3Region, S3Endpoint>>,
-): ServiceOrchestrator {
+// One Forge network per Hilt, keyed by the orchestrator id its regions map to
+// in ORCHESTRATOR_ID_BY_REGION. A network is built once and serves every region
+// of its id: its tenant is region-free, so the regions share tenant state and
+// the console key.
+const FORGE_NETWORKS: Record<
+  string,
+  { api: () => ForgeManagementApi; s3Endpoints?: Partial<Record<S3Region, S3Endpoint>> }
+> = {
+  forge: {
+    api: () => ({
+      baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
+      accessToken: Resource.ForgeManagementApiToken.value,
+    }),
+  },
+  forgeDev: {
+    api: () => ({
+      baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
+      accessToken: Resource.ForgeDevManagementApiToken.value,
+    }),
+    // The dev stack's gateway is a local port, which no region name produces,
+    // so the override is keyed by the region it serves.
+    get s3Endpoints() {
+      const endpointUrl = process.env.FORGE_DEV_S3_ENDPOINT_URL;
+      if (!endpointUrl) return undefined;
+      const presignEndpointUrl = process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL;
+      return {
+        [S3Region.UsEast9]: { endpointUrl, ...(presignEndpointUrl && { presignEndpointUrl }) },
+      };
+    },
+  },
+};
+
+function getForgeOrchestrator(id: string, stage: string): ServiceOrchestrator {
   let orchestrator = forgeOrchestrators.get(id);
   if (!orchestrator) {
-    orchestrator = createForgeOrchestrator(id, regions, api(), s3Endpoints);
+    const network = FORGE_NETWORKS[id];
+    if (!network) throw new Error(`No Forge network is configured for orchestrator "${id}".`);
+    // Destructured rather than length-checked: it gives the non-empty list the
+    // orchestrator takes, and a stage this id serves no region on is caught here
+    // rather than inside the orchestrator.
+    const [first, ...rest] = getRegionsForOrchestrator(id, stage);
+    if (!first) throw new Error(`Orchestrator "${id}" serves no region on stage "${stage}".`);
+    orchestrator = createForgeOrchestrator(
+      id,
+      [first, ...rest],
+      network.api(),
+      network.s3Endpoints,
+    );
     forgeOrchestrators.set(id, orchestrator);
   }
   return orchestrator;
@@ -45,42 +87,21 @@ function getForgeOrchestrator(
 /** The orchestrator (storage network) serving a region. */
 export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
   const stage = process.env.FILONE_STAGE!;
-  if (isSupportedRegion(region, stage)) {
-    switch (region) {
-      case S3Region.EuWest1:
-        return auroraOrchestrator;
-      case S3Region.UsEast1:
-        fthOrchestrator ??= createFthOrchestrator(createInstrumentedFthClient());
-        return fthOrchestrator;
-      case S3Region.EuCentral3:
-        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], [region], () => ({
-          baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
-          accessToken: Resource.ForgeManagementApiToken.value,
-        }));
-      case S3Region.UsEast9:
-        return getForgeOrchestrator(
-          ORCHESTRATOR_ID_BY_REGION[region],
-          [region],
-          () => ({
-            baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
-            accessToken: Resource.ForgeDevManagementApiToken.value,
-          }),
-          // The dev stack's gateway is a local port, which no region name
-          // produces, so the override is keyed by the region it serves.
-          process.env.FORGE_DEV_S3_ENDPOINT_URL
-            ? {
-                [region]: {
-                  endpointUrl: process.env.FORGE_DEV_S3_ENDPOINT_URL,
-                  ...(process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL && {
-                    presignEndpointUrl: process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL,
-                  }),
-                },
-              }
-            : undefined,
-        );
-    }
+  if (!isSupportedRegion(region, stage)) {
+    throw new Error(`Unsupported region "${String(region)}".`);
   }
-  throw new Error(`Unsupported region "${String(region)}".`);
+
+  switch (region) {
+    case S3Region.EuWest1:
+      return auroraOrchestrator;
+    case S3Region.UsEast1:
+      fthOrchestrator ??= createFthOrchestrator(createInstrumentedFthClient());
+      return fthOrchestrator;
+  }
+
+  // Every other supported region is served by a Forge network, which the ids
+  // map names.
+  return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], stage);
 }
 
 /**
