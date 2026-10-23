@@ -11,9 +11,9 @@ vi.mock('sst', () => ({
   },
 }));
 
-const mockGetProvisionedTenants = vi.fn(async () => [] as unknown[]);
+const mockGetProvisionedNetworks = vi.fn(async () => [] as unknown[]);
 vi.mock('./region-helpers.ts', () => ({
-  getProvisionedTenants: (...args: unknown[]) => mockGetProvisionedTenants(...(args as [])),
+  getProvisionedNetworks: (...args: unknown[]) => mockGetProvisionedNetworks(...(args as [])),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -64,7 +64,7 @@ describe('resolveDeletionTargets', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.clearAllMocks();
-    mockGetProvisionedTenants.mockResolvedValue([]);
+    mockGetProvisionedNetworks.mockResolvedValue([]);
     stubMembers({});
     stubProfiles({ 'user-1': 'auth0|one', 'user-2': 'auth0|two' });
   });
@@ -144,12 +144,12 @@ describe('resolveDeletionTargets', () => {
     });
   });
 
-  // The tenant ids teardown deletes come from the provisioned tenants, keyed by
+  // The tenant ids teardown deletes come from the provisioned networks, keyed by
   // orchestrator. A stale read here would orphan a live tenant permanently, so the
   // lookup is consistent.
   it('maps every provisioned region to its tenant id', async () => {
     stubMembers({ orgTable: [memberRow('user-1')] });
-    mockGetProvisionedTenants.mockResolvedValue([
+    mockGetProvisionedNetworks.mockResolvedValue([
       { orchestrator: { id: 'fth' }, tenantId: '42' },
       { orchestrator: { id: 'ord' }, tenantId: '43' },
     ]);
@@ -157,7 +157,7 @@ describe('resolveDeletionTargets', () => {
     const { tenantIds } = await resolveDeletionTargets(ORG);
 
     expect(tenantIds).toEqual({ fth: '42', ord: '43' });
-    expect(mockGetProvisionedTenants).toHaveBeenCalledWith(ORG, { consistent: true });
+    expect(mockGetProvisionedNetworks).toHaveBeenCalledWith(ORG, { consistent: true });
   });
 
   describe('the sole-membership census', () => {

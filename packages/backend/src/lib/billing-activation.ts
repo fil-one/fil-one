@@ -3,7 +3,7 @@ import { SubscriptionStatus } from '@filone/shared';
 
 import {
   assertTenantSyncSucceeded,
-  syncTenantStatusInProvisionedTenants,
+  syncTenantStatusInProvisionedNetworks,
 } from './region-helpers.ts';
 import { updateSubscription, type SubscriptionOwner } from './subscription-store.ts';
 
@@ -56,9 +56,9 @@ export async function saveBillingRecord(
 // Unlocks the org's tenant on every orchestrator where it exists (Aurora, FTH,
 // ...). Each orchestrator resolves its own tenant and is skipped when the org
 // has none there, so this is a no-op for orchestrators the org never used.
-export async function unlockAllProvisionedTenants(orgId: string): Promise<void> {
+export async function unlockAllProvisionedNetworks(orgId: string): Promise<void> {
   try {
-    assertTenantSyncSucceeded(await syncTenantStatusInProvisionedTenants(orgId, 'active'));
+    assertTenantSyncSucceeded(await syncTenantStatusInProvisionedNetworks(orgId, 'active'));
     console.log('[billing-activation] Tenant unlocked', { orgId });
   } catch (error) {
     console.error('[billing-activation] Failed to unlock tenant', {
