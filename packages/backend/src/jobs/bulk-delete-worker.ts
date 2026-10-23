@@ -180,13 +180,12 @@ async function runPages(
   // A job's bucket doesn't change mid-run, so its versioning is read once per
   // invocation, for the access checks and the walk.
   const bucketVersioningStatus = await getBucketVersioningStatus(s3, job.bucketName);
+  const memberId = job.startedBy;
 
   for (;;) {
     // The tenant's credentials delete without any policy evaluation, so the
     // starter's role and access are re-checked before every page: a change
-    // made after the job was queued, or mid-run, stops it within a page. The
-    // member id comes from the current role, so it is read each time too.
-    const memberId = await resolveStarterScope(job);
+    // made after the job was queued, or mid-run, stops it within a page.
     await assertMemberCanDelete(tenant, job, memberId, bucketVersioningStatus);
 
     const page = await enumerateDeletionPage({
@@ -224,9 +223,10 @@ async function runPages(
 }
 
 /**
- * Fail the job when the scoped member's bucket policies no longer cover the
- * deletion; an unscoped starter (no member id) passes. A policy change will not
- * be undone by redelivery.
+ * Fail the job when the member who started it may no longer run it: their
+ * current role must hold `objects.delete`, and, when that role is scoped, their
+ * bucket policies must still cover the deletion. Neither will be undone by
+ * redelivery.
  */
 async function assertMemberCanDelete(
   { orchestrator, tenantId }: ResolvedTenant,
@@ -234,31 +234,27 @@ async function assertMemberCanDelete(
   memberId: string | undefined,
   bucketVersioningStatus: BucketVersioningStatus,
 ): Promise<void> {
-  const access = await canBulkDelete(orchestrator, tenantId, memberId, {
-    bucketName: job.bucketName,
-    scope: job.scope,
-    getVersioningStatus: async () => bucketVersioningStatus,
-  });
+  // Queued before the starter was recorded.
+  if (!memberId) return;
+  const membership = await resolveMembership(job.orgId, memberId);
+  if (!membership || !roleHasPermission(membership.role, 'objects.delete')) {
+    throw new NonRetryableBulkDeleteError('Your role no longer permits deleting objects');
+  }
+  const access = await canBulkDelete(
+    orchestrator,
+    tenantId,
+    getScopedMemberId(membership.role, memberId),
+    {
+      bucketName: job.bucketName,
+      scope: job.scope,
+      getVersioningStatus: async () => bucketVersioningStatus,
+    },
+  );
   if (!access.ok) {
     throw new NonRetryableBulkDeleteError(
       `Your access to ${job.bucketName} no longer permits bulk deletion`,
     );
   }
-}
-
-/**
- * The member the starter's deletion is scoped to, or undefined for a starter
- * the console serves unscoped, read from their current role. Fails the job when
- * the starter is no longer a member or no longer holds `objects.delete`.
- */
-async function resolveStarterScope(job: BulkDeleteJobRecord): Promise<string | undefined> {
-  // Queued before the starter was recorded.
-  if (!job.startedBy) return undefined;
-  const membership = await resolveMembership(job.orgId, job.startedBy);
-  if (!membership || !roleHasPermission(membership.role, 'objects.delete')) {
-    throw new NonRetryableBulkDeleteError('Your role no longer permits deleting objects');
-  }
-  return getScopedMemberId(membership.role, job.startedBy);
 }
 
 /**
