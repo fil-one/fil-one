@@ -88,7 +88,6 @@ describe('BillingRequiredGate', () => {
     expect(mockApiRequest).not.toHaveBeenCalled();
   });
 
-  // A pre-re-key billing row answers 503, and the card form refuses it too.
   it('points to support, with no card button, when billing cannot be read', async () => {
     mockGetBilling.mockRejectedValue(
       new Error('Unable to load billing details for this account. Please try again shortly.'),

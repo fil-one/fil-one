@@ -478,6 +478,24 @@ export default $config({
         allowCredentials: true,
         maxAge: '1 day',
       },
+      transform: {
+        // Per-route CloudWatch metrics (Count, 4xx, 5xx, latencies) let the SLOs
+        // track a single route. They are billed per route and metric, so only
+        // production turns them on.
+        stage: isProduction
+          ? {
+              defaultRouteSettings: {
+                detailedMetricsEnabled: true,
+                // The AWS provider sends an unset throttling limit as 0, and a
+                // limit of 0 answers every request with 429, see
+                // https://github.com/hashicorp/terraform-provider-aws/issues/27674.
+                // These match the default account quota in us-east-2.
+                throttlingBurstLimit: 5000,
+                throttlingRateLimit: 10000,
+              },
+            }
+          : undefined,
+      },
     });
 
     // ── Website (S3 + CloudFront via sst.aws.Router) ─────────────────
@@ -631,6 +649,14 @@ export default $config({
               functionArn: spaRewriteFunction.arn,
             },
           ];
+          // SST gives every URL origin (the API routes) a 20 s read timeout,
+          // so CloudFront answers 504 while a slower API request is still
+          // running. API Gateway caps integrations at 30 s; waiting a few
+          // seconds longer lets its answer, or the handler's own, reach the
+          // browser. The cast reflects that origins are plain objects here.
+          for (const origin of args.origins as aws.types.output.cloudfront.DistributionOrigin[]) {
+            if (origin.customOriginConfig) origin.customOriginConfig.originReadTimeout = 35;
+          }
         },
       },
     });
@@ -1437,9 +1463,11 @@ export default $config({
       // by id, never the accept URL, because the URL carries the token.
       // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
       // than from the request, since the link goes to somebody else's inbox.
+      // The Auth0 runtime credentials look up whether the invitee has an account,
+      // which decides whether the link opens sign-up or sign-in.
       'create-invitation': {
-        extraEnv: { WEBSITE_URL: siteUrl },
-        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+        extraEnv: { WEBSITE_URL: siteUrl, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        extraLink: [...mgmtRuntimeResources, ...(sendGridApiKey ? [sendGridApiKey] : [])],
       },
 
       // ── Usage and dashboard ────────────────────────────────────────
@@ -1576,6 +1604,20 @@ export default $config({
       schedule: 'cron(0 8/12 * * ? *)',
       function: gracePeriodEnforcer.arn,
     });
+
+    // ── E2E account state (test-only) ───────────────────────────────
+    // Puts an E2E test account into a known state: its billing row and its
+    // tenant status in every region (tests/e2e). It can disable any tenant, so
+    // it is never deployed to production, and the handler refuses to run there.
+    if (!isProduction) {
+      createFn('AccountStateTestHelper', {
+        handler: 'packages/backend/src/jobs/account-state-test-helper.handler',
+        link: [billingTable, userInfoTable, orgTable, ...managementApiTokens],
+        environment: orchestratorEnv,
+        timeout: '120 seconds',
+        memory: '256 MB',
+      });
+    }
 
     // ── RAG indexer (cron → orchestrator → per-org worker) ──────────
     // Keeps each RAG-enabled bucket's vector index in sync with S3 contents via

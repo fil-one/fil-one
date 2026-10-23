@@ -18,7 +18,19 @@ const STASH_KEY = 'filone:pendingInviteToken';
  */
 
 /**
- * Take the token out of the URL fragment and strip the fragment.
+ * Whether the last fragment read asked for sign-up (`signup=1`), which the
+ * backend adds when the invited address has no account yet.
+ *
+ * Memory only: the accept route's `beforeLoad` runs twice on first load and
+ * the second run finds the fragment gone, yet both must redirect to the same
+ * place. The login redirect reloads the document, so the hint lasts exactly
+ * that one redirect.
+ */
+let signUpHinted = false;
+
+/**
+ * Take the token, and the sign-up hint beside it, out of the URL fragment and
+ * strip the fragment.
  *
  * The strip happens whether or not a token was found: a fragment that did not
  * parse is still a fragment somebody pasted, and it is not this page's to keep.
@@ -29,12 +41,18 @@ export function readAndStripInviteTokenFromHash(): string | null {
   const hash = window.location.hash;
   if (hash.length < 2) return null;
 
-  const token = new URLSearchParams(hash.slice(1)).get('token')?.trim();
+  const params = new URLSearchParams(hash.slice(1));
+  const token = params.get('token')?.trim();
+  signUpHinted = params.get('signup') === '1';
 
   const { pathname, search } = window.location;
   window.history.replaceState(window.history.state, '', `${pathname}${search}`);
 
   return token ? token : null;
+}
+
+export function hasSignUpHint(): boolean {
+  return signUpHinted;
 }
 
 /**
@@ -49,7 +67,12 @@ export function readAndStripInviteTokenFromHash(): string | null {
  */
 let inMemoryToken: string | null = null;
 
-export function stashInviteToken(token: string): void {
+/** The token `getCachedInviteToken` last returned, until the next `cacheInviteToken`. */
+let cachedInviteToken: string | null = null;
+
+export function cacheInviteToken(token: string): void {
+  // A new token to cache, so the next `getCachedInviteToken` reads storage and clears it.
+  cachedInviteToken = null;
   try {
     sessionStorage.setItem(STASH_KEY, token);
   } catch {
@@ -74,32 +97,31 @@ export function hasPendingInviteToken(): boolean {
   }
 }
 
-let taken: string | null = null;
-
 /**
- * Take the stashed token, clearing it from storage.
+ * Get the cached token, clearing it from storage.
  *
- * Idempotent for the life of the page: the route takes it in `beforeLoad`, so
+ * Idempotent until the next `cacheInviteToken`: the route gets it in `beforeLoad`, so
  * that storage is clear before any redirect can be thrown, and the component
  * asks again when it renders. Memoizing the answer means those two are the same
  * token rather than a token and a null, and clearing storage first means a page
  * that then fails to render cannot leave the app bouncing back here forever.
  */
-export function takeInviteToken(): string | null {
-  if (taken !== null) return taken;
+export function getCachedInviteToken(): string | null {
+  if (cachedInviteToken !== null) return cachedInviteToken;
   try {
     const stored = sessionStorage.getItem(STASH_KEY);
     if (stored !== null) sessionStorage.removeItem(STASH_KEY);
-    taken = stored ?? inMemoryToken;
+    cachedInviteToken = stored ?? inMemoryToken;
   } catch {
-    taken = inMemoryToken;
+    cachedInviteToken = inMemoryToken;
   }
   inMemoryToken = null;
-  return taken;
+  return cachedInviteToken;
 }
 
-/** Test seam: forget the token this page load has already taken. */
+/** Test seam: forget the token and sign-up hint this page load has already taken. */
 export function resetTakenInviteToken(): void {
-  taken = null;
+  cachedInviteToken = null;
   inMemoryToken = null;
+  signUpHinted = false;
 }

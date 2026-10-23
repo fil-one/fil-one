@@ -1,45 +1,17 @@
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import type Stripe from 'stripe';
-import { Resource } from 'sst';
-import { getDynamoClient } from './ddb-client.ts';
-import { SubscriptionKeys } from './subscription-store.ts';
 
 /**
  * The org a Stripe object belongs to, from the metadata it carries.
  *
  * Stripe has carried `metadata.orgId` on customers and subscriptions since
  * March, and the webhook backfills it onto any billing row that lacks one — so
- * the Stripe object is the direct answer, and the billing-row read below is
- * the fallback for objects created before the metadata (or by hand in the
- * Stripe dashboard).
+ * the Stripe object is the answer.
  */
 export function orgIdFromStripeMetadata(
   metadata: Stripe.Metadata | null | undefined,
 ): string | undefined {
   const orgId = metadata?.orgId;
   return typeof orgId === 'string' && orgId.length > 0 ? orgId : undefined;
-}
-
-/**
- * The org behind a Stripe customer, read off its legacy billing record.
- *
- * The fallback for customers that predate `metadata.orgId`, and the one read
- * still keyed by user: its callers hold a Stripe customer with no usable org
- * id, so there is no org key to read with. `customer.deleted` and
- * `customer.updated` both take it — the re-key stamped no metadata on Stripe,
- * so nothing but the row answers for that cohort. Dead once the re-key's dated
- * cleanup deletes the legacy rows, by which point the cohort has been
- * dispositioned by name (docs/BillingRekeyRunbook.md).
- */
-export async function resolveOrgIdFromSubscription(userId: string): Promise<string | undefined> {
-  const { Item } = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: Resource.BillingTable.name,
-      Key: { pk: { S: SubscriptionKeys.legacyPk(userId) }, sk: { S: SubscriptionKeys.sk() } },
-      ProjectionExpression: 'orgId',
-    }),
-  );
-  return Item?.orgId?.S;
 }
 
 /**
