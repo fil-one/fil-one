@@ -5,6 +5,7 @@
 // PROFILE-row attributes used: `auroraTenantId` and `auroraSetupStatus`.
 
 import pRetry from 'p-retry';
+import type { BucketRef } from '../bucket-orchestrator.ts';
 import { S3Region, getS3Endpoint, type TenantStatus } from '@filone/shared';
 import type {
   NonEmptyArray,
@@ -179,7 +180,7 @@ export const auroraOrchestrator = {
 
   async deleteBucket(
     tenantId: string,
-    bucketName: string,
+    { bucketName }: BucketRef,
     opts?: OrchestratorRequestOptions,
   ): Promise<void> {
     await deleteAuroraBucket({ tenantId, bucketName, signal: opts?.signal });
@@ -217,7 +218,7 @@ export const auroraOrchestrator = {
 
   async getBucket(
     tenantId: string,
-    bucketName: string,
+    { bucketName }: BucketRef,
     _memberId?: string,
     opts?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
@@ -298,7 +299,7 @@ export const auroraOrchestrator = {
     await deleteAuroraAccessKey({ tenantId, auroraKeyId: keyId, signal: opts?.signal });
   },
 
-  async getS3ClientContext(tenantId: string): Promise<S3ClientContext> {
+  async getS3ClientContext(tenantId: string, _region: S3RegionType): Promise<S3ClientContext> {
     const stage = getStage();
     const credentials = await getConsoleS3Credentials({
       orchestratorId: auroraOrchestrator.id,
@@ -368,7 +369,12 @@ export const auroraOrchestrator = {
     // getBucketStorageSamples queries Aurora metrics globally by bucket name, so
     // gate it behind a tenant-scoped ownership check: only the owning tenant's
     // Portal client resolves the bucket (404 -> null otherwise).
-    const bucket = await auroraOrchestrator.getBucket(tenantId, bucketName, undefined, opts);
+    const bucket = await auroraOrchestrator.getBucket(
+      tenantId,
+      { region: auroraOrchestrator.regions[0]!, bucketName },
+      undefined,
+      opts,
+    );
     if (!bucket) throw new BucketNotFoundError(bucketName);
     const auroraInterval = mapIntervalToAuroraWindow(metricsOpts.interval ?? '1d');
 

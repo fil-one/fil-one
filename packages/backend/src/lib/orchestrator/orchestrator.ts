@@ -15,6 +15,7 @@
 //     `filone-console` system key stashed in SSM during setup.
 
 import pRetry from 'p-retry';
+import type { BucketRef } from '../bucket-orchestrator.ts';
 import type {
   NonEmptyArray,
   BucketPolicy,
@@ -27,6 +28,7 @@ import {
   type TenantSetupDeps,
 } from './tenant-setup.ts';
 import { buildIssueAccessKeyRequestBody, describeAccessKeyBody } from './access-key-body.ts';
+import { buildS3ClientContext } from './s3-context.ts';
 import type { FilOneOrchestratorConfig } from './config.ts';
 export type { FilOneOrchestratorConfig } from './config.ts';
 import { withWriteRetry } from './policy-writes.ts';
@@ -76,7 +78,6 @@ import {
   deleteBucketPolicy as s3DeleteBucketPolicy,
 } from '../s3-bucket-operations.ts';
 import { isAccessDeniedError, isNoSuchBucketError } from '../s3-errors.ts';
-import { getConsoleS3Credentials } from '../s3-credentials.ts';
 import {
   deleteTenantsByTenantId,
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
@@ -112,6 +113,11 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   constructor(config: FilOneOrchestratorConfig) {
     this.config = config;
     this.id = config.id;
+    if (config.s3EndpointUrl && config.regions.length > 1) {
+      throw new Error(
+        `Orchestrator "${config.id}" serves several regions, so it cannot take one S3 endpoint.`,
+      );
+    }
     this.regions = config.regions;
     this.client = resolveClient(config);
     const { id, stage } = config;
@@ -143,27 +149,17 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
 
   async getS3ClientContext(
     tenantId: string,
+    region: S3Region,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<S3ClientContext> {
-    const credentials = await getConsoleS3Credentials(
-      {
-        orchestratorId: this.id,
-        stage: this.config.stage,
-        tenantId,
-      },
+    const { stage, s3EndpointUrl, s3PresignEndpointUrl } = this.config;
+    const config = { orchestratorId: this.id, regions: this.regions, stage };
+    return buildS3ClientContext(
+      { ...config, s3EndpointUrl, s3PresignEndpointUrl },
+      tenantId,
+      region,
       requestOptions,
     );
-    return {
-      endpointUrl: this.config.s3EndpointUrl,
-      region: this.regions[0],
-      credentials,
-      forcePathStyle: true,
-      orchestratorId: this.id,
-      tenantId,
-      ...(this.config.s3PresignEndpointUrl && {
-        presignEndpointUrl: this.config.s3PresignEndpointUrl,
-      }),
-    };
   }
 
   async ensureTenantReady(
@@ -248,7 +244,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     args: CreateBucketArgs,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, args.region, requestOptions);
     const s3 = createS3Client(ctx);
     await s3CreateBucket(
       s3,
@@ -301,10 +297,10 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
 
   async deleteBucket(
     tenantId: string,
-    bucketName: string,
+    { region, bucketName }: BucketRef,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     await s3DeleteBucket(s3, bucketName, requestOptions);
   }
@@ -328,7 +324,9 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     tenantId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketSummary[]> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    // ListBuckets is account-wide at every gateway of the network, so any
+    // region's endpoint returns the tenant's buckets in all of them.
+    const ctx = await this.getS3ClientContext(tenantId, this.regions[0]!, requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
     // Versioning and object-lock both cost a call per bucket; neither is
@@ -357,7 +355,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
    */
   async getBucket(
     tenantId: string,
-    bucketName: string,
+    { region, bucketName }: BucketRef,
     memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
@@ -366,7 +364,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
       !userId ||
       (await canMemberAccessBucket(this, { tenantId, userId, bucketName }, requestOptions));
     if (!canAccess) return null;
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
 
     let versioning: boolean;
@@ -591,8 +589,12 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     await withWriteRetry(() => s3DeleteBucketPolicy(s3, bucketName, precondition));
   }
 
-  /** An S3 client signing as the tenant's console key on this region. */
+  /**
+   * An S3 client signing as the tenant's console key. Policy reads and writes
+   * are control-plane calls the gateway answers the same at every region of the
+   * network, so any of them will do.
+   */
   private async getTenantS3Client(tenantId: string) {
-    return createS3Client(await this.getS3ClientContext(tenantId));
+    return createS3Client(await this.getS3ClientContext(tenantId, this.regions[0]!));
   }
 }

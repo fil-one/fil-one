@@ -48,7 +48,7 @@ export async function baseHandler(
   }
 
   try {
-    await orchestrator.deleteBucket(tenantId, bucketName, { signal });
+    await orchestrator.deleteBucket(tenantId, { region, bucketName }, { signal });
   } catch (err) {
     if (err instanceof BucketNotEmptyError) {
       return new ResponseBuilder()
