@@ -29,6 +29,7 @@ import {
 } from './tenant-setup.ts';
 import { buildIssueAccessKeyRequestBody, describeAccessKeyBody } from './access-key-body.ts';
 import { buildS3ClientContext } from './s3-context.ts';
+import { bucketRegion } from './bucket-region.ts';
 import type { FilOneOrchestratorConfig } from './config.ts';
 export type { FilOneOrchestratorConfig } from './config.ts';
 import { withWriteRetry } from './policy-writes.ts';
@@ -334,7 +335,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     // for the one bucket the detail page actually needs them for.
     return buckets.map((b) => ({
       bucketName: b.name,
-      region: this.regions[0],
+      region: bucketRegion(this, b),
       createdAt: b.createdAt,
       isPublic: false,
       // The contract mandates server-side encryption by default.
@@ -384,7 +385,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
 
     return {
       bucketName,
-      region: this.regions[0],
+      region,
       isPublic: false,
       versioning,
       encrypted: true,
