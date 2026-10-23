@@ -128,7 +128,7 @@ describe('list-access-keys baseHandler', () => {
           status: 'active',
           permissions: ['read', 'list'],
           bucketScope: 'all',
-          region: 'eu-west-1',
+          regions: ['eu-west-1'],
           expiresAt: null,
         },
       ],
@@ -160,7 +160,7 @@ describe('list-access-keys baseHandler', () => {
       accessKeyId: 'did:key:z9',
       createdAt: '2026-09-16T00:00:00Z',
       status: 'active',
-      region: 'us-east-9',
+      regions: ['us-east-9'],
       expiresAt: null,
       createdBy: 'user-1',
       principalId: 'user-1',
@@ -214,7 +214,7 @@ describe('list-access-keys baseHandler', () => {
     expect(body.keys[0].permissions).toEqual(['read', 'CreateBucket', 'DeleteBucket']);
   });
 
-  it('returns the persisted region from the row', async () => {
+  it('reports the regions of the network a row names, resolved from its region', async () => {
     ddbMock.on(QueryCommand).resolves({
       Items: [
         ddbItem({
@@ -233,10 +233,10 @@ describe('list-access-keys baseHandler', () => {
     const result = await baseHandler(event);
 
     const body = JSON.parse(result.body!);
-    expect(body.keys[0].region).toBe('us-east-1');
+    expect(body.keys[0].regions).toStrictEqual(['us-east-1']);
   });
 
-  it('falls back to S3_REGION (eu-west-1) for legacy rows without region', async () => {
+  it("falls back to Aurora's regions for legacy rows naming neither network nor region", async () => {
     ddbMock.on(QueryCommand).resolves({
       Items: [
         ddbItem({
@@ -255,7 +255,7 @@ describe('list-access-keys baseHandler', () => {
     const result = await baseHandler(event);
 
     const body = JSON.parse(result.body!);
-    expect(body.keys[0].region).toBe('eu-west-1');
+    expect(body.keys[0].regions).toStrictEqual(['eu-west-1']);
   });
 
   it('returns expiresAt when set', async () => {
@@ -383,7 +383,10 @@ describe('list-access-keys baseHandler', () => {
     });
   });
 
-  it('filters on region alone, matching only that region', async () => {
+  // A key works at every region of its network, and which regions that is
+  // depends on the stage rather than the row, so the region filter is applied
+  // after the query rather than inside it.
+  it('keeps the region filter out of the query and narrows the result instead', async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({
@@ -396,36 +399,14 @@ describe('list-access-keys baseHandler', () => {
     expect(input).toStrictEqual({
       TableName: 'UserInfoTable',
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      FilterExpression: '#region = :region',
-      ExpressionAttributeNames: { '#region': 'region' },
       ExpressionAttributeValues: {
         ':pk': { S: 'ORG#org-1' },
         ':skPrefix': { S: 'ACCESSKEY#' },
-        ':region': { S: 'us-east-1' },
       },
     });
   });
 
-  it('also matches region-less legacy rows when filtering on eu-west-1', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const event = buildEvent({
-      userInfo: USER_INFO,
-      queryStringParameters: { region: 'eu-west-1' },
-    });
-    await baseHandler(event);
-
-    const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
-    expect(input.FilterExpression).toBe('(#region = :region OR attribute_not_exists(#region))');
-    expect(input.ExpressionAttributeNames).toStrictEqual({ '#region': 'region' });
-    expect(input.ExpressionAttributeValues).toStrictEqual({
-      ':pk': { S: 'ORG#org-1' },
-      ':skPrefix': { S: 'ACCESSKEY#' },
-      ':region': { S: 'eu-west-1' },
-    });
-  });
-
-  it('combines the bucket and region filters', async () => {
+  it('still asks DynamoDB for the bucket filter while narrowing the region here', async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     const event = buildEvent({
@@ -439,14 +420,12 @@ describe('list-access-keys baseHandler', () => {
       TableName: 'UserInfoTable',
       KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
       FilterExpression:
-        '(bucketScope = :all OR contains(buckets, :bucket) OR attribute_exists(principalId)) AND #region = :region',
-      ExpressionAttributeNames: { '#region': 'region' },
+        '(bucketScope = :all OR contains(buckets, :bucket) OR attribute_exists(principalId))',
       ExpressionAttributeValues: {
         ':pk': { S: 'ORG#org-1' },
         ':skPrefix': { S: 'ACCESSKEY#' },
         ':all': { S: 'all' },
         ':bucket': { S: 'my-bucket' },
-        ':region': { S: 'us-east-1' },
       },
     });
   });
@@ -506,7 +485,7 @@ describe('list-access-keys baseHandler', () => {
           status: 'active',
           permissions: ['read', 'write'],
           bucketScope: 'all',
-          region: 'eu-west-1',
+          regions: ['eu-west-1'],
           expiresAt: null,
         },
         {
@@ -519,7 +498,7 @@ describe('list-access-keys baseHandler', () => {
           permissions: ['read'],
           bucketScope: 'specific',
           buckets: ['target-bucket'],
-          region: 'eu-west-1',
+          regions: ['eu-west-1'],
           expiresAt: null,
         },
       ],

@@ -6,7 +6,6 @@ import {
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { S3Region } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
@@ -35,7 +34,7 @@ function revoke(overrides: Partial<RevokeAccessKeyArgs> = {}) {
     keyId: KEY_ID,
     accessKeyId: 'AKIA1111',
     keyName: 'My Key',
-    region: S3Region.UsEast1,
+    orchestratorId: 'fth',
     orchestrator: { deleteAccessKey },
     tenantId: 'fth:org-1',
     actor: userActor({ userId: 'admin-1', email: 'admin@example.test' }),
@@ -85,7 +84,12 @@ describe('revokeAccessKey', () => {
       type: 'key.deleted',
       phase: 'intent',
       subject: 'key:1111',
-      details: { keyKind: 's3', keyName: 'My Key', region: 'us-east-1', reason: 'role_narrowing' },
+      details: {
+        keyKind: 's3',
+        keyName: 'My Key',
+        orchestratorId: 'fth',
+        reason: 'role_narrowing',
+      },
     });
     expect(completion).toMatchObject({ phase: 'completion', outcome: 'succeeded' });
     expect(completion.correlationId).toBe(intent!.correlationId);

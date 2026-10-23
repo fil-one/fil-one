@@ -49,10 +49,15 @@ const iamOrchestrator = {
   deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
 };
 
+// The row records the network the orchestrator is, so each region answers with
+// the orchestrator its network would build.
+const fthOrchestrator = { ...mockOrchestrator, id: 'fth', regions: [S3Region.UsEast1] };
+
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
-    return region === S3Region.UsEast9 ? iamOrchestrator : mockOrchestrator;
+    if (region === S3Region.UsEast9) return iamOrchestrator;
+    return region === S3Region.UsEast1 ? fthOrchestrator : mockOrchestrator;
   },
 }));
 
@@ -283,7 +288,8 @@ describe('create-access-key baseHandler', () => {
     expect(item.createdAt.S).toBe('2026-03-10T13:36:07.752371Z');
     expect(item.status.S).toBe('active');
     expect(item.bucketScope.S).toBe('all');
-    expect(item.region.S).toBe('eu-west-1');
+    expect(item.orchestratorId.S).toBe('aurora');
+    expect(item.region).toBeUndefined();
     // Secret must NOT be stored
     expect(item.accessKeySecret).toBeUndefined();
     expect(item.secretAccessKey).toBeUndefined();
@@ -550,7 +556,7 @@ describe('create-access-key baseHandler', () => {
       phase: 'intent',
       subject: 'org:org-1',
       actor: { kind: 'user', id: USER_1, email: 'alice@example.com' },
-      details: { keyKind: 's3', keyName: 'My Key', region: 'eu-west-1' },
+      details: { keyKind: 's3', keyName: 'My Key', region: 'eu-west-1', orchestratorId: 'aurora' },
     });
     // One subject for both halves, or the viewer cannot pair them: the mint has
     // no key id to file under until the vendor returns one, so the completion
@@ -716,7 +722,7 @@ describe('create-access-key baseHandler', () => {
     expect(completion.correlationId).toBe(intent.correlationId);
   });
 
-  it('recovers DynamoDB record when same keyName exists only in a different region', async () => {
+  it('recovers DynamoDB record when the same keyName exists only on another network', async () => {
     mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
     ddbMock.on(QueryCommand).resolves({
       Items: [
@@ -751,11 +757,11 @@ describe('create-access-key baseHandler', () => {
       pk: { S: 'ORG#org-1' },
       sk: { S: 'ACCESSKEY#aurora-key-1' },
       keyName: { S: 'My Key' },
-      region: { S: 'eu-west-1' },
+      orchestratorId: { S: 'aurora' },
     });
   });
 
-  it('treats DynamoDB rows without region as eu-west-1 (recovery proceeds when request region differs)', async () => {
+  it('treats rows naming neither network nor region as Aurora (recovery proceeds when the request names another network)', async () => {
     mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
     // Legacy row: matching keyName, no `region` attribute -> treated as eu-west-1
     ddbMock.on(QueryCommand).resolves({
@@ -785,7 +791,7 @@ describe('create-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(409);
     const item = keyRow();
-    expect(item.region.S).toBe('us-east-1');
+    expect(item.orchestratorId.S).toBe('fth');
   });
 
   describe('the request deadline', () => {
@@ -895,7 +901,7 @@ describe('create-access-key baseHandler', () => {
       expect(result.statusCode).toBe(201);
       expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith('us-east-1');
       const item = keyRow();
-      expect(item.region.S).toBe('us-east-1');
+      expect(item.orchestratorId.S).toBe('fth');
     });
 
     it('accepts us-east-1 in production for any user (soft-launched region)', async () => {
@@ -1404,7 +1410,7 @@ describe('create-access-key baseHandler', () => {
         accessKeyId: 'AKIA1234567890',
         createdAt: '2026-03-10T13:36:07.752371Z',
         status: 'active',
-        region: S3Region.UsEast9,
+        orchestratorId: 'forgeDev',
         principalId: USER_1,
         createdBy: USER_1,
         policyVersion: 'pre-member-scope',
@@ -1418,6 +1424,7 @@ describe('create-access-key baseHandler', () => {
         keyKind: 's3',
         keyName: 'laptop',
         region: S3Region.UsEast9,
+        orchestratorId: 'forgeDev',
         isPrincipalKey: true,
       });
     });
@@ -1516,7 +1523,7 @@ describe('create-access-key baseHandler', () => {
           accessKeyId: 'AKIA1234567890',
           createdAt: '2026-03-10T00:00:00Z',
           status: 'active',
-          region: S3Region.UsEast9,
+          orchestratorId: 'forgeDev',
           createdBy: USER_1,
           policyVersion: 'pre-member-scope',
           principalId: USER_1,
@@ -1567,7 +1574,7 @@ describe('create-access-key baseHandler', () => {
           accessKeyId: 'AKIA1234567890',
           createdAt: '2026-03-10T13:36:07.752371Z',
           status: 'active',
-          region: S3Region.UsEast9,
+          orchestratorId: 'forgeDev',
           permissions: ['read', 'list'],
           bucketScope: 'specific',
           buckets: ['photos'],

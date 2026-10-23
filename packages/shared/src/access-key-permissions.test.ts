@@ -262,11 +262,11 @@ describe('canRetainAccessKey', () => {
     expect(canRetainAccessKey(OrgRole.Member, { permissions: [] })).toStrictEqual(KEPT);
   });
 
-  // Bucket policies never see a service key, so on an `iam` region only a role
-  // holding `keys.create_service` keeps one.
+  // Bucket policies never see a service key, so on a network serving the `iam`
+  // access model only a role holding `keys.create_service` keeps one.
   const iamServiceKey: ServiceKeyGrant = {
     permissions: ['read', 'write'],
-    region: S3Region.UsEast9,
+    regions: [S3Region.UsEast9],
   };
 
   it('takes a service key on an iam region from a Member, who lacks keys.create_service', () => {
@@ -279,7 +279,7 @@ describe('canRetainAccessKey', () => {
 
   it('keeps a key on a service-keys region for a Member', () => {
     expect(
-      canRetainAccessKey(OrgRole.Member, { ...iamServiceKey, region: S3Region.EuWest1 }),
+      canRetainAccessKey(OrgRole.Member, { ...iamServiceKey, regions: [S3Region.EuWest1] }),
     ).toStrictEqual(KEPT);
   });
 });

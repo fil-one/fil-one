@@ -87,14 +87,34 @@ describe('getAccessKeysInScope', () => {
     expect(input.ExpressionAttributeValues?.[':bucket']).toEqual({ S: 'target-bucket' });
   });
 
-  it('narrows to a region filter via the DynamoDB FilterExpression', async () => {
+  // A key works at every region of its network, and which regions that is
+  // depends on the stage rather than the row, so the filter cannot be a
+  // DynamoDB expression over a stored attribute any more.
+  it('leaves a region filter out of the DynamoDB query and applies it in memory', async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [] });
 
     await getAccessKeysInScope('org-1', { sees: 'all' }, { regionFilter: 'us-east-1' });
 
     const input = ddbMock.commandCalls(QueryCommand)[0].args[0].input;
-    expect(input.FilterExpression).toBe('#region = :region');
-    expect(input.ExpressionAttributeValues?.[':region']).toEqual({ S: 'us-east-1' });
+    expect(input.FilterExpression).toBeUndefined();
+    expect(input.ExpressionAttributeValues?.[':region']).toBeUndefined();
+  });
+
+  it('keeps a key whose network serves the filtered region, and drops the others', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        { ...row('on-fth'), orchestratorId: { S: 'fth' } },
+        { ...row('on-aurora'), orchestratorId: { S: 'aurora' } },
+      ],
+    });
+
+    const keys = await getAccessKeysInScope(
+      'org-1',
+      { sees: 'all' },
+      { regionFilter: 'us-east-1' },
+    );
+
+    expect(keys.map((k) => k.id)).toStrictEqual(['on-fth']);
   });
 });
 
