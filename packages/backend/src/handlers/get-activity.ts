@@ -22,7 +22,7 @@ import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
-import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
+import { type ProvisionedTenant, getProvisionedTenants } from '../lib/region-helpers.ts';
 import { reportMetric } from '../lib/metrics.ts';
 
 const dynamo = getDynamoClient();
@@ -96,12 +96,12 @@ export async function baseHandler(
   // fails its own leg (caught in listBucketActivities) instead of holding the
   // whole handler until the Lambda timeout kills it with nothing logged.
   const signal = getRequestDeadline(event);
-  // The dashboard aggregates activity across every region the org is provisioned
-  // in, so resolve the ready tenant on each available orchestrator.
+  // The dashboard aggregates activity across every network the org is provisioned
+  // on, so resolve the ready tenant on each available orchestrator.
   const { result: regions, durationMs: resolveRegionsMs } = await timed(
     event,
     'resolveRegions',
-    () => getProvisionedRegions(orgId),
+    () => getProvisionedTenants(orgId),
   );
 
   const [
@@ -158,7 +158,7 @@ export async function baseHandler(
 async function fetchBucketActivities(
   event: AuthenticatedEvent,
   orgId: string,
-  regions: ProvisionedRegion[],
+  regions: ProvisionedTenant[],
   signal: AbortSignal,
 ): Promise<RecentActivity[]> {
   const perRegion = await Promise.all(

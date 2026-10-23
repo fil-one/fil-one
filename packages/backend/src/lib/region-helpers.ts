@@ -4,17 +4,23 @@ import { getOrgProfile } from './org-profile.ts';
 import type { RegionOrchestrator } from './service-orchestrator.ts';
 import type { TenantStatus } from '@filone/shared/src/api/tenants.ts';
 
-export interface ProvisionedRegion {
+/**
+ * A tenant the org holds on one orchestrator. An orchestrator is a storage
+ * network serving one or more regions, and its tenant is region-free: this is
+ * one entry per network, never one per region, so a loop over it touches each
+ * tenant once.
+ */
+export interface ProvisionedTenant {
   orchestrator: RegionOrchestrator;
   tenantId: string;
 }
 
-export async function getProvisionedRegions(
+export async function getProvisionedTenants(
   orgId: string,
   // Account teardown snapshots tenant ids from here; a stale read there would
   // orphan a live tenant permanently.
   options?: { consistent?: boolean },
-): Promise<ProvisionedRegion[]> {
+): Promise<ProvisionedTenant[]> {
   const orchestrators = getAvailableOrchestrators();
   if (orchestrators.length === 0) return [];
   const orgProfile = await getOrgProfile(
@@ -26,20 +32,20 @@ export async function getProvisionedRegions(
       const tenantId = orchestrator.isTenantReady(orgProfile);
       return tenantId ? { orchestrator, tenantId } : null;
     })
-    .filter((t): t is ProvisionedRegion => t !== null);
+    .filter((t): t is ProvisionedTenant => t !== null);
 }
 
-export interface RegionSyncOutcome {
+export interface TenantSyncOutcome {
   orchestratorId: string;
   tenantId: string;
   outcome: 'updated' | 'in-sync' | 'skipped' | 'not-found' | 'error';
   cause?: unknown;
 }
 
-// Re-raises per-region sync failures as a single error. Callers that need a
+// Re-raises per-tenant sync failures as a single error. Callers that need a
 // failed sync to abort the surrounding operation (so it is retried as a whole)
-// pass the outcomes of syncTenantStatusInProvisionedRegions through this.
-export function assertRegionSyncSucceeded(outcomes: RegionSyncOutcome[]): void {
+// pass the outcomes of syncTenantStatusInProvisionedTenants through this.
+export function assertTenantSyncSucceeded(outcomes: TenantSyncOutcome[]): void {
   const failed = outcomes.filter((o) => o.outcome === 'error');
   if (failed.length > 0) {
     throw new Error(
@@ -53,17 +59,17 @@ export function assertRegionSyncSucceeded(outcomes: RegionSyncOutcome[]): void {
 // update retries several times (p-retry's default 1s/2s/4s backoff).
 const STATUS_SYNC_RETRY: RetryOptions = { retries: 3 };
 
-// Reconciles every provisioned region with the desired tenant status. Each
-// region's live status is its own source of truth: probe first, update only
-// when it differs. A region that fails to update still differs on the next
-// run, so partial failures self-heal. Never throws — per-region failures are
-// reported as `error` outcomes so callers can record them.
-export async function syncTenantStatusInProvisionedRegions(
+// Reconciles every provisioned tenant with the desired status. Each tenant's
+// live status is its own source of truth: probe first, update only when it
+// differs. A tenant that fails to update still differs on the next run, so
+// partial failures self-heal. Never throws — per-tenant failures are reported
+// as `error` outcomes so callers can record them.
+export async function syncTenantStatusInProvisionedTenants(
   orgId: string,
   desired: TenantStatus,
   options?: { consistent?: boolean },
-): Promise<RegionSyncOutcome[]> {
-  const ready = await getProvisionedRegions(orgId, options);
+): Promise<TenantSyncOutcome[]> {
+  const ready = await getProvisionedTenants(orgId, options);
 
   return Promise.all(
     ready.map(({ orchestrator, tenantId }) =>
@@ -82,7 +88,7 @@ async function syncRegionTenantStatus({
   orchestrator: RegionOrchestrator;
   tenantId: string;
   desired: TenantStatus;
-}): Promise<RegionSyncOutcome> {
+}): Promise<TenantSyncOutcome> {
   const base = { orchestratorId: orchestrator.id, tenantId };
   try {
     // getTenantStatus never throws; surface `error` probes as exceptions so

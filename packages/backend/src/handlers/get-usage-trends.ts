@@ -10,7 +10,7 @@ import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
-import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
+import { type ProvisionedTenant, getProvisionedTenants } from '../lib/region-helpers.ts';
 
 /**
  * How a period is bucketed.
@@ -83,16 +83,16 @@ export async function baseHandler(
   const { orgId } = getUserInfo(event);
   const period = parsePeriod(event.queryStringParameters?.period);
 
-  // The dashboard aggregates usage across every region the org is provisioned
-  // in, so resolve the ready tenant on each available orchestrator.
-  const regions = await getProvisionedRegions(orgId);
+  // The dashboard aggregates usage across every network the org is provisioned
+  // on, so resolve the ready tenant on each available orchestrator.
+  const regions = await getProvisionedTenants(orgId);
 
   const response: UsageTrendsResponse = await buildTimeSeries(regions, period, signal);
   return new ResponseBuilder().status(200).body(response).build();
 }
 
 async function buildTimeSeries(
-  regions: ProvisionedRegion[],
+  regions: ProvisionedTenant[],
   period: UsageTrendsPeriod,
   signal: AbortSignal,
 ): Promise<UsageTrendsResponse> {

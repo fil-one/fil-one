@@ -18,7 +18,7 @@ import { emitStripeCustomersOutOfSync } from '../lib/usage-worker-metrics.ts';
 import { STRIPE_METADATA_KEYS } from '../lib/stripe-metadata.ts';
 import { reportOrgUsage, type AggregateUsage } from '../lib/org-usage-report.ts';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
-import { syncTenantStatusInProvisionedRegions } from '../lib/region-helpers.ts';
+import { syncTenantStatusInProvisionedTenants } from '../lib/region-helpers.ts';
 
 const dynamo = getDynamoClient();
 
@@ -57,7 +57,7 @@ async function enforceTenantLocks({
     desired = 'active';
   }
 
-  const outcomes = await syncTenantStatusInProvisionedRegions(orgId, desired);
+  const outcomes = await syncTenantStatusInProvisionedTenants(orgId, desired);
 
   const updated = outcomes.filter((o) => o.outcome === 'updated');
   if (updated.length > 0) {
@@ -207,7 +207,7 @@ async function resolveOrgSyncAndLockActions(params: {
 /**
  * Trial lock enforcement applies to every provisioned region. Each region's
  * live status is probed via its own orchestrator and reconciled with the
- * desired status (syncTenantStatusInProvisionedRegions), so partial failures
+ * desired status (syncTenantStatusInProvisionedTenants), so partial failures
  * self-heal on the next run.
  */
 async function resolveLockAction(params: {

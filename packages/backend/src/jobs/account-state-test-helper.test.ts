@@ -228,7 +228,7 @@ describe('account-state-test-helper', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toStrictEqual([]);
   });
 
-  it('reads the provisioned regions consistently', async () => {
+  it('reads the provisioned tenants consistently', async () => {
     await handler({ userId: USER_ID, state: 'paid' });
 
     expect(vi.mocked(getOrgProfile).mock.calls).toStrictEqual([[ORG_ID, { consistentRead: true }]]);
