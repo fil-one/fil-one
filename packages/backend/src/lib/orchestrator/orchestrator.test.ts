@@ -656,6 +656,54 @@ describe('listBuckets', () => {
       },
     ]);
   });
+
+  // A bucket is served by one region, and the gateway says which. Taking the
+  // network's own first region instead would misfile every bucket outside it.
+  it('labels each bucket with the region the gateway reports for it', async () => {
+    const network = new FilOneOrchestrator({
+      id: 'forge',
+      regions: [S3Region.EuCentral3, S3Region.UsEast9],
+      stage: 'test',
+      api: { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
+    });
+    stubS3Credentials();
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [
+        {
+          Name: 'eu-bucket',
+          CreationDate: new Date('2026-01-01T00:00:00Z'),
+          BucketRegion: 'eu-central-3',
+        },
+        {
+          Name: 'us-bucket',
+          CreationDate: new Date('2026-01-02T00:00:00Z'),
+          BucketRegion: 'us-east-9',
+        },
+      ],
+    });
+
+    const result = await network.listBuckets(tenantId);
+
+    expect(result.map((b) => [b.bucketName, b.region])).toStrictEqual([
+      ['eu-bucket', S3Region.EuCentral3],
+      ['us-bucket', S3Region.UsEast9],
+    ]);
+  });
+
+  it('refuses a listing whose label names a region the network does not serve', async () => {
+    stubS3Credentials();
+    s3Mock.on(ListBucketsCommand).resolves({
+      Buckets: [
+        {
+          Name: 'stray',
+          CreationDate: new Date('2026-01-01T00:00:00Z'),
+          BucketRegion: 'eu-west-1',
+        },
+      ],
+    });
+
+    await expect(orchestrator.listBuckets(tenantId)).rejects.toThrow(/does not serve/);
+  });
 });
 
 describe('listBuckets for a member', () => {
