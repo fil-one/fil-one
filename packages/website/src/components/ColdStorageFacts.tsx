@@ -69,3 +69,76 @@ export function Term({
     </li>
   );
 }
+
+/** What a choice costs now and each month from then on, as shown in the Now and Monthly columns. */
+export type RowCosts = {
+  now: string;
+  monthly: string;
+  /** How the monthly amount compares with today's: "no change", or what it was. */
+  monthlyNote: string;
+};
+
+// Fixed widths, so each amount lines up under its heading across rows. Below
+// `sm` the columns give way to a labelled line under the row's text, since two
+// number columns left the descriptions a few words wide.
+const NOW_WIDTH = 'w-16 shrink-0 text-right';
+const MONTHLY_WIDTH = 'w-20 shrink-0 text-right';
+
+/**
+ * The Now and Monthly headings, set above the bordered list rather than in a
+ * header strip of their own: two words don't need a filled row and a divider.
+ */
+export function CostColumnsHeader() {
+  return (
+    <div
+      className="hidden items-center gap-3 px-4 pb-1.5 text-xs text-zinc-500 sm:flex"
+      aria-hidden="true"
+    >
+      <span className="flex-1" />
+      <span className={NOW_WIDTH}>Now</span>
+      <span className={MONTHLY_WIDTH}>Monthly</span>
+    </div>
+  );
+}
+
+/** A row's title and description, with its costs as a line beneath on small screens. */
+export function CostRowText({
+  title,
+  description,
+  costs,
+}: {
+  title: string;
+  description: string;
+  costs: RowCosts;
+}) {
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span className="font-medium text-zinc-900">{title}</span>
+      <span className="text-xs text-zinc-500">{description}</span>
+      <span className="mt-1 flex flex-wrap gap-x-3 text-xs text-zinc-500 tabular-nums sm:hidden">
+        <span>
+          Now <span className="font-medium text-zinc-900">{costs.now}</span>
+        </span>
+        <span>
+          Monthly <span className="font-medium text-zinc-900">{costs.monthly}</span>,{' '}
+          {costs.monthlyNote}
+        </span>
+      </span>
+    </span>
+  );
+}
+
+/** A row's Now and Monthly cells, from `sm` up. */
+export function CostRowAmounts({ costs }: { costs: RowCosts }) {
+  return (
+    <>
+      <span className={`${NOW_WIDTH} hidden font-medium text-zinc-900 tabular-nums sm:block`}>
+        {costs.now}
+      </span>
+      <span className={`${MONTHLY_WIDTH} hidden flex-col items-end tabular-nums sm:flex`}>
+        <span className="font-medium text-zinc-900">{costs.monthly}</span>
+        <span className="text-xs text-zinc-500">{costs.monthlyNote}</span>
+      </span>
+    </>
+  );
+}

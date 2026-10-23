@@ -538,6 +538,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onAddKeyOpenChange={setAddKeyOpen}
               onShowKeys={tabs.showKeysTab}
               listingTruncated={isTruncated}
+              lockedReason={cold.lockedReason}
               totalObjectCount={analyticsData?.objectCount}
             />
           </TabPanel>

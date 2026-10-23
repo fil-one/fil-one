@@ -424,6 +424,11 @@ export function formatMoment(timestamp: number): string {
     : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+/** "Nov 6": the year adds nothing to a date a few weeks out. */
+export function formatShortDate(timestamp: number): string {
+  return new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 /** "about 1 hour", or a seconds countdown under short waits. */
 export function formatWaitLeft(readyAt: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.ceil((readyAt - now) / 1000));

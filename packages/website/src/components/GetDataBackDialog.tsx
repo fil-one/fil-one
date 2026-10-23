@@ -8,10 +8,12 @@ import { Button } from './Button';
 import { Radio } from './Radio';
 import { useToast } from './Toast';
 import type { ColdStorageTarget } from './FreezeBucketDialog';
+import { CostColumnsHeader, CostRowAmounts, CostRowText, type RowCosts } from './ColdStorageFacts';
 import {
   COLD_PRICE_PER_TB_MONTH,
   DAY_MS,
   MIN_TERM_DAYS,
+  formatShortDate,
   formatUsd,
   getBillableBytes,
   getMonthlyCost,
@@ -102,16 +104,7 @@ export function GetDataBackDialog({ target, onClose }: GetDataBackDialogProps) {
           Restore {bucketName}
         </ModalHeader>
         <ModalBody>
-          {/* Column labels sit above the list rather than in a header strip of
-              their own: two words don't need a filled row and a divider. */}
-          <div
-            className="hidden items-center gap-3 px-4 pb-1.5 text-xs text-zinc-500 sm:flex"
-            aria-hidden="true"
-          >
-            <span className="flex-1" />
-            <span className={NOW_WIDTH}>Now</span>
-            <span className={MONTHLY_WIDTH}>Monthly</span>
-          </div>
+          <CostColumnsHeader />
           <div
             className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 text-ui"
             role="radiogroup"
@@ -168,13 +161,6 @@ export function GetDataBackDialog({ target, onClose }: GetDataBackDialogProps) {
 }
 
 // Fixed widths, so each amount lines up under its heading across the rows.
-// Below `sm` the columns give way to a labelled line under each option, since
-// two number columns left the descriptions a few words wide.
-const NOW_WIDTH = 'w-16 shrink-0 text-right';
-const MONTHLY_WIDTH = 'w-20 shrink-0 text-right';
-const NOW_COLUMN = `${NOW_WIDTH} hidden sm:block`;
-const MONTHLY_COLUMN = `${MONTHLY_WIDTH} hidden sm:flex`;
-
 /** One option in the table: a radio, what it does, and its Now and Monthly amounts. */
 function OptionRow({
   value,
@@ -191,11 +177,8 @@ function OptionRow({
   onChange: () => void;
   title: string;
   description: string;
-  now: string;
-  monthly: string;
-  /** How the monthly amount compares with today's: "No change", or what it was. */
-  monthlyNote: string;
-}) {
+} & RowCosts) {
+  const costs = { now, monthly, monthlyNote };
   return (
     <label
       className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors duration-150 hover:bg-zinc-50 has-[:checked]:bg-brand-50"
@@ -209,29 +192,9 @@ function OptionRow({
           onChange={onChange}
           className="mt-0.5"
         />
-        <span className="flex flex-col gap-0.5">
-          <span className="font-medium text-zinc-900">{title}</span>
-          <span className="text-xs text-zinc-500">{description}</span>
-          <span className="mt-1 flex flex-wrap gap-x-3 text-xs text-zinc-500 tabular-nums sm:hidden">
-            <span>
-              Now <span className="font-medium text-zinc-900">{now}</span>
-            </span>
-            <span>
-              Monthly <span className="font-medium text-zinc-900">{monthly}</span>, {monthlyNote}
-            </span>
-          </span>
-        </span>
+        <CostRowText title={title} description={description} costs={costs} />
       </span>
-      <span className={`${NOW_COLUMN} font-medium text-zinc-900 tabular-nums`}>{now}</span>
-      <span className={`${MONTHLY_COLUMN} flex-col items-end tabular-nums`}>
-        <span className="font-medium text-zinc-900">{monthly}</span>
-        <span className="text-xs text-zinc-500">{monthlyNote}</span>
-      </span>
+      <CostRowAmounts costs={costs} />
     </label>
   );
-}
-
-/** "Nov 6": the year adds nothing to a date two weeks out. */
-function formatShortDate(timestamp: number): string {
-  return new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }

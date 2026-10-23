@@ -2,13 +2,15 @@ import { useRef } from 'react';
 
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal';
 import { Button } from './Button';
+import { CostColumnsHeader, CostRowAmounts, CostRowText } from './ColdStorageFacts';
 import {
   COLD_PRICE_PER_TB_MONTH,
   DAY_MS,
   WARM_MIN_DAYS,
-  formatMoment,
+  formatShortDate,
   formatUsd,
   getBillableBytes,
+  getMonthlyCost,
   getWarmPeriodCost,
   type WarmState,
 } from '../lib/cold-storage-prototype.js';
@@ -22,9 +24,9 @@ type ExtendRestoreDialogProps = {
 };
 
 /**
- * Confirms an extension before charging for it: what it costs, the new date
- * the restored copy lasts until, and that the frozen copy is untouched. An
- * extension is a purchase, so it never happens on a single click.
+ * Confirms an extension before charging for it, in the same Now and Monthly
+ * table the restore dialog uses, so the two read as one decision. An extension
+ * is a purchase, so it never happens on a single click.
  */
 export function ExtendRestoreDialog({
   state,
@@ -38,29 +40,32 @@ export function ExtendRestoreDialog({
   const current = shown.current;
   if (!current) return null;
 
-  const cost = getWarmPeriodCost(getBillableBytes(current.bytes));
-  const newEnd = formatMoment(current.warmUntil + WARM_MIN_DAYS * DAY_MS);
+  const bytes = getBillableBytes(current.bytes);
+  const cost = getWarmPeriodCost(bytes);
+  const costs = {
+    now: formatUsd(cost),
+    monthly: formatUsd(getMonthlyCost(bytes, COLD_PRICE_PER_TB_MONTH)),
+    monthlyNote: 'no change',
+  };
+  const newEnd = formatShortDate(current.warmUntil + WARM_MIN_DAYS * DAY_MS);
 
   return (
-    <Modal open={state !== null} onClose={onClose} size="sm" testId="extend-restore-dialog">
-      <ModalHeader onClose={onClose} description={bucketName}>
-        Extend restore by 2 weeks
+    <Modal open={state !== null} onClose={onClose} size="md" testId="extend-restore-dialog">
+      <ModalHeader onClose={onClose} description="Keep the restored copy for 2 more weeks.">
+        Extend {bucketName}
       </ModalHeader>
       <ModalBody>
-        <dl className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 text-ui">
-          <div className="flex items-center justify-between gap-3 px-4 py-2">
-            <dt className="text-zinc-600">Charged now</dt>
-            <dd className="font-medium text-zinc-900 tabular-nums">{formatUsd(cost)}</dd>
-          </div>
-          <div className="flex items-center justify-between gap-3 px-4 py-2">
-            <dt className="text-zinc-600">Downloadable until</dt>
-            <dd className="font-medium text-zinc-900">{newEnd}</dd>
-          </div>
-        </dl>
-        <p className="mt-3 text-xs text-zinc-500">
-          Your frozen copy doesn’t change and keeps billing at {formatUsd(COLD_PRICE_PER_TB_MONTH)}
-          /TB-month.
-        </p>
+        <CostColumnsHeader />
+        <div className="flex items-start gap-3 rounded-lg border border-zinc-200 px-4 py-3 text-ui">
+          <span className="flex-1">
+            <CostRowText
+              title="2 more weeks"
+              description={`Downloadable until ${newEnd}, then the restored copy is deleted. Your frozen copy stays untouched.`}
+              costs={costs}
+            />
+          </span>
+          <CostRowAmounts costs={costs} />
+        </div>
       </ModalBody>
       <ModalFooter fullWidth>
         <Button id="extend-restore-cancel-button" variant="ghost" onClick={onClose}>

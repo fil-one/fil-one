@@ -86,6 +86,8 @@ export function useBucketColdStorage(
     /** Frozen buckets are read-only in every state, warm included, so uploads and emptying go. */
     readOnly: state !== null,
     downloadObject: guardedDownload,
+    /** Disables download and share on every object row until the bucket is restored. */
+    lockedReason: downloadsBlocked ? 'Restore the bucket first' : undefined,
     actions,
     overlays: (
       <>

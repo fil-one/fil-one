@@ -320,6 +320,8 @@ export type ObjectBrowserProps = {
   listingTruncated?: boolean;
   /** Full bucket object count from analytics, shown alongside the loaded count. */
   totalObjectCount?: number;
+  /** Why download and share are off on every row; see `RowActions.lockedReason`. */
+  lockedReason?: string;
 };
 
 /** The share dialog a row's Share button opens, and whether the plan allows it. */
@@ -357,6 +359,7 @@ export function ObjectBrowser({
   keyAction,
   listingTruncated = false,
   totalObjectCount,
+  lockedReason,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState<{
@@ -387,6 +390,7 @@ export function ObjectBrowser({
     onDownload,
     canShare: share.canShare,
     onShare: share.request,
+    lockedReason,
     // Without a delete handler no row renders the control, so nothing reaches
     // the confirmation dialog below either.
     ...(onDelete && { onRequestDelete: requestDelete }),

@@ -80,6 +80,7 @@ export function ObjectsPanel({
   onShowKeys: () => void;
   listingTruncated: boolean;
   totalObjectCount: number | undefined;
+  lockedReason?: string;
 }) {
   // An empty bucket's next steps depend on its keys and the caller's permissions, so its
   // empty state waits for both and appears once, in its final form; a bucket with objects
