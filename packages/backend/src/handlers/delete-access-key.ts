@@ -7,14 +7,14 @@ import type { ErrorResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { userActor } from '../lib/audit.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
-import { AccessKeyKeys, accessKeyOrchestratorId } from '../lib/dynamo-records.ts';
+import { AccessKeyKeys, getAccessKeyOrchestratorId } from '../lib/dynamo-records.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
 import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.ts';
 import { revokeAccessKey } from '../lib/key-revocation.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
-  orchestratorUnavailableResponse,
+  accessKeyNetworkUnavailableResponse,
 } from '../lib/response-builder.ts';
 import { findOrchestratorById } from '../lib/service-orchestrator-registry.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
@@ -67,12 +67,12 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // The network holding the credential is what revokes it. Rows written before
   // keys were recorded by network name a region instead, which resolves to the
   // network that served it.
-  const orchestratorId = accessKeyOrchestratorId({
+  const orchestratorId = getAccessKeyOrchestratorId({
     orchestratorId: Item.orchestratorId?.S,
     region: Item.region?.S as AccessKeyRecord['region'],
   });
   const orchestrator = findOrchestratorById(orchestratorId);
-  if (!orchestrator) return orchestratorUnavailableResponse(orchestratorId);
+  if (!orchestrator) return accessKeyNetworkUnavailableResponse(orchestratorId);
 
   const tenantId = orchestrator.isTenantReady(orgProfile);
   if (!tenantId) return tenantNotReadyResponse();
