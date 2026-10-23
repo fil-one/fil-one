@@ -1679,3 +1679,33 @@ describe('fthOrchestrator signal forwarding', () => {
     });
   });
 });
+
+describe('fthOrchestrator region assertions', () => {
+  // FTH serves us-east-1 and nothing else, so a call naming another region is a
+  // routing bug upstream rather than something to send to its gateway.
+  const wrong = S3Region.EuWest1;
+
+  it('refuses a createBucket naming a region it does not serve', async () => {
+    await expect(
+      fthOrchestrator.createBucket(fthClientId, { region: wrong, bucketName: 'b' }),
+    ).rejects.toThrow(/does not serve region "eu-west-1"/);
+  });
+
+  it('refuses a deleteBucket naming a region it does not serve', async () => {
+    await expect(
+      fthOrchestrator.deleteBucket(fthClientId, { region: wrong, bucketName: 'b' }),
+    ).rejects.toThrow(/does not serve region "eu-west-1"/);
+  });
+
+  it('refuses a getBucket naming a region it does not serve', async () => {
+    await expect(
+      fthOrchestrator.getBucket(fthClientId, { region: wrong, bucketName: 'b' }),
+    ).rejects.toThrow(/does not serve region "eu-west-1"/);
+  });
+
+  it('refuses an S3 context for a region it does not serve', async () => {
+    await expect(fthOrchestrator.getS3ClientContext(fthClientId, wrong)).rejects.toThrow(
+      /does not serve region "eu-west-1"/,
+    );
+  });
+});
