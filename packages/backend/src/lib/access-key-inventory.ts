@@ -4,7 +4,7 @@ import type { AccessKey, GranularPermission, ServiceAccessKey } from '@filone/sh
 import { S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
-import { AccessKeyKeys, accessKeyRegions, type AccessKeyRecord } from './dynamo-records.ts';
+import { AccessKeyKeys, getAccessKeyRegions, type AccessKeyRecord } from './dynamo-records.ts';
 import { withinScope, type KeyScope } from './key-scope.ts';
 import { BARE_DATE } from './access-key-expiry.ts';
 
@@ -158,7 +158,7 @@ function toAccessKey(record: Record<string, unknown>): AccessKey {
     accessKeyId: record.accessKeyId as string,
     createdAt: record.createdAt as string,
     status,
-    regions: accessKeyRegions(
+    regions: getAccessKeyRegions(
       record as Pick<AccessKeyRecord, 'orchestratorId' | 'region'>,
       process.env.FILONE_STAGE!,
     ),

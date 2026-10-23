@@ -23,8 +23,8 @@ import {
   AccessKeyKeys,
   DEFAULT_ACCESS_KEY_REGION,
   keyAttribution,
-  accessKeyOrchestratorId,
-  accessKeyRegions,
+  getAccessKeyOrchestratorId,
+  getAccessKeyRegions,
 } from '../lib/dynamo-records.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
@@ -45,7 +45,7 @@ import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
-  orchestratorUnavailableResponse,
+  accessKeyNetworkUnavailableResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
@@ -173,9 +173,9 @@ async function prepareRotation(
 
   // The row names the network that holds the credential; an older row names
   // only the region it was minted in, which resolves to the same network.
-  const orchestratorId = accessKeyOrchestratorId(stored);
+  const orchestratorId = getAccessKeyOrchestratorId(stored);
   const orchestrator = findOrchestratorById(orchestratorId);
-  if (!orchestrator) return orchestratorUnavailableResponse(orchestratorId);
+  if (!orchestrator) return accessKeyNetworkUnavailableResponse(orchestratorId);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
@@ -397,7 +397,7 @@ function replacementRow({
     createdAt: replacement.createdAt,
     status: 'active',
     // The replacement lives on the same network as the key it supersedes.
-    orchestratorId: accessKeyOrchestratorId(stored),
+    orchestratorId: getAccessKeyOrchestratorId(stored),
     ...(stored.permissions ? { permissions: stored.permissions } : {}),
     ...(stored.principalId ? { principalId: stored.principalId } : {}),
     vendorKeyName,
@@ -447,7 +447,7 @@ function canRoleRotateKey(role: string, stored: StoredKey): KeyRetentionResult {
   return canRetainAccessKey(role, {
     permissions: stored.permissions,
     granularPermissions: stored.granularPermissions,
-    regions: accessKeyRegions(stored, process.env.FILONE_STAGE!),
+    regions: getAccessKeyRegions(stored, process.env.FILONE_STAGE!),
   });
 }
 
