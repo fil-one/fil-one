@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import PQueue from 'p-queue';
 
 import type { BucketAnalyticsResponse, S3Region } from '@filone/shared';
 import { formatBytes } from '@filone/shared';
@@ -7,6 +8,17 @@ import { apiRequest } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
 const FIVE_MINUTES = 5 * 60 * 1000;
+
+/**
+ * How many analytics requests the whole table runs at once.
+ *
+ * Each request makes the backend query the storage provider's metrics API, so
+ * this bounds the load one open Buckets page puts there however many buckets
+ * the org has. Four still fills a screen of rows within a few round trips.
+ */
+export const ANALYTICS_CONCURRENCY = 4;
+
+const analyticsQueue = new PQueue({ concurrency: ANALYTICS_CONCURRENCY });
 
 /**
  * Size and object count for one bucket, as inline text for the secondary line
@@ -20,6 +32,13 @@ const FIVE_MINUTES = 5 * 60 * 1000;
  * behind the slowest bucket. Each row resolves on its own, shares the query key
  * with the bucket detail page (so navigating there is warm), and holds for five
  * minutes since storage totals move slowly.
+ *
+ * The rows share one queue of `ANALYTICS_CONCURRENCY` requests, because an org
+ * with hundreds of buckets would otherwise send hundreds of requests the moment
+ * the table renders. A retry runs the query function again, so it waits in the
+ * same queue. React Query aborts a query's signal once the last component using
+ * it unmounts, so leaving the page drops the requests still queued and cancels
+ * the ones in flight.
  */
 export function BucketStorageLine({
   bucketName,
@@ -30,10 +49,15 @@ export function BucketStorageLine({
 }) {
   const { data, isPending, isError } = useQuery({
     queryKey: queryKeys.bucketAnalytics(bucketName, region),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams({ region });
-      return apiRequest<BucketAnalyticsResponse>(
-        `/buckets/${encodeURIComponent(bucketName)}/analytics?${params.toString()}`,
+      return analyticsQueue.add(
+        () =>
+          apiRequest<BucketAnalyticsResponse>(
+            `/buckets/${encodeURIComponent(bucketName)}/analytics?${params.toString()}`,
+            { signal },
+          ),
+        { signal },
       );
     },
     staleTime: FIVE_MINUTES,
@@ -44,7 +68,7 @@ export function BucketStorageLine({
       <>
         <MobileSeparator />
         <span
-          className="inline-block h-3 w-24 animate-pulse rounded bg-zinc-100"
+          className="inline-block h-3 w-24 animate-pulse rounded-md bg-zinc-100"
           aria-label={`Loading storage for ${bucketName}`}
         />
       </>

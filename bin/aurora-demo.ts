@@ -3,7 +3,7 @@ import {
   createS3AccessKey,
   getS3AccessKey,
   listS3AccessKeys,
-} from '../packages/aurora-portal-client/src/index.ts';
+} from '@filone/aurora-portal-client';
 
 const tenantId = requireEnv('AURORA_TENANT_ID');
 const portalApiKey = requireEnv('AURORA_PORTAL_TOKEN');

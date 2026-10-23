@@ -1,7 +1,7 @@
 import type { Preview } from '@storybook/react-vite';
 import { useMemo } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { OrgRole } from '@filone/shared';
+import { OrgRole, PlanId, SubscriptionStatus } from '@filone/shared';
 import '../src/styles.css';
 import { ToastProvider } from '../src/components/Toast';
 import { queryKeys } from '../src/lib/query-client.js';
@@ -19,13 +19,21 @@ import { seedPermissions } from '../src/lib/test-permissions.js';
  * seeded role has to inherit that: an observer without one treats the seed as
  * stale on mount and refetches, and there is no server behind a story to answer.
  */
-function usePreviewClient(role: OrgRole) {
+function usePreviewClient(role: OrgRole, billingStatus?: SubscriptionStatus) {
   return useMemo(() => {
     const created = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     created.setQueryDefaults(queryKeys.me, { staleTime: Infinity });
     seedPermissions(created, role);
+    // Opt-in, for controls gated on the plan (Share): `parameters: { billingStatus }`.
+    // Unseeded, the plan stays unknown, as it would before `/billing` answers.
+    if (billingStatus) {
+      created.setQueryDefaults(queryKeys.billing, { staleTime: Infinity });
+      created.setQueryData(queryKeys.billing, {
+        subscription: { planId: PlanId.PayAsYouGo, status: billingStatus },
+      });
+    }
     return created;
-  }, [role]);
+  }, [role, billingStatus]);
 }
 
 const preview: Preview = {
@@ -35,7 +43,8 @@ const preview: Preview = {
       // misrepresent them as floating on a white page.
       const fullBleed = Boolean(context.parameters.fullBleed);
       const role = (context.parameters.role as OrgRole | undefined) ?? OrgRole.Owner;
-      const queryClient = usePreviewClient(role);
+      const billingStatus = context.parameters.billingStatus as SubscriptionStatus | undefined;
+      const queryClient = usePreviewClient(role, billingStatus);
       return (
         <QueryClientProvider client={queryClient}>
           <ToastProvider>

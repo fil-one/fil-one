@@ -64,6 +64,31 @@ function computePosition(side: TooltipSide, trigger: Rect, tw: number, th: numbe
   return { top, left };
 }
 
+/**
+ * Shrinks a wrapped tooltip to its widest line. CSS sizes a box that wraps to
+ * its max-width, not to the lines inside it, and `text-balance` then shortens
+ * those lines, so without this a two-line hint sits in a box with an empty band
+ * down its right side. A hint on one line already fits and is left alone.
+ */
+function fitToLines(tooltip: HTMLElement) {
+  tooltip.style.width = '';
+  const range = document.createRange();
+  range.selectNodeContents(tooltip);
+  // jsdom, which the unit tests run in, has no layout and leaves this out.
+  if (typeof range.getClientRects !== 'function') return;
+  const lines = [...range.getClientRects()];
+  if (new Set(lines.map((line) => Math.round(line.top))).size < 2) return;
+  const widest =
+    Math.max(...lines.map((line) => line.right)) - Math.min(...lines.map((line) => line.left));
+  const box = tooltip.getBoundingClientRect();
+  const frame =
+    box.width -
+    tooltip.clientWidth +
+    parseFloat(getComputedStyle(tooltip).paddingLeft) +
+    parseFloat(getComputedStyle(tooltip).paddingRight);
+  tooltip.style.width = `${Math.ceil(widest + frame)}px`;
+}
+
 export function Tooltip({
   children,
   content,
@@ -93,6 +118,7 @@ export function Tooltip({
       tooltip.style.left = `${left}px`;
     };
 
+    if (tooltipRef.current) fitToLines(tooltipRef.current);
     position();
 
     // The tooltip is fixed-positioned in a body portal, so it won't track the
@@ -150,7 +176,8 @@ export function Tooltip({
             // readability cap so a long hint wraps instead of running edge to
             // edge. It's max-w-sm (384px) rather than a tighter value so a
             // one-sentence hint stays on a single line. `text-balance` evens out
-            // the lines of the longer hints that do wrap.
+            // the lines of the longer hints that do wrap, and `fitToLines`
+            // shrinks the box to match them.
             className="pointer-events-none fixed z-50 w-max max-w-sm whitespace-normal text-balance rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs leading-relaxed text-zinc-900 shadow-md"
           >
             {content}

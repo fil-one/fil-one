@@ -1,7 +1,11 @@
 import { z } from 'zod';
-import { S3Region, supportsBucketManagement } from '../constants.ts';
+import { S3Region, supportsIamMethods, supportsBucketManagement } from '../constants.ts';
 
-export type AccessKeyStatus = 'active' | 'inactive';
+/**
+ * Whether the key still authenticates. `expired` is computed by the server at
+ * read time from `expiresAt`, so the console never does date math.
+ */
+export type AccessKeyStatus = 'active' | 'expired';
 
 /** Object-level data operations. Each may act as a parent for data-protection granulars. */
 export const OBJECT_PERMISSIONS = ['read', 'write', 'list', 'delete'] as const;
@@ -28,11 +32,21 @@ export const BUCKET_INFO_PERMISSIONS = [
 ] as const;
 export type BucketInfoPermission = (typeof BUCKET_INFO_PERMISSIONS)[number];
 
+/**
+ * Bucket-configuration write permissions. Selectable only in a region that
+ * serves the `iam` access model (a Forge gateway), where the gateway stores a
+ * bucket's own CORS document; the other regions have no operation for it.
+ * Standalone top-level permissions like {@link BUCKET_PERMISSIONS}.
+ */
+export const BUCKET_CONFIG_PERMISSIONS = ['PutBucketCORS'] as const;
+export type BucketConfigPermission = (typeof BUCKET_CONFIG_PERMISSIONS)[number];
+
 /** All permissions selectable on an access key: object operations plus bucket management. */
 export const ACCESS_KEY_PERMISSIONS = [
   ...OBJECT_PERMISSIONS,
   ...BUCKET_PERMISSIONS,
   ...BUCKET_INFO_PERMISSIONS,
+  ...BUCKET_CONFIG_PERMISSIONS,
 ] as const;
 export type AccessKeyPermission = (typeof ACCESS_KEY_PERMISSIONS)[number];
 
@@ -48,6 +62,13 @@ export function isBucketInfoPermission(
   permission: AccessKeyPermission,
 ): permission is BucketInfoPermission {
   return (BUCKET_INFO_PERMISSIONS as readonly string[]).includes(permission);
+}
+
+/** Type guard: is this permission a (Forge-only) bucket-configuration write permission? */
+export function isBucketConfigPermission(
+  permission: AccessKeyPermission,
+): permission is BucketConfigPermission {
+  return (BUCKET_CONFIG_PERMISSIONS as readonly string[]).includes(permission);
 }
 
 /** Type guard: is this permission an object-level permission? */
@@ -137,6 +158,16 @@ export const BUCKET_INFO_PERMISSION_LABELS: Record<
   },
 };
 
+export const BUCKET_CONFIG_PERMISSION_LABELS: Record<
+  BucketConfigPermission,
+  { label: string; description: string }
+> = {
+  PutBucketCORS: {
+    label: 'Set bucket CORS',
+    description: 'Set or remove the cross-origin rules of buckets',
+  },
+};
+
 export const ACCESS_KEY_BUCKET_SCOPES = ['all', 'specific'] as const;
 export type AccessKeyBucketScope = (typeof ACCESS_KEY_BUCKET_SCOPES)[number];
 
@@ -207,21 +238,40 @@ export const CreateAccessKeySchema = z
       message: 'Bucket management permissions are not supported in the selected region',
       path: ['permissions'],
     },
+  )
+  .refine(
+    (data) => !data.permissions.some(isBucketConfigPermission) || supportsIamMethods(data.region),
+    {
+      message: 'Bucket configuration permissions are not supported in the selected region',
+      path: ['permissions'],
+    },
   );
 
 export type CreateAccessKeyRequest = z.infer<typeof CreateAccessKeySchema>;
 
-export interface AccessKey {
+/**
+ * The create request on a region serving the `iam` access model. A key there
+ * belongs to the caller's principal and carries no permissions or bucket list,
+ * so the form asks for a name and an expiry and nothing else. The name rules
+ * are {@link CreateAccessKeySchema}'s; the region is validated by the handler
+ * against the access model it serves.
+ */
+export const CreatePrincipalAccessKeySchema = z
+  .object({
+    keyName: CreateAccessKeySchema.shape.keyName,
+    region: z.enum(S3Region),
+    expiresAt: CreateAccessKeySchema.shape.expiresAt,
+  })
+  .strict();
+
+export type CreatePrincipalAccessKeyRequest = z.infer<typeof CreatePrincipalAccessKeySchema>;
+
+interface AccessKeyBase {
   id: string;
   keyName: string;
   accessKeyId: string;
   createdAt: string;
-  lastUsedAt?: string;
   status: AccessKeyStatus;
-  permissions: AccessKeyPermission[];
-  granularPermissions?: GranularPermission[];
-  bucketScope: AccessKeyBucketScope;
-  buckets?: string[];
   region?: S3Region;
   expiresAt?: string | null;
   /**
@@ -239,6 +289,32 @@ export interface AccessKey {
   rotatedAt?: string;
 }
 
+/** A key that carries its own permissions and bucket list. */
+export interface ServiceAccessKey extends AccessKeyBase {
+  type: 'service';
+  /**
+   * Absent on a recovered row: one the backend rebuilt from the storage
+   * provider after a create that returned 409, so it never learned the key's
+   * permissions (`recovered` in backend `dynamo-records.ts`).
+   */
+  permissions?: AccessKeyPermission[];
+  granularPermissions?: GranularPermission[];
+  bucketScope?: AccessKeyBucketScope;
+  buckets?: string[];
+}
+
+/**
+ * A key bound to a member on a region serving the `iam` access model. It holds
+ * no permissions or bucket list; the bucket policies naming its member decide
+ * what it may do at request time.
+ */
+export interface PrincipalAccessKey extends AccessKeyBase {
+  type: 'principal';
+  principalId: string;
+}
+
+export type AccessKey = ServiceAccessKey | PrincipalAccessKey;
+
 export interface ListAccessKeysResponse {
   keys: AccessKey[];
 }
@@ -249,6 +325,8 @@ export interface CreateAccessKeyResponse {
   accessKeyId: string;
   secretAccessKey: string;
   createdAt: string;
+  /** Set when the key was bound to the caller's principal. See {@link PrincipalAccessKey.principalId}. */
+  principalId?: string;
 }
 
 export interface DeleteAccessKeyRequest {

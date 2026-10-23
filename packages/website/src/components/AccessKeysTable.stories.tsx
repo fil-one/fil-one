@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 
-import type { AccessKey } from '@filone/shared';
+import type { AccessKey, ServiceAccessKey } from '@filone/shared';
 import { S3Region } from '@filone/shared';
 
 import { AccessKeysTable } from './AccessKeysTable';
@@ -13,36 +13,40 @@ const meta: Meta<typeof AccessKeysTable> = {
 export default meta;
 type Story = StoryObj<typeof AccessKeysTable>;
 
+const backupKey: ServiceAccessKey = {
+  id: '2',
+  type: 'service',
+  keyName: 'Backup Read-Only',
+  accessKeyId: 'ACCESS_KEY_09876EXAMPL',
+  createdAt: '2026-02-20T08:00:00Z',
+  status: 'active',
+  permissions: ['read', 'list'],
+  bucketScope: 'specific',
+  buckets: ['backups', 'archives'],
+  region: S3Region.UsEast1,
+};
+
 const mockKeys: AccessKey[] = [
   {
     id: '1',
+    type: 'service',
     keyName: 'Production API Key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
     createdAt: '2026-01-15T10:00:00Z',
-    lastUsedAt: '2026-04-08T14:30:00Z',
     status: 'active',
     permissions: ['read', 'write', 'list'],
     bucketScope: 'all',
     region: S3Region.EuWest1,
   },
-  {
-    id: '2',
-    keyName: 'Backup Read-Only',
-    accessKeyId: 'ACCESS_KEY_09876EXAMPL',
-    createdAt: '2026-02-20T08:00:00Z',
-    status: 'active',
-    permissions: ['read', 'list'],
-    bucketScope: 'specific',
-    buckets: ['backups', 'archives'],
-    region: S3Region.UsEast1,
-  },
+  backupKey,
   {
     id: '3',
-    keyName: 'Deprecated Key',
+    type: 'service',
+    keyName: 'Contractor Key',
     accessKeyId: 'ACCESS_KEY_00000EXAMPL',
     createdAt: '2025-06-01T12:00:00Z',
-    lastUsedAt: '2025-12-01T09:00:00Z',
-    status: 'inactive',
+    status: 'expired',
+    expiresAt: '2026-03-01',
     permissions: ['read'],
     bucketScope: 'all',
     region: S3Region.EuWest1,
@@ -52,10 +56,10 @@ const mockKeys: AccessKey[] = [
 const keysWithBucketPermissions: AccessKey[] = [
   {
     id: '10',
+    type: 'service',
     keyName: 'Full Access Key',
     accessKeyId: 'ACCESS_KEY_FULL0EXAMPL',
     createdAt: '2026-03-10T10:00:00Z',
-    lastUsedAt: '2026-04-08T14:30:00Z',
     status: 'active',
     permissions: [
       'read',
@@ -73,6 +77,7 @@ const keysWithBucketPermissions: AccessKey[] = [
   },
   {
     id: '11',
+    type: 'service',
     keyName: 'Bucket Info Reader',
     accessKeyId: 'ACCESS_KEY_INFO0EXAMPL',
     createdAt: '2026-03-12T09:00:00Z',
@@ -93,6 +98,28 @@ export const Default: Story = {
 export const WithBucketPermissions: Story = {
   args: {
     keys: keysWithBucketPermissions,
+    showBuckets: true,
+    showPermissions: true,
+  },
+};
+
+/** An `iam` region's list: a personal key bound to its holder beside a service key. */
+export const WithPrincipalKey: Story = {
+  args: {
+    keys: [
+      {
+        id: '20',
+        type: 'principal',
+        principalId: 'user-1',
+        keyName: 'Laptop',
+        accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
+        createdAt: '2026-09-16T12:00:00Z',
+        status: 'active',
+        region: S3Region.UsEast9,
+      },
+      { ...mockKeys[0], region: S3Region.UsEast9 },
+    ],
+    showRegion: true,
     showBuckets: true,
     showPermissions: true,
   },
@@ -173,8 +200,8 @@ export const EmptyWithoutKeyCreation: Story = {
 
 /**
  * A shared org, where the column says whose key each one is — the question an
- * operator asks after removing somebody, since removal does not revoke keys
- * (FIL-1021). Key 3 predates attribution and carries no `createdBy`. Key 1 was
+ * operator asks after removing somebody, since removal does not revoke service
+ * keys (FIL-1021). Key 3 predates attribution and carries no `createdBy`. Key 1 was
  * rotated by somebody other than its owner, which the column says beneath them.
  */
 export const WithCreators: Story = {
@@ -189,5 +216,104 @@ export const WithCreators: Story = {
       userId === 'user-1'
         ? { name: 'Ada Lovelace', email: 'ada@example.com' }
         : { name: 'grace@example.com', email: 'grace@example.com' },
+  },
+};
+
+export const Selectable: Story = {
+  args: {
+    keys: mockKeys,
+    showBuckets: true,
+    showPermissions: true,
+    onBulkDelete: () => Promise.resolve(),
+  },
+};
+
+/** A key scoped to far more buckets than fit inline: two names, then a count. */
+export const WithManyBuckets: Story = {
+  args: {
+    keys: [
+      {
+        ...backupKey,
+        buckets: Array.from(
+          { length: 30 },
+          (_, i) => `data-pipeline-${String(i + 1).padStart(2, '0')}`,
+        ),
+      },
+    ],
+    showBuckets: true,
+  },
+};
+
+/** A long name and a long access key ID truncate instead of widening the Name column. */
+export const WithLongNameAndId: Story = {
+  args: {
+    keys: [
+      {
+        ...backupKey,
+        keyName: 'nightly-backup-pipeline-for-the-analytics-warehouse-eu',
+        accessKeyId: 'z6MkfD2e6PQLZGVzi7FQAYfSCQYwnB97AD8PdWuEDTXZnwEd',
+      },
+      mockKeys[0],
+    ],
+    showRegion: true,
+    showBuckets: true,
+    showPermissions: true,
+  },
+};
+
+/** Keys carrying more than the object permissions, as a busy account has them. */
+export const WithManyPermissions: Story = {
+  args: {
+    keys: [
+      {
+        ...backupKey,
+        keyName: 'new-key',
+        permissions: ['read', 'write', 'list', 'delete', 'CreateBucket', 'DeleteBucket'],
+        granularPermissions: [
+          'GetObjectVersion',
+          'GetObjectRetention',
+          'GetObjectLegalHold',
+          'PutObjectRetention',
+          'PutObjectLegalHold',
+          'ListBucketVersions',
+          'DeleteObjectVersion',
+        ],
+        buckets: ['fgrc-ltda', 'filipa-1'],
+      },
+      {
+        ...backupKey,
+        id: '3',
+        keyName: 'production',
+        permissions: ['read', 'write', 'list', 'GetBucketVersioning'],
+        granularPermissions: ['GetObjectVersion', 'GetObjectRetention'],
+        bucketScope: 'all',
+        region: S3Region.EuWest1,
+      },
+    ],
+    showRegion: true,
+    showBuckets: true,
+    showPermissions: true,
+    onBulkDelete: () => Promise.resolve(),
+    onDelete: () => Promise.resolve(),
+    onRotate: () => {},
+  },
+};
+
+/** Bucket names too long for the column: the names truncate and the count stays visible. */
+export const WithLongBucketNames: Story = {
+  args: {
+    keys: [
+      {
+        ...backupKey,
+        buckets: ['analytics-warehouse-nightly-exports-eu-central', 'archives', 'backups'],
+      },
+      {
+        ...backupKey,
+        id: '3',
+        keyName: 'single-long-bucket',
+        buckets: ['customer-uploads-production-eu-west-1-primary-store'],
+      },
+    ],
+    showBuckets: true,
   },
 };

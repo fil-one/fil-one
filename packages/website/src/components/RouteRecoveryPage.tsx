@@ -54,14 +54,14 @@ export function RouteErrorPage({ error }: ErrorComponentProps) {
     >
       <button
         type="button"
-        className="button button--primary button--lg mt-6 w-full justify-center py-3.5"
+        className="button button--primary button--lg mt-6 w-full justify-center h-12"
         onClick={() => window.location.reload()}
       >
         Reload page
       </button>
       {/* Plain anchor, not Link: a full document load is the reliable way out of a crashed route. */}
       <a
-        className="button button--ghost button--lg mt-3 w-full justify-center py-3.5"
+        className="button button--ghost button--lg mt-3 w-full justify-center h-12"
         href="/dashboard"
       >
         Back to dashboard
@@ -87,7 +87,7 @@ export function RouteNotFoundPage() {
     >
       {/* Reload is pointless on a 404, so the only action is a way back. */}
       <a
-        className="button button--primary button--lg mt-6 w-full justify-center py-3.5"
+        className="button button--primary button--lg mt-6 w-full justify-center h-12"
         href="/dashboard"
       >
         Back to dashboard

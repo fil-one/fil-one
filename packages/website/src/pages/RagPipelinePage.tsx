@@ -35,7 +35,7 @@ function StatSkeleton() {
     <span
       data-testid="rag-pipeline-stat-loading"
       aria-hidden="true"
-      className="block h-6 w-14 animate-pulse rounded bg-zinc-200"
+      className="block h-6 w-14 animate-pulse rounded-md bg-zinc-200"
     />
   );
 }
@@ -152,7 +152,7 @@ function RagPipelineView({
           {stats.map((s) => (
             <div key={s.label} data-testid="rag-pipeline-stat" className="px-5 py-4">
               <p className="text-xs font-medium text-zinc-500">{s.label}</p>
-              <p className="mt-1.5 text-2xl font-semibold tabular-nums text-zinc-950">{s.value}</p>
+              <p className="mt-1.5 text-2xl font-medium tabular-nums text-zinc-950">{s.value}</p>
               {s.sub && <p className="mt-1 text-xs text-zinc-500">{s.sub}</p>}
             </div>
           ))}

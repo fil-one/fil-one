@@ -17,6 +17,7 @@ import {
 } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
+import { getScopedMemberId } from '../lib/member-scope.ts';
 import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { ragAccessMiddleware } from '../middleware/rag-access.ts';
@@ -80,7 +81,7 @@ export async function baseHandler(
   }
   const { query, top_k, model } = parsed.data;
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId, membership, apiKeySession } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3Region.EuWest1;
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
@@ -92,7 +93,13 @@ export async function baseHandler(
   if (!tenantId) return tenantNotReadyResponse();
 
   // Enforce tenant/org scope: a bucket the caller's tenant does not own is 404.
-  const bucket = await orchestrator.getBucket(tenantId, bucketName);
+  // A cookie caller also answers to their member scope; a RAG key carries its
+  // own bucket scope, which the auth middleware already applied.
+  const bucket = await orchestrator.getBucket(
+    tenantId,
+    bucketName,
+    apiKeySession ? undefined : getScopedMemberId(membership?.role, userId),
+  );
   if (!bucket) {
     return new ResponseBuilder()
       .status(404)
@@ -105,20 +112,7 @@ export async function baseHandler(
   // misleading "no relevant content" empty answer. `lastSyncedAt` is written by
   // the indexer only when a pass completes, so it doubles as the
   // "queryable yet?" signal here and in the UI (disabled Ask-questions button).
-  const enablement = await getBucketRagEnablement(orgId, region, bucketName);
-  // Defense in depth: ignore a record whose stamped org, region, or bucket name
-  // somehow differs from what we queried. `orgId` is denormalized onto the row;
-  // region and bucket name are decoded from the pk (mirrors
-  // get-bucket-rag-enablement, which checks org only).
-  const parsedPk = enablement ? RAGKeys.parseBucketPk(enablement.pk) : undefined;
-  const owned =
-    enablement &&
-    enablement.orgId === orgId &&
-    parsedPk?.orgId === orgId &&
-    parsedPk.region === region &&
-    parsedPk.bucketName === bucketName
-      ? enablement
-      : undefined;
+  const owned = await getOwnedBucketEnablement(orgId, region, bucketName);
   if (!owned?.lastSyncedAt) {
     return new ResponseBuilder()
       .status(409)
@@ -153,6 +147,23 @@ export async function baseHandler(
     .status(200)
     .body<QueryBucketResponse>({ answer, sources: sourcesFromChunks(chunks) })
     .build();
+}
+
+/**
+ * Load the bucket's RAG enablement record, or undefined when there is none.
+ *
+ * Defense in depth: ignore a record whose stamped org, region, or bucket name
+ * somehow differs from what we queried. `orgId` is denormalized onto the row;
+ * region and bucket name are decoded from the pk (mirrors
+ * get-bucket-rag-enablement, which checks org only).
+ */
+async function getOwnedBucketEnablement(orgId: string, region: S3Region, bucketName: string) {
+  const enablement = await getBucketRagEnablement(orgId, region, bucketName);
+  if (!enablement || enablement.orgId !== orgId) return undefined;
+  const parsedPk = RAGKeys.parseBucketPk(enablement.pk);
+  const isOwned =
+    parsedPk?.orgId === orgId && parsedPk.region === region && parsedPk.bucketName === bucketName;
+  return isOwned ? enablement : undefined;
 }
 
 /**

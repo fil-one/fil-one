@@ -4,6 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { GetBucketResponse } from '@filone/shared';
 import { S3_REGION, isSupportedRegion } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import {
   ResponseBuilder,
@@ -11,6 +12,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getScopedMemberId } from '../lib/member-scope.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
@@ -20,13 +22,14 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  const signal = getRequestDeadline(event);
   const bucketName = event.pathParameters?.name;
 
   if (!bucketName) {
     return new ResponseBuilder().status(400).body({ message: 'Bucket name is required' }).build();
   }
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId, membership } = getUserInfo(event);
 
   const region = event.queryStringParameters?.region ?? S3_REGION;
   if (!isSupportedRegion(region, process.env.FILONE_STAGE!)) {
@@ -36,7 +39,12 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  const bucket = await orchestrator.getBucket(tenantId, bucketName);
+  const bucket = await orchestrator.getBucket(
+    tenantId,
+    bucketName,
+    getScopedMemberId(membership?.role, userId),
+    { signal },
+  );
   if (!bucket) {
     return new ResponseBuilder().status(404).body({ message: 'Bucket not found' }).build();
   }
@@ -45,6 +53,7 @@ export async function baseHandler(
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(authorize('buckets.read'))

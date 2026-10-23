@@ -68,7 +68,7 @@ function statusBadgeProps(status: SubscriptionStatus): { label: string; color: B
 function DashboardSkeleton() {
   return (
     <div className="p-8 animate-pulse">
-      <div className="mb-6 h-8 w-40 rounded bg-zinc-200" />
+      <div className="mb-6 h-8 w-40 rounded-md bg-zinc-200" />
       <div className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
         <div className="h-[157px] rounded-xl bg-zinc-100" />
         <div className="h-[157px] rounded-xl bg-zinc-100" />
@@ -218,7 +218,7 @@ export function DashboardPage() {
             variant="ghost"
             size="sm"
             icon={PlusIcon}
-            href="/buckets"
+            href="/buckets/create"
           >
             New bucket
           </Button>
@@ -227,16 +227,16 @@ export function DashboardPage() {
     >
       {/* 2. Trial banner */}
       {isTrialing && trialBannerVisible && (
-        <div className="mb-5 flex flex-col gap-3 rounded-xl bg-brand-50/60 px-5 py-3.5 shadow-[0px_0px_0px_1px_theme(colors.brand.100)] sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-5 flex flex-col gap-3 rounded-xl bg-brand-50/60 px-5 py-3.5 ring-1 ring-brand-100 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <Badge color="blue" size="sm" strength="strong" description={trialEndsLabel}>
               {trialDaysLeft !== null ? `${trialDaysLeft} days left` : 'TRIAL'}
             </Badge>
             <p className="text-ui">
-              <span className="font-medium text-zinc-900">Free trial</span>
+              <span className="font-medium text-zinc-900">Free trial:</span>
               <span className="text-zinc-500">
                 {' '}
-                — Add a payment method to unlock unlimited storage at $4.99/TB
+                add a payment method to unlock unlimited storage at $5.99/TB
               </span>
             </p>
           </div>
@@ -480,7 +480,7 @@ export function DashboardPage() {
                 id="dashboard-create-bucket-button"
                 variant="primary"
                 icon={PlusIcon}
-                href="/buckets"
+                href="/buckets/create"
               >
                 Create bucket
               </Button>

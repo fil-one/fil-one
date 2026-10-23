@@ -67,9 +67,12 @@ export function UserMenu({ src, initial, displayName, collapsed, testId }: UserM
           </>
         )}
       </MenuButton>
+      {/* No outline on the panel: it holds focus while the arrow keys move
+          between items, so the highlighted item shows a keyboard user where
+          they are. */}
       <MenuItems
         anchor="top start"
-        className="z-50 mb-1 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-md focus:outline-none"
+        className="z-50 mb-1 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-md outline-none"
       >
         <MenuItem as={BaseLink} href="/settings" className={itemClassName}>
           <GearIcon size={13} className="flex-shrink-0 text-zinc-400" />

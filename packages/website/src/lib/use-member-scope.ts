@@ -71,6 +71,14 @@ export function memberName(member: Pick<MemberSummary, 'name' | 'email'>): strin
   return member.name || member.email || 'Unnamed member';
 }
 
+/** Looks up a member's display name by user id; undefined for an id not in the list. */
+export function getMemberNameLookup(members: readonly MemberSummary[] | undefined) {
+  return (userId: string): string | undefined => {
+    const member = members?.find((m) => m.userId === userId);
+    return member ? memberName(member) : undefined;
+  };
+}
+
 /**
  * Whether the Owner seat can be handed to this member.
  *

@@ -1,5 +1,5 @@
 // Tenant setup for Management API backed orchestrators. Owned by
-// createFilOneOrchestrator().ensureTenantReady but kept in a separate
+// FilOneOrchestrator.ensureTenantReady but kept in a separate
 // module, mirroring fth-tenant-setup.ts / aurora-tenant-setup.ts.
 //
 // The Management API contract makes this much simpler than Aurora's state
@@ -10,12 +10,15 @@
 // the `${id}TenantId` PROFILE attribute (written last) is sufficient to mean
 // "fully provisioned, console credentials stashed in SSM".
 
+import pMap from 'p-map';
 import { format } from 'node:util';
 import { GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../ddb-client.ts';
+import { MAX_MEMBERS, listMembers } from '../org-membership.ts';
 import { OrgDeletingError } from '../org-profile.ts';
+import { syncPrincipal } from './members.ts';
 import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import {
@@ -32,12 +35,9 @@ import {
 export const CONSOLE_KEY_NAME = 'filone-console';
 
 // The contract-legal maximum: every action in the Management API's
-// AccessKeyPermission enum. Note the contract (unlike FTH) has no
-// s3:Get/PutBucketVersioning or s3:Get/PutBucketObjectLockConfiguration
-// actions, yet the console key drives exactly those S3 calls for bucket
-// create/get/list — orchestrators are expected to authorize bucket-config
-// operations implicitly for tenant-scoped keys (flagged against the spec).
-const CONSOLE_KEY_PERMISSIONS = [
+// AccessKeyPermission enum. The console key holds every action the console
+// performs for a tenant.
+export const CONSOLE_KEY_PERMISSIONS = [
   's3:CreateBucket',
   's3:ListAllMyBuckets',
   's3:DeleteBucket',
@@ -51,8 +51,34 @@ const CONSOLE_KEY_PERMISSIONS = [
   's3:ListBucket',
   's3:ListBucketVersions',
   's3:ListBucketMultipartUploads',
+  's3:ListMultipartUploadParts',
+  's3:AbortMultipartUpload',
   's3:DeleteObject',
   's3:DeleteObjectVersion',
+  // Bucket policies are read and written over S3 with this key (fil-one/RFC#30).
+  's3:GetBucketPolicy',
+  's3:PutBucketPolicy',
+  's3:DeleteBucketPolicy',
+  // Every bucket view reads both, and bucket create and update write them.
+  's3:GetBucketVersioning',
+  's3:PutBucketVersioning',
+  's3:GetBucketObjectLockConfiguration',
+  's3:PutBucketObjectLockConfiguration',
+  // The rest of the enum. The console does not call these; the key holds
+  // them because it holds every action in the enum.
+  's3:GetBucketLocation',
+  's3:GetBucketAcl',
+  's3:GetBucketCORS',
+  's3:GetBucketTagging',
+  's3:GetObjectAttributes',
+  's3:GetObjectTagging',
+  's3:PutObjectTagging',
+  's3:DeleteObjectTagging',
+  's3:GetBucketPolicyStatus',
+  's3:GetEncryptionConfiguration',
+  's3:PutEncryptionConfiguration',
+  's3:PutBucketTagging',
+  's3:PutBucketCORS',
 ] as const;
 
 const dynamo = getDynamoClient();
@@ -151,6 +177,26 @@ async function processTenantSetup(
       { abortSignal: requestOptions?.signal },
     );
   }
+
+  // Every current member becomes a principal, so a policy can name them and a
+  // key can bind to them. A member who joins once the pointer below is visible
+  // registers themselves (`registerMemberPrincipal`); one who joins in between is
+  // not a principal until their first key mint or the first policy naming them.
+  const members = await listMembers(orgId);
+  // A scan stopped at the cap would publish a tenant whose unregistered
+  // members no policy can name; refuse instead, and the request tries again.
+  if (members.length >= MAX_MEMBERS) {
+    throw new Error(`The member scan of org ${orgId} stopped at ${MAX_MEMBERS} members`);
+  }
+  // Ten at a time: a few hundred members would otherwise run for the whole
+  // request, one principal after another (FIL-1504 asks for a batch route).
+  await pMap(
+    members,
+    ({ userId }) => syncPrincipal({ client, orchestratorId: id, tenantId: orgId, userId }),
+    {
+      concurrency: 10,
+    },
+  );
 
   try {
     await dynamo.send(

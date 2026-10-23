@@ -40,9 +40,9 @@ export type RouteCategory =
  *
  * `'invite-token'` marks the one route whose caller is, by definition, not yet a
  * member of the org it acts on: accepting an invitation. Its authorization is
- * the single-use token in the body plus a session whose verified email is the
- * invited address, both checked in the handler; a membership gate in the chain
- * would refuse every invitation there is. Deliberately not `'self'`, which is
+ * the single-use token in the body plus a session whose email is the invited
+ * address, both checked in the handler, which then marks that address verified;
+ * a membership gate in the chain would refuse every invitation there is. Deliberately not `'self'`, which is
  * for routes that touch no org state at all — accepting creates a membership.
  *
  * Two `'in-handler'` routes are membership-only: creating an additional org,
@@ -55,7 +55,7 @@ export type RouteCategory =
 export type RouteRequirement = Permission | 'self' | 'in-handler' | 'invite-token';
 
 export interface RouteManifestEntry {
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** API Gateway route path, as passed to `addRoute` in sst.config.ts. */
   path: string;
   /** Handler module under `packages/backend/src/handlers/`, without extension. */
@@ -124,6 +124,33 @@ const MANIFEST = [
     handler: 'get-bucket-analytics',
     category: 'authenticated',
     requires: 'buckets.read',
+  },
+  // The bucket's policy, on a region serving the `iam` access model. Reading
+  // takes the same permission as writing: the document names other members,
+  // and a member learns their own reach from the bucket list. The PUT narrows
+  // further in the handler: a statement granting a retention or legal-hold
+  // write needs `privileged.grant`, which depends on the body.
+  {
+    method: 'GET',
+    path: '/api/buckets/{name}/policy',
+    handler: 'get-bucket-policy',
+    category: 'authenticated',
+    requires: 'buckets.policy_manage',
+  },
+  {
+    method: 'PUT',
+    path: '/api/buckets/{name}/policy',
+    handler: 'put-bucket-policy',
+    category: 'authenticated',
+    requires: 'buckets.policy_manage',
+    capsInHandler: true,
+  },
+  {
+    method: 'DELETE',
+    path: '/api/buckets/{name}/policy',
+    handler: 'delete-bucket-policy',
+    category: 'authenticated',
+    requires: 'buckets.policy_manage',
   },
   {
     method: 'GET',
@@ -206,6 +233,9 @@ const MANIFEST = [
   // Minting a key is `keys.create`. The creator-authority cap runs in the
   // handler on top of it: the requested key permissions are intersected with the
   // creator's own, so a key can never carry more than the member minting it.
+  // A service-key body on a region serving the `iam` model also takes
+  // `keys.create_service`, checked in the handler beside the cap: which check
+  // applies depends on the body, which the chain cannot read.
   {
     method: 'POST',
     path: '/api/access-keys',
@@ -394,9 +424,8 @@ const MANIFEST = [
   },
   // Outside the org gate, and it has to be: the caller is not a member of the
   // inviting org yet, so a membership check here would refuse every invitation
-  // there is. The token plus a session whose verified email matches the
-  // invitation is the whole authorization, and neither is something a role can
-  // grant.
+  // there is. The token plus a session whose email matches the invitation is
+  // the whole authorization, and neither is something a role can grant.
   {
     method: 'POST',
     path: '/api/invitations/accept',

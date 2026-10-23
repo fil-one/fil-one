@@ -4,17 +4,22 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import {
   ACCESS_KEY_PERMISSION_REQUIREMENT,
   ApiErrorCode,
+  BUCKET_CONFIG_PERMISSIONS,
   CSRF_COOKIE_NAME,
   GRANULAR_PERMISSION_MAP,
   INVITE_TOKEN_MIN_LENGTH,
   GRANULAR_PERMISSION_REQUIREMENT,
   OrgRole,
   PresignOpSchema,
+  RETENTION_WRITE_ACTIONS,
   ROUTE_MANIFEST,
+  S3Region,
   roleHasPermission,
   SubscriptionStatus,
 } from '@filone/shared';
 import type { Permission, RouteManifestEntry } from '@filone/shared';
+import type { PolicyAction } from '@filone/shared';
+import { policyOf, statement } from './test/policy-statements.ts';
 import type { OrgMembership } from './lib/org-membership.ts';
 import { sstResourceMock } from './test/sst-resource-mock.ts';
 import { authPartialMock } from './test/auth-partial-mock.ts';
@@ -55,7 +60,7 @@ process.env.FILONE_STAGE ??= 'test';
 process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
 
 const ORG_ID = 'org-1';
-const USER_ID = 'user-1';
+const USER_ID = '00000000-0000-4000-8000-000000000001';
 /** Not a foundation address, so the RAG gate's answer hinges on the allowlist. */
 const OUTSIDER_EMAIL = 'outsider@example.com';
 /** The refusal `ragAccessMiddleware` writes, verbatim. */
@@ -147,11 +152,10 @@ const stubbedRows = new Map<string, Record<string, unknown>>();
  */
 function withActiveSubscription(): void {
   beforeEach(() => {
-    // Both rows the store reads, because it reads them together: the org row is
-    // the one it serves, and an unstubbed legacy read would reject alongside it.
-    // Spelled out rather than read from the store's key helpers, which reach
-    // the sst resources this file mocks and cannot be imported at the top.
-    for (const pk of [`ORG#${ORG_ID}`, `CUSTOMER#${USER_ID}`]) {
+    // The org row the store reads. Spelled out rather than read from the
+    // store's key helpers, which reach the sst resources this file mocks and
+    // cannot be imported at the top.
+    for (const pk of [`ORG#${ORG_ID}`]) {
       stubbedRows.set(
         rowKey('BillingTable', pk, 'SUBSCRIPTION'),
         marshall({ pk, orgId: ORG_ID, subscriptionStatus: SubscriptionStatus.Active }),
@@ -195,6 +199,7 @@ type LambdaModule = {
 /** The parts of a request an in-handler route reads to decide its permission. */
 type RouteRequest = {
   body?: string;
+  headers?: Record<string, string>;
   queryStringParameters?: Record<string, string>;
   pathParameters?: Record<string, string>;
 };
@@ -223,7 +228,7 @@ async function invokeRoute(
   },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const module = (await import(`./handlers/${route.handler}.ts`)) as LambdaModule;
-  const { pathParameters, ...eventProps } = request;
+  const { pathParameters, headers, ...eventProps } = request;
   const event = buildEvent({
     ...eventProps,
     method: route.method,
@@ -233,6 +238,7 @@ async function invokeRoute(
   // Assigned rather than passed: the shared builder takes no path parameters,
   // and the handler tests set them on the built event the same way.
   if (pathParameters) event.pathParameters = pathParameters;
+  if (headers) Object.assign(event.headers, headers);
   if (csrf) event.headers['x-csrf-token'] = CSRF_TOKEN;
   // Every route here answers with a ResponseBuilder, so the union's string arm
   // never occurs; middy's declared return type carries it anyway.
@@ -599,6 +605,7 @@ describe('the caps routes apply on top of their declared permission', () => {
     // A roster rather than a count, so a route that starts declaring a cap
     // arrives here and has to be given cases rather than passing on a number.
     expect(capped).toStrictEqual([
+      'put-bucket-policy',
       'create-access-key',
       'rotate-access-key',
       'update-member-role',
@@ -615,21 +622,28 @@ describe('the caps routes apply on top of their declared permission', () => {
    * A granular only parses alongside the object permission it hangs off, so the
    * parent comes from the same map the schema checks against. The parent is
    * always one the role holds where the granular is not, which keeps each case
-   * about the permission it names. `us-east-1` because bucket management does
-   * not parse in `eu-west-1` at all, and a body refused at the schema would
-   * answer 400 and say nothing about the cap.
+   * about the permission it names. The region is one the permission parses in,
+   * because a body refused at the schema would answer 400 and say nothing
+   * about the cap: `us-east-1` for most, since bucket management does not parse
+   * in `eu-west-1` at all, and a Forge region for a bucket-configuration write,
+   * which parses nowhere else.
    */
   const parentOf = (granular: string) =>
     Object.entries(GRANULAR_PERMISSION_MAP).find(([, granulars]) =>
       (granulars as string[]).includes(granular),
     )?.[0];
 
+  const regionFor = (keyPermission: string): S3Region =>
+    (BUCKET_CONFIG_PERMISSIONS as readonly string[]).includes(keyPermission)
+      ? S3Region.EuCentral3
+      : S3Region.UsEast1;
+
   const mintRequest = (keyPermission: string, granular: boolean): RouteRequest => ({
     body: JSON.stringify({
       keyName: 'a key',
       permissions: granular ? [parentOf(keyPermission)] : [keyPermission],
       ...(granular && { granularPermissions: [keyPermission] }),
-      region: 'us-east-1',
+      region: regionFor(keyPermission),
     }),
   });
 
@@ -700,6 +714,10 @@ describe('the caps routes apply on top of their declared permission', () => {
         accessKeyId: 'AKIA0000TESTKEY0',
         createdAt: '2026-01-01T00:00:00Z',
         status: 'active',
+        // Stays in `us-east-1` whatever the permission: the rotate cap reads
+        // the stored permissions and never parses them against the region,
+        // and a Forge region refuses a Member's rotation earlier, on the key
+        // kind, with a message that names no permission.
         region: 'us-east-1',
         createdBy: USER_ID,
         permissions: granular ? [parent] : [keyPermission],
@@ -729,6 +747,69 @@ describe('the caps routes apply on top of their declared permission', () => {
       expect(result.body).toContain(keyPermission);
     },
   );
+
+  /**
+   * Writing a bucket policy needs `buckets.policy_manage` to reach the handler,
+   * and `privileged.grant` for a statement that grants a retention write. On a
+   * first policy (`If-None-Match: *`) that check runs before the region is
+   * read, so it answers even in a region without bucket policies: a caller who
+   * may grant reaches the region check (501), and anyone else gets the 403.
+   */
+  describe('granting a retention write through a policy needs privileged.grant', () => {
+    const buildPolicyGrantRequest = (action: string): RouteRequest => ({
+      body: JSON.stringify({
+        policy: policyOf(statement('photos', 'Allow', [USER_ID], [action as PolicyAction])),
+      }),
+      headers: { 'if-none-match': '*' },
+      pathParameters: { name: 'photos' },
+      // A service-keys region, which serves no bucket policies.
+      queryStringParameters: { region: S3Region.EuWest1 },
+    });
+    const editors = Object.values(OrgRole).filter((role) =>
+      roleHasPermission(role, 'buckets.policy_manage'),
+    );
+    const retentionGrantActions = [...RETENTION_WRITE_ACTIONS, 's3:*'];
+    const pairWithRetentionActions = (roles: OrgRole[]) =>
+      roles.flatMap((role) => retentionGrantActions.map((action) => [role, action] as const));
+    const granters = editors.filter((role) => roleHasPermission(role, 'privileged.grant'));
+    const nonGranters = editors.filter((role) => !granters.includes(role));
+
+    it.each(editors)('%s may grant s3:GetObject', async (role) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: buildPolicyGrantRequest('s3:GetObject'),
+      });
+
+      expect({ ...result, body: errorBody(result) }).toMatchObject({
+        statusCode: 501,
+        body: { message: 'Bucket policies are not available in this region' },
+      });
+    });
+
+    it.each(pairWithRetentionActions(granters))('%s may grant %s', async (role, action) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: buildPolicyGrantRequest(action),
+      });
+
+      expect({ ...result, body: errorBody(result) }).toMatchObject({
+        statusCode: 501,
+        body: { message: 'Bucket policies are not available in this region' },
+      });
+    });
+
+    it.each(pairWithRetentionActions(nonGranters))('%s may not grant %s', async (role, action) => {
+      const result = await invokeRoute(routeFor('put-bucket-policy'), {
+        membership: membershipFor(ORG_ID, USER_ID, role),
+        request: buildPolicyGrantRequest(action),
+      });
+
+      expect({ ...result, body: errorBody(result) }).toMatchObject({
+        statusCode: 403,
+        body: { code: ApiErrorCode.RETENTION_GRANT_FORBIDDEN },
+      });
+    });
+  });
 
   /**
    * The other cap in this stack is a ceiling on who the caller may reach.

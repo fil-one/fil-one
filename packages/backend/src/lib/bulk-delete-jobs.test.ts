@@ -6,7 +6,7 @@ import {
   GetItemCommand,
   PutItemCommand,
 } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
+import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 
 import {
   BulkDeleteJobStatus,
@@ -159,6 +159,7 @@ const createArgs = {
   bucketName: 'bucket',
   prefix: '',
   scope: BulkDeleteScope.AllVersions,
+  startedBy: 'any-user',
 };
 
 function conditionalFailure() {
@@ -189,6 +190,16 @@ describe('createBulkDeleteJob', () => {
     expect(record.jobId).toBe(deriveBulkDeleteJobId(createArgs));
     const input = ddbMock.commandCalls(PutItemCommand)[0].args[0].input;
     expect(input.ConditionExpression).toBe('attribute_not_exists(sk)');
+  });
+
+  it('records the user who started the job', async () => {
+    ddbMock.on(PutItemCommand).resolves({});
+
+    const record = await createBulkDeleteJob(createArgs);
+
+    expect(record).toMatchObject({ startedBy: 'any-user' });
+    const item = ddbMock.commandCalls(PutItemCommand)[0].args[0].input.Item!;
+    expect(unmarshall(item)).toMatchObject({ startedBy: 'any-user' });
   });
 
   it('surfaces the running job when the same idempotency key is submitted twice', async () => {

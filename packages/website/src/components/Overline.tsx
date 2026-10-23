@@ -7,9 +7,7 @@ type OverlineProps = {
 
 export function Overline({ children, className }: OverlineProps) {
   return (
-    <p
-      className={clsx('text-meta font-semibold uppercase tracking-widest text-zinc-500', className)}
-    >
+    <p className={clsx('text-meta font-medium uppercase tracking-widest text-zinc-500', className)}>
       {children}
     </p>
   );

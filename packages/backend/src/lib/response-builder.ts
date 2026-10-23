@@ -33,8 +33,9 @@ export function makeClearCookieHeader(name: string): string {
 // corsPreflight configuration in the CDK stack — no need to set them here.
 export class ResponseBuilder {
   private _statusCode = 200;
-  private _body: object = {};
+  private _body: object | null = {};
   private _cookies: string[] = [];
+  private _headers: Record<string, string> = {};
 
   status(code: number): this {
     this._statusCode = code;
@@ -43,6 +44,17 @@ export class ResponseBuilder {
 
   body<T extends object>(b: T): this {
     this._body = b;
+    return this;
+  }
+
+  /** No body and no Content-Type, as a 204 carries. */
+  emptyBody(): this {
+    this._body = null;
+    return this;
+  }
+
+  header(name: string, value: string): this {
+    this._headers[name] = value;
     return this;
   }
 
@@ -55,12 +67,13 @@ export class ResponseBuilder {
     return {
       statusCode: this._statusCode,
       headers: {
-        'Content-Type': 'application/json',
+        ...(this._body !== null && { 'Content-Type': 'application/json' }),
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
         'Strict-Transport-Security': 'max-age=2592000; includeSubDomains',
+        ...this._headers,
       },
-      body: JSON.stringify(this._body),
+      body: this._body === null ? '' : JSON.stringify(this._body),
       ...(this._cookies.length > 0 && { cookies: this._cookies }),
     };
   }
@@ -138,7 +151,7 @@ export function tenantNotReadyResponse(): APIGatewayProxyStructuredResultV2 {
  * The keys are gone whatever the transaction did, so a refusal that dropped
  * them would leave the console unable to say what just happened.
  */
-export type ErrorWithRevokedKeys = ErrorResponse & { revokedKeys: AccessKeySummary[] };
+export type ErrorWithKeysRevoked = ErrorResponse & { keysRevoked: AccessKeySummary[] };
 
 /**
  * The answer to a cancellation nothing can name. Rethrows when no key was
@@ -150,17 +163,17 @@ export function unattributableFailure(
   {
     source,
     orgId,
-    revokedKeys,
-  }: { source: string; orgId: string; revokedKeys: AccessKeySummary[] },
+    keysRevoked,
+  }: { source: string; orgId: string; keysRevoked: AccessKeySummary[] },
 ): APIGatewayProxyStructuredResultV2 {
-  if (revokedKeys.length === 0) throw err;
+  if (keysRevoked.length === 0) throw err;
 
   console.error(`[${source}] Unattributable failure after revoking keys`, {
     orgId,
-    revoked: revokedKeys.length,
+    revoked: keysRevoked.length,
     error: err,
   });
-  return unexpectedFailureResponse(revokedKeys);
+  return unexpectedFailureResponse(keysRevoked);
 }
 
 /**
@@ -169,13 +182,27 @@ export function unattributableFailure(
  * fault itself is disclosed either way.
  */
 export function unexpectedFailureResponse(
-  revokedKeys: AccessKeySummary[] = [],
+  keysRevoked: AccessKeySummary[] = [],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(500)
-    .body<ErrorResponse | ErrorWithRevokedKeys>({
+    .body<ErrorResponse | ErrorWithKeysRevoked>({
       message: 'An unexpected server error occurred. Please try again later.',
-      ...(revokedKeys.length > 0 ? { revokedKeys } : {}),
+      ...(keysRevoked.length > 0 ? { keysRevoked } : {}),
+    })
+    .build();
+}
+
+/**
+ * 504 rather than 500: the request deadline fired before the storage service
+ * answered, so the backend, acting as its gateway, ran out of time. The same
+ * request may succeed once the service recovers.
+ */
+export function storageTimeoutResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(504)
+    .body<ErrorResponse>({
+      message: 'The storage service took too long to respond. Please try again.',
     })
     .build();
 }
@@ -203,13 +230,13 @@ export function refusedKeysSubject(failedKeys: readonly AccessKeySummary[]): str
  * caller: `authorize` answers for a caller without a membership, with a 403.
  */
 export function notAMemberResponse(
-  revokedKeys?: AccessKeySummary[],
+  keysRevoked?: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(404)
-    .body<ErrorResponse | ErrorWithRevokedKeys>({
+    .body<ErrorResponse | ErrorWithKeysRevoked>({
       message: 'That person is not a member of this organization.',
-      ...(revokedKeys ? { revokedKeys } : {}),
+      ...(keysRevoked ? { keysRevoked } : {}),
     })
     .build();
 }
@@ -232,7 +259,7 @@ export function beyondCeilingResponse(verbPhrase: string): APIGatewayProxyStruct
 /**
  * The 409s a membership transaction cancels with. Each one reads a condition
  * the transaction carried as a statement about the org, and each may land after
- * a revocation, so `revokedKeys` rides along when the caller has any to report:
+ * a revocation, so `keysRevoked` rides along when the caller has any to report:
  * those keys are gone whatever the roster now says, and an answer that named
  * only the roster would hide half of what happened.
  */
@@ -244,14 +271,14 @@ export function beyondCeilingResponse(verbPhrase: string): APIGatewayProxyStruct
  */
 export function lastOwnerResponse(
   remedy: string,
-  revokedKeys?: AccessKeySummary[],
+  keysRevoked?: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse | ErrorWithRevokedKeys>({
+    .body<ErrorResponse | ErrorWithKeysRevoked>({
       message: `This organization would be left without an owner. ${remedy}`,
       code: ApiErrorCode.LAST_OWNER,
-      ...(revokedKeys ? { revokedKeys } : {}),
+      ...(keysRevoked ? { keysRevoked } : {}),
     })
     .build();
 }
@@ -266,26 +293,26 @@ export function lastOwnerResponse(
  */
 export function ownerCountUnavailableResponse(
   attempted: 'updated' | 'read',
-  revokedKeys?: AccessKeySummary[],
+  keysRevoked?: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse | ErrorWithRevokedKeys>({
+    .body<ErrorResponse | ErrorWithKeysRevoked>({
       message: `The organization’s owner count could not be ${attempted}. Please contact support.`,
-      ...(revokedKeys ? { revokedKeys } : {}),
+      ...(keysRevoked ? { keysRevoked } : {}),
     })
     .build();
 }
 
 /** An invitation the change retires was accepted or revoked underneath it. */
 export function invitationRaceResponse(
-  revokedKeys?: AccessKeySummary[],
+  keysRevoked?: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse | ErrorWithRevokedKeys>({
+    .body<ErrorResponse | ErrorWithKeysRevoked>({
       message: 'An invitation from that member changed while this was in flight — try again.',
-      ...(revokedKeys ? { revokedKeys } : {}),
+      ...(keysRevoked ? { keysRevoked } : {}),
     })
     .build();
 }
@@ -303,13 +330,13 @@ export function invitationRaceResponse(
  */
 export function keyMintedResponse(
   subject: string,
-  revokedKeys: AccessKeySummary[],
+  keysRevoked: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorWithRevokedKeys>({
+    .body<ErrorWithKeysRevoked>({
       message: `An access key was created for ${subject} while this was in flight — try again.`,
-      revokedKeys,
+      keysRevoked,
     })
     .build();
 }
@@ -321,13 +348,13 @@ export function keyMintedResponse(
  */
 export function memberRoleChangedResponse(
   during: string,
-  revokedKeys?: AccessKeySummary[],
+  keysRevoked?: AccessKeySummary[],
 ): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
-    .body<ErrorResponse | ErrorWithRevokedKeys>({
+    .body<ErrorResponse | ErrorWithKeysRevoked>({
       message: `That member’s role changed ${during}.`,
-      ...(revokedKeys ? { revokedKeys } : {}),
+      ...(keysRevoked ? { keysRevoked } : {}),
     })
     .build();
 }

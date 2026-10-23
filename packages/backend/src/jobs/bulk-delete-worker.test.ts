@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import { BulkDeleteJobStatus, BulkDeleteScope, S3Region } from '@filone/shared';
+import { BulkDeleteJobStatus, BulkDeleteScope, OrgRole, S3Region } from '@filone/shared';
 
 import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
 
@@ -28,9 +28,16 @@ vi.mock('../lib/s3-bucket-operations.ts', () => ({
 }));
 vi.mock('../lib/s3-client.ts', () => ({ createS3Client: vi.fn(() => ({})) }));
 vi.mock('../lib/org-profile.ts', () => ({ getOrgProfile: vi.fn(async () => ({})) }));
+const mockResolveMemberAccess = vi.fn();
+const mockResolveMembership = vi.fn();
+vi.mock('../lib/org-membership.ts', () => ({
+  resolveMembership: (...args: unknown[]) => mockResolveMembership(...args),
+}));
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  getOrchestratorForRegion: vi.fn(() => ({
+  getOrchestratorForRegion: vi.fn((region: string) => ({
+    region,
     isTenantReady: () => 'tenant-1',
+    resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args),
     getS3ClientContext: async () => ({
       endpointUrl: 'https://s3.example.com',
       region: 'auto',
@@ -49,6 +56,7 @@ vi.mock('../lib/bulk-delete-queue.ts', async (importOriginal) => {
 
 import { getBulkDeleteJob, putBulkDeleteJob } from '../lib/bulk-delete-jobs.ts';
 import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.ts';
+import { getBucketVersioningStatus } from '../lib/s3-bucket-operations.ts';
 import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.ts';
 import { processJob } from './bulk-delete-worker.ts';
 
@@ -254,5 +262,229 @@ describe('bulk-delete worker', () => {
     const saved = lastSavedJob();
     expect(saved.status).toBe(BulkDeleteJobStatus.Failed);
     expect(saved.error).toContain('not provisioned');
+  });
+
+  // The worker deletes with the tenant's key, so the starter's role and, for a
+  // scoped member, their bucket access are re-checked before each run: a change
+  // made after the job was queued applies to its next run.
+  describe('a job a member started, on an iam region', () => {
+    const memberJob = (overrides: Partial<BulkDeleteJobRecord> = {}) =>
+      job({ region: S3Region.UsEast9, startedBy: 'any-member', ...overrides });
+    const allVersionsActions = [
+      's3:ListBucketVersions',
+      's3:DeleteObject',
+      's3:DeleteObjectVersion',
+    ];
+
+    beforeEach(() => {
+      mockEnumerate.mockResolvedValue({ targets: [{ key: 'a.txt' }] });
+      mockResolveMembership.mockResolvedValue({ role: OrgRole.Member });
+    });
+
+    it('deletes when the member still holds every action the scope needs', async () => {
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockResolvedValue([
+        { bucketName: 'bucket', actions: allVersionsActions },
+      ]);
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+      expect(lastSavedJob().status).toBe(BulkDeleteJobStatus.Completed);
+    });
+
+    it('deletes for a member without s3:DeleteObjectVersion on a bucket that never enabled versioning', async () => {
+      // The worker drops the "null" version id there and issues plain deletes.
+      vi.mocked(getBucketVersioningStatus).mockResolvedValueOnce('Never');
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockResolvedValue([
+        { bucketName: 'bucket', actions: ['s3:ListBucketVersions', 's3:DeleteObject'] },
+      ]);
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+      expect(lastSavedJob().status).toBe(BulkDeleteJobStatus.Completed);
+    });
+
+    it("reads the bucket's versioning once a run, though access is checked before every page", async () => {
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockResolvedValue([
+        { bucketName: 'bucket', actions: allVersionsActions },
+      ]);
+      mockEnumerate
+        .mockResolvedValueOnce({ targets: [{ key: 'a.txt' }], nextCursor: { keyMarker: 'a.txt' } })
+        .mockResolvedValueOnce({ targets: [{ key: 'b.txt' }] });
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(mockResolveMemberAccess).toHaveBeenCalledTimes(2);
+      expect(getBucketVersioningStatus).toHaveBeenCalledTimes(1);
+    });
+
+    // Revoked mid-run, after the first page: the check before the second page
+    // stops the job, and the first page's progress is kept.
+    it.each([
+      {
+        revocation: 'the starter is demoted to ReadOnly',
+        revoke: () =>
+          mockResolveMembership
+            .mockResolvedValueOnce({ role: OrgRole.Member })
+            .mockResolvedValueOnce({ role: OrgRole.ReadOnly }),
+        error: 'Your role no longer permits deleting objects',
+      },
+      {
+        revocation: "the bucket's policy stops granting the starter",
+        revoke: () =>
+          mockResolveMemberAccess
+            .mockResolvedValueOnce([{ bucketName: 'bucket', actions: allVersionsActions }])
+            .mockResolvedValueOnce([]),
+        error: 'Your access to bucket no longer permits bulk deletion',
+      },
+    ])(
+      'stops before the next page when $revocation between two pages',
+      async ({ revoke, error }) => {
+        mockGetJob.mockResolvedValue(memberJob());
+        mockResolveMemberAccess.mockResolvedValue([
+          { bucketName: 'bucket', actions: allVersionsActions },
+        ]);
+        revoke();
+        mockEnumerate.mockResolvedValueOnce({
+          targets: [{ key: 'a.txt' }],
+          nextCursor: { keyMarker: 'a.txt' },
+        });
+        mockDelete.mockResolvedValue({ deleted: 1, failures: [] });
+
+        await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+        expect(mockEnumerate).toHaveBeenCalledTimes(1);
+        expect(mockDelete).toHaveBeenCalledTimes(1);
+        expect(lastSavedJob()).toMatchObject({
+          status: BulkDeleteJobStatus.Failed,
+          deletedCount: 1,
+          error,
+        });
+      },
+    );
+
+    it.each([
+      // A role change leaves bucket policies alone, so the policy still grants.
+      ['has since been demoted to ReadOnly', { role: OrgRole.ReadOnly }],
+      ['is no longer a member', undefined],
+    ])('fails the job without deleting when the starter %s', async (_case, membership) => {
+      mockResolveMembership.mockResolvedValue(membership);
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockResolvedValue([
+        { bucketName: 'bucket', actions: allVersionsActions },
+      ]);
+
+      // A role change will not be undone by redelivery.
+      await expect(processJob(payload, FIRST_DELIVERY, generousBudget)).resolves.toBeUndefined();
+
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(lastSavedJob()).toMatchObject({
+        status: BulkDeleteJobStatus.Failed,
+        error: 'Your role no longer permits deleting objects',
+      });
+    });
+
+    it("reads the starter's membership in the job's org", async () => {
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockResolvedValue([
+        { bucketName: 'bucket', actions: allVersionsActions },
+      ]);
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(mockResolveMembership).toHaveBeenCalledWith('org-1', 'any-member');
+    });
+
+    it('deletes without a policy check for a starter since promoted to Admin', async () => {
+      mockResolveMembership.mockResolvedValue({ role: OrgRole.Admin });
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockResolvedValue([]);
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(mockResolveMemberAccess).not.toHaveBeenCalled();
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it("looks up the member's access by tenant and member id", async () => {
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockResolvedValue([
+        { bucketName: 'bucket', actions: allVersionsActions },
+      ]);
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(mockResolveMemberAccess).toHaveBeenCalledWith('tenant-1', 'any-member');
+    });
+
+    it.each([
+      [
+        'no policy grants the member the bucket any longer',
+        [] as { bucketName: string; actions: string[] }[],
+      ],
+      [
+        "the bucket's policy no longer grants s3:DeleteObjectVersion",
+        [{ bucketName: 'bucket', actions: ['s3:ListBucketVersions', 's3:DeleteObject'] }],
+      ],
+    ])('fails the job without listing or deleting when %s', async (_case, access) => {
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockResolvedValue(access);
+
+      // A policy change will not be undone by redelivery, so the first delivery
+      // fails the job rather than spending the retries.
+      await expect(processJob(payload, FIRST_DELIVERY, generousBudget)).resolves.toBeUndefined();
+
+      expect(mockEnumerate).not.toHaveBeenCalled();
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(lastSavedJob()).toMatchObject({
+        status: BulkDeleteJobStatus.Failed,
+        error: 'Your access to bucket no longer permits bulk deletion',
+      });
+    });
+
+    it('re-checks access on a continuation, not only on the first run', async () => {
+      // A job resumed from a checkpoint after the member lost the bucket.
+      mockGetJob.mockResolvedValue(memberJob({ resumeCount: 2, cursor: { keyMarker: 'a.txt' } }));
+      mockResolveMemberAccess.mockResolvedValue([]);
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(lastSavedJob().status).toBe(BulkDeleteJobStatus.Failed);
+    });
+
+    it('leaves a failed access lookup to redelivery', async () => {
+      mockGetJob.mockResolvedValue(memberJob());
+      mockResolveMemberAccess.mockRejectedValue(new Error('management api unavailable'));
+
+      await expect(processJob(payload, FIRST_DELIVERY, generousBudget)).rejects.toThrow(
+        'management api unavailable',
+      );
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(mockPutJob).not.toHaveBeenCalled();
+    });
+
+    it('runs a job queued before its starter was recorded without either lookup', async () => {
+      mockGetJob.mockResolvedValue(memberJob({ startedBy: undefined }));
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(mockResolveMembership).not.toHaveBeenCalled();
+      expect(mockResolveMemberAccess).not.toHaveBeenCalled();
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips the lookup on a service-keys region', async () => {
+      mockGetJob.mockResolvedValue(memberJob({ region: S3Region.EuWest1 }));
+
+      await processJob(payload, FIRST_DELIVERY, generousBudget);
+
+      expect(mockResolveMemberAccess).not.toHaveBeenCalled();
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+    });
   });
 });

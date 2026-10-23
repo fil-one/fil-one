@@ -73,8 +73,35 @@ export type UpdateTenantStatusRequest = {
  * **Bucket-level** — operating on buckets via the S3 Gateway:
  *
  * * `s3:CreateBucket` — create a bucket.
- * * `s3:ListAllMyBuckets` — list the tenant's buckets.
+ * * `s3:ListAllMyBuckets` — list the tenant's buckets. Every
+ * principal-bound key holds it; a bucket policy never grants
+ * or denies it.
  * * `s3:DeleteBucket` — delete a bucket.
+ * * `s3:GetBucketPolicy`, `s3:PutBucketPolicy`,
+ * `s3:DeleteBucketPolicy` — read, write and delete a bucket's
+ * policy. `s3:GetBucketPolicyStatus` — read whether the policy
+ * makes the bucket public. A bucket policy never grants
+ * them; only a service key holds them.
+ * * `s3:GetEncryptionConfiguration`,
+ * `s3:PutEncryptionConfiguration` — read, set and remove a
+ * bucket's default encryption. A bucket policy never grants
+ * them; only a service key holds them.
+ * * `s3:GetBucketVersioning`, `s3:PutBucketVersioning` — read and
+ * set a bucket's versioning state.
+ * * `s3:GetBucketObjectLockConfiguration`,
+ * `s3:PutBucketObjectLockConfiguration` — read and set a bucket's
+ * default object-lock retention.
+ *
+ * * `s3:GetBucketLocation`, `s3:GetBucketAcl`, `s3:GetBucketCORS`,
+ * `s3:GetBucketTagging` — read a bucket's region, ACL, CORS
+ * configuration and tags.
+ * * `s3:PutBucketTagging` — set and remove a bucket's tags.
+ * * `s3:PutBucketCORS` — set or remove a bucket's own CORS
+ * configuration, which replaces the gateway's default for that
+ * bucket. Removing it needs the same action, as on AWS.
+ *
+ * A bucket policy may grant the versioning, object-lock and
+ * configuration reads; the writes are held only by a service key.
  *
  * **Object-level** — operating on objects within buckets. The
  * basic actions (`s3:GetObject`, `s3:PutObject`, `s3:ListBucket`,
@@ -83,6 +110,8 @@ export type UpdateTenantStatusRequest = {
  * legal holds.
  *
  * * `s3:GetObject` — get an object and its metadata.
+ * * `s3:GetObjectAttributes` — get an object's attributes, such as
+ * its checksums and parts.
  * * `s3:GetObjectVersion` — get a specific object version.
  * * `s3:GetObjectRetention` — read an object's retention policy.
  * * `s3:GetObjectLegalHold` — read an object's legal-hold status.
@@ -99,8 +128,14 @@ export type UpdateTenantStatusRequest = {
  * uploads in a bucket. (Same AWS quirk as `s3:ListBucket`
  * above: the name says "Bucket" but the action operates on
  * uploads within it.)
+ * * `s3:ListMultipartUploadParts` — list the parts of an
+ * in-progress multipart upload.
+ * * `s3:AbortMultipartUpload` — abort an in-progress multipart
+ * upload.
  * * `s3:DeleteObject` — delete an object.
  * * `s3:DeleteObjectVersion` — delete a specific object version.
+ * * `s3:GetObjectTagging`, `s3:PutObjectTagging`,
+ * `s3:DeleteObjectTagging` — read, set and remove an object's tags.
  *
  */
 export type AccessKeyPermission =
@@ -117,10 +152,170 @@ export type AccessKeyPermission =
   | 's3:ListBucket'
   | 's3:ListBucketVersions'
   | 's3:ListBucketMultipartUploads'
+  | 's3:ListMultipartUploadParts'
+  | 's3:AbortMultipartUpload'
   | 's3:DeleteObject'
-  | 's3:DeleteObjectVersion';
+  | 's3:DeleteObjectVersion'
+  | 's3:GetBucketPolicy'
+  | 's3:PutBucketPolicy'
+  | 's3:DeleteBucketPolicy'
+  | 's3:GetBucketVersioning'
+  | 's3:PutBucketVersioning'
+  | 's3:GetBucketObjectLockConfiguration'
+  | 's3:PutBucketObjectLockConfiguration'
+  | 's3:GetBucketLocation'
+  | 's3:GetBucketAcl'
+  | 's3:GetBucketCORS'
+  | 's3:PutBucketCORS'
+  | 's3:GetBucketTagging'
+  | 's3:GetObjectAttributes'
+  | 's3:GetObjectTagging'
+  | 's3:PutObjectTagging'
+  | 's3:DeleteObjectTagging'
+  | 's3:GetBucketPolicyStatus'
+  | 's3:GetEncryptionConfiguration'
+  | 's3:PutEncryptionConfiguration'
+  | 's3:PutBucketTagging';
 
-export type CreateAccessKeyRequest = {
+/**
+ * Caller-supplied, opaque, unique within the tenant. FilOne uses
+ * its member user id. The value `*` is reserved for the policy
+ * wildcard and must be rejected (422).
+ *
+ */
+export type PrincipalId = string;
+
+export type Principal = {
+  principalId: PrincipalId;
+  createdAt: string;
+};
+
+export type PrincipalList = {
+  items: Array<Principal>;
+};
+
+/**
+ * A concrete `PolicyAction`: every value except `s3:*`. A
+ * principal's effective actions are always reported in this form.
+ *
+ */
+export type PolicyConcreteAction =
+  | 's3:GetObject'
+  | 's3:GetObjectVersion'
+  | 's3:GetObjectAttributes'
+  | 's3:GetObjectRetention'
+  | 's3:GetObjectLegalHold'
+  | 's3:ListBucket'
+  | 's3:ListBucketVersions'
+  | 's3:ListBucketMultipartUploads'
+  | 's3:ListMultipartUploadParts'
+  | 's3:PutObject'
+  | 's3:AbortMultipartUpload'
+  | 's3:PutObjectRetention'
+  | 's3:PutObjectLegalHold'
+  | 's3:DeleteObject'
+  | 's3:DeleteObjectVersion'
+  | 's3:GetObjectTagging'
+  | 's3:PutObjectTagging'
+  | 's3:DeleteObjectTagging'
+  | 's3:GetBucketAcl'
+  | 's3:GetBucketCORS'
+  | 's3:GetBucketLocation'
+  | 's3:GetBucketObjectLockConfiguration'
+  | 's3:GetBucketTagging'
+  | 's3:GetBucketVersioning';
+
+/**
+ * An action a bucket policy statement may carry: a
+ * `PolicyConcreteAction`, or `s3:*`, which stands for exactly those
+ * values. A policy never grants `s3:CreateBucket`,
+ * `s3:DeleteBucket` or `s3:ListAllMyBuckets`, the bucket policy
+ * operations, or a write to the bucket's configuration
+ * (versioning, default object lock, tags, encryption, CORS).
+ *
+ */
+export type PolicyAction = PolicyConcreteAction | 's3:*';
+
+/**
+ * One statement of an AWS bucket policy. `Condition` and
+ * `NotPrincipal` are rejected (422). `Action` and `Resource` are
+ * accepted as a string or a list and returned as a list.
+ *
+ */
+export type PolicyStatement = {
+  /**
+   * Optional label. Stored and returned; nothing evaluates it.
+   */
+  Sid?: string;
+  Effect: 'Allow' | 'Deny';
+  /**
+   * The principals the statement applies to: the bare string `*`
+   * (or `{"AWS": "*"}`) for every live principal of the tenant, or
+   * `{"AWS": ...}` naming principals by user ARN,
+   * `arn:aws:iam:::user/<principalId>`, with an empty account
+   * field since the bucket already fixes the tenant. One ARN or a
+   * list is accepted; a list is returned. `*` inside the list is
+   * rejected (422).
+   *
+   */
+  Principal:
+    | '*'
+    | {
+        AWS: string | Array<string>;
+      };
+  Action: PolicyAction | Array<PolicyAction>;
+  /**
+   * The bucket the policy is stored on: `arn:aws:s3:::<bucket>` for
+   * `s3:ListBucket`, `s3:ListBucketVersions`,
+   * `s3:ListBucketMultipartUploads` and the `s3:GetBucket*`
+   * configuration reads, `arn:aws:s3:::<bucket>*` for
+   * every other action, and both for `s3:*`. A key prefix, a
+   * wildcard in the bucket name or another bucket is rejected
+   * (422).
+   *
+   */
+  Resource: string | Array<string>;
+};
+
+/**
+ * A bucket's policy: an AWS bucket policy document, reduced to what
+ * the orchestrator evaluates. A principal's effective actions are
+ * the union of the `Allow` statements naming them minus the union
+ * of the `Deny` statements naming them; an explicit deny wins. Reads
+ * return the canonical form: lists sorted and deduplicated,
+ * statements reordered, `*` for the wildcard principal.
+ *
+ */
+export type BucketPolicy = {
+  /**
+   * The policy language version. Both are evaluated the same way.
+   */
+  Version: '2012-10-17' | '2008-10-17';
+  Statement: Array<PolicyStatement>;
+};
+
+export type PrincipalPolicies = {
+  items: Array<{
+    bucketName: BucketName;
+    policy: BucketPolicy;
+  }>;
+};
+
+export type PrincipalAccess = {
+  buckets: Array<{
+    name: BucketName;
+    actions: Array<PolicyConcreteAction>;
+  }>;
+};
+
+/**
+ * A service key with its own permissions, or a key bound to a principal that carries none.
+ */
+export type CreateAccessKeyRequest =
+  | CreateServiceAccessKeyRequest
+  | CreatePrincipalAccessKeyRequest;
+
+export type CreateServiceAccessKeyRequest = {
   /**
    * Unique within the tenant.
    */
@@ -133,25 +328,60 @@ export type CreateAccessKeyRequest = {
    *
    */
   buckets?: Array<BucketName>;
-  /**
-   * Optional expiration. The Service Orchestrator must reject the credentials
-   * after this time.
-   *
-   */
-  expiresAt?: string | null;
+  expiresAt?: AccessKeyExpiresAt;
 };
 
-export type AccessKey = {
+export type CreatePrincipalAccessKeyRequest = {
+  /**
+   * Unique within the principal.
+   */
+  name: string;
+  principalId: PrincipalId;
+  expiresAt?: AccessKeyExpiresAt;
+};
+
+/**
+ * Optional expiration. The Service Orchestrator must reject the credentials
+ * after this time.
+ *
+ */
+export type AccessKeyExpiresAt = string | null;
+
+/**
+ * A service key with its own permissions, or a key bound to a principal that carries none.
+ */
+export type AccessKey =
+  | ({
+      type: 'service';
+    } & ServiceAccessKey)
+  | ({
+      type: 'principal';
+    } & PrincipalAccessKey);
+
+export type ServiceAccessKey = {
   /**
    * AWS-style access key ID, used by S3 clients.
    */
   accessKeyId: string;
   name: string;
+  type: 'service';
   permissions: Array<AccessKeyPermission>;
   /**
    * Empty or omitted when the key has tenant-wide access.
    */
   buckets?: Array<BucketName>;
+  expiresAt?: string | null;
+  createdAt: string;
+};
+
+export type PrincipalAccessKey = {
+  /**
+   * AWS-style access key ID, used by S3 clients.
+   */
+  accessKeyId: string;
+  name: string;
+  type: 'principal';
+  principalId: PrincipalId;
   expiresAt?: string | null;
   createdAt: string;
 };
@@ -231,6 +461,8 @@ export type TenantId2 = TenantId;
 export type AccessKeyId = string;
 
 export type BucketName2 = BucketName;
+
+export type PrincipalId2 = PrincipalId;
 
 /**
  * Start of the query range (inclusive), RFC 3339. Service Orchestrators
@@ -412,7 +644,9 @@ export type GetTenantsByTenantIdAccessKeysData = {
   path: {
     tenantId: TenantId;
   };
-  query?: never;
+  query?: {
+    principalId?: PrincipalId;
+  };
   url: '/tenants/{tenantId}/access-keys';
 };
 
@@ -459,13 +693,15 @@ export type PostTenantsByTenantIdAccessKeysErrors = {
    */
   404: Error;
   /**
-   * An access key with this `name` already exists for the tenant.
+   * An access key with this `name` already exists for the tenant
+   * (service key) or for the principal (principal-bound key).
+   *
    */
   409: Error;
   /**
-   * Request body is well-formed but fails semantic validation
-   * (missing required field, value out of range, enum mismatch,
-   * cross-field constraint, etc.).
+   * The body fails semantic validation, or `principalId` names no
+   * live principal of the tenant; the latter carries the error
+   * `code` `UnknownPrincipal` so a client can tell it apart.
    *
    */
   422: Error;
@@ -557,6 +793,231 @@ export type GetTenantsByTenantIdAccessKeysByAccessKeyIdResponses = {
 
 export type GetTenantsByTenantIdAccessKeysByAccessKeyIdResponse =
   GetTenantsByTenantIdAccessKeysByAccessKeyIdResponses[keyof GetTenantsByTenantIdAccessKeysByAccessKeyIdResponses];
+
+export type GetTenantsByTenantIdPrincipalsData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals';
+};
+
+export type GetTenantsByTenantIdPrincipalsErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+};
+
+export type GetTenantsByTenantIdPrincipalsError =
+  GetTenantsByTenantIdPrincipalsErrors[keyof GetTenantsByTenantIdPrincipalsErrors];
+
+export type GetTenantsByTenantIdPrincipalsResponses = {
+  /**
+   * The tenant's live principals.
+   */
+  200: PrincipalList;
+};
+
+export type GetTenantsByTenantIdPrincipalsResponse =
+  GetTenantsByTenantIdPrincipalsResponses[keyof GetTenantsByTenantIdPrincipalsResponses];
+
+export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}';
+};
+
+export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+  /**
+   * The write could not take its lock within the orchestrator's
+   * timeout, because another change to the same principal or policy
+   * is in flight. Nothing was written; the caller retries.
+   *
+   */
+  409: Error;
+};
+
+export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdError =
+  DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors[keyof DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors];
+
+export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponses = {
+  /**
+   * Removed (or already absent).
+   */
+  204: void;
+};
+
+export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponse =
+  DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponses[keyof DeleteTenantsByTenantIdPrincipalsByPrincipalIdResponses];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}';
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdError =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdErrors[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdErrors];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdResponses = {
+  /**
+   * Principal details.
+   */
+  200: Principal;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdResponse =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdResponses[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdResponses];
+
+export type PutTenantsByTenantIdPrincipalsByPrincipalIdData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}';
+};
+
+export type PutTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+  /**
+   * The write could not take its lock within the orchestrator's
+   * timeout, because another change to the same principal or policy
+   * is in flight. Nothing was written; the caller retries.
+   *
+   */
+  409: Error;
+  /**
+   * The `principalId` path value is not a valid principal id.
+   */
+  422: Error;
+};
+
+export type PutTenantsByTenantIdPrincipalsByPrincipalIdError =
+  PutTenantsByTenantIdPrincipalsByPrincipalIdErrors[keyof PutTenantsByTenantIdPrincipalsByPrincipalIdErrors];
+
+export type PutTenantsByTenantIdPrincipalsByPrincipalIdResponses = {
+  /**
+   * The principal already existed.
+   */
+  200: Principal;
+  /**
+   * Principal created.
+   */
+  201: Principal;
+};
+
+export type PutTenantsByTenantIdPrincipalsByPrincipalIdResponse =
+  PutTenantsByTenantIdPrincipalsByPrincipalIdResponses[keyof PutTenantsByTenantIdPrincipalsByPrincipalIdResponses];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}/policies';
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesError =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesErrors];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses = {
+  /**
+   * The policies, each with its bucket.
+   */
+  200: PrincipalPolicies;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponse =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdPoliciesResponses];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessData = {
+  body?: never;
+  path: {
+    tenantId: TenantId;
+    principalId: PrincipalId;
+  };
+  query?: never;
+  url: '/tenants/{tenantId}/principals/{principalId}/access';
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors = {
+  /**
+   * Missing or invalid bearer token, or token not authorised for this tenant.
+   */
+  401: Error;
+  /**
+   * Resource not found.
+   */
+  404: Error;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessError =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdAccessErrors];
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses = {
+  /**
+   * The principal's reach.
+   */
+  200: PrincipalAccess;
+};
+
+export type GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponse =
+  GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses[keyof GetTenantsByTenantIdPrincipalsByPrincipalIdAccessResponses];
 
 export type GetTenantsByTenantIdMetricsData = {
   body?: never;

@@ -79,7 +79,7 @@ export function CreateApiKeyPage() {
 
           {/* Right: info panel */}
           <div className="w-64 shrink-0">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            <p className="mb-3 text-xs font-medium uppercase tracking-wider text-zinc-400">
               Good to know
             </p>
             <p className="mb-4 text-sm font-medium text-zinc-700">
@@ -94,10 +94,22 @@ export function CreateApiKeyPage() {
                   or secrets vault.
                 </p>
               </div>
-              <div>
-                <p className="mb-1 font-medium text-zinc-800">Scope by bucket</p>
-                <p>Restrict keys to specific buckets to follow the principle of least privilege.</p>
-              </div>
+              {form.keyType === 'principal' ? (
+                <div>
+                  <p className="mb-1 font-medium text-zinc-800">Follows the bucket policies</p>
+                  <p>
+                    This key can do whatever each bucket's policy lets you do, and changes to a
+                    policy reach it without reissuing it.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <p className="mb-1 font-medium text-zinc-800">Scope by bucket</p>
+                  <p>
+                    Restrict keys to specific buckets to follow the principle of least privilege.
+                  </p>
+                </div>
+              )}
               <div>
                 <p className="mb-1 font-medium text-zinc-800">Set an expiry</p>
                 <p>

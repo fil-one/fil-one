@@ -66,7 +66,7 @@ function MobileUserMenu() {
         <div
           ref={menuRef}
           role="menu"
-          className="absolute left-0 top-12 z-50 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg"
+          className="absolute left-0 top-12 z-50 w-52 rounded-lg border border-zinc-200 bg-white p-1 shadow-md"
         >
           <div className="px-3 py-2">
             <p className="truncate text-sm font-medium text-zinc-900">{displayName}</p>
@@ -228,34 +228,10 @@ export function AppShell({ children }: AppShellProps) {
   useEffect(() => {
     if (!mobileOpen) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        // A menu or dialog opened from inside the drawer handles its own Escape;
-        // the drawer only closes when nothing above it claimed the key. A dialog
-        // is portalled out of the drawer and handles the key on `window`, after
-        // this listener has already seen it, so the key coming from outside the
-        // drawer is what says something above it has focus.
-        if (e.defaultPrevented) return;
-        if (!(e.target instanceof Node) || !drawerRef.current?.contains(e.target)) return;
-        closeDrawer();
-        return;
-      }
-      if (e.key !== 'Tab') return;
       const drawer = drawerRef.current;
       if (!drawer) return;
-      const focusable = drawer.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey && active === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
+      if (e.key === 'Escape' && isUnclaimedEscapeInDrawer(e, drawer)) closeDrawer();
+      if (e.key === 'Tab') trapTabFocus(e, drawer);
     }
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -288,7 +264,7 @@ export function AppShell({ children }: AppShellProps) {
           aria-hidden="true"
           onClick={closeDrawer}
           className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 motion-reduce:duration-0 lg:hidden ${
-            mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+            mobileOpen ? 'opacity-100 ease-out' : 'pointer-events-none opacity-0 ease-in'
           }`}
         />
 
@@ -300,7 +276,7 @@ export function AppShell({ children }: AppShellProps) {
           aria-modal="true"
           aria-label="Navigation menu"
           className={`fixed inset-y-0 right-0 z-40 flex w-72 flex-col bg-white shadow-xl transition-transform duration-200 motion-reduce:duration-0 lg:hidden ${
-            mobileOpen ? 'translate-x-0' : 'translate-x-full'
+            mobileOpen ? 'translate-x-0 ease-out' : 'translate-x-full ease-in'
           }`}
           // Hide from assistive technology when closed
           inert={!mobileOpen || undefined}
@@ -404,4 +380,31 @@ export function AppShell({ children }: AppShellProps) {
       </div>
     </div>
   );
+}
+
+// A menu or dialog opened from inside the drawer handles its own Escape; the
+// drawer only closes when nothing above it claimed the key. A dialog is
+// portalled out of the drawer and handles the key on `window`, after this
+// listener has already seen it, so the key coming from outside the drawer is
+// what says something above it has focus.
+function isUnclaimedEscapeInDrawer(e: KeyboardEvent, drawer: HTMLElement): boolean {
+  return !e.defaultPrevented && e.target instanceof Node && drawer.contains(e.target);
+}
+
+// Wrap Tab and Shift+Tab around the drawer's first and last focusable elements.
+function trapTabFocus(e: KeyboardEvent, drawer: HTMLElement) {
+  const focusable = drawer.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  );
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+  if (e.shiftKey && active === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && active === last) {
+    e.preventDefault();
+    first.focus();
+  }
 }

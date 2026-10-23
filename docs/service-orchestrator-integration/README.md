@@ -6,8 +6,8 @@ This document describes what FilOne needs from a Service Orchestrator to integra
 
 FilOne integrates with a Service Orchestrator through two HTTP surfaces:
 
-- a **Management API** for tenant lifecycle, S3 access-key management, and usage metering; and
-- an **S3 Gateway**, used directly by FilOne's backend and the FilOne Console UI to drive bucket and object operations.
+- a **Management API** for tenant lifecycle, principals, S3 access-key management, and usage metering; and
+- an **S3 Gateway**, used directly by FilOne's backend and the FilOne Console UI to drive bucket, object and bucket-policy operations.
 
 The Management API contract is defined in [`management-openapi.yaml`](./management-openapi.yaml). The S3 Gateway is a standard S3-compatible endpoint; the requirements below describe what FilOne needs from it.
 
@@ -22,6 +22,8 @@ The Management API contract is defined in [`management-openapi.yaml`](./manageme
 |  | - Create / get / delete tenant                   | |
 |  | - Set tenant status                              | |
 |  | - Create / list / get / delete S3 access keys    | |
+|  | - Register / remove principals; read a           | |
+|  |   principal's policies and effective access      | |
 |  | - Query usage metrics (per-tenant & per-bucket)  | |
 |  +--------------------------------------------------+ |
 |                                                       |
@@ -32,6 +34,7 @@ The Management API contract is defined in [`management-openapi.yaml`](./manageme
 |  | - PutObject / GetObject (pre-signed URLs)        | |
 |  | - ListObjectsV2, HeadObject, DeleteObject        | |
 |  | - CreateBucket, ListBuckets, DeleteBucket        | |
+|  | - Get / Put / DeleteBucketPolicy (ETag, If-Match)| |
 |  +--------------------------------------------------+ |
 |                                                       |
 +-------------------------------------------------------+
@@ -50,6 +53,8 @@ The S3 Gateway uses per-tenant AWS Sig V4 access keys, provisioned through the M
 ### Transport
 
 All API traffic — Management API and S3 Gateway alike — must be served over HTTPS/TLS.
+
+FilOne sets a deadline on the Management API and S3 Gateway calls it makes while serving an interactive console read (usage, activity, bucket list, bucket details, bucket analytics), a bucket deletion or an access key creation. A call still unanswered at its deadline is aborted and treated as failed, so endpoints should answer these requests within a few seconds.
 
 ### Versioning
 
@@ -73,7 +78,12 @@ The entire tenant lifecycle — from creation through credential provisioning to
 
 ### S3 Access Keys
 
-End-users manage their own S3 access keys through the FilOne console. The Service Orchestrator must support creating, listing, retrieving, and deleting access keys through the management API. When a user creates an access key, FilOne sends the key name, a set of permissions, an optional list of buckets (for scoped access), and an optional expiration date.
+End-users manage their own S3 access keys through the FilOne console. The Service Orchestrator must support creating, listing, retrieving, and deleting access keys through the management API. A key is one of two kinds, and the shape of the create request decides which:
+
+- A **service key** (`{ name, permissions, buckets?, expiresAt? }`) is authorized from the permissions and optional bucket list it was created with. Its name is unique within the tenant.
+- A **principal-bound key** (`{ name, principalId, expiresAt? }`) belongs to one principal (see [Principals and Bucket Policies](#principals-and-bucket-policies)) and is authorized on every request from the bucket policies naming that principal. It carries no permissions of its own, except `s3:ListAllMyBuckets`, which every principal holds. Its name is unique within its principal. The Service Orchestrator must reject (422) a body that carries `principalId` together with `permissions` or `buckets`, or a `principalId` that is not a live principal of the tenant.
+
+The key list serves both kinds and filters by principal when asked.
 
 In addition to user-created keys, FilOne creates one system S3 access key per tenant during onboarding. This key is used by the FilOne Console UI to perform bucket and object operations on the user's behalf (create/list/delete buckets, upload/download/list/delete objects, etc.). The system key is created via the same `POST /tenants/{tenantId}/access-keys` endpoint and is transparent to the Service Orchestrator: from the Service Orchestrator's perspective, a tenant has `1 + X` access keys at any moment — one created by FilOne and `X` created by the end user. The Service Orchestrator does not need to treat the system key specially.
 
@@ -82,17 +92,27 @@ FilOne uses AWS S3 IAM action names as permission scopes. The Service Orchestrat
 Bucket-level scopes:
 
 - `s3:CreateBucket`, `s3:ListAllMyBuckets`, `s3:DeleteBucket`.
+- `s3:GetBucketPolicy`, `s3:PutBucketPolicy`, `s3:DeleteBucketPolicy`. Only a service key holds them; a bucket policy never grants them.
 
 Object-level scopes — the basic actions (`s3:GetObject`, `s3:PutObject`, `s3:ListBucket`, `s3:DeleteObject`) cover the common case, with variant actions for operations on versions, retention policies, and legal holds:
 
 - `s3:GetObject`, `s3:GetObjectVersion`, `s3:GetObjectRetention`, `s3:GetObjectLegalHold`
 - `s3:PutObject`, `s3:PutObjectRetention`, `s3:PutObjectLegalHold`
 - `s3:ListBucket`, `s3:ListBucketVersions`
+- `s3:ListBucketMultipartUploads`, `s3:ListMultipartUploadParts`, `s3:AbortMultipartUpload`
 - `s3:DeleteObject`, `s3:DeleteObjectVersion`
 
 Note the AWS quirk that `s3:ListBucket` lists _objects_ in a bucket, while `s3:ListAllMyBuckets` lists buckets. Similarly, `s3:ListBucketVersions` allows listing _object_ versions in a bucket.
 
 Deleting an access key should revoke the key immediately so that subsequent S3 requests using those credentials fail.
+
+### Principals and Bucket Policies
+
+FilOne represents each organization member as a **principal** of the tenant: `PUT /tenants/{tenantId}/principals/{principalId}` registers one (the id is FilOne's user id, a UUID) and `DELETE` removes it together with the keys bound to it. A principal carries no permissions. What it may do on a bucket comes from that bucket's policy, so the Service Orchestrator must answer two reads computed from the stored policies: `GET /tenants/{tenantId}/principals/{principalId}/policies` returns every bucket policy with a statement naming the principal or `*`, and `GET .../access` returns, per bucket, the sorted effective action set (the `Allow` statements naming them minus the `Deny` statements naming them). `s3:ListAllMyBuckets` never appears in that answer; every principal holds it outside the policies.
+
+Policies themselves travel over the S3 Gateway as AWS bucket policy documents: `GetBucketPolicy`, `PutBucketPolicy` and `DeleteBucketPolicy` on the bucket, signed with a service key holding the matching action. A document carries `Version`, `Statement` entries with `Sid`, `Effect`, `Principal` (`arn:aws:iam:::user/<principalId>`, or `*` for every principal of the tenant), `Action` and `Resource` (the bucket ARN for `s3:ListBucket*`, the `/*` ARN for object actions). The action vocabulary is the object-level scope list above plus `s3:*`; the bucket-level scopes are never granted by a policy. `GetBucketPolicy` returns an `ETag`; `PutBucketPolicy` and `DeleteBucketPolicy` accept `If-Match` with that value, or `If-None-Match: *` on the write that creates a bucket's first policy, and answer 412 on a mismatch with nothing written. A bucket with no policy is reachable by service keys only. FilOne writes a bucket's first policy right after `CreateBucket`, naming the member who created it.
+
+The full contract is in [`management-openapi.yaml`](./management-openapi.yaml) and in [fil-one/RFC#30](https://github.com/fil-one/RFC/pull/30) with its amendment [fil-one/RFC#34](https://github.com/fil-one/RFC/pull/34).
 
 ### Usage Metrics
 
@@ -131,6 +151,7 @@ The S3 Gateway is a standard S3-compatible endpoint reached at `https://s3.{regi
 - AWS Signature V4 authentication
 - Metadata headers (x-amz-meta-\*)
 - Versioning, Object Lock and Retention
+- Bucket policies (`GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`) as AWS policy documents with ETag compare-and-set, enforced for principal-bound keys
 - DNS-level forwarding (`https://s3.{region}.filonecontent.com`)
 
 ### Bucket Creation and Deletion

@@ -1,16 +1,18 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import type { ListBucketsResponse } from '@filone/shared';
+import type { ListBucketsResponse, S3Region } from '@filone/shared';
 import { ApiErrorCode, DOCS_URL } from '@filone/shared';
 
 import { Link as ExternalLink } from '../components/Link';
 import { useToast } from '../components/Toast';
 import { apiRequest } from './api.js';
+import { executePresignedUrl, parseListObjectVersionsResponse } from './aurora-s3.js';
+import { batchPresign } from './use-presign.js';
 import { queryKeys } from './query-client.js';
 import { useHasPermission } from './use-permissions.js';
 import { usePermittedDialog } from './use-permitted-dialog.js';
 
-// Linked from the "bucket is not empty" toast, next to the thing it explains —
+// Linked from the "bucket is not empty" toast, next to the thing it explains:
 // the docs page covers emptying a bucket with the S3 CLI.
 const EMPTY_BUCKET_DOCS_URL = `${DOCS_URL}/storage/objects#deleting-objects`;
 
@@ -27,8 +29,8 @@ function reportDeleteError(err: unknown, bucketName: string, toast: Toast) {
   if ((err as { code?: string }).code === ApiErrorCode.BUCKET_NOT_EMPTY) {
     toast.error(
       <>
-        Bucket &ldquo;{bucketName}&rdquo; is not empty. Delete its objects and object versions first
-        —{' '}
+        Bucket &ldquo;{bucketName}&rdquo; is not empty. Delete its objects and object versions
+        first:{' '}
         <ExternalLink href={EMPTY_BUCKET_DOCS_URL} variant="accent">
           how to empty a bucket
         </ExternalLink>
@@ -43,6 +45,36 @@ function reportDeleteError(err: unknown, bucketName: string, toast: Toast) {
 interface PendingDelete {
   bucketName: string;
   region: string;
+}
+
+/**
+ * What the delete dialog knows about the bucket's contents. `unknown` is a
+ * failed check: the dialog then offers the delete as before, and the server's
+ * BUCKET_NOT_EMPTY refusal still stands behind it.
+ */
+export type BucketContents = 'checking' | 'empty' | 'not-empty' | 'unknown';
+
+/**
+ * Whether the bucket still holds anything S3 would refuse to delete it over.
+ *
+ * One ListObjectVersions entry is enough to answer, and it covers every bucket:
+ * versions and delete markers in a versioned or suspended bucket, and plain
+ * objects in one that never enabled versioning, which S3 reports as `null`
+ * versions. The analytics count would be cheaper but is a daily sample, so it
+ * can call a just-emptied bucket full or a just-filled one empty.
+ */
+async function bucketHoldsObjects(
+  bucketName: string,
+  region: S3Region,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const { items } = await batchPresign(
+    region,
+    [{ op: 'listObjectVersions', bucket: bucketName, maxKeys: 1 }],
+    signal,
+  );
+  const response = await executePresignedUrl(items[0].url, items[0].method);
+  return parseListObjectVersionsResponse(await response.text()).versions.length > 0;
 }
 
 /**
@@ -62,6 +94,28 @@ export function useDeleteBucket() {
     null,
     useHasPermission('buckets.delete'),
   );
+
+  // gcTime 0: every opening asks S3 afresh, so emptying a bucket on its own page
+  // and coming back to delete it never meets a cached "not empty".
+  const contentsQuery = useQuery({
+    queryKey: queryKeys.bucketHoldsObjects(
+      pending?.bucketName ?? '',
+      (pending?.region ?? '') as S3Region,
+    ),
+    queryFn: ({ signal }) =>
+      bucketHoldsObjects(pending!.bucketName, pending!.region as S3Region, signal),
+    enabled: pending !== null,
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  });
+  const contents: BucketContents = contentsQuery.isPending
+    ? 'checking'
+    : contentsQuery.isError
+      ? 'unknown'
+      : contentsQuery.data
+        ? 'not-empty'
+        : 'empty';
 
   const mutation = useMutation({
     mutationFn: ({ bucketName, region }: PendingDelete) =>
@@ -93,8 +147,8 @@ export function useDeleteBucket() {
   }
 
   return {
-    // Still just the name: it is what the confirm dialog shows.
-    pendingBucketName: pending?.bucketName ?? null,
+    pendingBucket: pending,
+    contents,
     requestDelete: (bucketName: string, region: string) => setPending({ bucketName, region }),
     cancelDelete: () => setPending(null),
     confirmDelete,

@@ -9,9 +9,10 @@ import {
   TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { ApiErrorCode, OrgRole } from '@filone/shared';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
+import { delegateIamMethods, FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -35,10 +36,23 @@ const mockOrchestrator = {
   deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
 };
 
+// One region serves the `iam` access model in these tests, minting keys bound
+// to the caller's principal through the in-memory fake.
+const iamFake = new FakeIamOrchestrator();
+const iamOrchestrator = {
+  id: 'forgeDev',
+  region: S3Region.UsEast9,
+  ...delegateIamMethods(iamFake),
+  ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
+  issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
+  findAccessKeyByName: (...args: unknown[]) => mockFindAccessKeyByName(...args),
+  deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
+};
+
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
-    return mockOrchestrator;
+    return region === S3Region.UsEast9 ? iamOrchestrator : mockOrchestrator;
   },
 }));
 
@@ -59,6 +73,7 @@ vi.mock('../middleware/subscription-guard.ts', () => ({
 
 import { baseHandler } from './create-access-key.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
+import type { IssuedAccessKey } from '../lib/service-orchestrator.ts';
 import {
   buildEvent,
   membershipFor,
@@ -66,11 +81,16 @@ import {
   stubMembershipRead,
 } from '../test/lambda-test-utilities.ts';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
+
+/** The options a call bounded by the request deadline receives. */
+const WITH_DEADLINE = { signal: expect.any(AbortSignal) };
 
 function validBody({
   keyName,
@@ -94,8 +114,9 @@ function validBody({
 /** A key only an Owner may mint, so a demotion to Admin strands it. */
 const PRIVILEGED = { granularPermissions: ['PutObjectRetention'] };
 
-function issuedAccessKey() {
+function issuedAccessKey(): IssuedAccessKey {
   return {
+    type: 'service',
     id: 'aurora-key-1',
     accessKeyId: 'AKIA1234567890',
     accessKeySecret: 'secret-abc-123',
@@ -234,13 +255,17 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
-      keyName: 'My Key',
-      permissions: ['read', 'write', 'list', 'delete'],
-      granularPermissions: undefined,
-      buckets: undefined,
-      expiresAt: null,
-    });
+    expect(mockIssueAccessKey).toHaveBeenCalledWith(
+      'aurora-t-1',
+      {
+        keyName: 'My Key',
+        permissions: ['read', 'write', 'list', 'delete'],
+        granularPermissions: undefined,
+        buckets: undefined,
+        expiresAt: null,
+      },
+      WITH_DEADLINE,
+    );
   });
 
   it('stores access key in DynamoDB without the secret', async () => {
@@ -275,7 +300,7 @@ describe('create-access-key baseHandler', () => {
     await baseHandler(event);
 
     const item = keyRow();
-    expect(item.createdBy.S).toBe('user-1');
+    expect(item.createdBy.S).toBe(USER_1);
     expect(item.creatorEmail.S).toBe('alice@example.com');
     expect(item.policyVersion.S).toBe('pre-member-scope');
   });
@@ -291,7 +316,7 @@ describe('create-access-key baseHandler', () => {
     await baseHandler(event);
 
     const item = keyRow();
-    expect(item.createdBy.S).toBe('user-1');
+    expect(item.createdBy.S).toBe(USER_1);
     expect(item.creatorEmail).toBeUndefined();
     expect(item.policyVersion.S).toBe('pre-member-scope');
   });
@@ -337,13 +362,17 @@ describe('create-access-key baseHandler', () => {
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(201);
-    expect(mockIssueAccessKey).toHaveBeenCalledWith('aurora-t-1', {
-      keyName: 'My Key',
-      permissions: ['read', 'write', 'list', 'delete'],
-      granularPermissions: undefined,
-      buckets: undefined,
-      expiresAt: null,
-    });
+    expect(mockIssueAccessKey).toHaveBeenCalledWith(
+      'aurora-t-1',
+      {
+        keyName: 'My Key',
+        permissions: ['read', 'write', 'list', 'delete'],
+        granularPermissions: undefined,
+        buckets: undefined,
+        expiresAt: null,
+      },
+      WITH_DEADLINE,
+    );
     const body = JSON.parse(result.body!);
     expect(body.keyName).toBe('My Key');
   });
@@ -367,6 +396,7 @@ describe('create-access-key baseHandler', () => {
     expect(mockIssueAccessKey).toHaveBeenCalledWith(
       'aurora-t-1',
       expect.objectContaining({ expiresAt: '2026-06-01' }),
+      WITH_DEADLINE,
     );
   });
 
@@ -459,7 +489,7 @@ describe('create-access-key baseHandler', () => {
     const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
     await baseHandler(event);
 
-    expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1');
+    expect(mockEnsureTenantReady).toHaveBeenCalledWith('org-1', WITH_DEADLINE);
   });
 
   it('throws when the orchestrator fails', async () => {
@@ -519,7 +549,7 @@ describe('create-access-key baseHandler', () => {
       type: 'key.created',
       phase: 'intent',
       subject: 'org:org-1',
-      actor: { kind: 'user', id: 'user-1', email: 'alice@example.com' },
+      actor: { kind: 'user', id: USER_1, email: 'alice@example.com' },
       details: { keyKind: 's3', keyName: 'My Key', region: 'eu-west-1' },
     });
     // One subject for both halves, or the viewer cannot pair them: the mint has
@@ -634,7 +664,7 @@ describe('create-access-key baseHandler', () => {
       status: { S: 'active' },
       // Attributed to the caller who retried, and flagged as such: a key with
       // no owner at all is the worse record.
-      createdBy: { S: 'user-1' },
+      createdBy: { S: USER_1 },
       policyVersion: { S: 'pre-member-scope' },
       recovered: { BOOL: true },
     });
@@ -758,6 +788,73 @@ describe('create-access-key baseHandler', () => {
     expect(item.region.S).toBe('us-east-1');
   });
 
+  describe('the request deadline', () => {
+    beforeEach(() => {
+      stubWrites();
+      mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
+    });
+
+    it.each([
+      { call: 'ensureTenantReady', mock: mockEnsureTenantReady },
+      { call: 'issueAccessKey', mock: mockIssueAccessKey },
+    ])('passes the request deadline to $call', async ({ mock }) => {
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+      await baseHandler(event);
+
+      expect(mock.mock.calls[0]!.at(-1).signal).toBe(event.requestContext.deadline);
+    });
+
+    it('passes the request deadline to the lookup that recovers a duplicate', async () => {
+      mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+      mockFindAccessKeyByName.mockResolvedValue({
+        id: 'aurora-key-1',
+        accessKeyId: 'AKIA1234567890',
+        createdAt: '2026-03-10T00:00:00Z',
+      });
+
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+      await baseHandler(event);
+
+      expect(mockFindAccessKeyByName.mock.calls[0]!.at(-1).signal).toBe(
+        event.requestContext.deadline,
+      );
+    });
+
+    it.each([
+      { call: 'ensureTenantReady', mock: mockEnsureTenantReady, result: 'aurora-t-1' },
+      { call: 'issueAccessKey', mock: mockIssueAccessKey, result: issuedAccessKey() },
+    ])('names $call as the step in flight while it runs', async ({ call, mock, result }) => {
+      const event = buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO });
+      let stepInFlight: string | undefined;
+      mock.mockImplementation(async () => {
+        stepInFlight = event.requestContext.deadlineStep;
+        return result;
+      });
+
+      await baseHandler(event);
+
+      expect(stepInFlight).toBe(call);
+    });
+
+    // The vendor already minted the key, so a deadline that has fired must not
+    // stop the delete that takes it back.
+    it('discards a key whose row never landed without the deadline', async () => {
+      ddbMock
+        .on(TransactWriteItemsCommand)
+        .rejects(cancelledWith(['ConditionalCheckFailed', 'None', 'None', 'None']));
+      mockDeleteAccessKey.mockResolvedValue(undefined);
+
+      const event = buildEvent({
+        body: validBody({ keyName: 'My Key' }),
+        userInfo: USER_INFO,
+        requestContext: { deadline: AbortSignal.abort() },
+      });
+      await baseHandler(event);
+
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith('aurora-t-1', 'aurora-key-1');
+    });
+  });
+
   describe('region', () => {
     beforeEach(() => {
       stubWrites();
@@ -844,6 +941,7 @@ describe('create-access-key baseHandler', () => {
         expect.objectContaining({
           permissions: ['read', 'CreateBucket', 'DeleteBucket'],
         }),
+        WITH_DEADLINE,
       );
     });
 
@@ -1011,7 +1109,7 @@ describe('create-access-key baseHandler', () => {
 
       expect(
         ddbMock.commandCalls(GetItemCommand).map((call) => call.args[0].input.Key),
-      ).toContainEqual({ pk: { S: 'ORG#org-1' }, sk: { S: 'MEMBER#user-1' } });
+      ).toContainEqual({ pk: { S: 'ORG#org-1' }, sk: { S: `MEMBER#${USER_1}` } });
     });
 
     it('advances the mint sequence in the transaction that writes the row', async () => {
@@ -1099,7 +1197,7 @@ describe('create-access-key baseHandler', () => {
       const revocation = standaloneEvents().find((event) => event.type === 'key.deleted');
       expect(revocation).toMatchObject({
         phase: 'intent',
-        actor: { kind: 'user', id: 'user-1' },
+        actor: { kind: 'user', id: USER_1 },
         details: { keyKind: 's3', reason: 'stale_role_at_mint', keyName: 'My Key' },
       });
     });
@@ -1228,6 +1326,354 @@ describe('create-access-key baseHandler', () => {
       const result = await baseHandler(event);
 
       expect(result.statusCode).toBe(201);
+    });
+  });
+
+  describe('on a region serving the iam access model', () => {
+    const buildPrincipalKeyBody = (overrides: Record<string, unknown> = {}) =>
+      JSON.stringify({ keyName: 'laptop', region: S3Region.UsEast9, ...overrides });
+
+    const buildServiceKeyBody = (overrides: Record<string, unknown> = {}) =>
+      buildPrincipalKeyBody({
+        permissions: ['read', 'list'],
+        bucketScope: 'specific',
+        buckets: ['photos'],
+        ...overrides,
+      });
+
+    /** The key row the transaction put, as the table would store it. */
+    function getWrittenKeyRow() {
+      const items =
+        ddbMock.commandCalls(TransactWriteItemsCommand)[0]!.args[0].input.TransactItems!;
+      const put = items.find((item) => item.Put?.TableName === 'UserInfoTable');
+      return unmarshall(put!.Put!.Item!);
+    }
+
+    beforeEach(() => {
+      iamFake.principals.clear();
+      iamFake.calls.length = 0;
+      mockEnsureTenantReady.mockResolvedValue('tenant-9');
+      mockIssueAccessKey.mockImplementation((_tenantId: string, opts: { principalId?: string }) =>
+        Promise.resolve({ ...issuedAccessKey(), type: 'principal', principalId: opts.principalId }),
+      );
+      // The org shows no key under this name yet.
+      ddbMock.on(QueryCommand).resolves({ Items: [] });
+      stubWrites();
+    });
+
+    it("binds the minted key to the caller's principal", async () => {
+      const result = await baseHandler(
+        buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }),
+      );
+
+      expect(result.statusCode).toBe(201);
+      expect(mockIssueAccessKey).toHaveBeenCalledWith(
+        'tenant-9',
+        {
+          keyName: 'laptop',
+          principalId: USER_1,
+          expiresAt: null,
+        },
+        WITH_DEADLINE,
+      );
+    });
+
+    it("syncs the caller's principal before minting", async () => {
+      let syncedBeforeMint: string[] = [];
+      mockIssueAccessKey.mockImplementation((_tenantId: string, opts: { principalId?: string }) => {
+        syncedBeforeMint = iamFake.calls.map((call) => `${call.method}:${call.target}`);
+        return Promise.resolve({
+          ...issuedAccessKey(),
+          type: 'principal',
+          principalId: opts.principalId,
+        });
+      });
+
+      await baseHandler(buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }));
+
+      expect(syncedBeforeMint).toStrictEqual([`syncMember:${USER_1}`]);
+    });
+
+    it('records a principal-bound row with no permission set or bucket scope', async () => {
+      await baseHandler(buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }));
+
+      expect(getWrittenKeyRow()).toStrictEqual({
+        pk: 'ORG#org-1',
+        sk: 'ACCESSKEY#aurora-key-1',
+        keyName: 'laptop',
+        accessKeyId: 'AKIA1234567890',
+        createdAt: '2026-03-10T13:36:07.752371Z',
+        status: 'active',
+        region: S3Region.UsEast9,
+        principalId: USER_1,
+        createdBy: USER_1,
+        policyVersion: 'pre-member-scope',
+      });
+    });
+
+    it('records in the audit that the key is bound to a principal', async () => {
+      await baseHandler(buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }));
+
+      expect(intentEvents()[0].details).toStrictEqual({
+        keyKind: 's3',
+        keyName: 'laptop',
+        region: S3Region.UsEast9,
+        isPrincipalKey: true,
+      });
+    });
+
+    it('lets a Member create a principal-bound key', async () => {
+      stubWrites(OrgRole.Member);
+
+      const result = await baseHandler(
+        buildEvent({
+          body: buildPrincipalKeyBody(),
+          userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, OrgRole.Member) },
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
+      expect(JSON.parse(result.body!)).toStrictEqual({
+        id: 'aurora-key-1',
+        keyName: 'laptop',
+        accessKeyId: 'AKIA1234567890',
+        secretAccessKey: 'secret-abc-123',
+        createdAt: '2026-03-10T13:36:07.752371Z',
+        principalId: USER_1,
+      });
+    });
+
+    it('keeps a principal-bound key when the creator is demoted mid-mint to a role that holds keys.create', async () => {
+      stubCreatorRole(OrgRole.Member);
+
+      const result = await baseHandler(
+        buildEvent({
+          body: buildPrincipalKeyBody(),
+          userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, OrgRole.Admin) },
+        }),
+      );
+
+      expect(result.statusCode).toBe(201);
+      expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+    });
+
+    it('discards a principal-bound key when the creator lost keys.create mid-mint', async () => {
+      stubCreatorRole(OrgRole.ReadOnly);
+      mockDeleteAccessKey.mockResolvedValue(undefined);
+
+      const result = await baseHandler(
+        buildEvent({
+          body: buildPrincipalKeyBody(),
+          userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, OrgRole.Member) },
+        }),
+      );
+
+      expect(result.statusCode).toBe(409);
+      expect(mockDeleteAccessKey).toHaveBeenCalledWith('tenant-9', 'aurora-key-1');
+    });
+
+    describe('a duplicate name at the storage system', () => {
+      beforeEach(() => {
+        mockIssueAccessKey.mockRejectedValue(new AccessKeyAlreadyExistsError());
+        mockFindAccessKeyByName.mockResolvedValue({
+          id: 'iam-key-1',
+          accessKeyId: 'AKIA1234567890',
+          createdAt: '2026-03-10T00:00:00Z',
+        });
+      });
+
+      it('answers 409 when the storage system already has the name', async () => {
+        const result = await baseHandler(
+          buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }),
+        );
+
+        expect(result.statusCode).toBe(409);
+        expect(JSON.parse(result.body!)).toStrictEqual({
+          message: 'An access key with this name already exists',
+        });
+      });
+
+      // The name is unique only within the principal, so the existing key is
+      // looked up under the caller's principal, never another member's.
+      it("looks the existing key up under the caller's principal", async () => {
+        await baseHandler(buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }));
+
+        expect(mockFindAccessKeyByName).toHaveBeenCalledWith(
+          'tenant-9',
+          'laptop',
+          USER_1,
+          WITH_DEADLINE,
+        );
+      });
+
+      it("records the recovered row bound to the caller's principal", async () => {
+        await baseHandler(buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }));
+
+        expect(getWrittenKeyRow()).toStrictEqual({
+          pk: 'ORG#org-1',
+          sk: 'ACCESSKEY#iam-key-1',
+          keyName: 'laptop',
+          accessKeyId: 'AKIA1234567890',
+          createdAt: '2026-03-10T00:00:00Z',
+          status: 'active',
+          region: S3Region.UsEast9,
+          createdBy: USER_1,
+          policyVersion: 'pre-member-scope',
+          principalId: USER_1,
+          recovered: true,
+        });
+      });
+    });
+
+    describe('a service key, when the body carries permissions', () => {
+      it('does not sync a principal for a service key', async () => {
+        await baseHandler(buildEvent({ body: buildServiceKeyBody(), userInfo: USER_INFO }));
+
+        expect(iamFake.calls).toStrictEqual([]);
+      });
+
+      it('mints a service key with the requested permissions and buckets', async () => {
+        const result = await baseHandler(
+          buildEvent({ body: buildServiceKeyBody(), userInfo: USER_INFO }),
+        );
+
+        expect(JSON.parse(result.body!)).toStrictEqual({
+          id: 'aurora-key-1',
+          keyName: 'laptop',
+          accessKeyId: 'AKIA1234567890',
+          secretAccessKey: 'secret-abc-123',
+          createdAt: '2026-03-10T13:36:07.752371Z',
+        });
+        expect(mockIssueAccessKey).toHaveBeenCalledWith(
+          'tenant-9',
+          {
+            keyName: 'laptop',
+            permissions: ['read', 'list'],
+            granularPermissions: undefined,
+            buckets: ['photos'],
+            expiresAt: null,
+          },
+          WITH_DEADLINE,
+        );
+      });
+
+      it("records the service key's scope on the row", async () => {
+        await baseHandler(buildEvent({ body: buildServiceKeyBody(), userInfo: USER_INFO }));
+
+        expect(getWrittenKeyRow()).toStrictEqual({
+          pk: 'ORG#org-1',
+          sk: 'ACCESSKEY#aurora-key-1',
+          keyName: 'laptop',
+          accessKeyId: 'AKIA1234567890',
+          createdAt: '2026-03-10T13:36:07.752371Z',
+          status: 'active',
+          region: S3Region.UsEast9,
+          permissions: ['read', 'list'],
+          bucketScope: 'specific',
+          buckets: ['photos'],
+          createdBy: USER_1,
+          policyVersion: 'pre-member-scope',
+        });
+      });
+
+      it('refuses a Member, who holds keys.create but not keys.create_service', async () => {
+        stubWrites(OrgRole.Member);
+
+        const result = await baseHandler(
+          buildEvent({
+            body: buildServiceKeyBody(),
+            userInfo: {
+              ...USER_INFO,
+              membership: membershipFor('org-1', USER_1, OrgRole.Member),
+            },
+          }),
+        );
+
+        expect(result.statusCode).toBe(403);
+        expect(JSON.parse(result.body!)).toStrictEqual({
+          message: 'Only an Owner or an Admin can create a service key on this region.',
+          code: ApiErrorCode.FORBIDDEN_ROLE,
+        });
+        expect(mockIssueAccessKey).not.toHaveBeenCalled();
+        expect(intentEvents()).toStrictEqual([]);
+      });
+
+      it('discards the service key when the creator lost keys.create_service mid-mint', async () => {
+        // The permission was checked against the Admin snapshot. A Member may
+        // hold a read/list key, so neither the row's ConditionCheck nor the
+        // read after it notices that a Member may not mint a service key here.
+        stubCreatorRole(OrgRole.Member);
+        mockDeleteAccessKey.mockResolvedValue(undefined);
+
+        const result = await baseHandler(
+          buildEvent({
+            body: buildServiceKeyBody(),
+            userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, OrgRole.Admin) },
+          }),
+        );
+
+        expect(result.statusCode).toBe(409);
+        expect(JSON.parse(result.body!)).toStrictEqual({
+          message: 'Your role in this organization changed while this key was being issued.',
+          code: ApiErrorCode.FORBIDDEN_ROLE,
+        });
+        expect(mockDeleteAccessKey).toHaveBeenCalledWith('tenant-9', 'aurora-key-1');
+      });
+
+      it('refuses an Admin a service key that grants PutObjectRetention', async () => {
+        stubWrites(OrgRole.Admin);
+
+        const result = await baseHandler(
+          buildEvent({
+            body: buildServiceKeyBody({
+              permissions: ['read', 'write', 'list'],
+              granularPermissions: ['PutObjectRetention'],
+            }),
+            userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, OrgRole.Admin) },
+          }),
+        );
+
+        expect(result.statusCode).toBe(403);
+        expect(mockIssueAccessKey).not.toHaveBeenCalled();
+      });
+    });
+
+    it('writes no key.created intent when the principal sync fails', async () => {
+      // The sync runs before the vendor mint, so no credential can exist yet;
+      // an intent left dangling here reads to an operator as a possible orphan
+      // key, which is the one thing a dangling intent is meant to mean.
+      iamFake.failNext('syncMember', new Error('iam down'));
+
+      await expect(
+        baseHandler(buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO })),
+      ).rejects.toThrow('iam down');
+
+      expect(intentEvents()).toStrictEqual([]);
+    });
+
+    it('refuses a name the org already shows in the region, before the vendor', async () => {
+      ddbMock.on(QueryCommand).resolves({
+        Items: [
+          {
+            pk: { S: 'ORG#org-1' },
+            sk: { S: 'ACCESSKEY#existing' },
+            keyName: { S: 'laptop' },
+            region: { S: S3Region.UsEast9 },
+            createdAt: { S: '2026-01-01T00:00:00Z' },
+          },
+        ],
+      });
+
+      const result = await baseHandler(
+        buildEvent({ body: buildPrincipalKeyBody(), userInfo: USER_INFO }),
+      );
+
+      expect(result.statusCode).toBe(409);
+      expect(JSON.parse(result.body!)).toStrictEqual({
+        message: 'An access key with this name already exists',
+      });
+      expect(iamFake.calls).toStrictEqual([]);
+      expect(mockIssueAccessKey).not.toHaveBeenCalled();
     });
   });
 });

@@ -8,7 +8,7 @@ import type {
 import { ApiErrorCode, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
-import { readSubscription, updateSubscription } from '../lib/subscription-store.ts';
+import { getSubscription, updateSubscription } from '../lib/subscription-store.ts';
 import { claimTrialIfEligible, isTrialClaimable } from '../lib/trial-claim.ts';
 import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -46,7 +46,7 @@ async function runSubscriptionGuard(
   // otherwise a stale read could falsely block an entitled user. The row is the
   // org's, so a member rides the org's subscription rather than looking for one
   // of their own.
-  const record = await readSubscription(orgId, { consistentRead: true });
+  const record = await getSubscription(orgId, { consistentRead: true });
 
   // No record, or the customer-mapping-only row an abandoned payment modal
   // leaves behind: both leave the trial claim open, and the claim upgrades the
@@ -108,10 +108,6 @@ async function claimTrialOrDeny(
 ): Promise<APIGatewayProxyStructuredResultV2 | void> {
   const outcome = await claimTrialIfEligible(userInfo);
   if (outcome === 'claimed') return undefined;
-  // The claim refused because a pre-re-key `CUSTOMER#` row is still standing:
-  // this org has billing the org key cannot see, so its state is unknown here
-  // rather than inactive.
-  if (outcome === 'legacy-row') return buildBillingUnavailableResponse();
   if (outcome === 'not-own-org') return buildOrgBillingInactiveResponse();
   return buildInactiveResponse();
 }
@@ -204,28 +200,6 @@ function buildOrgBillingInactiveResponse(): APIGatewayProxyStructuredResultV2 {
       message:
         'This organization does not have billing set up. Adding a payment method for it requires the Owner role.',
       code: ApiErrorCode.ORG_BILLING_INACTIVE,
-    })
-    .build();
-}
-
-/**
- * The account has billing this deploy cannot address — a row the re-key left
- * behind.
- *
- * The 503 is what separates this from an inactive subscription: it says the same
- * thing to the customer and to the on-call, come back, somebody is looking at
- * it, and it carries no instruction to update a payment method there is nothing
- * wrong with. The code stays `SUBSCRIPTION_INACTIVE`, shared with the read-side
- * twin in `get-billing` and with the plain denial, so the runbook's post-flip
- * watch on the denial rate sees every refusal the re-key can cause on one
- * signal.
- */
-function buildBillingUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(503)
-    .body({
-      message: 'Billing is temporarily unavailable for this account. Please try again shortly.',
-      code: ApiErrorCode.SUBSCRIPTION_INACTIVE,
     })
     .build();
 }

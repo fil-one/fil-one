@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
-import { ApiErrorCode, PlanId, SubscriptionStatus } from '@filone/shared';
+import { PlanId, SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -780,6 +780,28 @@ describe('get-billing baseHandler', () => {
     });
   });
 
+  // Neither value existed in Stripe when this code was written.
+  it.each([
+    ['billing scheme', { billing_scheme: 'any-new-scheme' }],
+    ['tiers mode', { tiers_mode: 'any-new-mode' }],
+  ])(
+    'reports neither a minimum nor a rate for a %s the console does not know',
+    async (_, unknownField) => {
+      ddbMock.on(GetItemCommand).resolves(activeRecordWith());
+      ddbMock.on(UpdateItemCommand).resolves({});
+      mockSubscriptionsRetrieve.mockResolvedValue(
+        stripeSubscription({ ...TIERED_PRICE, ...unknownField }),
+      );
+
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(JSON.parse(String(result.body)).subscription).toStrictEqual({
+        planId: PlanId.PayAsYouGo,
+        status: SubscriptionStatus.Active,
+      });
+    },
+  );
+
   const missingTiersCases: Record<string, unknown> = {
     'the tiers are missing': undefined,
     'the tiers are empty': [],
@@ -862,8 +884,14 @@ describe('get-billing baseHandler', () => {
   // What the customer's plan is called, and what it charges
   // -------------------------------------------------------------------------
 
-  /** The product as Stripe returns it once expanded. */
-  const EXPANDED_PRODUCT = { id: PRODUCT_ID, object: 'product', name: 'Business', active: true };
+  /** A negotiated plan's product as Stripe returns it once expanded. */
+  const EXPANDED_PRODUCT = {
+    id: PRODUCT_ID,
+    object: 'product',
+    name: 'any internal name',
+    active: true,
+    metadata: { display_name: 'Business' },
+  };
 
   it('reports both ends of the billing period when the record holds them', async () => {
     ddbMock.on(GetItemCommand).resolves(
@@ -893,7 +921,7 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.currentPeriodStart).toBeUndefined();
   });
 
-  it('reports the plan name from the expanded Stripe product', async () => {
+  it("reports the plan name from the product's display_name metadata", async () => {
     ddbMock.on(GetItemCommand).resolves(activeRecordWith());
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsRetrieve.mockResolvedValue(
@@ -906,14 +934,16 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.planName).toBe('Business');
   });
 
-  it('does not surface the Stripe product name for the self-serve price', async () => {
+  it("does not surface the product's own name when the product has no display_name", async () => {
     ddbMock.on(GetItemCommand).resolves(activeRecordWith());
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsRetrieve.mockResolvedValue(
       stripeSubscription({
         ...TIERED_PRICE,
-        id: 'price_test_fake',
-        product: { id: PRODUCT_ID, object: 'product', name: 'Fil ONE Storage (GB)', active: true },
+        // Any self-serve price, the current one or one a customer is
+        // grandfathered on: its product carries no display_name.
+        id: 'price_any_old',
+        product: { id: PRODUCT_ID, object: 'product', name: 'Fil ONE Storage (GB)', metadata: {} },
       }),
     );
 
@@ -923,7 +953,21 @@ describe('get-billing baseHandler', () => {
     expect(body.subscription.planName).toBeUndefined();
   });
 
-  it('caches the product name, so an outage does not cost the customer their plan name', async () => {
+  it('does not surface a product name cached before display_name was read', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      activeRecordWith({
+        stripePrice: { ...CACHED_TIERED_PRICE, product_name: 'Fil ONE Storage (GB)' },
+      }),
+    );
+    mockSubscriptionsRetrieve.mockRejectedValue(new Error('Stripe unavailable'));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.subscription.planName).toBeUndefined();
+  });
+
+  it('caches the plan name, so an outage does not cost the customer their plan name', async () => {
     ddbMock.on(GetItemCommand).resolves(activeRecordWith());
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsRetrieve.mockResolvedValue(
@@ -932,13 +976,31 @@ describe('get-billing baseHandler', () => {
 
     await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
-    expect(storedStripePrice()).toStrictEqual({ ...CACHED_TIERED_PRICE, product_name: 'Business' });
+    expect(storedStripePrice()).toStrictEqual({
+      ...CACHED_TIERED_PRICE,
+      plan_display_name: 'Business',
+    });
   });
 
-  it('serves the cached product name when Stripe is unreachable', async () => {
+  it('refreshes the cache when display_name is set on the product of an unchanged price', async () => {
+    ddbMock.on(GetItemCommand).resolves(activeRecordWith({ stripePrice: CACHED_TIERED_PRICE }));
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsRetrieve.mockResolvedValue(
+      stripeSubscription({ ...TIERED_PRICE, product: EXPANDED_PRODUCT }),
+    );
+
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(storedStripePrice()).toStrictEqual({
+      ...CACHED_TIERED_PRICE,
+      plan_display_name: 'Business',
+    });
+  });
+
+  it('serves the cached plan name when Stripe is unreachable', async () => {
     ddbMock.on(GetItemCommand).resolves(
       activeRecordWith({
-        stripePrice: { ...CACHED_TIERED_PRICE, product_name: 'Business' },
+        stripePrice: { ...CACHED_TIERED_PRICE, plan_display_name: 'Business' },
       }),
     );
     mockSubscriptionsRetrieve.mockRejectedValue(new Error('Stripe unavailable'));
@@ -1149,20 +1211,6 @@ describe('get-billing baseHandler', () => {
       },
     );
 
-    it('says billing is unreadable when a pre-re-key CUSTOMER# row is still standing', async () => {
-      // The backfill missed this account, so its billing lives on a key nothing
-      // here reads. "No plan" would invite the user to buy a second
-      // subscription beside the one still billing them.
-      ddbMock.on(GetItemCommand).resolves({});
-      mockClaimTrialIfEligible.mockResolvedValue('legacy-row');
-
-      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
-
-      expect(result.statusCode).toBe(503);
-      expect(JSON.parse(String(result.body)).code).toBe(ApiErrorCode.SUBSCRIPTION_INACTIVE);
-      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    });
-
     it('leaves a record that already holds a subscription alone', async () => {
       ddbMock
         .on(GetItemCommand)
@@ -1227,8 +1275,8 @@ describe('get-billing baseHandler', () => {
   });
 
   it('reports inactive when the caller has only a legacy row', async () => {
-    // A `CUSTOMER#` row the cleanup step has not deleted yet is not
-    // entitlement: nothing reads it, so the org holds no subscription.
+    // A `CUSTOMER#` row the cleanup step missed is not entitlement: nothing
+    // reads it, so the org holds no subscription.
     ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({});
     ddbMock
       .on(GetItemCommand, { Key: LEGACY_KEY })

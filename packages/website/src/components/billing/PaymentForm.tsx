@@ -17,6 +17,9 @@ import { ActivateSubscriptionRequestSchema } from '@filone/shared';
 
 import { ModalBody, ModalHeader } from '../Modal/index.js';
 import { Button } from '../Button.js';
+import { FormField } from '../FormField.js';
+import { Input } from '../Input.js';
+import { Label } from '../Label.js';
 
 import { activateSubscription } from '../../lib/api.js';
 
@@ -28,19 +31,26 @@ export type PaymentFormProps = {
   onRefreshSetupIntent: () => Promise<string>;
 };
 
+// Stripe renders these fields inside its own iframe, which cannot read the
+// console's CSS variables, so each colour is the hex of the token `Input` uses.
 const ELEMENT_STYLE = {
   base: {
-    fontSize: '13px',
+    fontSize: '14px',
     fontFamily: 'Inter, system-ui, sans-serif',
-    color: '#14181f',
-    '::placeholder': { color: '#99a0ae' },
+    color: '#09090b', // zinc-950, --color-text-base
+    '::placeholder': { color: '#9f9fa9' }, // zinc-400, --input-placeholder-color
   },
-  invalid: { color: '#ef4444' },
+  invalid: { color: '#e7000b' }, // red-600, the FormField error colour
 };
 
 const ELEMENT_OPTIONS = {
   style: ELEMENT_STYLE,
 };
+
+// The frame around each Stripe field, matching `Input` md. `focus-within`
+// because focus lands on Stripe's iframe, which the frame contains.
+const STRIPE_FIELD_CLASS =
+  'flex h-(--control-height-md) flex-col justify-center rounded-md border border-(--input-border-color) bg-white px-3 transition-colors focus-within:brand-outline';
 
 export function PaymentForm({
   initialClientSecret,
@@ -155,21 +165,21 @@ export function PaymentForm({
     <form onSubmit={handleSubmit}>
       <ModalHeader onClose={onClose}>Add payment method</ModalHeader>
       <ModalBody>
-        <p className="text-sm text-[#677183] mb-4">Pay as you go — $4.99/TB/month</p>
+        <p className="text-sm text-zinc-600 mb-4">Pay as you go: $5.99/TB/month</p>
 
         {/* Security banner */}
-        <div className="flex items-center gap-[10px] rounded-lg bg-[rgba(243,244,246,0.5)] p-[10px] mb-4">
-          <ShieldCheckIcon size={16} className="text-[#0066ff] flex-shrink-0" weight="fill" />
-          <span className="text-ui text-[#677183]">
+        <div className="flex items-center gap-2.5 rounded-lg bg-zinc-50 p-2.5 mb-4">
+          <ShieldCheckIcon size={16} className="text-brand-600 flex-shrink-0" weight="fill" />
+          <span className="text-ui text-zinc-600">
             Your payment information is encrypted and secure
           </span>
         </div>
 
         <div className="flex flex-col gap-4">
           {/* Card Number */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-ui font-medium text-[#14181f]">Card number</label>
-            <div className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5">
+          <div className="flex flex-col gap-2.5">
+            <Label>Card number</Label>
+            <div className={STRIPE_FIELD_CLASS}>
               <CardNumberElement
                 options={{ ...ELEMENT_OPTIONS, showIcon: true }}
                 onChange={handleCardChange}
@@ -179,45 +189,41 @@ export function PaymentForm({
 
           {/* Expiry + CVC */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-ui font-medium text-[#14181f]">Expiry</label>
-              <div className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5">
+            <div className="flex flex-col gap-2.5">
+              <Label>Expiry</Label>
+              <div className={STRIPE_FIELD_CLASS}>
                 <CardExpiryElement options={ELEMENT_OPTIONS} />
               </div>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-ui font-medium text-[#14181f]">CVC</label>
-              <div className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5">
+            <div className="flex flex-col gap-2.5">
+              <Label>CVC</Label>
+              <div className={STRIPE_FIELD_CLASS}>
                 <CardCvcElement options={ELEMENT_OPTIONS} />
               </div>
             </div>
           </div>
 
           {/* Promo code (optional) */}
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="promotion-code" className="text-ui font-medium text-[#14181f]">
-              Promo code <span className="font-normal text-[#99a0ae]">(optional)</span>
-            </label>
-            <input
+          <FormField label="Promo code" optional htmlFor="promotion-code">
+            <Input
               id="promotion-code"
               type="text"
               value={promotionCode}
-              onChange={(e) => setPromotionCode(e.target.value)}
+              onChange={setPromotionCode}
               placeholder="Add promo code"
               autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
               maxLength={40}
-              className="rounded-[6px] border border-[#e1e4ea] bg-[#f9fafb] px-3 py-2.5 text-ui text-[#14181f] placeholder:text-[#99a0ae] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#0080ff]"
             />
-          </div>
+          </FormField>
 
           {/* Error */}
           {error && <p className="text-sm text-red-500">{error}</p>}
         </div>
 
         {/* Buttons */}
-        <div className="mt-4 border-t border-[#e1e4ea] pt-4 flex flex-col gap-2">
+        <div className="mt-4 border-t border-zinc-200 pt-4 flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" size="md" onClick={onBack}>
               Back
@@ -235,8 +241,8 @@ export function PaymentForm({
             </Button>
           </div>
 
-          <p className="text-center text-meta text-[#677183]">
-            Pay for the storage you use, $4.99/month minimum.
+          <p className="text-center text-meta text-zinc-600">
+            Pay for the storage you use, $5.99/month minimum.
             <br />
             Cancel anytime.
           </p>

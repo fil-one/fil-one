@@ -4,7 +4,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ListInvoicesResponse, Invoice } from '@filone/shared';
 import type Stripe from 'stripe';
 import { getStripeClient } from '../lib/stripe-client.ts';
-import { readSubscription } from '../lib/subscription-store.ts';
+import { getSubscription } from '../lib/subscription-store.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -32,6 +32,22 @@ function isIssued(invoice: Stripe.Invoice): boolean {
   return invoice.status !== 'draft';
 }
 
+const KNOWN_INVOICE_STATUSES: readonly Invoice['status'][] = [
+  'paid',
+  'open',
+  'void',
+  'draft',
+  'uncollectible',
+];
+
+/**
+ * The invoice's status as the console knows it. Stripe may add statuses at any
+ * time, and the console reports one it does not know as `unknown`.
+ */
+function toInvoiceStatus(status: Stripe.Invoice.Status | null): Invoice['status'] {
+  return KNOWN_INVOICE_STATUSES.find((known) => known === status) ?? 'unknown';
+}
+
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
@@ -39,7 +55,7 @@ export async function baseHandler(
 
   // Invoices belong to the org's Stripe customer, so an Admin reading them
   // reads the org's, not a record of their own that may not exist.
-  const billingRecord = await readSubscription(orgId);
+  const billingRecord = await getSubscription(orgId);
 
   if (!billingRecord?.stripeCustomerId) {
     const response: ListInvoicesResponse = { invoices: [] };
@@ -55,7 +71,7 @@ export async function baseHandler(
   const invoices: Invoice[] = stripeInvoices.data.filter(isIssued).map((inv) => ({
     id: inv.id,
     amountDueInCents: inv.amount_due,
-    status: inv.status ?? 'unknown',
+    status: toInvoiceStatus(inv.status),
     createdAt: new Date(inv.created * 1000).toISOString(),
     invoicePdfUrl: inv.invoice_pdf ?? null,
   }));

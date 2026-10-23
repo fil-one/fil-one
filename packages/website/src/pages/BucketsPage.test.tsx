@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import type { ListBucketsResponse } from '@filone/shared';
 
+import { ANALYTICS_CONCURRENCY } from '../components/BucketStorageLine.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { BucketsPage } from './BucketsPage.js';
@@ -23,7 +24,18 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
     <a href={to}>{children}</a>
   ),
-  useNavigate: () => vi.fn(),
+  useNavigate: () => mockNavigate,
+}));
+
+const mockNavigate = vi.fn();
+
+// The delete dialog asks S3 directly whether the bucket is empty, through a
+// presigned ListObjectVersions URL. The parser stays real; only the fetch of
+// the presigned URL is stood in for.
+const mockExecutePresignedUrl = vi.fn();
+vi.mock('../lib/aurora-s3.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/aurora-s3.js')>()),
+  executePresignedUrl: (...args: unknown[]) => mockExecutePresignedUrl(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -44,14 +56,38 @@ const BUCKETS: ListBucketsResponse = {
 // The row's storage line reads this endpoint independently of the bucket list.
 const EMPTY_ANALYTICS = { bytesUsed: 0, objectCount: 0 };
 
+const EMPTY_LISTING = '<ListVersionsResult><IsTruncated>false</IsTruncated></ListVersionsResult>';
+const ONE_OBJECT_LISTING =
+  '<ListVersionsResult><IsTruncated>true</IsTruncated><Version><Key>photo.jpg</Key>' +
+  '<VersionId>null</VersionId><IsLatest>true</IsLatest><Size>10</Size></Version></ListVersionsResult>';
+
+function mockBucketListing(xml: string) {
+  mockExecutePresignedUrl.mockResolvedValue({ text: () => Promise.resolve(xml) });
+}
+
 function mockApiResponses(deleteError?: Error) {
+  mockBucketListing(EMPTY_LISTING);
   mockApiRequest.mockImplementation((path: string, options?: { method?: string }) => {
     if (options?.method === 'DELETE') {
       return deleteError ? Promise.reject(deleteError) : Promise.resolve(undefined);
     }
+    if (path.startsWith('/presign')) {
+      return Promise.resolve({ items: [{ url: 'https://s3.test/list', method: 'GET' }] });
+    }
     if (path.includes('/analytics')) return Promise.resolve(EMPTY_ANALYTICS);
     return Promise.resolve(BUCKETS);
   });
+}
+
+/** The confirm button, once the emptiness check has let it go. */
+async function enabledDeleteButton() {
+  const button = await screen.findByRole('button', { name: 'Delete bucket' });
+  await waitFor(() => expect(button).toBeEnabled());
+  return button;
+}
+
+function deleteCalls() {
+  return mockApiRequest.mock.calls.filter(([, options]) => options?.method === 'DELETE');
 }
 
 const DEGRADED: ListBucketsResponse = {
@@ -103,21 +139,78 @@ describe('BucketsPage', () => {
   });
 
   // Deleting a bucket is irreversible, so the menu item must not delete on click.
-  it('asks for confirmation before deleting and does not call the API', async () => {
+  it('asks for confirmation before deleting and does not delete', async () => {
     const deleteMenuItem = await renderPageWithBucketMenuOpen();
-    mockApiRequest.mockClear();
 
     fireEvent.click(deleteMenuItem);
 
-    expect(await screen.findByTestId('confirm-dialog')).toBeInTheDocument();
-    expect(mockApiRequest).not.toHaveBeenCalled();
+    expect(await screen.findByTestId('delete-bucket-dialog')).toBeInTheDocument();
+    expect(await screen.findByText('This bucket will be permanently deleted.')).toBeInTheDocument();
+    expect(deleteCalls()).toHaveLength(0);
+  });
+
+  it('holds the delete while it checks whether the bucket is empty', async () => {
+    const deleteMenuItem = await renderPageWithBucketMenuOpen();
+    mockExecutePresignedUrl.mockReturnValue(new Promise(() => {}));
+
+    fireEvent.click(deleteMenuItem);
+
+    expect(await screen.findByText('Checking whether the bucket is empty')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete bucket' })).toBeDisabled();
+  });
+
+  it("asks S3 for one listing entry, in the bucket's own region", async () => {
+    const deleteMenuItem = await renderPageWithBucketMenuOpen();
+
+    fireEvent.click(deleteMenuItem);
+
+    await waitFor(() =>
+      expect(mockApiRequest).toHaveBeenCalledWith('/presign?region=eu-west-1', {
+        method: 'POST',
+        body: JSON.stringify([{ op: 'listObjectVersions', bucket: 'my-bucket', maxKeys: 1 }]),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  // Delete on a full bucket can only be refused, so the dialog says why and
+  // sends the user to the bucket page, where Empty bucket is.
+  it('points a bucket that still holds objects to its own page instead of deleting', async () => {
+    const deleteMenuItem = await renderPageWithBucketMenuOpen();
+    mockBucketListing(ONE_OBJECT_LISTING);
+
+    fireEvent.click(deleteMenuItem);
+
+    expect(await screen.findByText('This bucket isn’t empty')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete bucket' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to bucket' }));
+
+    expect(mockNavigate).toHaveBeenCalledWith({
+      to: '/buckets/$bucketName',
+      params: { bucketName: 'my-bucket' },
+      search: { region: S3Region.EuWest1 },
+    });
+    expect(deleteCalls()).toHaveLength(0);
+  });
+
+  // A failed check is not a full bucket: the delete is offered, and the server's
+  // own refusal still covers a bucket that turns out not to be empty.
+  it('still offers the delete when the emptiness check fails', async () => {
+    const deleteMenuItem = await renderPageWithBucketMenuOpen();
+    mockExecutePresignedUrl.mockRejectedValue(new Error('S3 request failed with status 403'));
+
+    fireEvent.click(deleteMenuItem);
+
+    fireEvent.click(await enabledDeleteButton());
+    await waitFor(() => expect(deleteCalls()).toHaveLength(1));
   });
 
   it('deletes the bucket once the dialog is confirmed', async () => {
     const deleteMenuItem = await renderPageWithBucketMenuOpen();
     fireEvent.click(deleteMenuItem);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
+    fireEvent.click(await enabledDeleteButton());
 
     await waitFor(() =>
       // The bucket's own region, not the default: a delete routed to the wrong
@@ -141,7 +234,7 @@ describe('BucketsPage', () => {
     );
 
     fireEvent.click(deleteMenuItem);
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
+    fireEvent.click(await enabledDeleteButton());
 
     expect(await screen.findByText(/is not empty/)).toBeInTheDocument();
     expect(screen.getByText(/Delete its objects and object versions first/)).toBeInTheDocument();
@@ -156,7 +249,7 @@ describe('BucketsPage', () => {
     rejectDeleteWith(Object.assign(new Error('Tenant setup is not complete'), { status: 503 }));
 
     fireEvent.click(deleteMenuItem);
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete bucket' }));
+    fireEvent.click(await enabledDeleteButton());
 
     expect(await screen.findByText('Tenant setup is not complete')).toBeInTheDocument();
   });
@@ -232,3 +325,55 @@ describe('BucketsPage degraded regions', () => {
     expect(await screen.findByText(DEGRADED_MESSAGE)).toBeInTheDocument();
   });
 });
+
+describe('BucketsPage storage line', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it(`asks for the analytics of at most ${ANALYTICS_CONCURRENCY} buckets at a time`, async () => {
+    mockBucketsWithPendingAnalytics(ANALYTICS_CONCURRENCY + 3);
+    renderPage();
+    await waitFor(() => expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY));
+
+    // Give any request over the limit the chance to go out.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+    expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY);
+  });
+
+  it("asks for the next bucket's analytics once an earlier one answers", async () => {
+    const answers = mockBucketsWithPendingAnalytics(ANALYTICS_CONCURRENCY + 3);
+    renderPage();
+    await waitFor(() => expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY));
+
+    act(() => answers[0]());
+
+    await waitFor(() => expect(analyticsCalls()).toHaveLength(ANALYTICS_CONCURRENCY + 1));
+  });
+});
+
+/**
+ * A list of buckets whose analytics requests stay pending until the test
+ * answers them. Returns one answer function per request, in request order.
+ */
+function mockBucketsWithPendingAnalytics(bucketCount: number): Array<() => void> {
+  const buckets = Array.from({ length: bucketCount }, (_, index) => ({
+    ...BUCKETS.buckets[0],
+    bucketName: `any-bucket-${index}`,
+  }));
+  const answers: Array<() => void> = [];
+  mockApiRequest.mockImplementation((path: string, options?: { signal?: AbortSignal }) => {
+    if (!path.includes('/analytics')) return Promise.resolve({ buckets });
+    return new Promise((resolve, reject) => {
+      answers.push(() => resolve(EMPTY_ANALYTICS));
+      // Rejects on abort as fetch does.
+      options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
+    });
+  });
+  return answers;
+}
+
+function analyticsCalls() {
+  return mockApiRequest.mock.calls.filter(([path]) => String(path).includes('/analytics'));
+}

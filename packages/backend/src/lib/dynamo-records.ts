@@ -8,6 +8,7 @@ import type {
   GranularPermission,
   SubscriptionStatus,
 } from '@filone/shared';
+import type Stripe from 'stripe';
 
 /**
  * The era a key was minted in.
@@ -70,6 +71,13 @@ export interface AccessKeyRecord {
   granularPermissions?: GranularPermission[];
   bucketScope?: AccessKeyBucketScope;
   buckets?: string[];
+  /**
+   * The member this key is bound to, on a region serving the `iam` access
+   * model. Such a key carries no authority of its own; bucket policies decide.
+   * Always the same as `createdBy` today; kept apart because it is what the
+   * storage system knows the key by.
+   */
+  principalId?: string;
   expiresAt?: string;
   /** The FilOne user who minted the key. Absent on keys older than roles. */
   createdBy?: string;
@@ -137,20 +145,28 @@ export function keyAttribution({
  * The Stripe price a subscription is billed on. Only fields that are immutable
  * on a Stripe price are kept — mutable ones (`nickname`, `active`, `metadata`,
  * `lookup_key`) are dropped, so a copy of this shape can never drift from
- * Stripe no matter how long we hold it. Field names mirror the Stripe API.
+ * Stripe no matter how long we hold it. The plan display name is the one
+ * exception, see below. Field names mirror the Stripe API.
  */
 export interface StripePriceDetails {
   id: string;
   product?: string;
   /**
-   * The product's display name, cached alongside the price so a Stripe outage
-   * does not cost the customer the name of their own plan. Snake_case with the
-   * rest of this interface, which mirrors Stripe's field names.
+   * The customer-facing plan name, read from the product's `display_name`
+   * metadata and cached alongside the price so a Stripe outage does not cost
+   * the customer the name of their own plan. Unlike the rest of this shape it
+   * can change in Stripe, so the cache is also rewritten when it does.
+   * Snake_case with the rest of this interface, which mirrors Stripe's field
+   * names.
    */
-  product_name?: string;
+  plan_display_name?: string;
   currency?: string;
-  billing_scheme?: 'per_unit' | 'tiered';
-  tiers_mode?: 'graduated' | 'volume' | null;
+  /**
+   * Stripe may add values to these enums at any time. The pricing code reports
+   * neither a minimum nor a rate for a value it does not know.
+   */
+  billing_scheme?: Stripe.Price.BillingScheme;
+  tiers_mode?: Stripe.Price.TiersMode | null;
   unit_amount?: number | null;
   /** Set instead of `unit_amount` for sub-cent rates, e.g. '0.499' per GB. */
   unit_amount_decimal?: string | null;
@@ -452,6 +468,12 @@ export interface BulkDeleteJobRecord {
   /** Empty string means the whole bucket. */
   prefix: string;
   scope: BulkDeleteScope;
+  /**
+   * The user who started the job. The worker re-reads their role, and for a
+   * scoped member their bucket access, before each run. Absent on jobs queued
+   * before it was recorded.
+   */
+  startedBy?: string;
   status: BulkDeleteJobStatus;
   deletedCount: number;
   failedCount: number;

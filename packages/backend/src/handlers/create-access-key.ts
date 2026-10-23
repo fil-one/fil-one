@@ -3,13 +3,16 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import {
   CreateAccessKeySchema,
+  CreatePrincipalAccessKeySchema,
   S3Region,
   excessKeyPermissions,
   isSupportedRegion,
+  supportsIamMethods,
 } from '@filone/shared';
 import type {
   CreateAccessKeyRequest,
   CreateAccessKeyResponse,
+  CreatePrincipalAccessKeyRequest,
   ErrorResponse,
 } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
@@ -28,7 +31,12 @@ import { listOrgAccessKeys } from '../lib/member-keys.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
-import type { IssuedAccessKey, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import type {
+  IssueAccessKeyOpts,
+  IssuedAccessKey,
+  RegionOrchestrator,
+  ServiceOrchestrator,
+} from '../lib/service-orchestrator.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import {
@@ -42,30 +50,42 @@ import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
-import { authorize, requireOrgMembershipMiddleware } from '../middleware/authorize.ts';
+import {
+  authorize,
+  requireOrgMembershipMiddleware,
+  requirePermission,
+} from '../middleware/authorize.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import {
+  getRequestDeadline,
+  markRequestStep,
+  requestDeadlineMiddleware,
+} from '../middleware/request-deadline.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
+//
+// The request deadline bounds the orchestrator calls that take it: a hung one
+// fails at the deadline and reaches the error handler, instead of the Lambda
+// timeout killing the request with nothing logged. The steps marked below name
+// the call in flight when the deadline fires, including the DynamoDB calls and
+// `syncMember`, which take no signal.
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const parsed = parseJsonBody(event.body, CreateAccessKeySchema);
+  const signal = getRequestDeadline(event);
+  const parsed = parseCreateRequest(event.body);
   if ('error' in parsed) return parsed.error;
 
-  const { keyName, permissions, granularPermissions, bucketScope, region } = parsed.data;
-  const buckets = bucketScope === 'specific' ? (parsed.data.buckets ?? []) : undefined;
-  const expiresAt = parsed.data.expiresAt ?? null;
-
-  const denied = checkCreatorAuthority(event, parsed.data);
-  if (denied) return denied;
-
+  const { keyName, region } = parsed.data;
   const { orgId, userId } = getUserInfo(event);
-  // What the cap above admitted. The key row's write asserts the role on file
-  // can still grant it, and the read after that write asks again.
-  const creator = { orgId, userId, key: { permissions, granularPermissions } };
+  const keyOpts = buildIssueAccessKeyOpts(parsed.data, userId);
+  // The key row's write asserts the role on file can still hold this key
+  // (`creatorRoleStillMintsCheck`), and the read after that write asks again
+  // (`keyExceedsCurrentRole`).
+  const creator: KeyMinter = { orgId, userId, key: getKeyRoleRequirement(parsed.data) };
   const creatorEmail = getVerifiedEmail(event);
   const attribution = keyAttribution({ userId, creatorEmail });
   const actor = userActor({ userId, email: creatorEmail });
@@ -76,16 +96,32 @@ export async function baseHandler(
 
   // Before ensureTenantReady: the key is minted upstream, so a fence checked
   // only at the DynamoDB write would leave a live credential behind.
+  markRequestStep(event, 'isOrgDeleting');
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
   const orchestrator = getOrchestratorForRegion(region);
-  const tenantId = await orchestrator.ensureTenantReady(orgId);
+  const denied = checkServiceKeyAuthority(event, parsed.data, orchestrator);
+  if (denied) return denied;
+  markRequestStep(event, 'ensureTenantReady');
+  const tenantId = await orchestrator.ensureTenantReady(orgId, { signal });
   if (!tenantId) return tenantNotReadyResponse();
 
   // Before the intent, because nothing happened: a name the org already shows
   // is a request that was never going to produce a key, and writing an intent
   // for it would leave an operator reading a mint that never started.
+  markRequestStep(event, 'orgAlreadyShowsKeyName');
   if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) return duplicateKeyNameResponse();
+
+  // A key bound to a principal syncs the principal first: the write is
+  // idempotent, a member invited after tenant setup may not be a principal yet,
+  // and `syncMember` recreates a principal that `removeMember` deleted. Before
+  // the intent, because it mints nothing: a failure here leaves no credential
+  // anywhere, and an intent left dangling by it would read to an operator as a
+  // possible orphan key.
+  if ('principalId' in keyOpts && supportsIamMethods(region)) {
+    markRequestStep(event, 'syncMember');
+    await (orchestrator as ServiceOrchestrator).syncMember(tenantId, userId);
+  }
 
   // Fail-closed, and before the vendor: the credential is created at the storage
   // vendor before anything local is written, so no SigV4 key may come into
@@ -93,25 +129,22 @@ export async function baseHandler(
   // name the key — the id comes back from the vendor — which is what makes a
   // dangling intent legible: a key was asked for by this name and no completion
   // followed. Both halves are filed under the org for the same reason.
+  markRequestStep(event, 'twoPhaseAudit');
   const mint = await twoPhaseAudit({
     type: 'key.created',
     mode: 'fail-closed',
     actor,
     orgId,
     subject: AuditSubjects.org(orgId),
-    details: { keyKind: 's3', keyName, region },
+    details: { keyKind: 's3', keyName, region, ...getKeyAuditDetails(keyOpts) },
   });
 
   let accessKey: IssuedAccessKey;
   try {
-    accessKey = await orchestrator.issueAccessKey(tenantId, {
-      keyName,
-      permissions,
-      granularPermissions,
-      buckets,
-      expiresAt,
-    });
+    markRequestStep(event, 'issueAccessKey');
+    accessKey = await orchestrator.issueAccessKey(tenantId, keyOpts, { signal });
   } catch (err) {
+    markRequestStep(event, 'handleMintRefusal');
     return await handleMintRefusal(err, {
       orgId,
       tenantId,
@@ -121,6 +154,8 @@ export async function baseHandler(
       attribution,
       mint,
       creator,
+      principalId: getPrincipalId(keyOpts),
+      signal,
     });
   }
 
@@ -133,6 +168,7 @@ export async function baseHandler(
     tenantId,
   };
 
+  markRequestStep(event, 'recordMintedKey');
   const record = await recordMintedKey({
     row: {
       pk: AccessKeyKeys.orgPk(orgId),
@@ -142,23 +178,38 @@ export async function baseHandler(
       createdAt: accessKey.createdAt,
       status: 'active',
       region,
-      permissions,
-      ...optionalKeyAttributes({ granularPermissions, bucketScope, buckets, expiresAt }),
+      ...buildKeyRowFields(parsed.data, accessKey, userId),
       ...attribution,
     },
     mint,
     minter: creator,
   });
+  // The discards below delete a key the vendor already minted, so they run
+  // without the deadline: a signal that has already fired would abort the
+  // delete at once and leave the very credential they exist to remove.
   if (!record.recorded) {
+    markRequestStep(event, 'discardUnrecordedKey');
     await discardUnrecordedKey({ minted: mintedKey, mint, minter: creator });
     return record.reason === 'minter_role_changed' ? roleChangedResponse() : mintConflictResponse();
   }
 
+  markRequestStep(event, 'keyExceedsCurrentRole');
   if (await keyExceedsCurrentRole(creator)) {
+    markRequestStep(event, 'discardRecordedKey');
     await discardRecordedKey({ minted: mintedKey, minter: creator, actor });
     return roleChangedResponse();
   }
 
+  return createdKeyResponse(accessKey, keyName);
+}
+
+type CreateKeyRequest = CreateAccessKeyRequest | CreatePrincipalAccessKeyRequest;
+
+/** The 201 that hands the caller the new key, its secret included. */
+function createdKeyResponse(
+  accessKey: IssuedAccessKey,
+  keyName: string,
+): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(201)
     .body<CreateAccessKeyResponse>({
@@ -167,8 +218,116 @@ export async function baseHandler(
       accessKeyId: accessKey.accessKeyId,
       secretAccessKey: accessKey.accessKeySecret,
       createdAt: accessKey.createdAt,
+      ...(accessKey.type === 'principal' ? { principalId: accessKey.principalId } : {}),
     })
     .build();
+}
+
+/**
+ * The key the orchestrator is asked to mint, by the request's shape. A key bound
+ * to the caller's principal sends its name, the principal and an expiry; a
+ * service key sends its permissions and bucket list.
+ */
+function buildIssueAccessKeyOpts(data: CreateKeyRequest, userId: string): IssueAccessKeyOpts {
+  const expiresAt = data.expiresAt ?? null;
+  if (!('permissions' in data)) return { keyName: data.keyName, principalId: userId, expiresAt };
+  const { keyName, permissions, granularPermissions, bucketScope } = data;
+  const buckets = bucketScope === 'specific' ? (data.buckets ?? []) : undefined;
+  return { keyName, permissions, granularPermissions, buckets, expiresAt };
+}
+
+/**
+ * What the minter's role must be able to hold, read by the key row's
+ * conditional write and by the check after it. A key bound to a principal
+ * carries no authority of its own, so any role holding `keys.create` may hold
+ * it. A service key carries its own grant, and the role must cover it; the
+ * region rides along because on one serving the `iam` access model only a role
+ * holding `keys.create_service` keeps a service key.
+ */
+function getKeyRoleRequirement(data: CreateKeyRequest): KeyMinter['key'] {
+  if (!('permissions' in data)) return { type: 'principal' };
+  const { permissions, granularPermissions, region } = data;
+  return { type: 'service', grant: { permissions, granularPermissions, region } };
+}
+
+/** The principal a key is bound to, or undefined for a service key. */
+function getPrincipalId(keyOpts: IssueAccessKeyOpts): string | undefined {
+  return 'principalId' in keyOpts ? keyOpts.principalId : undefined;
+}
+
+/** What the `key.created` intent records about the key's kind. */
+function getKeyAuditDetails(keyOpts: IssueAccessKeyOpts): { isPrincipalKey?: true } {
+  return 'principalId' in keyOpts ? { isPrincipalKey: true } : {};
+}
+
+/** The row attributes that depend on the key's kind. */
+function buildKeyRowFields(data: CreateKeyRequest, issued: IssuedAccessKey, userId: string) {
+  const expiresAt = data.expiresAt ?? null;
+  if (!('permissions' in data)) {
+    return {
+      principalId: issued.type === 'principal' ? issued.principalId : userId,
+      ...optionalKeyAttributes({ expiresAt }),
+    };
+  }
+  const { permissions, granularPermissions, bucketScope } = data;
+  const buckets = bucketScope === 'specific' ? (data.buckets ?? []) : undefined;
+  return {
+    permissions,
+    ...optionalKeyAttributes({ granularPermissions, bucketScope, buckets, expiresAt }),
+  };
+}
+
+/**
+ * The checks a service key answers to before anything is written: the
+ * creator-authority cap, and on a region serving the `iam` access model its own
+ * permission, because such a key answers to no bucket policy.
+ */
+function checkServiceKeyAuthority(
+  event: AuthenticatedEvent,
+  request: CreateKeyRequest,
+  orchestrator: RegionOrchestrator,
+): APIGatewayProxyStructuredResultV2 | undefined {
+  // A principal-bound key carries no authority to check.
+  if (!('permissions' in request)) return undefined;
+  const denied = checkCreatorAuthority(event, request);
+  if (denied || !supportsIamMethods(orchestrator.region)) return denied;
+  return requirePermission(
+    event,
+    'keys.create_service',
+    'Only an Owner or an Admin can create a service key on this region.',
+  );
+}
+
+/**
+ * The request in the shape the region and the body decide: on a region serving
+ * the `iam` access model a body with no `permissions` asks for a key bound to
+ * the caller's principal, and everything else is the service-key shape. The
+ * raw body is read ahead of validation because the two shapes have different
+ * schemas; a body that is not JSON, or names no supported region, is left to
+ * the service-key schema, which answers the 400.
+ */
+function parseCreateRequest(
+  rawBody: string | undefined,
+): { data: CreateKeyRequest } | { error: APIGatewayProxyStructuredResultV2 } {
+  return isPrincipalKeyRequest(rawBody)
+    ? parseJsonBody(rawBody, CreatePrincipalAccessKeySchema)
+    : parseJsonBody(rawBody, CreateAccessKeySchema);
+}
+
+function isPrincipalKeyRequest(rawBody: string | undefined): boolean {
+  try {
+    const body = JSON.parse(rawBody ?? '{}') as { region?: unknown; permissions?: unknown };
+    if (body.permissions !== undefined) return false;
+    if (
+      typeof body.region !== 'string' ||
+      !isSupportedRegion(body.region, process.env.FILONE_STAGE!)
+    ) {
+      return false;
+    }
+    return supportsIamMethods(body.region);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -238,9 +397,6 @@ async function handleMintRefusal(
 }
 
 /**
-
-
-/**
  * The creator-authority cap: the requested key permissions are intersected with
  * the caller's own, so a key can never carry more than the member minting it.
  *
@@ -270,11 +426,15 @@ interface MintAttempt {
   tenantId: string;
   keyName: string;
   region: S3Region;
-  orchestrator: ServiceOrchestrator;
+  orchestrator: RegionOrchestrator;
   attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
   /** The intent this attempt already wrote — every exit here closes it. */
   mint: AuditCorrelation<'key.created'>;
   creator: KeyMinter;
+  /** The principal a principal-bound key is bound to; its name is unique only within it. */
+  principalId?: string;
+  /** The request deadline, for the vendor lookup a duplicate's recovery makes. */
+  signal: AbortSignal;
 }
 
 async function recoverDuplicateKey({
@@ -286,6 +446,8 @@ async function recoverDuplicateKey({
   attribution,
   mint,
   creator,
+  principalId,
+  signal,
 }: MintAttempt): Promise<void> {
   if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) {
     // A plain duplicate name: the vendor refused and there is nothing to
@@ -296,7 +458,9 @@ async function recoverDuplicateKey({
 
   // Partial failure: key exists in Orchestrator's DB, but our DynamoDB record is missing.
   // Recover by fetching key details from the provider and writing the DB record.
-  const recovered = await orchestrator.findAccessKeyByName(tenantId, keyName);
+  const recovered = await orchestrator.findAccessKeyByName(tenantId, keyName, principalId, {
+    signal,
+  });
 
   if (!recovered) {
     // Shouldn't happen — orchestrator returned conflict but key not found in list.
@@ -336,6 +500,7 @@ async function recoverDuplicateKey({
       // no owner at all is the worse outcome, and `recovered` keeps the
       // record honest about which of the two this is.
       ...attribution,
+      ...(principalId ? { principalId } : {}),
       recovered: true,
     },
     mint,
@@ -356,11 +521,13 @@ async function recoverDuplicateKey({
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
-  // The key's permissions are capped at the creator's own inside the handler;
-  // that the creator is in the org at all is settled here, ahead of the billing
-  // read a non-member should never cost.
+  // A service key's permissions are capped at the creator's own inside the
+  // handler, and a principal-bound key carries none to cap; that the creator is
+  // in the org at all is settled here, ahead of the billing read a non-member
+  // should never cost.
   .use(requireOrgMembershipMiddleware())
   // Minting a key at all is `keys.create`, which does not depend on the body —
   // so it is declared in the manifest and checked here, like every other gated

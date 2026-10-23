@@ -41,7 +41,6 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => ({
     id: region === 'us-east-1' ? 'fth' : 'aurora',
     region,
-    accessModel: 'scoped-keys',
     isTenantReady: () => `tenant:${region}`,
     deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
   }),
@@ -323,7 +322,7 @@ describe('POST /api/org/transfer handler', () => {
     const result = await handler(transferEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 502 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual(['key-0']);
   });
 
   it('names the caller’s own keys the transfer revoked', async () => {
@@ -337,7 +336,7 @@ describe('POST /api/org/transfer handler', () => {
     const result = await handler(transferEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200 });
-    expect(body(result).revokedKeys.map((key: { id: string }) => key.id)).toStrictEqual([
+    expect(body(result).keysRevoked.map((key: { id: string }) => key.id)).toStrictEqual([
       'key-0',
       'key-1',
     ]);

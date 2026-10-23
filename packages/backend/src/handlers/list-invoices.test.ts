@@ -179,6 +179,30 @@ describe('list-invoices baseHandler', () => {
     expect(body.invoices.map((i: { id: string }) => i.id)).toEqual(['in_paid']);
   });
 
+  it('reports a status the console does not know as unknown', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(subscriptionItem({ stripeCustomerId: 'cus_456', subscriptionStatus: 'active' }));
+    mockInvoicesList.mockResolvedValue({
+      data: [
+        {
+          id: 'in_any',
+          amount_due: 1874,
+          // Not a status Stripe had when this code was written.
+          status: 'any-new-status',
+          created: 1764547200,
+          invoice_pdf: null,
+        },
+      ],
+    });
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(JSON.parse(String(result.body))).toMatchObject({
+      invoices: [{ id: 'in_any', status: 'unknown' }],
+    });
+  });
+
   it('calls stripe.invoices.list with correct params', async () => {
     ddbMock.on(GetItemCommand).resolves(
       subscriptionItem({

@@ -1,7 +1,6 @@
-import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/ssr';
 import type { OrgRole } from '@filone/shared';
 
-import { Input } from './Input';
+import { SearchInput } from './SearchInput';
 import { Select } from './Select';
 import { ALL_ROLES, type MemberFilters, hasActiveMemberFilters } from '../lib/member-table.js';
 import { ROLE_LABELS } from '../lib/use-member-scope.js';
@@ -36,20 +35,13 @@ export function MembersToolbar({
     // Wraps rather than squeezes: at 375px the search takes the full width and
     // the filter and count drop to a second line.
     <div className="mb-2.5 flex flex-wrap items-center gap-2">
-      <div className="relative w-full sm:w-64">
-        <span className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-zinc-400">
-          <MagnifyingGlassIcon size={14} />
-        </span>
-        <Input
-          type="search"
-          value={filters.query}
-          onChange={(query) => onChange({ ...filters, query })}
-          placeholder="Search members"
-          aria-label="Search members by name, email, or user ID"
-          inputSize="sm"
-          className="pl-8"
-        />
-      </div>
+      <SearchInput
+        value={filters.query}
+        onChange={(query) => onChange({ ...filters, query })}
+        placeholder="Search members"
+        aria-label="Search members by name, email, or user ID"
+        className="w-full sm:w-64"
+      />
 
       {showRoleFilter && (
         <Select

@@ -134,8 +134,7 @@ Do not use `font-bold`.
 
 **Why:** The console already leans this way (173 `font-medium` against 12 explicit
 `font-normal`), and a restricted weight set is most of what makes dense interfaces read as
-calm. At 13px, the visual step from 400 to 500 is enough; 600 and 700 shout. The 8 remaining
-`font-bold` uses are the exception to remove.
+calm. At 13px, the visual step from 400 to 500 is enough; 600 and 700 shout.
 
 **Check:** No `font-bold` in `src`. `font-semibold` only on a page-level `h1`.
 
@@ -174,7 +173,7 @@ height from a shared token, and horizontal padding is set independently of it:
 
 ```css
 @theme {
-  --control-height-sm: 28px;
+  --control-height-sm: 32px;
   --control-height-md: 36px;
   --control-height-lg: 44px;
 }
@@ -182,25 +181,29 @@ height from a shared token, and horizontal padding is set independently of it:
 
 **Why:** Height computed from `py-*` plus line height plus border drifts the moment two
 components pick different padding, and the drift is invisible in isolation and glaring in a
-row. That is the current state: `Button` (md) resolves to 38px from `py-2`, while `Input`
-and `Select` resolve to 42px from `py-2.5`, so every search-plus-button and
-field-plus-submit row in the console is misaligned by 4px. Horizontal padding disagrees too
-(`px-4` against `px-3`). Aligned controls are one of the clearest signals of a system that
-somebody owns.
+row. Before the tokens, `Button` (md) resolved to 38px from `py-2` while `Input` and `Select`
+resolved to 42px from `py-2.5`, so every search-plus-button row was 4px out. Aligned
+controls are one of the clearest signals of a system that somebody owns.
+
+Horizontal padding matches across controls of the same size so their contents share an
+inset: `px-2.5` at `sm`, `px-3` at `md`, `px-4` at `lg`. A call site that needs a taller
+control than `lg` (the auth pages' full-width CTA, which matches Auth0's 48px button) sets
+`h-*`, never `py-*`.
 
 The same reasoning applies to measurements that must match across independently-written
 components: page gutter, content max width, sidebar width. Those belong in `@theme` too, not
 repeated at call sites.
 
-**Check:** A story placing a button, an input, and a select in one `flex` row. Their tops
-and bottoms line up exactly.
+**Check:** `Components/Button/Aligned With Form Controls` places a button, a split button,
+an input, and a select in one `flex` row at each size. Their tops and bottoms line up
+exactly.
 
 **Dropdown and overflow menus** follow `BucketActionMenu.tsx`'s sizing, not a size picked
 per call site: `p-1.5` trigger padding with an 18px icon, `min-w-36` panel, `text-xs` items
 with `gap-2 px-3 py-1.5` and a 13px icon. `RowActionsMenu.tsx` (used by the Organizations
 list and the Members table) matches this.
 
-## 8. Use four radii (plus one sanctioned exception)
+## 8. Use four radii (plus two sanctioned exceptions)
 
 | Radius              | Use for                                                                |
 | ------------------- | ---------------------------------------------------------------------- |
@@ -211,12 +214,16 @@ list and the Members table) matches this.
 
 Nothing else. Not bare `rounded`, not `rounded-2xl`, `rounded-3xl`, or `rounded-[6px]`.
 
-**The one exception:** `OrgAvatar` is a rounded square, not a circle, so an org is
-distinguishable from a person at a glance rather than only by color (`OrgAvatar.tsx`).
-Its `sm` (28px), `md` (56px) and `lg` (64px) sizes nest inside the four radii above
-(`rounded-md`, `rounded-xl`) same as anything else, but its `xs` size (16px, the org switcher's list
-rows) is small enough that even `rounded-md` reads closer to round than square, so it
-steps down to `rounded-sm` (4px) — the one place in the console that class is allowed.
+**Exception 1, 16px squares:** at 16px even `rounded-md` reads closer to round than
+square, so a 16px square steps down to `rounded-sm` (4px). Two components qualify:
+
+- `OrgAvatar` `xs` (the org switcher's list rows). `OrgAvatar` is a rounded square, not a
+  circle, so an org is distinguishable from a person at a glance rather than only by
+  color. Its larger sizes nest inside the four radii above like anything else.
+- `Checkbox`, whose box is 16px.
+
+**Exception 2, region flags:** `RegionFlag` is a 16 by 12 image, not a control. It takes
+`rounded-xs` (2px), which softens the corners without changing the flag's shape.
 
 **Why:** Radius is where a system leaks most visibly, because mismatches show up as
 optically wrong corners when elements nest. These four keep nesting correct: a 6px control
@@ -228,7 +235,8 @@ needs removing is the leftovers, including `rounded-[6px]`, which is already `ro
 
 Side-specific variants of a permitted radius (`rounded-l-md`, `rounded-t-lg`) are fine.
 
-**Check:** this prints nothing.
+**Check:** this prints only `rounded-sm` and `rounded-xs`. Confirm each is one of the
+exceptions above. It also matches the word in comments and in `IconBox`'s `rounded` prop.
 
 ```bash
 grep -rhoE '\brounded(-(t|b|l|r|tl|tr|bl|br))?(-[a-z0-9]+|-\[[^]]*\])?' src --include="*.tsx" --include="*.css" | sort -u | grep -vE '(rounded(-(t|b|l|r|tl|tr|bl|br))?-(md|lg|xl|full))$'
@@ -254,17 +262,20 @@ it makes page content look like it is hovering, and it destroys the contrast tha
 mark a real overlay. `shadow-xs` is deliberately authored at 3% opacity, which reads as a
 hairline lift rather than a shadow, and is the ceiling for anything in the page.
 
-The console currently spans seven levels. 14 `shadow-sm` uses sit on resting surfaces and
-should become `Card` or `shadow-xs`, and
-`shadow-[0px_1px_2px_0px_rgba(0,0,0,0.05)]` duplicates `--shadow-xs` at a slightly
-different opacity.
+**Rings are not elevation.** A `box-shadow` that draws an outline (for example
+`shadow-[0px_0px_0px_1px_theme(colors.brand.100)]`) is a ring. Use a `ring-*` utility so it
+is not mistaken for one.
 
-**Exception:** `box-shadow` used as a ring rather than elevation (for example
-`shadow-[0px_0px_0px_1px_theme(colors.brand.100)]` for a selected state) is not elevation.
-Use a `ring-*` utility instead so it is not mistaken for one.
+**Two exceptions:**
 
-**Check:** Every `shadow-*` in a diff is on an overlay, or is `shadow-xs`, or is a ring
-expressed with `ring-*`.
+- **`shadow-auth-card`** on the auth screens (`AuthCard`, `InvitationOutcome`). It matches
+  the shadow `docs/auth0/universal-login-template.liquid` sets on Auth0's hosted card, so
+  the console's auth screens and Auth0's read as one surface. Change both together.
+- **`shadow-sm` on the `Switch` thumb.** The thumb is a control raised off its track, not a
+  resting surface.
+
+**Check:** Every `shadow-*` in a diff is on an overlay, is `shadow-xs`, is a ring expressed
+with `ring-*`, or is one of the two exceptions above.
 
 ## 10. Style focus with `focus-visible`, never `focus`
 
@@ -317,6 +328,10 @@ Every interactive element defines: default, hover, focus-visible, active, disabl
 where it loads or fetches, loading, empty, and error. If a state is genuinely unreachable,
 say so in a comment on the component.
 
+Filled buttons darken on hover and darken again on press (`brand-600` to `brand-700` to
+`brand-800`). Lightening fails: `brand-500`, `red-500`, and `amber-600` all put white text
+below 4.5:1.
+
 Empty and error states are content, not placeholders. An empty state says what belongs here
 and how to add it. An error says what failed and what to do next. Use `EmptyStateCard` and
 `StateCard`; do not hand-roll either.
@@ -360,27 +375,23 @@ here.
 1. **`focus` to `focus-visible`** (rule 10): 11 occurrences in CSS (`button.css` 8, plus
    `tabs.css`, `modal.css`, `toast.css`), plus 5 components (`Switch`, `Checkbox`,
    `CodeBlock`, `AccessKeyExpirationFields`, `billing/PaymentForm`).
-2. **Control height mismatch** (rule 7): `Button` md resolves to 38px, `Input` and
-   `Select` to 42px. Introduce the height tokens and migrate `Button`, `SplitButton`,
-   `Input`, and `Select` in one change, since a partial migration looks worse than the
-   current state.
-3. **Off-scale type to `text-meta` / `text-ui`** (rule 4): 25 files. `text-[13px]` 43,
+2. **Off-scale type to `text-meta` / `text-ui`** (rule 4): 25 files. `text-[13px]` 43,
    `text-[11px]` 40, `text-[10px]` 18, `text-[12px]` 7, plus one-off `text-[14px]` and
    `text-[18px]`. Heaviest in `DashboardPage` (29) and `BillingPage` (26). Decide where
    10px goes: it most likely becomes `text-meta`.
-4. **Raw hex to tokens** (rules 2 and 3): 7 distinct values across `MfaSettings`,
+3. **Raw hex to tokens** (rules 2 and 3): 7 distinct values across `MfaSettings`,
    `billing/PaymentForm`, and `SettingRow.stories`. Do `#0080ff` and `#0066ff` first, since
    a hardcoded brand blue also loses the documented AA contrast behaviour. Add the missing
    semantic variables before migrating the greys.
-5. **Shadow collapse** (rule 9): 14 `shadow-sm`, 3 `shadow-2xl`, 2
+4. **Shadow collapse** (rule 9): 14 `shadow-sm`, 3 `shadow-2xl`, 2
    `shadow-[0px_1px_2px_...]`, 1 ring-as-shadow to convert to `ring-*`.
-6. **Radius collapse** (rule 8): 29 bare `rounded`, 4 `rounded-[6px]`, 2 `rounded-sm`, 2
+5. **Radius collapse** (rule 8): 29 bare `rounded`, 4 `rounded-[6px]`, 2 `rounded-sm`, 2
    `rounded-2xl`, 2 `rounded-3xl`.
-7. **Motion** (rule 11): 1 `duration-300`, 4 `transition-transform` and 2
+6. **Motion** (rule 11): 1 `duration-300`, 4 `transition-transform` and 2
    `transition-opacity` to confirm as intentional.
-8. **Weights** (rule 5): 8 `font-bold` uses to remove, and `font-semibold` (47 uses) to
+7. **Weights** (rule 5): 8 `font-bold` uses to remove, and `font-semibold` (47 uses) to
    audit down to page titles.
-9. **`font-heading` is undefined.** `DesignTokens.stories.tsx` uses it in two places and no
+8. **`font-heading` is undefined.** `DesignTokens.stories.tsx` uses it in two places and no
    CSS defines it, so the design tokens page renders its own headings in the fallback font.
    Either define the token or use `font-sans`.
 

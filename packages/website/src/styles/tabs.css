@@ -46,7 +46,13 @@
     @apply mt-4;
   }
 
+  /* Headless UI puts the selected panel in the tab order, so a keyboard user
+     tabbing past the tab list lands on it and needs to see that. */
   .tab-panel {
-    @apply focus:outline-none;
+    @apply rounded-md;
+
+    &:focus-visible {
+      @apply brand-outline outline-offset-2;
+    }
   }
 }

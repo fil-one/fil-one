@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, S3Region } from '@filone/shared';
-import type { AccessKey } from '@filone/shared';
+import type { ServiceAccessKey } from '@filone/shared';
 
 vi.mock('../lib/api.js', () => ({
   apiRequest: vi.fn(),
@@ -13,12 +13,16 @@ import { BucketAccessTab } from './BucketAccessTab.js';
 import { ToastProvider } from './Toast/ToastProvider.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
+const USER_1 = '00000000-0000-0000-0000-000000000001';
+const USER_2 = '00000000-0000-0000-0000-000000000002';
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function key(over: Partial<AccessKey> = {}): AccessKey {
+function key(over: Partial<ServiceAccessKey> = {}): ServiceAccessKey {
   return {
+    type: 'service',
     id: 'key-1',
     keyName: 'my key',
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
@@ -28,8 +32,8 @@ function key(over: Partial<AccessKey> = {}): AccessKey {
     bucketScope: 'specific',
     buckets: ['my-bucket'],
     region: S3Region.UsEast1,
-    // `seedPermissions` writes userId 'user-1'.
-    createdBy: 'user-1',
+    // `seedPermissions` writes userId USER_1.
+    createdBy: USER_1,
     ...over,
   };
 }
@@ -98,24 +102,24 @@ describe('BucketAccessTab — who may revoke', () => {
   it('gives a Member the action on the key they minted', () => {
     renderTab({ accessKeys: [key()] }, OrgRole.Member);
 
-    expect(screen.getByRole('button', { name: 'Key actions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Actions for / })).toBeInTheDocument();
   });
 
   it('withholds it on a key somebody else minted', () => {
-    renderTab({ accessKeys: [key({ createdBy: 'user-2' })] }, OrgRole.Member);
+    renderTab({ accessKeys: [key({ createdBy: USER_2 })] }, OrgRole.Member);
 
-    expect(screen.queryByRole('button', { name: 'Key actions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Actions for / })).not.toBeInTheDocument();
   });
 
   it('gives an Admin the action on every key', () => {
-    renderTab({ accessKeys: [key(), key({ id: 'key-2', createdBy: 'user-2' })] }, OrgRole.Admin);
+    renderTab({ accessKeys: [key(), key({ id: 'key-2', createdBy: USER_2 })] }, OrgRole.Admin);
 
-    expect(screen.getAllByRole('button', { name: 'Key actions' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /^Actions for / })).toHaveLength(2);
   });
 
   it('gives ReadOnly none', () => {
     renderTab({ accessKeys: [key()] }, OrgRole.ReadOnly);
 
-    expect(screen.queryByRole('button', { name: 'Key actions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Actions for / })).not.toBeInTheDocument();
   });
 });

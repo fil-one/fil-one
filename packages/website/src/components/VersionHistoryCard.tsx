@@ -4,6 +4,7 @@ import { formatBytes } from '@filone/shared';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { formatDateTime } from '../lib/time.js';
 import { Badge } from './Badge';
+import { Card } from './Card';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -21,14 +22,14 @@ export function truncateVersionId(versionId: string, length = 8): string {
 export function VersionRowBadge({ version }: { version: S3ObjectVersion }) {
   if (version.isDeleteMarker) {
     return (
-      <Badge color="red" size="sm" weight="semibold">
+      <Badge color="red" size="sm">
         Delete marker
       </Badge>
     );
   }
   if (version.isLatest) {
     return (
-      <Badge color="green" size="sm" weight="semibold">
+      <Badge color="green" size="sm">
         Latest
       </Badge>
     );
@@ -85,7 +86,7 @@ function VersionRow({
       <td className="px-3 py-2 font-mono text-zinc-700">
         {truncatedId}
         {isCurrent && (
-          <span className="ml-1.5 text-meta font-semibold text-brand-600">(viewing)</span>
+          <span className="ml-1.5 text-meta font-medium text-brand-600">(viewing)</span>
         )}
       </td>
       <td className="px-3 py-2">
@@ -121,7 +122,7 @@ export function VersionHistoryCard({
   if (versions.length <= 1) return null;
 
   return (
-    <div className="mt-6 rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+    <Card className="mt-6">
       <div className="mb-3 flex items-center gap-2">
         <ClockCounterClockwiseIcon size={14} className="text-zinc-400" aria-hidden="true" />
         <h2 className="text-sm font-medium text-zinc-900">Version history ({versions.length})</h2>
@@ -149,6 +150,6 @@ export function VersionHistoryCard({
           </tbody>
         </table>
       </div>
-    </div>
+    </Card>
   );
 }

@@ -103,7 +103,7 @@ function TableHead({
         <button
           type="button"
           onClick={onSort}
-          className="group -mx-1 flex items-center gap-1 rounded-sm px-1 py-0.5 transition-colors hover:text-zinc-900 focus-visible:brand-outline"
+          className="group -mx-1 flex items-center gap-1 rounded-md px-1 py-0.5 transition-colors hover:text-zinc-900 focus-visible:brand-outline"
         >
           {children}
           <SortIcon direction={sortDirection} />

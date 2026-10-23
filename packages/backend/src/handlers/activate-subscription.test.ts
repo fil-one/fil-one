@@ -136,8 +136,8 @@ describe('activate-subscription baseHandler', () => {
     });
     mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
     mockIsOrgDeleting.mockResolvedValue(false);
-    // The billing read asks both keys at once. Absent unless a test says
-    // otherwise, so a row only exists where the test put one.
+    // The billing row is absent unless a test says otherwise, so a row only
+    // exists where the test put one.
     ddbMock.on(GetItemCommand).resolves({});
   });
 
@@ -229,9 +229,8 @@ describe('activate-subscription baseHandler', () => {
   });
 
   it('refuses to activate when the org has no billing row of its own', async () => {
-    // A `CUSTOMER#` row the cleanup step has not deleted yet cannot stand in
-    // for the org's: activating off it would charge a Stripe customer the org
-    // does not own.
+    // A `CUSTOMER#` row the cleanup step missed cannot stand in for the org's:
+    // activating off it would charge a Stripe customer the org does not own.
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves({})
@@ -381,6 +380,40 @@ describe('activate-subscription baseHandler', () => {
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
 
     expect(body.subscription.status).toBe(SubscriptionStatus.Active);
+  });
+
+  it('clears canceledAt and the grace deadline when reactivating from grace', async () => {
+    ddbMock
+      .on(GetItemCommand, { Key: ORG_KEY })
+      .resolves({
+        Item: buildBillingRecord({
+          subscriptionId: 'any-ended-subscription',
+          subscriptionStatus: SubscriptionStatus.GracePeriod,
+          canceledAt: '2026-01-01T00:00:00.000Z',
+          gracePeriodEndsAt: '2026-01-31T00:00:00.000Z',
+        }),
+      })
+      .on(GetItemCommand, { TableName: 'UserInfoTable' })
+      .resolves(orgProfileWithTenant('aurora-t-1'));
+    ddbMock.on(UpdateItemCommand).resolves({});
+    mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
+
+    await baseHandler(
+      buildEvent({
+        userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+        method: 'POST',
+        rawPath: '/api/billing/activate',
+      }),
+    );
+
+    // Activation writes the new subscription id, and subscription.updated refuses
+    // an event for the id the row names while canceledAt stands, so a canceledAt
+    // left here would block every later update for the new subscription.
+    expect(ddbMock.commandCalls(UpdateItemCommand).at(0)?.args[0].input).toMatchObject({
+      UpdateExpression:
+        'SET subscriptionId = :subId, subscriptionStatus = :status, currentPeriodStart = :periodStart, currentPeriodEnd = :periodEnd, paymentMethodId = :pmId, paymentMethodLast4 = :last4, paymentMethodBrand = :brand, paymentMethodExpMonth = :expMonth, paymentMethodExpYear = :expYear, updatedAt = :now REMOVE trialEndsAt, canceledAt, gracePeriodEndsAt',
+      ExpressionAttributeValues: expect.objectContaining({ ':subId': { S: 'sub_test_456' } }),
+    });
   });
 
   it('creates a new subscription when reactivating a fully canceled subscription (Canceled)', async () => {

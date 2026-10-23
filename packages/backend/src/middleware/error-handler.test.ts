@@ -1,10 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import type { Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
-import { ApiErrorCode } from '@filone/shared';
+import { ApiErrorCode, S3Region } from '@filone/shared';
 import { errorHandlerMiddleware } from './error-handler.ts';
 import { OrgDeletingError } from '../lib/org-profile.ts';
+import { IamRegionRefusedError } from '../lib/errors.ts';
+import { createS3Client } from '../lib/s3-client.ts';
+import { deleteBucket } from '../lib/s3-bucket-operations.ts';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
+
+const USER_1 = '00000000-0000-0000-0000-000000000001';
 
 type ErrorRequest = Request<APIGatewayProxyEventV2, APIGatewayProxyResultV2, Error, Context>;
 
@@ -26,6 +33,111 @@ describe('errorHandlerMiddleware', () => {
   it('sets a 500 response with a generic error message', async () => {
     const { onError } = errorHandlerMiddleware();
     const request = buildErrorRequest(new Error('db connection failed'));
+
+    await onError!(request);
+
+    expect(request.response).toMatchObject({
+      statusCode: 500,
+      body: JSON.stringify({
+        message: 'An unexpected server error occurred. Please try again later.',
+      }),
+    });
+  });
+
+  it.each([
+    // What fetch rejects with.
+    { condition: 'is the deadline abort', wrap: (abort: Error) => abort },
+    // What the AWS SDK rejects with, then wrapped once more by the orchestrator.
+    {
+      condition: 'wraps the deadline abort as its cause',
+      wrap: (abort: Error) =>
+        new Error('Failed to fetch bucket', {
+          cause: Object.assign(new Error('Request aborted', { cause: abort }), {
+            name: 'AbortError',
+          }),
+        }),
+    },
+  ])('sets a 504 response when the error $condition', async ({ wrap }) => {
+    const deadline = AbortSignal.abort(new DOMException('deadline', 'TimeoutError'));
+    const { onError } = errorHandlerMiddleware();
+    const request = buildErrorRequest(wrap(deadline.reason));
+    request.event = buildEvent({ requestContext: { deadline } });
+
+    await onError!(request);
+
+    expect(request.response).toMatchObject({
+      statusCode: 504,
+      body: JSON.stringify({
+        message: 'The storage service took too long to respond. Please try again.',
+      }),
+    });
+  });
+
+  // The cases above build the SDK's abort error by hand. This one lets the AWS
+  // SDK build it, so the test fails if a release stops carrying the deadline's
+  // reason as the abort's cause.
+  describe('with a real S3 call', () => {
+    let neverAnsweringServer: Server;
+    let endpointUrl: string;
+
+    beforeAll(async () => {
+      neverAnsweringServer = createServer(() => {});
+      await new Promise<void>((resolve) => neverAnsweringServer.listen(0, '127.0.0.1', resolve));
+      const { port } = neverAnsweringServer.address() as AddressInfo;
+      endpointUrl = `http://127.0.0.1:${port}`;
+    });
+
+    afterAll(() => {
+      neverAnsweringServer.closeAllConnections();
+      neverAnsweringServer.close();
+    });
+
+    it('sets a 504 response when the request deadline aborts the call', async () => {
+      const s3 = createS3Client({
+        endpointUrl,
+        region: 'us-east-1',
+        credentials: { accessKeyId: 'any-key-id', secretAccessKey: 'any-secret' },
+        forcePathStyle: true,
+        orchestratorId: 'any-orchestrator',
+        tenantId: 'any-tenant',
+      });
+      // Fires once the request is in flight, with the reason AbortSignal.timeout
+      // gives, without making the test wait out a timer.
+      const deadlineController = new AbortController();
+      neverAnsweringServer.once('request', () =>
+        deadlineController.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+      );
+      const deadline = deadlineController.signal;
+      const error = await deleteBucket(s3, 'any-bucket', { signal: deadline }).catch(
+        (err: Error) => err,
+      );
+      const { onError } = errorHandlerMiddleware();
+      const request = buildErrorRequest(error as Error);
+      request.event = buildEvent({ requestContext: { deadline } });
+
+      await onError!(request);
+
+      expect(request.response).toMatchObject({
+        statusCode: 504,
+        body: JSON.stringify({
+          message: 'The storage service took too long to respond. Please try again.',
+        }),
+      });
+    });
+  });
+
+  it.each([
+    // A handler settled the aborted call itself, then failed for another reason.
+    {
+      condition: 'has fired but did not cause the error',
+      deadline: AbortSignal.abort(new DOMException('deadline', 'TimeoutError')),
+    },
+    { condition: 'has not fired', deadline: new AbortController().signal },
+    { condition: 'is not attached', deadline: undefined },
+  ])('sets a 500 response when the request deadline $condition', async ({ deadline }) => {
+    const { onError } = errorHandlerMiddleware();
+    const request = buildErrorRequest(new Error('any-failure'));
+    request.event = buildEvent({ requestContext: { deadline } });
 
     await onError!(request);
 
@@ -59,6 +171,50 @@ describe('errorHandlerMiddleware', () => {
     });
   });
 
+  it.each([
+    {
+      action: 'remove' as const,
+      succeeded: [],
+      message: 'We could not remove the member from this organization. Please try again.',
+    },
+    {
+      action: 'remove' as const,
+      succeeded: [S3Region.EuCentral3],
+      message: `The member was removed from ${S3Region.EuCentral3} but could not be removed from ${S3Region.UsEast9}. They are still in this organization, please try again.`,
+    },
+    {
+      action: 'register' as const,
+      succeeded: [],
+      message:
+        'The member joined, but could not be registered on the storage regions. Please try again.',
+    },
+    {
+      action: 'register' as const,
+      succeeded: [S3Region.EuCentral3],
+      message: `The member joined, and was registered on ${S3Region.EuCentral3} but not on ${S3Region.UsEast9}. Please try again.`,
+    },
+  ])(
+    'maps IamRegionRefusedError on $action to 502 that says which regions applied it',
+    async ({ action, succeeded, message }) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const { onError } = errorHandlerMiddleware();
+      const request = buildErrorRequest(
+        new IamRegionRefusedError(action, [S3Region.UsEast9], succeeded),
+      );
+
+      try {
+        await onError!(request);
+      } finally {
+        warn.mockRestore();
+      }
+
+      expect(request.response).toMatchObject({
+        statusCode: 502,
+        body: JSON.stringify({ message }),
+      });
+    },
+  );
+
   it('does not expose the original error message in the response', async () => {
     const { onError } = errorHandlerMiddleware();
     const secret = 'password=hunter2&host=prod-db.internal';
@@ -77,14 +233,14 @@ describe('errorHandlerMiddleware', () => {
     const error = new Error('something broke');
     const request = buildErrorRequest(error);
     request.event = buildEvent({
-      userInfo: { userId: 'user-1', orgId: 'org-1' },
+      userInfo: { userId: USER_1, orgId: 'org-1' },
     });
 
     await onError!(request);
 
     expect(spy).toHaveBeenCalledWith(
       'Unhandled handler error:',
-      { orgId: 'org-1', userId: 'user-1', apiRequestId: 'req-1' },
+      { orgId: 'org-1', userId: USER_1, apiRequestId: 'req-1' },
       error,
     );
     spy.mockRestore();

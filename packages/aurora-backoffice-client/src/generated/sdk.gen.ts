@@ -3,12 +3,24 @@
 import { client } from './client.gen.ts';
 import type { Client, Options as Options2, TDataShape } from './client/index.ts';
 import type {
+  AdjustTenantInferenceCreditsData,
+  AdjustTenantInferenceCreditsErrors,
+  AdjustTenantInferenceCreditsResponses,
   CreateTenantData,
   CreateTenantErrors,
+  CreateTenantMessageData,
+  CreateTenantMessageErrors,
+  CreateTenantMessageResponses,
   CreateTenantResponses,
   CreateTenantTokenData,
   CreateTenantTokenErrors,
   CreateTenantTokenResponses,
+  CreateTenantTokenV2Data,
+  CreateTenantTokenV2Errors,
+  CreateTenantTokenV2Responses,
+  CreateTenantV2Data,
+  CreateTenantV2Errors,
+  CreateTenantV2Responses,
   CreateThemeData,
   CreateThemeErrors,
   CreateThemeResponses,
@@ -18,6 +30,15 @@ import type {
   CreateUserData,
   CreateUserErrors,
   CreateUserResponses,
+  DeleteTenantData,
+  DeleteTenantErrors,
+  DeleteTenantMessageData,
+  DeleteTenantMessageErrors,
+  DeleteTenantMessageResponses,
+  DeleteTenantMessagesData,
+  DeleteTenantMessagesErrors,
+  DeleteTenantMessagesResponses,
+  DeleteTenantResponses,
   DeleteTenantTokenData,
   DeleteTenantTokenErrors,
   DeleteTenantTokenResponses,
@@ -27,23 +48,32 @@ import type {
   DeleteTokenData,
   DeleteTokenErrors,
   DeleteTokenResponses,
+  GetAuthComponentData,
+  GetAuthComponentErrors,
+  GetAuthComponentResponses,
   GetBucketOperationMetricsData,
   GetBucketOperationMetricsErrors,
   GetBucketOperationMetricsResponses,
   GetBucketOwnerData,
   GetBucketOwnerErrors,
+  GetBucketOwnerFromPartnerData,
+  GetBucketOwnerFromPartnerErrors,
+  GetBucketOwnerFromPartnerResponses,
   GetBucketOwnerResponses,
   GetBucketStorageMetricsData,
   GetBucketStorageMetricsErrors,
   GetBucketStorageMetricsResponses,
-  GetComponentData,
-  GetComponentErrors,
-  GetComponentResponses,
+  GetComputeComponentData,
+  GetComputeComponentErrors,
+  GetComputeComponentResponses,
   GetConfigData,
   GetConfigErrors,
   GetConfigResponses,
   GetEnvironmentData,
   GetEnvironmentResponses,
+  GetInferenceComponentData,
+  GetInferenceComponentErrors,
+  GetInferenceComponentResponses,
   GetMyPartnerData,
   GetMyPartnerErrors,
   GetMyPartnerResponses,
@@ -53,11 +83,26 @@ import type {
   GetRegionData,
   GetRegionErrors,
   GetRegionResponses,
+  GetS3ComponentData,
+  GetS3ComponentErrors,
+  GetS3ComponentResponses,
   GetS3CredentialData,
   GetS3CredentialErrors,
   GetS3CredentialResponses,
   GetTenantData,
   GetTenantErrors,
+  GetTenantInferenceCreditWalletData,
+  GetTenantInferenceCreditWalletErrors,
+  GetTenantInferenceCreditWalletResponses,
+  GetTenantInferenceUsageBackofficeData,
+  GetTenantInferenceUsageBackofficeErrors,
+  GetTenantInferenceUsageBackofficeResponses,
+  GetTenantMessageData,
+  GetTenantMessageErrors,
+  GetTenantMessagePreviewData,
+  GetTenantMessagePreviewErrors,
+  GetTenantMessagePreviewResponses,
+  GetTenantMessageResponses,
   GetTenantOperationMetricsData,
   GetTenantOperationMetricsErrors,
   GetTenantOperationMetricsResponses,
@@ -68,6 +113,9 @@ import type {
   GetTenantTokenData,
   GetTenantTokenErrors,
   GetTenantTokenResponses,
+  GetTenantV2Data,
+  GetTenantV2Errors,
+  GetTenantV2Responses,
   GetThemeData,
   GetThemeErrors,
   GetThemeResponses,
@@ -80,6 +128,9 @@ import type {
   GetWarmTierCredentialData,
   GetWarmTierCredentialErrors,
   GetWarmTierCredentialResponses,
+  InviteUserData,
+  InviteUserErrors,
+  InviteUserResponses,
   ListAllRegionsData,
   ListAllRegionsErrors,
   ListAllRegionsResponses,
@@ -98,12 +149,21 @@ import type {
   ListS3CredentialsData,
   ListS3CredentialsErrors,
   ListS3CredentialsResponses,
+  ListTenantInferenceCreditEntriesData,
+  ListTenantInferenceCreditEntriesErrors,
+  ListTenantInferenceCreditEntriesResponses,
   ListTenantMembersData,
   ListTenantMembersErrors,
   ListTenantMembersResponses,
+  ListTenantMessagesBackofficeData,
+  ListTenantMessagesBackofficeErrors,
+  ListTenantMessagesBackofficeResponses,
   ListTenantsData,
   ListTenantsErrors,
   ListTenantsResponses,
+  ListTenantsV2Data,
+  ListTenantsV2Errors,
+  ListTenantsV2Responses,
   ListTenantTokensData,
   ListTenantTokensErrors,
   ListTenantTokensResponses,
@@ -119,6 +179,12 @@ import type {
   ListWarmTierCredentialsData,
   ListWarmTierCredentialsErrors,
   ListWarmTierCredentialsResponses,
+  MassUpdateTenantMessagesData,
+  MassUpdateTenantMessagesErrors,
+  MassUpdateTenantMessagesResponses,
+  ResendVerificationEmailData,
+  ResendVerificationEmailErrors,
+  ResendVerificationEmailResponses,
   SetTenantStatusData,
   SetTenantStatusErrors,
   SetTenantStatusResponses,
@@ -131,9 +197,6 @@ import type {
   SetupS3ComponentData,
   SetupS3ComponentErrors,
   SetupS3ComponentResponses,
-  SetupTenantData,
-  SetupTenantErrors,
-  SetupTenantResponses,
   UpdateAuthComponentData,
   UpdateAuthComponentErrors,
   UpdateAuthComponentResponses,
@@ -143,9 +206,15 @@ import type {
   UpdateConfigData,
   UpdateConfigErrors,
   UpdateConfigResponses,
+  UpdateInferenceComponentData,
+  UpdateInferenceComponentErrors,
+  UpdateInferenceComponentResponses,
   UpdateS3ComponentData,
   UpdateS3ComponentErrors,
   UpdateS3ComponentResponses,
+  UpdateTenantMessageData,
+  UpdateTenantMessageErrors,
+  UpdateTenantMessageResponses,
   UpdateThemeData,
   UpdateThemeErrors,
   UpdateThemeResponses,
@@ -206,6 +275,24 @@ export const getBucketStorageMetrics = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Get tenant inference usage metrics
+ *
+ * Returns inference usage metrics (token counts, requests, errors) for a tenant in the given time range, optionally resampled by window duration and grouped by model
+ */
+export const getTenantInferenceUsageBackoffice = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantInferenceUsageBackofficeData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantInferenceUsageBackofficeResponses,
+    GetTenantInferenceUsageBackofficeErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/analytics/v1/{partnerId}/tenants/{tenantId}/inference',
+    ...options,
+  });
+
+/**
  * Get tenant operation metrics
  *
  * Returns S3 operation metrics for a tenant in the given time range, optionally resampled by window duration and grouped by tags
@@ -258,7 +345,9 @@ export const listTenantTokens = <ThrowOnError extends boolean = false>(
 /**
  * Create tenant token
  *
- * Creates a new token for a tenant
+ * Creates a new token with all portal permissions for a tenant
+ *
+ * @deprecated
  */
 export const createTenantToken = <ThrowOnError extends boolean = false>(
   options: Options<CreateTenantTokenData, ThrowOnError>,
@@ -370,6 +459,86 @@ export const getToken = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Create tenant token v2
+ *
+ * Creates a new token with the requested portal permissions for a tenant
+ */
+export const createTenantTokenV2 = <ThrowOnError extends boolean = false>(
+  options: Options<CreateTenantTokenV2Data, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateTenantTokenV2Responses,
+    CreateTenantTokenV2Errors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/auth/v2/partners/{partnerId}/tenants/{tenantId}/tokens',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Adjust tenant inference credits
+ *
+ * Applies an idempotent audited manual adjustment to a tenant's inference credits
+ */
+export const adjustTenantInferenceCredits = <ThrowOnError extends boolean = false>(
+  options: Options<AdjustTenantInferenceCreditsData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    AdjustTenantInferenceCreditsResponses,
+    AdjustTenantInferenceCreditsErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/inference/v1/{partnerId}/tenants/{tenantId}/credits/adjustments',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * List tenant inference credit ledger entries
+ *
+ * Returns a paginated list of the tenant's inference credit ledger entries, newest first
+ */
+export const listTenantInferenceCreditEntries = <ThrowOnError extends boolean = false>(
+  options: Options<ListTenantInferenceCreditEntriesData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    ListTenantInferenceCreditEntriesResponses,
+    ListTenantInferenceCreditEntriesErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/inference/v1/{partnerId}/tenants/{tenantId}/credits/entries',
+    ...options,
+  });
+
+/**
+ * Get tenant inference credit wallet
+ *
+ * Returns inference credit details. Account field will be null until first credit is applied
+ */
+export const getTenantInferenceCreditWallet = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantInferenceCreditWalletData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantInferenceCreditWalletResponses,
+    GetTenantInferenceCreditWalletErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/inference/v1/{partnerId}/tenants/{tenantId}/credits/wallet',
+    ...options,
+  });
+
+/**
  * List partner regions
  *
  * Returns a list of regions for the partner
@@ -471,6 +640,24 @@ export const getPartner = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Get bucket owner
+ *
+ * Returns the owner information for a specific bucket in the partner context
+ */
+export const getBucketOwnerFromPartner = <ThrowOnError extends boolean = false>(
+  options: Options<GetBucketOwnerFromPartnerData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBucketOwnerFromPartnerResponses,
+    GetBucketOwnerFromPartnerErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/buckets/{bucketName}/owner',
+    ...options,
+  });
+
+/**
  * Get partner config
  *
  * Returns the configuration for the partner
@@ -520,6 +707,8 @@ export const getRegion = <ThrowOnError extends boolean = false>(
  * List partner tenants
  *
  * Returns a paginated list of tenants for the partner
+ *
+ * @deprecated
  */
 export const listTenants = <ThrowOnError extends boolean = false>(
   options: Options<ListTenantsData, ThrowOnError>,
@@ -533,7 +722,9 @@ export const listTenants = <ThrowOnError extends boolean = false>(
 /**
  * Create tenant
  *
- * Creates a new tenant for the partner. Created tenant must be initialized with the Setup endpoint before it's ready to use.
+ * Creates a new tenant for the partner. Created tenant components must be initialized before they're ready to use.
+ *
+ * @deprecated
  */
 export const createTenant = <ThrowOnError extends boolean = false>(
   options: Options<CreateTenantData, ThrowOnError>,
@@ -549,9 +740,25 @@ export const createTenant = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Delete tenant
+ *
+ * Marks the tenant as deleted, permanently disables API token authentication and creation, and tears down its components: deletes the Auth0 organization while preserving user accounts, revokes bucket shares, denies S3 access, deletes access keys and destroys bucket root encryption keys. Refused (409) when a component that has been set up has no teardown implemented yet, or when a component's setup is incomplete (finish it first). Idempotent: calling it again resumes an interrupted teardown. Progress is visible per component in the tenant's components status.
+ */
+export const deleteTenant = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteTenantData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<DeleteTenantResponses, DeleteTenantErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}',
+    ...options,
+  });
+
+/**
  * Get tenant
  *
  * Returns details of a specific tenant by ID
+ *
+ * @deprecated
  */
 export const getTenant = <ThrowOnError extends boolean = false>(
   options: Options<GetTenantData, ThrowOnError>,
@@ -571,6 +778,20 @@ export const listBuckets = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<ListBucketsResponses, ListBucketsErrors, ThrowOnError>({
     security: [{ name: 'X-Api-Key', type: 'apiKey' }],
     url: '/v1/partners/{partnerId}/tenants/{tenantId}/buckets',
+    ...options,
+  });
+
+/**
+ * Get Auth component status and properties
+ *
+ * Get the current status and properties of the Auth component for a tenant
+ */
+export const getAuthComponent = <ThrowOnError extends boolean = false>(
+  options: Options<GetAuthComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetAuthComponentResponses, GetAuthComponentErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Auth',
     ...options,
   });
 
@@ -611,6 +832,24 @@ export const setupAuthComponent = <ThrowOnError extends boolean = false>(
   >({ url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Auth/setup', ...options });
 
 /**
+ * Get Compute component status and properties
+ *
+ * Get the current status and properties of the Compute component for a tenant
+ */
+export const getComputeComponent = <ThrowOnError extends boolean = false>(
+  options: Options<GetComputeComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetComputeComponentResponses,
+    GetComputeComponentErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Compute',
+    ...options,
+  });
+
+/**
  * Update Compute component settings
  *
  * Updates settings (e.g. enabled status) for a component of a tenant
@@ -645,6 +884,60 @@ export const setupComputeComponent = <ThrowOnError extends boolean = false>(
     SetupComputeComponentErrors,
     ThrowOnError
   >({ url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Compute/setup', ...options });
+
+/**
+ * Get Inference component status and properties
+ *
+ * Get the current status, backend overrides, and resolved backends of the Inference component for a tenant
+ */
+export const getInferenceComponent = <ThrowOnError extends boolean = false>(
+  options: Options<GetInferenceComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetInferenceComponentResponses,
+    GetInferenceComponentErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Inference',
+    ...options,
+  });
+
+/**
+ * Update Inference component settings
+ *
+ * Updates enabled status and prepaid credit enforcement for a tenant
+ */
+export const updateInferenceComponent = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateInferenceComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).patch<
+    UpdateInferenceComponentResponses,
+    UpdateInferenceComponentErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/Inference',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Get S3 component status and properties
+ *
+ * Get the current status and properties of the S3 component for a tenant
+ */
+export const getS3Component = <ThrowOnError extends boolean = false>(
+  options: Options<GetS3ComponentData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetS3ComponentResponses, GetS3ComponentErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/S3',
+    ...options,
+  });
 
 /**
  * Update S3 component settings
@@ -682,19 +975,6 @@ export const setupS3Component = <ThrowOnError extends boolean = false>(
   });
 
 /**
- * Get component status and properties
- *
- * Get the current status (enabled/disabled) and properties of a component for a tenant
- */
-export const getComponent = <ThrowOnError extends boolean = false>(
-  options: Options<GetComponentData, ThrowOnError>,
-) =>
-  (options.client ?? client).get<GetComponentResponses, GetComponentErrors, ThrowOnError>({
-    url: '/v1/partners/{partnerId}/tenants/{tenantId}/components/{component}',
-    ...options,
-  });
-
-/**
  * List tenant members
  *
  * Returns users that are members of given org
@@ -711,18 +991,155 @@ export const listTenantMembers = <ThrowOnError extends boolean = false>(
   );
 
 /**
- * Setup tenant
+ * Delete tenant messages by tag
  *
- * Initiates the setup process for a tenant
- *
- * @deprecated
+ * Deletes tenant messages
  */
-export const setupTenant = <ThrowOnError extends boolean = false>(
-  options: Options<SetupTenantData, ThrowOnError>,
+export const deleteTenantMessages = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteTenantMessagesData, ThrowOnError>,
 ) =>
-  (options.client ?? client).post<SetupTenantResponses, SetupTenantErrors, ThrowOnError>({
+  (options.client ?? client).delete<
+    DeleteTenantMessagesResponses,
+    DeleteTenantMessagesErrors,
+    ThrowOnError
+  >({
+    querySerializer: { parameters: { tags: { array: { explode: false } } } },
     security: [{ name: 'X-Api-Key', type: 'apiKey' }],
-    url: '/v1/partners/{partnerId}/tenants/{tenantId}/setup',
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages',
+    ...options,
+  });
+
+/**
+ * List tenant messages
+ *
+ * Returns tenant messages, including dismissed messages
+ */
+export const listTenantMessagesBackoffice = <ThrowOnError extends boolean = false>(
+  options: Options<ListTenantMessagesBackofficeData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    ListTenantMessagesBackofficeResponses,
+    ListTenantMessagesBackofficeErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages',
+    ...options,
+  });
+
+/**
+ * Create tenant message
+ *
+ * Creates a tenant message from a predefined template
+ */
+export const createTenantMessage = <ThrowOnError extends boolean = false>(
+  options: Options<CreateTenantMessageData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateTenantMessageResponses,
+    CreateTenantMessageErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Mass update tenant messages by tags
+ *
+ * Updates existing tenant messages for provided templates and tags, creates missing ones, and deletes tagged messages not present in request templates
+ */
+export const massUpdateTenantMessages = <ThrowOnError extends boolean = false>(
+  options: Options<MassUpdateTenantMessagesData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    MassUpdateTenantMessagesResponses,
+    MassUpdateTenantMessagesErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Delete tenant message
+ *
+ * Deletes a tenant message
+ */
+export const deleteTenantMessage = <ThrowOnError extends boolean = false>(
+  options: Options<DeleteTenantMessageData, ThrowOnError>,
+) =>
+  (options.client ?? client).delete<
+    DeleteTenantMessageResponses,
+    DeleteTenantMessageErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages/{messageId}',
+    ...options,
+  });
+
+/**
+ * Get tenant message
+ *
+ * Returns a specific tenant message, including dismissed messages
+ */
+export const getTenantMessage = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantMessageData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetTenantMessageResponses, GetTenantMessageErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages/{messageId}',
+    ...options,
+  });
+
+/**
+ * Update tenant message
+ *
+ * Updates a tenant message, if message was dismissed before, it will be shown again
+ */
+export const updateTenantMessage = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateTenantMessageData, ThrowOnError>,
+) =>
+  (options.client ?? client).patch<
+    UpdateTenantMessageResponses,
+    UpdateTenantMessageErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages/{messageId}',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Preview tenant message
+ *
+ * Renders a specific tenant message for preview
+ */
+export const getTenantMessagePreview = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantMessagePreviewData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTenantMessagePreviewResponses,
+    GetTenantMessagePreviewErrors,
+    ThrowOnError
+  >({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/tenants/{tenantId}/messages/{messageId}/preview',
     ...options,
   });
 
@@ -839,7 +1256,7 @@ export const listUsers = <ThrowOnError extends boolean = false>(
 /**
  * Create user
  *
- * Creates a new user and assigns them to a tenant. If a user with provided email already exists, creation will be skipped and that user will be assigned to a tenant.
+ * Creates a new user WITHOUT assigning them to a tenant. Used for self-service flows.
  */
 export const createUser = <ThrowOnError extends boolean = false>(
   options: Options<CreateUserData, ThrowOnError>,
@@ -847,6 +1264,24 @@ export const createUser = <ThrowOnError extends boolean = false>(
   (options.client ?? client).post<CreateUserResponses, CreateUserErrors, ThrowOnError>({
     security: [{ name: 'X-Api-Key', type: 'apiKey' }],
     url: '/v1/partners/{partnerId}/users',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Invite user
+ *
+ * Creates a new user and assigns them to a tenant. If a user with provided email already exists, creation will be skipped and that user will be assigned to a tenant.
+ */
+export const inviteUser = <ThrowOnError extends boolean = false>(
+  options: Options<InviteUserData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<InviteUserResponses, InviteUserErrors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v1/partners/{partnerId}/users/invite',
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -867,6 +1302,20 @@ export const getUser = <ThrowOnError extends boolean = false>(
     url: '/v1/partners/{partnerId}/users/{userId}',
     ...options,
   });
+
+/**
+ * Resend verification email
+ *
+ * Resends a verification email to a user who has not yet verified their email address
+ */
+export const resendVerificationEmail = <ThrowOnError extends boolean = false>(
+  options: Options<ResendVerificationEmailData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    ResendVerificationEmailResponses,
+    ResendVerificationEmailErrors,
+    ThrowOnError
+  >({ url: '/v1/partners/{partnerId}/users/{userId}/resend-email', ...options });
 
 /**
  * List roles
@@ -947,5 +1396,51 @@ export const getWarmTierCredential = <ThrowOnError extends boolean = false>(
   >({
     security: [{ name: 'X-Api-Key', type: 'apiKey' }],
     url: '/v1/warm_tier_credentials/{warmTierCredentialId}',
+    ...options,
+  });
+
+/**
+ * List partner tenants v2
+ *
+ * Returns a paginated list of tenants for the partner
+ */
+export const listTenantsV2 = <ThrowOnError extends boolean = false>(
+  options: Options<ListTenantsV2Data, ThrowOnError>,
+) =>
+  (options.client ?? client).get<ListTenantsV2Responses, ListTenantsV2Errors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v2/partners/{partnerId}/tenants',
+    ...options,
+  });
+
+/**
+ * Create tenant v2
+ *
+ * Creates a new tenant for the partner. Created tenant must be initialized with the Setup endpoint before it's ready to use.
+ */
+export const createTenantV2 = <ThrowOnError extends boolean = false>(
+  options: Options<CreateTenantV2Data, ThrowOnError>,
+) =>
+  (options.client ?? client).post<CreateTenantV2Responses, CreateTenantV2Errors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v2/partners/{partnerId}/tenants',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+/**
+ * Get tenant v2
+ *
+ * Returns details of a specific tenant by ID
+ */
+export const getTenantV2 = <ThrowOnError extends boolean = false>(
+  options: Options<GetTenantV2Data, ThrowOnError>,
+) =>
+  (options.client ?? client).get<GetTenantV2Responses, GetTenantV2Errors, ThrowOnError>({
+    security: [{ name: 'X-Api-Key', type: 'apiKey' }],
+    url: '/v2/partners/{partnerId}/tenants/{tenantId}',
     ...options,
   });

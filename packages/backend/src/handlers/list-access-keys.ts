@@ -1,11 +1,14 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { ListAccessKeysResponse } from '@filone/shared';
-import { isSupportedRegion } from '@filone/shared';
+import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
+import { getEffectiveActions, isSupportedRegion, supportsIamMethods } from '@filone/shared';
 import { getAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.ts';
+import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import type { ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -29,9 +32,49 @@ export async function baseHandler(
   // A caller holding only `keys.manage_own` sees the keys they created and
   // nothing else. See `getAccessKeysInScope` for the query and the mapping to
   // `AccessKey`, shared with the dashboard's key count.
-  const keys = await getAccessKeysInScope(orgId, keyScope(event), { bucketFilter, regionFilter });
+  const inScope = await getAccessKeysInScope(orgId, keyScope(event), {
+    bucketFilter,
+    regionFilter,
+  });
+  const keys = bucketFilter
+    ? await filterKeysWithBucketAccess(inScope, {
+        orgId,
+        bucketName: bucketFilter,
+        region: regionFilter,
+      })
+    : inScope;
 
   return new ResponseBuilder().status(200).body<ListAccessKeysResponse>({ keys }).build();
+}
+
+/**
+ * Keeps the keys that can access the bucket. A service key answers from its
+ * stored scope, which the query already applied. A principal-bound key stores
+ * none: it is kept when the bucket's policy gives its principal any action, and
+ * the policy is read once per request.
+ */
+async function filterKeysWithBucketAccess(
+  keys: AccessKey[],
+  { orgId, bucketName, region }: { orgId: string; bucketName: string; region?: string },
+): Promise<AccessKey[]> {
+  if (!keys.some((key) => key.type === 'principal')) return keys;
+  const orchestrator =
+    region && isSupportedRegion(region, process.env.FILONE_STAGE!)
+      ? getOrchestratorForRegion(region)
+      : undefined;
+  // No `iam` region to ask, so no bucket policy can give a principal-bound key access.
+  if (!orchestrator || !supportsIamMethods(orchestrator.region))
+    return keys.filter((key) => key.type !== 'principal');
+  const iam = orchestrator as ServiceOrchestrator;
+  // Uses `isTenantReady`: a list must not create a tenant.
+  const tenantId = iam.isTenantReady(await getOrgProfile(orgId));
+  // No tenant or no policy on the bucket: no principal-bound key has access.
+  const stored = tenantId ? await iam.getBucketPolicy(tenantId, bucketName) : null;
+  return keys.filter(
+    (key) =>
+      key.type !== 'principal' ||
+      (stored !== null && getEffectiveActions(stored.policy, key.principalId).length > 0),
+  );
 }
 
 export const handler = middy(baseHandler)

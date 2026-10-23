@@ -44,14 +44,16 @@ vi.mock('../lib/org-profile.ts', () => ({
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './list-buckets.ts';
-import { buildEvent } from '../test/lambda-test-utilities.ts';
-import { S3_REGION, S3Region } from '@filone/shared';
+import { buildEvent, membershipFor, NO_MEMBERSHIP } from '../test/lambda-test-utilities.ts';
+import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
+
+const USER_1 = '00000000-0000-0000-0000-000000000001';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
 // A degraded region answers with `unavailableRegions` (partial 200) or, when no live region
 // answers at all, a 503 carrying this sentence. Mirrors listBucketsUnavailableMessage.
@@ -163,13 +165,37 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(byName('unencrypted-bucket')).toMatchObject({ versioning: false, encrypted: false });
   });
 
-  it('calls orchestrator.listBuckets with the tenant id', async () => {
+  it.each([
+    [OrgRole.Owner, undefined],
+    [OrgRole.Admin, undefined],
+    [OrgRole.Member, USER_1],
+    [OrgRole.ReadOnly, USER_1],
+  ])('lists buckets for %s scoped to %s', async (role, scopeToMemberId) => {
     aurora.listBuckets.mockResolvedValue([]);
 
-    const event = buildEvent({ userInfo: USER_INFO });
-    await baseHandler(event);
+    await baseHandler(
+      buildEvent({
+        userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, role) },
+      }),
+    );
 
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
+    expect(aurora.listBuckets).toHaveBeenCalledWith(
+      'aurora-t-1',
+      scopeToMemberId,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('scopes the listing to the caller when the membership is missing', async () => {
+    aurora.listBuckets.mockResolvedValue([]);
+
+    await baseHandler(buildEvent({ userInfo: { ...USER_INFO, membership: NO_MEMBERSHIP } }));
+
+    expect(aurora.listBuckets).toHaveBeenCalledWith(
+      'aurora-t-1',
+      USER_1,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('consults the orchestrator registry to fan out across available regions', async () => {
@@ -294,7 +320,11 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(body.buckets.map((b: { bucketName: string }) => b.bucketName)).toStrictEqual([
       'fth-bucket',
     ]);
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9');
+    expect(fth.listBuckets).toHaveBeenCalledWith(
+      'fth-t-9',
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(aurora.isTenantReady).not.toHaveBeenCalled();
     expect(aurora.listBuckets).not.toHaveBeenCalled();
   });
@@ -346,8 +376,16 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
         },
       ],
     });
-    expect(aurora.listBuckets).toHaveBeenCalledWith('aurora-t-1');
-    expect(fth.listBuckets).toHaveBeenCalledWith('fth-t-9');
+    expect(aurora.listBuckets).toHaveBeenCalledWith(
+      'aurora-t-1',
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(fth.listBuckets).toHaveBeenCalledWith(
+      'fth-t-9',
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('sorts buckets alphabetically by name across regions', async () => {
@@ -554,5 +592,28 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
       message: unavailableMessage('us-east-1'),
     });
     expect(aurora.listBuckets).not.toHaveBeenCalled();
+  });
+});
+
+describe('list-buckets baseHandler (request deadline)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    availableOrchestrators.mockReturnValue([aurora, fth]);
+    aurora.isTenantReady.mockReturnValue('aurora-t-1');
+    fth.isTenantReady.mockReturnValue('fth-t-9');
+    aurora.listBuckets.mockResolvedValue([]);
+    fth.listBuckets.mockResolvedValue([]);
+  });
+
+  // One budget per request: every leg of the fan-out gets the same signal, so
+  // the slowest region cannot hold the handler past what the fastest one saw.
+  it('hands every region the same deadline signal', async () => {
+    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const [, , auroraOpts] = aurora.listBuckets.mock.calls[0];
+    const [, , fthOpts] = fth.listBuckets.mock.calls[0];
+    // Identity, not deep equality: two separate signals compare as equal
+    // objects. The fan-out tests above check that each leg gets a signal.
+    expect(fthOpts.signal).toBe(auroraOpts.signal);
   });
 });

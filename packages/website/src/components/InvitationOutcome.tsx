@@ -36,7 +36,7 @@ function RoleBadge({ role, className }: { role: OrgRole; className?: string }) {
  * the live region below only reads the new text out, without moving them to it.
  */
 const PANEL_SHELL_CLASSES =
-  'w-full max-w-[380px] rounded-xl border border-zinc-200 bg-white p-8 text-center shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]';
+  'w-full max-w-[380px] rounded-xl border border-zinc-200 bg-white p-8 text-center shadow-auth-card';
 
 function Panel({
   title,
@@ -114,7 +114,7 @@ function Refused({
           {sessionEmail ? (
             <>
               You&rsquo;re signed in as{' '}
-              <span className="font-semibold text-zinc-900">{sessionEmail}</span>.
+              <span className="font-medium text-zinc-900">{sessionEmail}</span>.
             </>
           ) : (
             'This invitation was sent to a different address than the account you are signed in with.'
@@ -141,7 +141,7 @@ function Refused({
           Your email isn&rsquo;t verified yet, so this invitation is on hold. Verify it and
           we&rsquo;ll bring you straight back here.
         </p>
-        <Button variant="primary" href="/verify-email">
+        <Button id="accept-verify-email-button" variant="primary" href="/verify-email">
           Verify your email
         </Button>
       </Panel>

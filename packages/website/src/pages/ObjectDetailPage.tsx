@@ -22,7 +22,7 @@ import { IconButton } from '../components/IconButton';
 import { ShareObjectModal } from '../components/ShareObjectModal';
 import { Spinner } from '../components/Spinner';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
-import { formatBytes, getS3Endpoint, S3_REGION, SubscriptionStatus } from '@filone/shared';
+import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
 import type {
   ObjectMetadataResponse,
@@ -34,9 +34,9 @@ import type {
 import { FILONE_STAGE } from '../env';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { SHARE_UNAVAILABLE_TOOLTIP, useCanShareObjects } from '../lib/use-can-share-objects.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { queryKeys, queryClient } from '../lib/query-client.js';
-import { getBilling } from '../lib/api.js';
 import { batchPresign } from '../lib/use-presign.js';
 import {
   parseHeadObjectResponse,
@@ -161,24 +161,8 @@ export function ObjectDetailPage({
   );
   const objectVersions = (cachedVersions?.versions ?? []).filter((v) => v.key === objectKey);
 
-  const mayReadBilling = useHasPermission('billing.view');
   const mayDelete = useHasPermission('objects.delete');
-  const { data: billing } = useQuery({
-    queryKey: queryKeys.billing,
-    queryFn: getBilling,
-    enabled: mayReadBilling,
-  });
-  // With billing readable this is an allowlist: a status the list doesn't know
-  // (inactive, say) must not enable sharing. A Member cannot read billing at
-  // all, and inferring "trial" from an absent answer disabled Share for every
-  // Member on a paid plan and told them the trial was why. The presign endpoint
-  // applies the same subscription rule server-side, so the honest default when
-  // the console cannot see the plan is to offer the control.
-  const canShare =
-    !mayReadBilling ||
-    billing?.subscription.status === SubscriptionStatus.Active ||
-    billing?.subscription.status === SubscriptionStatus.PastDue ||
-    billing?.subscription.status === SubscriptionStatus.GracePeriod;
+  const canShare = useCanShareObjects();
 
   // The confirmation goes with the Delete control it was opened from.
   const [confirmDeleteOpen, setConfirmDeleteOpen] = usePermittedDialog(false, mayDelete);
@@ -287,11 +271,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
             id="object-share-button"
             icon={LinkIcon}
             aria-label="Share object"
-            tooltip={
-              canShare
-                ? 'Share object'
-                : 'Sharing is not available during the trial period. Upgrade to a paid plan to share objects.'
-            }
+            tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
             tooltipSide="bottom"
             disabled={!canShare}
             onClick={() => setShareOpen(true)}

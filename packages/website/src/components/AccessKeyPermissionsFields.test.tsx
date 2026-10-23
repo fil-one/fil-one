@@ -87,6 +87,20 @@ describe('AccessKeyPermissionsFields — bucket-info permissions', () => {
     expect(checkbox).toHaveAttribute('aria-disabled', 'true');
   });
 
+  it('offers the bucket CORS write in a Forge region', () => {
+    renderFields(S3Region.EuCentral3);
+    const checkbox = screen.getByRole('checkbox', { name: 'Set bucket CORS' });
+    expect(checkbox).not.toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(checkbox);
+    expect(screen.getByTestId('selected')).toHaveTextContent('PutBucketCORS');
+  });
+
+  it('disables the bucket CORS write outside the Forge regions', () => {
+    renderFields(S3Region.UsEast1);
+    const checkbox = screen.getByRole('checkbox', { name: 'Set bucket CORS' });
+    expect(checkbox).toHaveAttribute('aria-disabled', 'true');
+  });
+
   it('selects a bucket-info permission when its checkbox is toggled', () => {
     renderFields(S3Region.EuWest1);
     const checkbox = screen.getByRole('checkbox', { name: 'Read bucket versioning' });

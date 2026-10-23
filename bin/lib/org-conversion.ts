@@ -598,17 +598,22 @@ export function summarizePlans(plans: readonly OrgPlan[]): PlanCounts {
   };
 
   for (const plan of plans) {
-    if (plan.kind === 'convert') {
-      if (plan.origin === 'member-row') counts.convertFromMemberRow++;
-      else counts.repairFromProfile++;
-      if (!plan.metaExists) counts.metaToWrite++;
-    } else if (plan.kind === 'already-converted') {
-      counts.alreadyConverted++;
-      if (plan.legacyRowPending) counts.legacyRowsPendingDelete++;
-    } else if (plan.kind === 'deleting') {
-      counts.deleting++;
-    } else {
-      counts.anomalies++;
+    switch (plan.kind) {
+      case 'convert':
+        if (plan.origin === 'member-row') counts.convertFromMemberRow++;
+        else counts.repairFromProfile++;
+        if (!plan.metaExists) counts.metaToWrite++;
+        break;
+      case 'already-converted':
+        counts.alreadyConverted++;
+        if (plan.legacyRowPending) counts.legacyRowsPendingDelete++;
+        break;
+      case 'deleting':
+        counts.deleting++;
+        break;
+      default:
+        counts.anomalies++;
+        break;
     }
   }
 

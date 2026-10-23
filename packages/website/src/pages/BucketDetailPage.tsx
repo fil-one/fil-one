@@ -9,27 +9,29 @@ import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../components/Tabs';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Alert } from '../components/Alert';
 import { Skeleton } from '../components/Skeleton';
-import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
-import { ObjectBrowser, countObjects } from '../components/ObjectBrowser';
+import { countObjects } from '../components/ObjectBrowser';
+import { ObjectsPanel } from './BucketObjectsPanel';
+import { useBucketTabs } from '../lib/use-bucket-tabs.js';
 import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
+import { BucketPolicyTab } from '../components/BucketPolicyTab';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
 import type {
-  Bucket,
+  BucketDetails,
   ListObjectVersionsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
   BucketAnalyticsResponse,
 } from '@filone/shared';
+import { supportsIamMethods } from '../lib/access-model.js';
 import { apiRequest } from '../lib/api.js';
-import { formatDateTime } from '../lib/time.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
-import { useHasPermission } from '../lib/use-permissions.js';
+import { useHasPermission, usePermissions } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
@@ -75,7 +77,7 @@ function displayObjectCount(
 async function fetchObjectListing(
   region: S3Region,
   bucketName: string,
-  bucket: Bucket | null,
+  bucket: BucketDetails | null,
 ): Promise<ListObjectVersionsResponse> {
   if (bucket?.versioning) {
     const { items } = await batchPresign(region, [
@@ -131,7 +133,7 @@ function BucketOverview({
   region,
   bytesUsed,
 }: {
-  bucket: Bucket | null;
+  bucket: BucketDetails | null;
   region: S3Region;
   bytesUsed: number | undefined;
 }) {
@@ -143,8 +145,6 @@ function BucketOverview({
         <span className="text-zinc-700">{region}</span>
         <span className="mx-2 text-zinc-400">&bull;</span>
         <span className="text-xs text-zinc-500">{formatStorage(bytesUsed)} used</span>
-        <span className="mx-2 text-zinc-400">&bull;</span>
-        <span className="text-xs text-zinc-500">Created {formatDateTime(bucket.createdAt)}</span>
       </p>
       {/* Responsive rather than a fixed three columns: at 375px three columns
           crushed the cards, and with four of them the fourth was orphaned at a
@@ -264,68 +264,72 @@ function BucketErrorState({
   return (
     <div className="px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
-      <div className="mt-4">
+      <div className="mt-4" data-testid="bucket-error">
         <Alert variant="red" description={error?.message ?? fallback} />
       </div>
     </div>
   );
 }
 
-// Mirrors ObjectBrowser's columns so the placeholder holds the same shape as the
-// table it stands in for. The Version and Status pair is versioning-only, and
-// versioning is not known until the bucket metadata lands, so the skeleton shows
-// the columns every bucket has rather than guessing at two that may not appear.
-const OBJECT_SKELETON_COLUMNS: SkeletonColumn[] = [
-  { label: 'Name' },
-  { label: 'Size' },
-  { label: 'Last Modified' },
-  {},
-];
-
-/**
- * The Objects tab's body: the listing, or a table-shaped placeholder while it
- * loads. Extracted so the page component stays about layout, and so the
- * loading branch sits next to the table it stands in for.
- */
-function ObjectsPanel({
-  loading,
-  objectActions,
-  mayUpload,
-  mayDelete,
-  ...browser
-}: {
-  loading: boolean;
-  bucketName: string;
-  region: S3Region;
-  versions: S3ObjectVersion[];
-  versioningEnabled: boolean;
-  currentPrefix: string;
-  onPrefixChange: (prefix: string) => void;
-  objectActions: ReturnType<typeof useObjectActions>;
-  mayUpload: boolean;
-  mayDelete: boolean;
-  listingTruncated: boolean;
-  totalObjectCount: number | undefined;
-}) {
-  if (loading) {
-    return <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />;
-  }
-
-  return (
-    <ObjectBrowser
-      {...browser}
-      onDownload={objectActions.downloadObject}
-      downloading={objectActions.downloading}
-      canUpload={mayUpload}
-      onDelete={mayDelete ? objectActions.deleteObject : undefined}
-      onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
-    />
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
+/**
+ * The action bar beside the bucket heading. Both actions are hidden while the
+ * bucket is empty: the empty state carries the sole upload CTA then, so two
+ * identical primary actions never compete, and there is nothing to empty. Each
+ * also goes with its permission: emptying the bucket is a bulk
+ * `objects.delete`, uploading is `objects.write`, and a role holding neither
+ * gets no action bar at all. The cloud glyph leads the label, echoing that
+ * empty state's icon.
+ */
+export function BucketHeaderActions({
+  bucketName,
+  region,
+  hasObjects,
+  mayDelete,
+  mayUpload,
+  totalObjectCount,
+  onEmptied,
+  onUpload,
+}: {
+  bucketName: string;
+  region: S3Region;
+  hasObjects: boolean;
+  mayDelete: boolean;
+  mayUpload: boolean;
+  totalObjectCount: number | undefined;
+  onEmptied: () => void;
+  onUpload: () => void;
+}) {
+  if (!hasObjects || !(mayDelete || mayUpload)) return null;
+  return (
+    <div className="flex items-center gap-2">
+      {mayDelete && (
+        <EmptyBucketAction
+          bucketName={bucketName}
+          region={region}
+          totalObjectCount={totalObjectCount}
+          onFinished={onEmptied}
+        />
+      )}
+      {mayUpload && (
+        <Button
+          id="upload-object-button"
+          variant="primary"
+          size="sm"
+          icon={CloudArrowUpIcon}
+          iconSize={18}
+          iconPosition="left"
+          onClick={onUpload}
+        >
+          Upload object
+        </Button>
+      )}
+    </div>
+  );
+}
 
 export type BucketDetailPageProps = {
   bucketName: string;
@@ -342,6 +346,12 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const mayDelete = useHasPermission('objects.delete');
   const { mayList: mayListKeys } = useKeyActionScope();
   const mayCreateKeys = useHasPermission('keys.create');
+  const { isPending: permissionsLoading } = usePermissions();
+  // The policy tab exists where a policy can: a region serving the `iam`
+  // access model, for a role that may edit one. Reading takes the same
+  // permission as editing, so the tab is absent rather than read-only.
+  const isPolicyTabVisible =
+    useHasPermission('buckets.policy_manage') && supportsIamMethods(region);
 
   const setCurrentPrefix = useCallback(
     (newPrefix: string) => {
@@ -369,6 +379,13 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   // The Add key modal goes with the `keys.create` control inside the tab.
   const [addKeyOpen, setAddKeyOpen] = usePermittedDialog(false, mayCreateKeys);
+  // Controlled so the empty bucket's View API keys button can switch tabs.
+  const tabs = useBucketTabs({ hasKeysTab: mayListKeys, hasPolicyTab: isPolicyTabVisible });
+  // Each tab's count, undefined until its list has answered
+  const objectCount = objectsQuery.isPending
+    ? undefined
+    : displayObjectCount(analyticsData, versions, isTruncated);
+  const keyCount = accessKeysLoading ? undefined : accessKeys.length;
 
   const refreshAfterBulkDelete = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
@@ -429,47 +446,25 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
 
       <div className="mt-4 mb-2 flex items-center justify-between">
-        <Heading tag="h1" size="xl">
+        <Heading id="bucket-detail-heading" tag="h1" size="xl">
           {bucketName}
         </Heading>
-        {/* Both hidden while the bucket is empty: the empty state carries the
-            sole upload CTA then, so two identical primary actions never compete,
-            and there is nothing to empty. Each also goes with its permission:
-            emptying the bucket is a bulk `objects.delete`, uploading is
-            `objects.write`, and a role holding neither gets no action bar at
-            all. The cloud glyph leads the label, echoing that empty state's
-            icon. */}
-        {versions.length > 0 && (mayDelete || mayUpload) && (
-          <div className="flex items-center gap-2">
-            {mayDelete && (
-              <EmptyBucketAction
-                bucketName={bucketName}
-                region={region}
-                totalObjectCount={analyticsData?.objectCount}
-                onFinished={refreshAfterBulkDelete}
-              />
-            )}
-            {mayUpload && (
-              <Button
-                id="upload-object-button"
-                variant="primary"
-                size="sm"
-                icon={CloudArrowUpIcon}
-                iconSize={18}
-                iconPosition="left"
-                onClick={() =>
-                  void navigate({
-                    to: '/buckets/$bucketName/upload',
-                    params: { bucketName },
-                    search: { region },
-                  })
-                }
-              >
-                Upload object
-              </Button>
-            )}
-          </div>
-        )}
+        <BucketHeaderActions
+          bucketName={bucketName}
+          region={region}
+          hasObjects={versions.length > 0}
+          mayDelete={mayDelete}
+          mayUpload={mayUpload}
+          totalObjectCount={analyticsData?.objectCount}
+          onEmptied={refreshAfterBulkDelete}
+          onUpload={() =>
+            void navigate({
+              to: '/buckets/$bucketName/upload',
+              params: { bucketName },
+              search: { region },
+            })
+          }
+        />
       </div>
 
       {bucketQuery.isPending ? (
@@ -478,30 +473,26 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         <BucketOverview bucket={bucket} region={region} bytesUsed={analyticsData?.bytesUsed} />
       )}
 
-      <Tabs>
+      <Tabs selectedIndex={tabs.selectedIndex} onChange={tabs.selectTabAt}>
         <TabList>
           {/* The count waits for the listing rather than counting an empty
               array: "Objects (0)" on a bucket that turns out to hold hundreds is
               a worse answer than no number yet, and it is the same rule the API
               Keys tab beside it already follows. */}
-          <Tab
-            testId="bucket-objects-tab"
-            count={
-              objectsQuery.isPending
-                ? undefined
-                : displayObjectCount(analyticsData, versions, isTruncated)
-            }
-          >
+          <Tab testId="bucket-objects-tab" count={objectCount}>
             Objects
           </Tab>
           {/* Absent, not empty, for a role that cannot list keys: an "API Keys
               (0)" tab reads as an org with no keys rather than a view this
               caller does not get. */}
           {mayListKeys && (
-            <Tab testId="bucket-keys-tab" count={accessKeysLoading ? undefined : accessKeys.length}>
+            <Tab ref={tabs.keysTabRef} testId="bucket-keys-tab" count={keyCount}>
               API Keys
             </Tab>
           )}
+          {/* Headless UI pairs tabs to panels by order, so this and its panel
+              below sit behind the identical condition. */}
+          {isPolicyTabVisible && <Tab testId="bucket-policy-tab">Policy</Tab>}
         </TabList>
 
         <TabPanels>
@@ -517,6 +508,13 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               objectActions={objectActions}
               mayUpload={mayUpload}
               mayDelete={mayDelete}
+              activeAccessKeyCount={accessKeys.filter((key) => key.status !== 'expired').length}
+              accessKeysLoading={accessKeysLoading}
+              accessKeysFailed={accessKeysQuery.isError}
+              permissionsLoading={permissionsLoading}
+              mayCreateKeys={mayCreateKeys}
+              onAddKeyOpenChange={setAddKeyOpen}
+              onShowKeys={tabs.showKeysTab}
               listingTruncated={isTruncated}
               totalObjectCount={analyticsData?.objectCount}
             />
@@ -534,6 +532,11 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
                 accessKeysErrorMessage={accessKeysQuery.error?.message}
                 onCreateOpen={() => setAddKeyOpen(true)}
               />
+            </TabPanel>
+          )}
+          {isPolicyTabVisible && (
+            <TabPanel>
+              <BucketPolicyTab bucketName={bucketName} region={region} />
             </TabPanel>
           )}
         </TabPanels>

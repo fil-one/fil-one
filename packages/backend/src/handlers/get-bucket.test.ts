@@ -25,15 +25,17 @@ vi.mock('../lib/org-profile.ts', () => ({
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './get-bucket.ts';
-import { buildEvent } from '../test/lambda-test-utilities.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 import { fakeOrchestrator, tenantFor, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
-import { S3_REGION, S3Region } from '@filone/shared';
+import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
+
+const USER_1 = '00000000-0000-0000-0000-000000000001';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
+const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -146,7 +148,48 @@ describe('get-bucket baseHandler', () => {
     event.pathParameters = { name: 'my-bucket' };
     await baseHandler(event);
 
-    expect(orch.getBucket).toHaveBeenCalledWith(tenantFor('aurora', 'org-1'), 'my-bucket');
+    // The default caller is an Owner, whom the console reads for unscoped.
+    expect(orch.getBucket).toHaveBeenCalledWith(
+      tenantFor('aurora', 'org-1'),
+      'my-bucket',
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  function eventAs(role: OrgRole) {
+    const event = buildEvent({
+      userInfo: { ...USER_INFO, membership: membershipFor('org-1', USER_1, role) },
+    });
+    event.pathParameters = { name: 'my-bucket' };
+    return event;
+  }
+
+  // An Owner or Admin must open a bucket whose policy leaves them out, or has
+  // none, to repair it; everyone else sees only what a statement grants.
+  it.each([OrgRole.Member, OrgRole.ReadOnly])(
+    'scopes the read to the caller for a %s',
+    async (role) => {
+      await baseHandler(eventAs(role));
+
+      expect(orch.getBucket).toHaveBeenCalledWith(
+        tenantFor('aurora', 'org-1'),
+        'my-bucket',
+        USER_1,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    },
+  );
+
+  it.each([OrgRole.Owner, OrgRole.Admin])('reads unscoped for an %s', async (role) => {
+    await baseHandler(eventAs(role));
+
+    expect(orch.getBucket).toHaveBeenCalledWith(
+      tenantFor('aurora', 'org-1'),
+      'my-bucket',
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('returns 404 when orchestrator.getBucket returns null', async () => {

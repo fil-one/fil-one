@@ -1,8 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { S3_REGION, S3Region } from '@filone/shared';
 import { ToastProvider } from '../components/Toast';
+const mockSupportsIamMethods = vi.fn(() => false);
+vi.mock('./access-model.js', () => ({ supportsIamMethods: () => mockSupportsIamMethods() }));
+
 import { useAccessKeyForm } from './use-access-key-form.js';
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -174,6 +177,33 @@ describe('useAccessKeyForm — region change', () => {
     expect(result.current.permissions).toEqual(['read']);
   });
 
+  // The access-model mock answers for every region at once, so a switch
+  // between a Forge region and another is staged by changing its answer
+  // between renders.
+  it('drops the bucket-configuration write when switching to a region that lacks it', () => {
+    mockSupportsIamMethods.mockReturnValue(true);
+    const { result, rerender } = renderWithRegion(S3Region.EuCentral3);
+    act(() => result.current.setPermissions(['read', 'PutBucketCORS']));
+    expect(result.current.permissions).toEqual(['read', 'PutBucketCORS']);
+
+    mockSupportsIamMethods.mockReturnValue(false);
+    rerender({ region: S3Region.UsEast1 });
+    expect(result.current.permissions).toEqual(['read']);
+  });
+
+  it('keeps the bucket-configuration write when switching between Forge regions', () => {
+    mockSupportsIamMethods.mockReturnValue(true);
+    try {
+      const { result, rerender } = renderWithRegion(S3Region.EuCentral3);
+      act(() => result.current.setPermissions(['read', 'PutBucketCORS']));
+
+      rerender({ region: S3Region.UsEast9 });
+      expect(result.current.permissions).toEqual(['read', 'PutBucketCORS']);
+    } finally {
+      mockSupportsIamMethods.mockReturnValue(false);
+    }
+  });
+
   it('keeps bucket-management permissions when switching between non-Aurora regions', () => {
     const { result, rerender } = renderWithRegion(S3Region.EuWest1);
     rerender({ region: S3Region.UsEast1 });
@@ -209,5 +239,75 @@ describe('useAccessKeyForm — granular permission filtering', () => {
 
     act(() => result.current.setPermissions(['CreateBucket']));
     expect(result.current.permissions).toEqual(['CreateBucket']);
+  });
+});
+
+describe('useAccessKeyForm — on a region serving the iam access model', () => {
+  beforeEach(() => mockSupportsIamMethods.mockReturnValue(true));
+  afterEach(() => mockSupportsIamMethods.mockReturnValue(false));
+
+  function renderServiceKeyForm() {
+    const rendered = renderForm();
+    act(() => {
+      rendered.result.current.setKeyName('nightly-backup');
+      rendered.result.current.setKeyType('service');
+    });
+    return rendered;
+  }
+
+  it('builds a name-region-expiry request for a personal key', () => {
+    const { result } = renderForm();
+    act(() => result.current.setKeyName('laptop'));
+
+    expect(result.current.request).toStrictEqual({
+      keyName: 'laptop',
+      region: S3_REGION,
+      expiresAt: null,
+    });
+  });
+
+  it('allows submit with no permissions for a personal key', () => {
+    const { result } = renderForm();
+    act(() => {
+      result.current.setKeyName('laptop');
+      result.current.setPermissions([]);
+    });
+
+    expect(result.current.canSubmit).toBe(true);
+  });
+
+  it('builds the service-key request once Service key is chosen', () => {
+    const { result } = renderServiceKeyForm();
+
+    expect(result.current.request).toStrictEqual({
+      keyName: 'nightly-backup',
+      permissions: [
+        'read',
+        'write',
+        'list',
+        'GetBucketVersioning',
+        'GetBucketObjectLockConfiguration',
+      ],
+      granularPermissions: undefined,
+      bucketScope: 'all',
+      buckets: undefined,
+      region: S3_REGION,
+      expiresAt: null,
+    });
+  });
+
+  it('blocks submit when a service key has no permissions', () => {
+    const { result } = renderServiceKeyForm();
+    act(() => result.current.setPermissions([]));
+
+    expect(result.current.canSubmit).toBe(false);
+  });
+
+  it('allows submit again after switching back to a personal key', () => {
+    const { result } = renderServiceKeyForm();
+    act(() => result.current.setPermissions([]));
+    act(() => result.current.setKeyType('principal'));
+
+    expect(result.current.canSubmit).toBe(true);
   });
 });
