@@ -36,6 +36,7 @@
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.1152.0",
+    "@aws-sdk/client-lambda": "^3.1152.0",
     "@aws-sdk/client-s3": "^3.1152.0",
     "@filone/oxlint-rules": "workspace:*",
     "@playwright/test": "^1.60.0",

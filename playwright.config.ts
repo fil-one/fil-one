@@ -23,7 +23,9 @@ export default defineConfig({
   workers: isCI ? 1 : undefined,
   // Ends the run before the CI job's 30-minute timeout, so the report still uploads.
   globalTimeout: isCI ? 25 * 60_000 : undefined,
-  reporter: [['list'], ['html']],
+  // The html reporter prints nothing, so Playwright adds its own terminal
+  // reporter: one dot per test on CI. CI logs list each test by name instead.
+  reporter: isCI ? [['list'], ['html']] : 'html',
   use: {
     baseURL,
     ignoreHTTPSErrors: true,
@@ -78,6 +80,7 @@ export default defineConfig({
       name,
       testDir: './tests/e2e/multi-org',
       fullyParallel: false,
+      workers: 1,
       // Lambdas start cold.
       timeout: 90_000,
       expect: { timeout: 20_000 },
