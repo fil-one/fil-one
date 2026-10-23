@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Context } from 'aws-lambda';
 import type { S3ClientContext } from '../lib/s3-client.ts';
-import type { ProvisionedRegion } from '../lib/region-helpers.ts';
+import type { ProvisionedTenant } from '../lib/region-helpers.ts';
 import { buildContext } from '../test/lambda-test-utilities.ts';
 import { S3Region } from '@filone/shared';
 import { reportMetric, type MetricEvent } from '../lib/metrics.ts';
@@ -19,7 +19,7 @@ vi.mock('sst', () => ({
 }));
 
 const {
-  mockGetProvisionedRegions,
+  mockGetProvisionedTenants,
   mockGetOrchestratorForRegion,
   mockCreateS3Client,
   mockIndexBucket,
@@ -27,7 +27,7 @@ const {
   mockUpdateBucketTelemetry,
   fakeS3Client,
 } = vi.hoisted(() => ({
-  mockGetProvisionedRegions: vi.fn(),
+  mockGetProvisionedTenants: vi.fn(),
   mockGetOrchestratorForRegion: vi.fn(),
   mockCreateS3Client: vi.fn(),
   mockIndexBucket: vi.fn(),
@@ -43,7 +43,7 @@ vi.mock('../lib/org-profile.ts', () => ({
 }));
 
 vi.mock('../lib/region-helpers.ts', () => ({
-  getProvisionedRegions: mockGetProvisionedRegions,
+  getProvisionedTenants: mockGetProvisionedTenants,
 }));
 
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
@@ -94,17 +94,17 @@ function makeOrchestrator(id: string, region: S3Region) {
 }
 
 function provisioned(orchestrator: ReturnType<typeof makeOrchestrator>, tenantId: string) {
-  return { orchestrator, tenantId } as unknown as ProvisionedRegion;
+  return { orchestrator, tenantId } as unknown as ProvisionedTenant;
 }
 
 /**
- * Wire both region mocks from one provisioned-region list: `getProvisionedRegions`
+ * Wire both region mocks from one provisioned-region list: `getProvisionedTenants`
  * returns them (so the worker can resolve each region's tenant), and
  * `getOrchestratorForRegion` resolves a region back to its orchestrator (used to
  * build that region's S3 client). In these tests the two are the same object.
  */
-function useRegions(regions: ProvisionedRegion[]) {
-  mockGetProvisionedRegions.mockResolvedValue(regions);
+function useRegions(regions: ProvisionedTenant[]) {
+  mockGetProvisionedTenants.mockResolvedValue(regions);
   mockGetOrchestratorForRegion.mockImplementation((region: S3Region) => {
     const match = regions.find((r) => r.orchestrator.regions.includes(region));
     if (!match) throw new Error(`no orchestrator registered for region ${region}`);
@@ -153,7 +153,7 @@ describe('rag-indexer-worker', () => {
 
     await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
 
-    expect(mockGetProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockGetProvisionedTenants).not.toHaveBeenCalled();
     expect(mockIndexBucket).not.toHaveBeenCalled();
   });
 
@@ -183,7 +183,7 @@ describe('rag-indexer-worker', () => {
   });
 
   it('skips when the org is not provisioned in any region', async () => {
-    mockGetProvisionedRegions.mockResolvedValue([]);
+    mockGetProvisionedTenants.mockResolvedValue([]);
 
     await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
 
@@ -197,7 +197,7 @@ describe('rag-indexer-worker', () => {
 
     await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
 
-    expect(mockGetProvisionedRegions).toHaveBeenCalledWith('org-1');
+    expect(mockGetProvisionedTenants).toHaveBeenCalledWith('org-1');
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.EuWest1);
     expect(aurora.getS3ClientContext).toHaveBeenCalledWith('tenant-a', S3Region.EuWest1);
     expect(mockCreateS3Client).toHaveBeenCalledWith(S3_CTX);
@@ -535,7 +535,7 @@ describe('rag-indexer-worker', () => {
   });
 
   it('emits a worker-invocation failure metric and rethrows when the handler throws', async () => {
-    mockGetProvisionedRegions.mockRejectedValue(new Error('region lookup failed'));
+    mockGetProvisionedTenants.mockRejectedValue(new Error('region lookup failed'));
 
     await expect(
       handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT),
