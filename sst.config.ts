@@ -1918,6 +1918,43 @@ export default $config({
       s3abRespondRoleArn = s3abRespondRole.arn;
     }
 
+    // ── PostHog warehouse reader ────────────────────────────────────
+    // IAM user for PostHog's DynamoDB source, which feeds the numbers
+    // dashboard (FIL-1587). The source needs a long-lived access key:
+    // temporary credentials expire and break its scheduled syncs, so a role
+    // will not do. Read-only, and exactly what the source calls: ListTables
+    // and DescribeTable to discover the tables, Scan to copy them (it has no
+    // incremental mode). Only the two tables the dashboard reads.
+    //
+    // The access key is created outside this stack so the secret never lands
+    // in Pulumi state or stack outputs:
+    //   aws iam create-access-key --user-name filone-posthog-warehouse-read
+    // and pasted straight into the PostHog source.
+    if (isProduction) {
+      const posthogWarehouseReader = new aws.iam.User('PosthogWarehouseReader', {
+        name: 'filone-posthog-warehouse-read',
+      });
+      new aws.iam.UserPolicy('PosthogWarehouseReaderPolicy', {
+        user: posthogWarehouseReader.name,
+        policy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Action: ['dynamodb:DescribeTable', 'dynamodb:Scan'],
+              Resource: [billingTable.arn, userInfoTable.arn],
+            },
+            {
+              // ListTables cannot be scoped to a table; it returns names only.
+              Effect: 'Allow',
+              Action: ['dynamodb:ListTables'],
+              Resource: '*',
+            },
+          ],
+        }),
+      });
+    }
+
     return {
       baseUrl: siteUrl,
       ...(isLocal ? { apiUrl: api.url } : {}),

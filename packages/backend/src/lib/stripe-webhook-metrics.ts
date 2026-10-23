@@ -135,28 +135,3 @@ export function emitBillingRowMissing(writer: string): void {
     BillingRowMissing: 1,
   });
 }
-
-/**
- * A trial claim refused because a pre-re-key `CUSTOMER#` row is still standing
- * for this user.
- *
- * Defense in depth for the flip-to-cleanup window: the backfill was verified,
- * but a row it missed would otherwise mint a second Stripe customer and
- * subscription for an account that already has one. Non-zero means the backfill
- * missed a cohort and the cleanup step must not run.
- */
-export function emitTrialClaimBlockedByLegacyRow(): void {
-  reportMetric({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [
-        {
-          Namespace: 'FilOne',
-          Dimensions: [[]],
-          Metrics: [{ Name: 'TrialClaimBlockedByLegacyRow', Unit: 'Count' }],
-        },
-      ],
-    },
-    TrialClaimBlockedByLegacyRow: 1,
-  });
-}

@@ -51,8 +51,8 @@ vi.mock('jose', () => ({
 }));
 
 // The one Stripe-touching boundary this test replaces. Everything upstream of
-// it — membership resolution, `isSoloPersonalOrg`, the legacy-row guard — runs
-// for real, against the DynamoDB rows stubbed below.
+// it — membership resolution and `isSoloPersonalOrg` — runs for real, against
+// the DynamoDB rows stubbed below.
 const mockEnsureTrialEntitlement = vi.fn();
 vi.mock('../lib/trial-entitlement.ts', () => ({
   ensureTrialEntitlement: (...args: unknown[]) => mockEnsureTrialEntitlement(...args),

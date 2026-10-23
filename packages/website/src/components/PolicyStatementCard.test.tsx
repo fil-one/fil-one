@@ -67,6 +67,8 @@ describe('PolicyStatementCard', () => {
     ['list', 's3:ListBucket', 'bg-brand-50'],
     ['write', 's3:PutObject', 'bg-amber-50'],
     ['delete', 's3:DeleteObject', 'bg-red-50'],
+    ['tags', 's3:PutObjectTagging', 'bg-amber-50'],
+    ['bucket', 's3:GetBucketVersioning', 'bg-brand-50'],
     ['protect', 's3:GetObjectRetention', 'bg-red-50'],
   ] as const)('colours the %s group badge by risk', (group, action, colourClass) => {
     renderCard({ ...allowTeam, Action: [action] });

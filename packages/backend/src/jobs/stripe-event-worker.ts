@@ -20,7 +20,7 @@ import {
   TRIAL_GRACE_DAYS,
   mapStripeStatus,
 } from '@filone/shared';
-import { resolveOrgId, resolveOrgIdFromSubscription } from '../lib/billing-org-lookup.ts';
+import { resolveOrgId } from '../lib/billing-org-lookup.ts';
 import { startDeletionFromStripe } from '../lib/deletion-from-stripe.ts';
 import {
   assertRegionSyncSucceeded,
@@ -165,13 +165,7 @@ async function handleCustomerUpdated(customer: Stripe.Customer): Promise<void> {
     return;
   }
 
-  // Nothing stamped `metadata.orgId` onto customers created before the metadata
-  // existed, and the re-key made no Stripe calls — so the daily usage worker's
-  // metadata writes generate `customer.updated` for those customers forever.
-  // Asking the billing row is the same fallback `customer.deleted` already
-  // takes: the legacy `CUSTOMER#{userId}` row carries the orgId the backfill
-  // keyed its copy by.
-  const orgId = resolveOrgId(customer.metadata) ?? (await resolveOrgIdFromSubscription(userId));
+  const orgId = resolveOrgId(customer.metadata);
   if (!orgId) {
     // Not a throw. The rows with no `orgId` were enumerated and dispositioned
     // by name before the re-key (docs/BillingRekeyRunbook.md), so no retry
@@ -238,7 +232,7 @@ async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
   // Deleting the customer in Stripe is an admin action against trial abuse, and
   // terminating the account is its intended meaning — so this starts the full
   // teardown rather than just disabling tenants. metadata.orgId is written at
-  // customer creation; the billing-row lookup covers customers that predate it.
+  // customer creation; a customer without one is logged and skipped.
   await startDeletionFromStripe({
     userId,
     customerId: customer.id,
@@ -416,7 +410,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
       return;
     }
     // A deleted customer carries no metadata, so the subscription's is the only
-    // one there is; startDeletionFromStripe's row fallback covers the rest.
+    // one there is.
     await startDeletionFromStripe({
       userId,
       customerId,
