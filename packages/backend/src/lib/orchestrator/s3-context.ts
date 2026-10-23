@@ -2,6 +2,7 @@
 // orchestrator.ts stays within its line budget.
 
 import { getS3Endpoint, type S3Region } from '@filone/shared';
+import { assertServesRegion } from '../service-orchestrator-ids.ts';
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import type { S3ClientContext } from '../s3-client.ts';
 import { getConsoleS3Credentials } from '../s3-credentials.ts';
@@ -28,11 +29,8 @@ export async function buildS3ClientContext(
   region: S3Region,
   requestOptions?: OrchestratorRequestOptions,
 ): Promise<S3ClientContext> {
-  // A region this network does not serve has no gateway to send the request to;
-  // reaching one is a routing bug upstream, not something to sign for anyway.
-  if (!config.regions.includes(region)) {
-    throw new Error(`Orchestrator "${config.orchestratorId}" does not serve region "${region}".`);
-  }
+  // A region this network does not serve has no gateway to send the request to.
+  assertServesRegion({ id: config.orchestratorId, regions: config.regions }, region);
   const credentials = await getConsoleS3Credentials(
     { orchestratorId: config.orchestratorId, stage: config.stage, tenantId },
     requestOptions,

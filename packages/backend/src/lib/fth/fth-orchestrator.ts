@@ -15,6 +15,7 @@
 
 import { createHash } from 'node:crypto';
 import type { BucketRef } from '../bucket-orchestrator.ts';
+import { assertServesRegion } from '../service-orchestrator-ids.ts';
 import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
@@ -181,9 +182,10 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
 
   async getS3ClientContext(
     tenantId: string,
-    _region: S3Region,
+    region: S3Region,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<S3ClientContext> {
+    assertServesRegion(this, region);
     const stage = process.env.FILONE_STAGE!;
     const credentials = await getConsoleS3Credentials(
       {
@@ -208,6 +210,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
     args: CreateBucketArgs,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
+    assertServesRegion(this, args.region);
     const ctx = await this.getS3ClientContext(tenantId, this.regions[0], requestOptions);
     const s3 = createS3Client(ctx);
     await s3CreateBucket(
@@ -250,10 +253,11 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
 
   async deleteBucket(
     tenantId: string,
-    { bucketName }: BucketRef,
+    { region, bucketName }: BucketRef,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, this.regions[0], requestOptions);
+    assertServesRegion(this, region);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     await s3DeleteBucket(s3, bucketName, requestOptions);
   }
@@ -282,11 +286,12 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
 
   async getBucket(
     tenantId: string,
-    { bucketName }: BucketRef,
+    { region, bucketName }: BucketRef,
     _memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
-    const ctx = await this.getS3ClientContext(tenantId, this.regions[0], requestOptions);
+    assertServesRegion(this, region);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
     const match = buckets.find((b) => b.name === bucketName);

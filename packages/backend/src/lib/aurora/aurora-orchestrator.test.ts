@@ -1187,3 +1187,33 @@ describe('auroraOrchestrator signal forwarding', () => {
     });
   }
 });
+
+describe('region assertions', () => {
+  // Aurora serves eu-west-1 and nothing else. A call naming another region is a
+  // routing bug upstream, and acting on it would reach the wrong gateway.
+  const wrong = S3Region.UsEast1;
+
+  it('refuses a createBucket naming a region it does not serve', async () => {
+    await expect(
+      auroraOrchestrator.createBucket('aurora-t-1', { region: wrong, bucketName: 'b' }),
+    ).rejects.toThrow(/does not serve region "us-east-1"/);
+  });
+
+  it('refuses a deleteBucket naming a region it does not serve', async () => {
+    await expect(
+      auroraOrchestrator.deleteBucket('aurora-t-1', { region: wrong, bucketName: 'b' }),
+    ).rejects.toThrow(/does not serve region "us-east-1"/);
+  });
+
+  it('refuses a getBucket naming a region it does not serve', async () => {
+    await expect(
+      auroraOrchestrator.getBucket('aurora-t-1', { region: wrong, bucketName: 'b' }),
+    ).rejects.toThrow(/does not serve region "us-east-1"/);
+  });
+
+  it('refuses an S3 context for a region it does not serve', async () => {
+    await expect(auroraOrchestrator.getS3ClientContext('aurora-t-1', wrong)).rejects.toThrow(
+      /does not serve region "us-east-1"/,
+    );
+  });
+});
