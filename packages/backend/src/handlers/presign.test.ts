@@ -630,6 +630,40 @@ describe('presign baseHandler', () => {
       expect(mockGetPresignedPutObjectUrl).not.toHaveBeenCalled();
     });
 
+    it('refuses deleteObject with the missing-bucket 404 when no policy grants the Member the bucket', async () => {
+      mockResolveMemberAccess.mockResolvedValue(grantActionsOnBucket('other', ['s3:DeleteObject']));
+
+      const result = await baseHandler(
+        buildPresignEvent([{ op: 'deleteObject', bucket: 'b', key: 'k' }], {
+          role: OrgRole.Member,
+        }),
+      );
+
+      expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+        statusCode: 404,
+        body: { message: 'Bucket not found' },
+      });
+      expect(mockGetPresignedDeleteObjectUrl).not.toHaveBeenCalled();
+    });
+
+    it('refuses deleteObject when the bucket policy grants the Member no s3:DeleteObject', async () => {
+      mockResolveMemberAccess.mockResolvedValue(
+        grantActionsOnBucket('b', ['s3:GetObject', 's3:ListBucket']),
+      );
+
+      const result = await baseHandler(
+        buildPresignEvent([{ op: 'deleteObject', bucket: 'b', key: 'k' }], {
+          role: OrgRole.Member,
+        }),
+      );
+
+      expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+        statusCode: 403,
+        body: { message: 'Your access to b does not permit deleteObject.' },
+      });
+      expect(mockGetPresignedDeleteObjectUrl).not.toHaveBeenCalled();
+    });
+
     // The gateway classifies a versioned read or delete as s3:GetObjectVersion
     // or s3:DeleteObjectVersion; the tenant-signed URL skips that evaluation.
     it.each([

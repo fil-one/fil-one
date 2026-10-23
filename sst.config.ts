@@ -991,7 +991,8 @@ export default $config({
       handler: 'packages/backend/src/jobs/bulk-delete-worker.handler',
       // Linking the queue covers both directions: consuming its messages and
       // enqueueing the continuation for a job too large for one invocation.
-      link: [bulkDeleteTable, userInfoTable, bulkDeleteQueue, ...managementApiTokens],
+      // OrgTable holds the starter's membership, re-read before each run.
+      link: [bulkDeleteTable, userInfoTable, orgTable, bulkDeleteQueue, ...managementApiTokens],
       environment: orchestratorEnv,
       timeout: '900 seconds',
       memory: '512 MB',
@@ -1240,6 +1241,8 @@ export default $config({
         extraEnv: { ...fthEnv, ...forgeEnv },
         // Linking the queue grants the send; the handler only enqueues the job.
         extraLink: [bulkDeleteQueue],
+        // Reads the bucket's versioning with the tenant's console S3 key.
+        permissions: s3DataPlanePermissions,
       },
       presign: {
         extraEnv: { ...fthEnv, ...forgeEnv },
@@ -1453,10 +1456,12 @@ export default $config({
       // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
       // than from the request, since the link goes to somebody else's inbox.
       // OrgLogoBucketName, to check the joined org's logo is one of its uploads.
+      // The Auth0 runtime credentials, to mark an unverified invitee's address
+      // verified through the Management API.
       'accept-invitation': {
         // Registers the new member as a principal on each ready iam region.
-        extraEnv: orchestratorEnv,
-        extraLink: [orgLogoBucketName],
+        extraEnv: { ...orchestratorEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        extraLink: [...mgmtRuntimeResources, orgLogoBucketName],
       },
       // The only route that sends mail. `SendGridApiKey` exists on staging and
       // production alone; every other stage sends no email and logs the invitation
@@ -1914,6 +1919,43 @@ export default $config({
         ],
       });
       s3abRespondRoleArn = s3abRespondRole.arn;
+    }
+
+    // ── PostHog warehouse reader ────────────────────────────────────
+    // IAM user for PostHog's DynamoDB source, which feeds the numbers
+    // dashboard (FIL-1587). The source needs a long-lived access key:
+    // temporary credentials expire and break its scheduled syncs, so a role
+    // will not do. Read-only, and exactly what the source calls: ListTables
+    // and DescribeTable to discover the tables, Scan to copy them (it has no
+    // incremental mode). Only the two tables the dashboard reads.
+    //
+    // The access key is created outside this stack so the secret never lands
+    // in Pulumi state or stack outputs:
+    //   aws iam create-access-key --user-name filone-posthog-warehouse-read
+    // and pasted straight into the PostHog source.
+    if (isProduction) {
+      const posthogWarehouseReader = new aws.iam.User('PosthogWarehouseReader', {
+        name: 'filone-posthog-warehouse-read',
+      });
+      new aws.iam.UserPolicy('PosthogWarehouseReaderPolicy', {
+        user: posthogWarehouseReader.name,
+        policy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Action: ['dynamodb:DescribeTable', 'dynamodb:Scan'],
+              Resource: [billingTable.arn, userInfoTable.arn],
+            },
+            {
+              // ListTables cannot be scoped to a table; it returns names only.
+              Effect: 'Allow',
+              Action: ['dynamodb:ListTables'],
+              Resource: '*',
+            },
+          ],
+        }),
+      });
     }
 
     return {

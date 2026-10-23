@@ -283,8 +283,8 @@ importers:
         specifier: ^5.7.3
         version: 5.7.3
       unpdf:
-        specifier: ^1.6.2
-        version: 1.6.2
+        specifier: ^1.9.1
+        version: 1.9.1
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -4955,10 +4955,11 @@ packages:
     resolution: {integrity: sha512-4Lup7Ezn8W3d52/xBhZBVdx323ckxa7DEvd9kPQHppTkLoJXw6ltrBCyj5pnrxj0qKDxYMJ56CoxNuFCscdTiw==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
-  unpdf@1.6.2:
-    resolution: {integrity: sha512-zQ80ySoPuPHOsvIoRp/nJyQt8TOUoTh1+WBCGcBvlddQNgKDLRwm0AY3x8Q35I7+kIiRSgqMx+Ma2pl9McIp7A==}
+  unpdf@1.9.1:
+    resolution: {integrity: sha512-nO1npM2kNyd4hj1fKzUVU6bvnWjDSxI97eycM/DgzI83dYyW+pNRI9NeMQVEfef8fI3Q06i9lkMeE1HxrQqKoA==}
+    engines: {node: '>=22'}
     peerDependencies:
-      '@napi-rs/canvas': ^0.1.69
+      '@napi-rs/canvas': ^0.1.69 || ^1.0.0
     peerDependenciesMeta:
       '@napi-rs/canvas':
         optional: true
@@ -9794,7 +9795,7 @@ snapshots:
     dependencies:
       imurmurhash: 0.1.4
 
-  unpdf@1.6.2: {}
+  unpdf@1.9.1: {}
 
   unplugin@2.3.11:
     dependencies:

@@ -65,7 +65,10 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
     started.current = true;
 
     void acceptInvitation(token).then(
-      (result) => setOutcome({ status: 'accepted', result }),
+      async (result) => {
+        await refreshSessionClaims();
+        setOutcome({ status: 'accepted', result });
+      },
       (error: unknown) => {
         // A 401 is the login funnel: `apiRequest` is already navigating, and the
         // token was taken out of storage before this call went out, so without
@@ -97,6 +100,24 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
       onLogOut={logout}
     />
   );
+}
+
+/**
+ * Re-read the session's ID token, which still says the address is unverified
+ * when the accept is what verified it. Without this, `_app.tsx`'s `beforeLoad`
+ * sends the new member to `/verify-email` as soon as they continue.
+ *
+ * Only after the accept has answered, so it never races the call that spends
+ * the token. `skipOrgReconcile` for the reason the query above gives. A failure
+ * is not the accept's: the membership stands, and the worst it costs is that
+ * detour.
+ */
+async function refreshSessionClaims(): Promise<void> {
+  try {
+    await getMe({ forceRefresh: true, skipOrgReconcile: true });
+  } catch {
+    // See above: the accept already succeeded.
+  }
 }
 
 function statusOf(token: string | null, outcome: Outcome): InvitationOutcomeProps['status'] {

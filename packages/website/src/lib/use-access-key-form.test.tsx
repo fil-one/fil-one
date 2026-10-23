@@ -177,6 +177,33 @@ describe('useAccessKeyForm — region change', () => {
     expect(result.current.permissions).toEqual(['read']);
   });
 
+  // The access-model mock answers for every region at once, so a switch
+  // between a Forge region and another is staged by changing its answer
+  // between renders.
+  it('drops the bucket-configuration write when switching to a region that lacks it', () => {
+    mockSupportsIamMethods.mockReturnValue(true);
+    const { result, rerender } = renderWithRegion(S3Region.EuCentral3);
+    act(() => result.current.setPermissions(['read', 'PutBucketCORS']));
+    expect(result.current.permissions).toEqual(['read', 'PutBucketCORS']);
+
+    mockSupportsIamMethods.mockReturnValue(false);
+    rerender({ region: S3Region.UsEast1 });
+    expect(result.current.permissions).toEqual(['read']);
+  });
+
+  it('keeps the bucket-configuration write when switching between Forge regions', () => {
+    mockSupportsIamMethods.mockReturnValue(true);
+    try {
+      const { result, rerender } = renderWithRegion(S3Region.EuCentral3);
+      act(() => result.current.setPermissions(['read', 'PutBucketCORS']));
+
+      rerender({ region: S3Region.UsEast9 });
+      expect(result.current.permissions).toEqual(['read', 'PutBucketCORS']);
+    } finally {
+      mockSupportsIamMethods.mockReturnValue(false);
+    }
+  });
+
   it('keeps bucket-management permissions when switching between non-Aurora regions', () => {
     const { result, rerender } = renderWithRegion(S3Region.EuWest1);
     rerender({ region: S3Region.UsEast1 });

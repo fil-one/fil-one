@@ -19,8 +19,9 @@
 
 import type { Context, SQSEvent, SQSRecord } from 'aws-lambda';
 
-import { BulkDeleteScope, isTerminalBulkDeleteStatus } from '@filone/shared';
+import { BulkDeleteScope, isTerminalBulkDeleteStatus, roleHasPermission } from '@filone/shared';
 
+import { canBulkDelete } from '../lib/bulk-delete-access.ts';
 import {
   applyPageResult,
   failJob,
@@ -34,10 +35,16 @@ import {
   type BulkDeleteWorkerPayload,
 } from '../lib/bulk-delete-queue.ts';
 import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
+import { getScopedMemberId } from '../lib/member-scope.ts';
+import { resolveMembership } from '../lib/org-membership.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { createS3Client } from '../lib/s3-client.ts';
-import { getBucketVersioningStatus } from '../lib/s3-bucket-operations.ts';
+import {
+  getBucketVersioningStatus,
+  type BucketVersioningStatus,
+} from '../lib/s3-bucket-operations.ts';
 import { deleteTargets, enumerateDeletionPage } from '../lib/s3-bulk-delete.ts';
 
 const LOG = '[bulk-delete-worker]';
@@ -150,6 +157,11 @@ export async function processJob(
   }
 }
 
+interface ResolvedTenant {
+  orchestrator: RegionOrchestrator;
+  tenantId: string;
+}
+
 interface RunOutcome {
   job: BulkDeleteJobRecord;
   /** True when the listing walk finished; false when the time budget ran out. */
@@ -161,25 +173,32 @@ async function runPages(
   getRemainingTimeInMillis: RemainingTimeFn,
   onProgress: (job: BulkDeleteJobRecord) => void,
 ): Promise<RunOutcome> {
-  const s3 = createS3Client(await resolveClientContext(initial));
+  const tenant = await resolveTenant(initial);
+  const s3 = createS3Client(await tenant.orchestrator.getS3ClientContext(tenant.tenantId));
   let job = initial;
 
-  // Only AllVersions ever sees a literal "null" version id (Current lists by
-  // key only), and a job's bucket doesn't change mid-run, so this is resolved
-  // once per invocation rather than per page.
-  const bucketVersioningStatus =
-    job.scope === BulkDeleteScope.AllVersions
-      ? await getBucketVersioningStatus(s3, job.bucketName)
-      : undefined;
+  // A job's bucket doesn't change mid-run, so its versioning is read once per
+  // invocation, for the access checks and the walk.
+  const versioningStatus = await getBucketVersioningStatus(s3, job.bucketName);
+  const memberId = job.startedBy;
 
   for (;;) {
+    // The tenant's credentials delete without any policy evaluation, so the
+    // starter's role and access are re-checked before every page: a change
+    // made after the job was queued, or mid-run, stops it within a page.
+    await assertMemberCanDelete(tenant, job, memberId, versioningStatus);
+
     const page = await enumerateDeletionPage({
       s3,
       bucket: job.bucketName,
       prefix: job.prefix,
       scope: job.scope,
       ...(job.cursor && { cursor: job.cursor }),
-      ...(bucketVersioningStatus && { bucketVersioningStatus }),
+      // Only AllVersions ever sees a literal "null" version id; Current lists
+      // by key only.
+      ...(job.scope === BulkDeleteScope.AllVersions && {
+        bucketVersioningStatus: versioningStatus,
+      }),
       maxKeys: PAGE_SIZE,
     });
 
@@ -206,16 +225,51 @@ async function runPages(
 }
 
 /**
- * Resolve the tenant's S3 credentials for the job's region. Every backend
- * (Aurora, FTH, Forge) supplies these through the same orchestrator method, so
- * the worker needs no per-region knowledge.
+ * Fail the job when the member who started it may no longer run it: their
+ * current role must hold `objects.delete`, and, when that role is scoped, their
+ * bucket policies must still cover the deletion. Neither will be undone by
+ * redelivery.
  */
-async function resolveClientContext(job: BulkDeleteJobRecord) {
+async function assertMemberCanDelete(
+  { orchestrator, tenantId }: ResolvedTenant,
+  job: BulkDeleteJobRecord,
+  memberId: string | undefined,
+  versioningStatus: BucketVersioningStatus,
+): Promise<void> {
+  // Queued before the starter was recorded.
+  if (!memberId) return;
+  const membership = await resolveMembership(job.orgId, memberId);
+  if (!membership || !roleHasPermission(membership.role, 'objects.delete')) {
+    throw new NonRetryableBulkDeleteError('Your role no longer permits deleting objects');
+  }
+  const access = await canBulkDelete(
+    orchestrator,
+    tenantId,
+    getScopedMemberId(membership.role, memberId),
+    {
+      bucketName: job.bucketName,
+      scope: job.scope,
+      versioningStatus,
+    },
+  );
+  if (!access.ok) {
+    throw new NonRetryableBulkDeleteError(
+      `Your access to ${job.bucketName} no longer permits bulk deletion`,
+    );
+  }
+}
+
+/**
+ * Resolve the tenant for the job's region. Every backend (Aurora, FTH, Forge)
+ * supplies its S3 credentials through the same orchestrator method, so the
+ * worker needs no per-region knowledge.
+ */
+async function resolveTenant(job: BulkDeleteJobRecord): Promise<ResolvedTenant> {
   const orchestrator = getOrchestratorForRegion(job.region);
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(job.orgId));
   if (!tenantId) {
     // Provisioning will not appear by itself between deliveries.
     throw new NonRetryableBulkDeleteError(`Tenant is not provisioned in region ${job.region}`);
   }
-  return orchestrator.getS3ClientContext(tenantId);
+  return { orchestrator, tenantId };
 }

@@ -771,6 +771,7 @@ components:
         - s3:GetBucketLocation
         - s3:GetBucketAcl
         - s3:GetBucketCORS
+        - s3:PutBucketCORS
         - s3:GetBucketTagging
         - s3:GetObjectAttributes
         - s3:GetObjectTagging
@@ -809,6 +810,9 @@ components:
             `s3:GetBucketTagging` — read a bucket's region, ACL, CORS
             configuration and tags.
           * `s3:PutBucketTagging` — set and remove a bucket's tags.
+          * `s3:PutBucketCORS` — set or remove a bucket's own CORS
+            configuration, which replaces the gateway's default for that
+            bucket. Removing it needs the same action, as on AWS.
 
           A bucket policy may grant the versioning, object-lock and
           configuration reads; the writes are held only by a service key.
@@ -917,7 +921,7 @@ components:
         values. A policy never grants `s3:CreateBucket`,
         `s3:DeleteBucket` or `s3:ListAllMyBuckets`, the bucket policy
         operations, or a write to the bucket's configuration
-        (versioning, default object lock, tags, encryption).
+        (versioning, default object lock, tags, encryption, CORS).
 
     PolicyStatement:
       type: object
