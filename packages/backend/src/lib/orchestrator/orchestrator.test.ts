@@ -380,7 +380,7 @@ describe('getS3ClientContext', () => {
   it('reads credentials from SSM and returns the configured endpoint context', async () => {
     stubS3Credentials();
 
-    const ctx = await orchestrator.getS3ClientContext(tenantId);
+    const ctx = await orchestrator.getS3ClientContext(tenantId, S3Region.UsEast1);
 
     expect(ctx).toEqual({
       endpointUrl: 'https://us-east-1.s3.test.example.com',
@@ -397,7 +397,7 @@ describe('getS3ClientContext', () => {
   it('signs against the orchestrator region', async () => {
     stubS3Credentials();
 
-    const ctx = await orchestrator.getS3ClientContext(tenantId);
+    const ctx = await orchestrator.getS3ClientContext(tenantId, S3Region.UsEast1);
 
     expect(ctx.region).toBe('us-east-1');
   });
@@ -416,6 +416,7 @@ describe('createBucket', () => {
     });
 
     await orchestrator.createBucket(tenantId, {
+      region: S3Region.UsEast1,
       bucketName: 'my-bucket',
       versioning: true,
       policy: grantGetObjectToUser,
@@ -429,6 +430,7 @@ describe('createBucket', () => {
     mockPutBucketPolicy.mockResolvedValue({ etag: '"e1"' });
 
     await orchestrator.createBucket(tenantId, {
+      region: S3Region.UsEast1,
       bucketName: 'my-bucket',
       policy: grantGetObjectToUser,
     });
@@ -445,6 +447,7 @@ describe('createBucket', () => {
       .mockResolvedValue({ etag: '"e1"' });
 
     await orchestrator.createBucket(tenantId, {
+      region: S3Region.UsEast1,
       bucketName: 'my-bucket',
       policy: grantGetObjectToUser,
     });
@@ -460,6 +463,7 @@ describe('createBucket', () => {
     // The handler answers 400 only for a PolicyValidationError.
     await expect(
       orchestrator.createBucket(tenantId, {
+        region: S3Region.UsEast1,
         bucketName: 'my-bucket',
         policy: grantGetObjectToUser,
       }),
@@ -469,7 +473,10 @@ describe('createBucket', () => {
   it('does not write a policy when the create has no policy', async () => {
     s3Mock.on(CreateBucketCommand).resolves({});
 
-    await orchestrator.createBucket(tenantId, { bucketName: 'my-bucket' });
+    await orchestrator.createBucket(tenantId, {
+      region: S3Region.UsEast1,
+      bucketName: 'my-bucket',
+    });
 
     expect(mockPutBucketPolicy).not.toHaveBeenCalled();
   });
@@ -477,7 +484,10 @@ describe('createBucket', () => {
   it('issues a CreateBucketCommand for the given bucket name', async () => {
     s3Mock.on(CreateBucketCommand).resolves({});
 
-    await orchestrator.createBucket(tenantId, { bucketName: 'my-bucket' });
+    await orchestrator.createBucket(tenantId, {
+      region: S3Region.UsEast1,
+      bucketName: 'my-bucket',
+    });
 
     const calls = s3Mock.commandCalls(CreateBucketCommand);
     expect(calls).toHaveLength(1);
@@ -492,7 +502,7 @@ describe('createBucket', () => {
     s3Mock.on(CreateBucketCommand).rejects(err);
 
     await expect(
-      orchestrator.createBucket(tenantId, { bucketName: 'my-bucket' }),
+      orchestrator.createBucket(tenantId, { region: S3Region.UsEast1, bucketName: 'my-bucket' }),
     ).rejects.toBeInstanceOf(BucketAlreadyExistsError);
   });
 
@@ -502,6 +512,7 @@ describe('createBucket', () => {
     s3Mock.on(PutObjectLockConfigurationCommand).resolves({});
 
     await orchestrator.createBucket(tenantId, {
+      region: S3Region.UsEast1,
       bucketName: 'my-bucket',
       versioning: true,
       lock: true,
@@ -528,6 +539,7 @@ describe('createBucket', () => {
     s3Mock.on(PutBucketVersioningCommand).rejectsOnce(new Error('transient S3 error')).resolves({});
 
     const promise = orchestrator.createBucket(tenantId, {
+      region: S3Region.UsEast1,
       bucketName: 'my-bucket',
       versioning: true,
     });
@@ -544,7 +556,11 @@ describe('createBucket', () => {
     s3Mock.on(PutBucketVersioningCommand).rejects(new Error('persistent S3 error'));
 
     const promise = orchestrator
-      .createBucket(tenantId, { bucketName: 'my-bucket', versioning: true })
+      .createBucket(tenantId, {
+        region: S3Region.UsEast1,
+        bucketName: 'my-bucket',
+        versioning: true,
+      })
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await promise;
@@ -563,7 +579,10 @@ describe('deleteBucket', () => {
   it('issues a DeleteBucketCommand against the tenant S3 gateway', async () => {
     s3Mock.on(DeleteBucketCommand).resolves({});
 
-    await orchestrator.deleteBucket(tenantId, 'my-bucket');
+    await orchestrator.deleteBucket(tenantId, {
+      region: S3Region.UsEast1,
+      bucketName: 'my-bucket',
+    });
 
     const calls = s3Mock.commandCalls(DeleteBucketCommand);
     expect(calls).toHaveLength(1);
@@ -573,7 +592,9 @@ describe('deleteBucket', () => {
   it('resolves when the delete succeeds', async () => {
     s3Mock.on(DeleteBucketCommand).resolves({});
 
-    await expect(orchestrator.deleteBucket(tenantId, 'my-bucket')).resolves.toBeUndefined();
+    await expect(
+      orchestrator.deleteBucket(tenantId, { region: S3Region.UsEast1, bucketName: 'my-bucket' }),
+    ).resolves.toBeUndefined();
   });
 
   // s3DeleteBucket swallows NoSuchBucket, so an already-gone bucket is a success.
@@ -582,7 +603,9 @@ describe('deleteBucket', () => {
     (err as Error & { name: string }).name = 'NoSuchBucket';
     s3Mock.on(DeleteBucketCommand).rejects(err);
 
-    await expect(orchestrator.deleteBucket(tenantId, 'my-bucket')).resolves.toBeUndefined();
+    await expect(
+      orchestrator.deleteBucket(tenantId, { region: S3Region.UsEast1, bucketName: 'my-bucket' }),
+    ).resolves.toBeUndefined();
   });
 
   // Surfaced as a domain error so delete-bucket can answer with a machine-readable
@@ -592,9 +615,9 @@ describe('deleteBucket', () => {
     (err as Error & { name: string }).name = 'BucketNotEmpty';
     s3Mock.on(DeleteBucketCommand).rejects(err);
 
-    await expect(orchestrator.deleteBucket(tenantId, 'my-bucket')).rejects.toBeInstanceOf(
-      BucketNotEmptyError,
-    );
+    await expect(
+      orchestrator.deleteBucket(tenantId, { region: S3Region.UsEast1, bucketName: 'my-bucket' }),
+    ).rejects.toBeInstanceOf(BucketNotEmptyError);
   });
 });
 
@@ -745,7 +768,13 @@ describe('getBucket for a member', () => {
   it("returns details when the Member's access includes the bucket", async () => {
     mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
 
-    await expect(orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).resolves.toMatchObject({
+    await expect(
+      orchestrator.getBucket(
+        tenantId,
+        { region: S3Region.UsEast1, bucketName: 'bucket-a' },
+        MEMBER_ID,
+      ),
+    ).resolves.toMatchObject({
       bucketName: 'bucket-a',
     });
   });
@@ -753,7 +782,11 @@ describe('getBucket for a member', () => {
   it('looks up access for the named member', async () => {
     mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
 
-    await orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID);
+    await orchestrator.getBucket(
+      tenantId,
+      { region: S3Region.UsEast1, bucketName: 'bucket-a' },
+      MEMBER_ID,
+    );
 
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(
       expect.objectContaining({ path: { tenantId, principalId: MEMBER_ID } }),
@@ -764,7 +797,12 @@ describe('getBucket for a member', () => {
     mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
     const signal = new AbortController().signal;
 
-    await orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID, { signal });
+    await orchestrator.getBucket(
+      tenantId,
+      { region: S3Region.UsEast1, bucketName: 'bucket-a' },
+      MEMBER_ID,
+      { signal },
+    );
 
     expect(mockGetPrincipalAccess).toHaveBeenCalledWith(expect.objectContaining({ signal }));
   });
@@ -774,12 +812,20 @@ describe('getBucket for a member', () => {
 
     // The tenant's key would answer for the bucket, so the refusal comes from
     // the member's policies, and it reads exactly like a missing bucket.
-    await expect(orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).resolves.toBeNull();
+    await expect(
+      orchestrator.getBucket(
+        tenantId,
+        { region: S3Region.UsEast1, bucketName: 'bucket-a' },
+        MEMBER_ID,
+      ),
+    ).resolves.toBeNull();
     expect(s3Mock.calls()).toHaveLength(0);
   });
 
   it('reads unscoped when no member is named', async () => {
-    await expect(orchestrator.getBucket(tenantId, 'bucket-a')).resolves.toMatchObject({
+    await expect(
+      orchestrator.getBucket(tenantId, { region: S3Region.UsEast1, bucketName: 'bucket-a' }),
+    ).resolves.toMatchObject({
       bucketName: 'bucket-a',
     });
     expect(mockGetPrincipalAccess).not.toHaveBeenCalled();
@@ -788,7 +834,13 @@ describe('getBucket for a member', () => {
   it('rejects rather than reading when the access lookup fails', async () => {
     mockGetPrincipalAccess.mockReturnValue(fail(400));
 
-    await expect(orchestrator.getBucket(tenantId, 'bucket-a', MEMBER_ID)).rejects.toThrow(
+    await expect(
+      orchestrator.getBucket(
+        tenantId,
+        { region: S3Region.UsEast1, bucketName: 'bucket-a' },
+        MEMBER_ID,
+      ),
+    ).rejects.toThrow(
       new Error(`Failed to resolve the access of "${MEMBER_ID}" for forge tenant ${tenantId}`),
     );
     expect(s3Mock.calls()).toHaveLength(0);
@@ -805,7 +857,10 @@ describe('getBucket', () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    const result = await orchestrator.getBucket(tenantId, 'bucket-a');
+    const result = await orchestrator.getBucket(tenantId, {
+      region: S3Region.UsEast1,
+      bucketName: 'bucket-a',
+    });
 
     // A tenant listing names every bucket in the tenant whether or not the
     // caller can open it, so the bucket-addressed reads settle existence.
@@ -817,14 +872,18 @@ describe('getBucket', () => {
     s3Mock.on(GetBucketVersioningCommand).rejects(buildNoSuchBucketError());
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    await expect(orchestrator.getBucket(tenantId, 'missing')).resolves.toBeNull();
+    await expect(
+      orchestrator.getBucket(tenantId, { region: S3Region.UsEast1, bucketName: 'missing' }),
+    ).resolves.toBeNull();
   });
 
   it('returns null when the object-lock read says the bucket is not there', async () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).rejects(buildNoSuchBucketError());
 
-    await expect(orchestrator.getBucket(tenantId, 'missing')).resolves.toBeNull();
+    await expect(
+      orchestrator.getBucket(tenantId, { region: S3Region.UsEast1, bucketName: 'missing' }),
+    ).resolves.toBeNull();
   });
 
   const buildAccessDeniedError = () =>
@@ -839,7 +898,9 @@ describe('getBucket', () => {
     s3Mock.on(GetBucketVersioningCommand).rejects(buildAccessDeniedError());
     s3Mock.on(GetObjectLockConfigurationCommand).rejects(buildAccessDeniedError());
 
-    await expect(orchestrator.getBucket(tenantId, 'someone-elses')).resolves.toBeNull();
+    await expect(
+      orchestrator.getBucket(tenantId, { region: S3Region.UsEast1, bucketName: 'someone-elses' }),
+    ).resolves.toBeNull();
     expect(s3Mock.commandCalls(ListBucketsCommand)).toHaveLength(0);
   });
 
@@ -851,7 +912,9 @@ describe('getBucket', () => {
         Object.assign(new Error('no config'), { name: 'ObjectLockConfigurationNotFoundError' }),
       );
 
-    await expect(orchestrator.getBucket(tenantId, 'bucket-a')).resolves.toMatchObject({
+    await expect(
+      orchestrator.getBucket(tenantId, { region: S3Region.UsEast1, bucketName: 'bucket-a' }),
+    ).resolves.toMatchObject({
       objectLockEnabled: false,
     });
   });
@@ -865,7 +928,10 @@ describe('getBucket', () => {
       },
     });
 
-    const result = await orchestrator.getBucket(tenantId, 'bucket-a');
+    const result = await orchestrator.getBucket(tenantId, {
+      region: S3Region.UsEast1,
+      bucketName: 'bucket-a',
+    });
 
     // No createdAt: S3 carries no creation date for a single bucket.
     expect(result).toEqual({
@@ -1571,7 +1637,7 @@ describe('signal forwarding', () => {
   }
 
   it('getS3ClientContext forwards the signal to the SSM credential read', async () => {
-    await orchestrator.getS3ClientContext(tenantId, { signal });
+    await orchestrator.getS3ClientContext(tenantId, S3Region.UsEast1, { signal });
 
     expect(sendOptionsOf(ssmMock.commandCalls(GetParameterCommand))).toEqual({
       abortSignal: signal,
@@ -1591,7 +1657,11 @@ describe('signal forwarding', () => {
   it('deleteBucket forwards the signal to S3 DeleteBucket', async () => {
     s3Mock.on(DeleteBucketCommand).resolves({});
 
-    await orchestrator.deleteBucket(tenantId, 'b', { signal });
+    await orchestrator.deleteBucket(
+      tenantId,
+      { region: S3Region.UsEast1, bucketName: 'b' },
+      { signal },
+    );
 
     expect(sendOptionsOf(s3Mock.commandCalls(DeleteBucketCommand))).toEqual({
       abortSignal: signal,
@@ -1602,7 +1672,12 @@ describe('signal forwarding', () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
 
-    await orchestrator.getBucket(tenantId, 'b', undefined, { signal });
+    await orchestrator.getBucket(
+      tenantId,
+      { region: S3Region.UsEast1, bucketName: 'b' },
+      undefined,
+      { signal },
+    );
 
     const sent = [
       sendOptionsOf(s3Mock.commandCalls(GetBucketVersioningCommand)),
@@ -1619,6 +1694,7 @@ describe('signal forwarding', () => {
     await orchestrator.createBucket(
       tenantId,
       {
+        region: S3Region.UsEast1,
         bucketName: 'b',
         versioning: true,
         lock: true,

@@ -110,7 +110,7 @@ export async function baseHandler(
   // own bucket scope, which the auth middleware already applied.
   const bucket = await orchestrator.getBucket(
     tenantId,
-    bucketName,
+    { region, bucketName },
     apiKeySession ? undefined : getScopedMemberId(membership?.role, userId),
   );
   if (!bucket) {
