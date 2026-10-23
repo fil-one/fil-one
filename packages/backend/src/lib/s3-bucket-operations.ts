@@ -77,7 +77,8 @@ export async function createBucket(
 }
 
 export interface ListBucketsResult {
-  buckets: Array<{ name: string; createdAt: string }>;
+  /** `region` is present when the gateway labels the bucket with the one serving it. */
+  buckets: Array<{ name: string; createdAt: string; region?: string }>;
 }
 
 export async function listBuckets(
@@ -89,6 +90,9 @@ export async function listBuckets(
     buckets: (result.Buckets ?? []).map((b) => ({
       name: b.Name!,
       createdAt: b.CreationDate?.toISOString() ?? new Date().toISOString(),
+      // The region serving the bucket, when the gateway reports it. A gateway
+      // fronting several regions labels each bucket with its own.
+      ...(b.BucketRegion && { region: b.BucketRegion }),
     })),
   };
 }
