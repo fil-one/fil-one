@@ -3,7 +3,13 @@
 // secret, so a bin/ script running outside `sst shell` cannot ask it. This
 // module reads nothing at import and loads under plain node.
 
-import { getAvailableRegions, S3Region, supportsIamMethods, type StageLike } from '@filone/shared';
+import {
+  getAvailableRegions,
+  S3Region,
+  supportsIamMethods,
+  type StageLike,
+  type NonEmptyArray,
+} from '@filone/shared';
 
 /**
  * The orchestrator behind each region, by the id it stores on the account
@@ -43,6 +49,8 @@ export function regionsForOrchestrator(id: string, stage: StageLike): S3Region[]
  * network, so every region it serves answers the same; the registry test holds
  * every built orchestrator to that.
  */
-export function orchestratorSupportsIamMethods(orchestrator: { regions: S3Region[] }): boolean {
-  return supportsIamMethods(orchestrator.regions[0]!);
+export function orchestratorSupportsIamMethods(orchestrator: {
+  regions: NonEmptyArray<S3Region>;
+}): boolean {
+  return supportsIamMethods(orchestrator.regions[0]);
 }

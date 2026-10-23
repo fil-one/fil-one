@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { S3Region, Stage } from '@filone/shared';
 
 // The registry builds every non-Aurora orchestrator lazily, on the first lookup
@@ -102,21 +102,50 @@ describe('findOrchestratorById', () => {
 });
 
 describe('regionsForOrchestrator', () => {
-  it('lists the regions an id serves on the stage, and none for an unknown id', () => {
-    expect(regionsForOrchestrator('aurora', Stage.Production)).toStrictEqual([S3Region.EuWest1]);
-    expect(regionsForOrchestrator('forge', Stage.Staging)).toStrictEqual([S3Region.EuCentral3]);
-    expect(regionsForOrchestrator('forge', Stage.Production)).toStrictEqual([]);
-    expect(regionsForOrchestrator('nope', Stage.Staging)).toStrictEqual([]);
+  it.each([
+    [Stage.Production, 'aurora', [S3Region.EuWest1]],
+    [Stage.Production, 'fth', [S3Region.UsEast1]],
+    [Stage.Staging, 'forge', [S3Region.EuCentral3]],
+    [Stage.Staging, 'forgeDev', [S3Region.UsEast9]],
+  ])('lists what %s serves for %s', (stage, id, expected) => {
+    expect(regionsForOrchestrator(id, stage)).toStrictEqual(expected);
   });
 
-  // Every orchestrator the registry builds serves exactly the regions the ids
-  // map gives its id, so the two ways of asking agree.
-  it('agrees with the regions of every built orchestrator', () => {
-    process.env.FILONE_STAGE = Stage.Staging;
+  it.each([
+    // Forge is non-production only, so in production its id serves nothing.
+    [Stage.Production, 'forge'],
+    [Stage.Production, 'forgeDev'],
+    [Stage.Staging, 'nope'],
+  ])('lists nothing for %s / %s', (stage, id) => {
+    expect(regionsForOrchestrator(id, stage)).toStrictEqual([]);
+  });
+});
+
+// Every orchestrator the registry builds serves exactly the regions the ids map
+// gives its id, so the two ways of asking agree. One case per orchestrator and
+// stage, so a failure names which pair disagreed.
+describe.each([Stage.Staging, Stage.Production])('built orchestrators in %s', (stage) => {
+  beforeEach(() => {
+    process.env.FILONE_STAGE = stage;
+  });
+
+  it('serve the regions the ids map gives them', () => {
     for (const orchestrator of getAvailableOrchestrators()) {
-      expect(orchestrator.regions).toStrictEqual(
-        regionsForOrchestrator(orchestrator.id, Stage.Staging),
-      );
+      expect({ id: orchestrator.id, regions: orchestrator.regions }).toStrictEqual({
+        id: orchestrator.id,
+        regions: regionsForOrchestrator(orchestrator.id, stage),
+      });
+    }
+  });
+
+  it('agree with the ids map on which orchestrator serves each region', () => {
+    for (const orchestrator of getAvailableOrchestrators()) {
+      for (const region of orchestrator.regions) {
+        expect({ region, id: ORCHESTRATOR_ID_BY_REGION[region] }).toStrictEqual({
+          region,
+          id: orchestrator.id,
+        });
+      }
     }
   });
 });
