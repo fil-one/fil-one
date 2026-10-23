@@ -84,6 +84,9 @@ export function Alert({
         // one-line and a two-line alert equally balanced. `centered` now only
         // controls horizontal centring.
         'items-center',
+        // Below `sm` the action takes its own row: beside the text it squeezed
+        // a long description into a column a few words wide.
+        action && 'flex-wrap sm:flex-nowrap',
         centered && 'justify-center',
         containerStyles[variant],
       )}
@@ -120,7 +123,7 @@ export function Alert({
       </div>
       {/* `shrink-0` so a long description wraps rather than squeezing the
           control the reader is being pointed at. */}
-      {action && <div className="shrink-0">{action}</div>}
+      {action && <div className="min-w-0 basis-full sm:shrink-0 sm:basis-auto">{action}</div>}
     </div>
   );
 }

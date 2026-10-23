@@ -100,6 +100,7 @@ function InteractiveBucketsTable({ buckets }: { buckets: Bucket[] }) {
       regions={regions}
       matchCount={visible.length}
       totalCount={buckets.length}
+      coldStorage={{ onFreeze: () => {}, onGetDataBack: () => {} }}
     />
   );
 }
