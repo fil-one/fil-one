@@ -1,4 +1,11 @@
-import { SquaresFourIcon, DatabaseIcon, KeyIcon } from '@phosphor-icons/react/dist/ssr';
+import {
+  ClockCounterClockwiseIcon,
+  CreditCardIcon,
+  DatabaseIcon,
+  KeyIcon,
+  SquaresFourIcon,
+  UsersIcon,
+} from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
 import type { Permission } from '@filone/shared';
@@ -29,21 +36,60 @@ type NavItem = {
   testId: string;
   /** What the destination needs. Omitted, every member sees the entry. */
   permission?: Permission;
+  /** Part of the organizations beta, so shown only to orgs in it. */
+  beta?: boolean;
 };
 
-// One unlabelled list: with two storage pages, a "Storage" heading only added
-// noise. The org's own pages live in the org switcher menu.
-const navItems: NavItem[] = [
-  { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard', testId: 'nav-dashboard' },
-  { path: '/buckets', icon: DatabaseIcon, label: 'Buckets', testId: 'nav-buckets' },
+type NavGroup = {
+  label?: string;
+  items: NavItem[];
+};
+
+const navGroups: NavGroup[] = [
   {
-    path: '/api-keys',
-    icon: KeyIcon,
-    label: 'API Keys',
-    testId: 'nav-api-keys',
-    // ReadOnly holds no `keys.*`, so the list request is refused and the
-    // page has nothing but the connection reference to offer.
-    permission: 'keys.manage_own',
+    // Unlabelled: with two storage pages, a "Storage" heading only added noise.
+    items: [
+      { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard', testId: 'nav-dashboard' },
+      { path: '/buckets', icon: DatabaseIcon, label: 'Buckets', testId: 'nav-buckets' },
+      {
+        path: '/api-keys',
+        icon: KeyIcon,
+        label: 'API Keys',
+        testId: 'nav-api-keys',
+        // ReadOnly holds no `keys.*`, so the list request is refused and the
+        // page has nothing but the connection reference to offer.
+        permission: 'keys.manage_own',
+      },
+    ],
+  },
+  {
+    // The org switcher menu keeps Edit organization; these live only here.
+    label: 'Organization',
+    items: [
+      {
+        path: '/members',
+        icon: UsersIcon,
+        label: 'Members',
+        testId: 'nav-members',
+        permission: 'members.read',
+        beta: true,
+      },
+      {
+        path: '/billing',
+        icon: CreditCardIcon,
+        label: 'Billing',
+        testId: 'nav-billing',
+        permission: 'billing.view',
+      },
+      {
+        path: '/audit',
+        icon: ClockCounterClockwiseIcon,
+        label: 'Audit log',
+        testId: 'nav-audit',
+        permission: 'audit.view',
+        beta: true,
+      },
+    ],
   },
 ];
 
@@ -57,41 +103,59 @@ type NavLinksProps = {
 };
 
 function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
-  const { has } = usePermissions();
+  const { has, orgsBeta } = usePermissions();
+  // A group whose every page the caller cannot open is left out, label and all.
+  const visibleGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) => (!item.permission || has(item.permission)) && (orgsBeta || !item.beta),
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
   return (
-    <div className="flex flex-col gap-0.5 p-2">
-      {navItems
-        .filter((item) => !item.permission || has(item.permission))
-        .map(({ path, icon: Icon, label, testId }) => {
-          const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
-          const link = (
-            <Link
-              key={path}
-              to={path}
-              data-testid={showTestIds ? testId : undefined}
-              aria-label={label}
-              onClick={onClose}
-              className={[
-                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-                collapsed ? 'justify-center' : '',
-                isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-            >
-              <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
-              {!collapsed && <span className="flex-1">{label}</span>}
-            </Link>
-          );
-          if (collapsed) {
-            return (
-              <Tooltip key={path} content={label} side="right">
-                {link}
-              </Tooltip>
-            );
-          }
-          return <div key={path}>{link}</div>;
-        })}
+    <div className="flex flex-col p-2">
+      {visibleGroups.map((group, gi) => (
+        <div key={gi} className={gi > 0 ? 'mt-4' : ''}>
+          {!collapsed && group.label && (
+            <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wide text-zinc-400">
+              {group.label}
+            </p>
+          )}
+          <div className="flex flex-col gap-0.5">
+            {group.items.map(({ path, icon: Icon, label, testId }) => {
+              const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
+              const link = (
+                <Link
+                  key={path}
+                  to={path}
+                  data-testid={showTestIds ? testId : undefined}
+                  aria-label={label}
+                  onClick={onClose}
+                  className={[
+                    'flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-ui transition-colors',
+                    collapsed ? 'justify-center' : '',
+                    isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                >
+                  <Icon size={16} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
+                  {!collapsed && <span className="flex-1">{label}</span>}
+                </Link>
+              );
+              if (collapsed) {
+                return (
+                  <Tooltip key={path} content={label} side="right">
+                    {link}
+                  </Tooltip>
+                );
+              }
+              return <div key={path}>{link}</div>;
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
