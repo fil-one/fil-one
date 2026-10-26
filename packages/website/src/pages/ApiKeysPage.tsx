@@ -53,6 +53,8 @@ const SKELETON_COLUMNS: SkeletonColumn[] = [
 
 type AccessKeysTabProps = {
   keys: AccessKey[];
+  /** Whether `keys` holds only the caller's own keys, which the empty state says. */
+  listsOwnKeysOnly?: boolean;
   /** Absent for a role that cannot mint keys — the table drops the control. */
   onCreateOpen?: () => void;
   /** Absent for a role that cannot revoke them — the table drops the column. */
@@ -69,6 +71,7 @@ type AccessKeysTabProps = {
 
 function AccessKeysTab({
   keys,
+  listsOwnKeysOnly,
   onCreateOpen,
   onDelete,
   onBulkDelete,
@@ -136,6 +139,12 @@ function AccessKeysTab({
           canRotate={canRotate}
           creatorFor={creatorFor}
           onCreateOpen={onCreateOpen}
+          // The org may hold keys this caller is not shown. Without this, a new
+          // Member reads an empty list as the org's keys having gone missing.
+          {...(listsOwnKeysOnly && {
+            emptyDescription:
+              'You can only see the keys you create. Owners and Admins see every key in the organization.',
+          })}
         />
       )}
       {keys.length === 0 && (
@@ -157,6 +166,7 @@ function AccessKeysTab({
  */
 function AccessKeysPanel({
   keys,
+  listsOwnKeysOnly,
   mayList,
   isPending,
   isError,
@@ -205,6 +215,7 @@ function AccessKeysPanel({
   return (
     <AccessKeysTab
       keys={keys}
+      listsOwnKeysOnly={listsOwnKeysOnly}
       onCreateOpen={onCreateOpen}
       onDelete={onDelete}
       onBulkDelete={onBulkDelete}
@@ -245,7 +256,7 @@ export function ApiKeysPage() {
   // Listing is `keys.manage_own` and the server narrows the response to the
   // caller's own keys; `keys.manage_all` lifts that narrowing server-side and
   // asks nothing extra of this request. Revoking is per row.
-  const { mayList, mayRevoke } = useKeyActionScope();
+  const { mayList, listsOwnKeysOnly, mayRevoke } = useKeyActionScope();
   const accountDisabled = useAccountDisabled();
 
   const openCreateKey = () => void navigate({ to: '/api-keys/create' });
@@ -314,6 +325,7 @@ export function ApiKeysPage() {
           <TabPanel>
             <AccessKeysPanel
               keys={keys}
+              listsOwnKeysOnly={listsOwnKeysOnly}
               mayList={mayList}
               isPending={isPending}
               isError={isError}
