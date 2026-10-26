@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { test as setup, expect } from '@playwright/test';
 import { maybeSkipPasskeyEnrollment } from '../destructive/passkey.util.ts';
-import { activateSubscription } from '../destructive/billing-reset.util.ts';
+import { ACCOUNT_STATE_TIMEOUT_MS, setAccountState } from '../destructive/account-state.util.ts';
 import { resolvePersonalOrgId, seedMembership } from '../destructive/invite.util.ts';
 import { STORAGE_STATE, getCredentials, type PolicyUser } from './policy.util.ts';
 
@@ -36,10 +36,10 @@ for (const user of ['owner', 'admin', 'member', 'readonly', 'leaver'] as PolicyU
 }
 
 setup('seat everyone in the owner org', async () => {
+  setup.setTimeout(ACCOUNT_STATE_TIMEOUT_MS);
   const owner = getCredentials('owner');
   const orgId = await resolvePersonalOrgId(owner.userId);
-  // `paid` only picks the subscription state activateSubscription writes.
-  await activateSubscription('paid', owner.userId);
+  await setAccountState(owner.userId, 'paid');
   for (const [user, role] of [
     ['admin', 'admin'],
     ['member', 'member'],

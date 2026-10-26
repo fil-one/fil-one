@@ -92,6 +92,9 @@ jobs:
       E2E_TRIAL_EMAIL: ${{ secrets.E2E_TRIAL_EMAIL }}
       E2E_TRIAL_PASSWORD: ${{ secrets.E2E_TRIAL_PASSWORD }}
       E2E_TRIAL_USER_ID: ${{ secrets.E2E_TRIAL_USER_ID }}
+      E2E_DISABLED_EMAIL: ${{ secrets.E2E_DISABLED_EMAIL }}
+      E2E_DISABLED_PASSWORD: ${{ secrets.E2E_DISABLED_PASSWORD }}
+      E2E_DISABLED_USER_ID: ${{ secrets.E2E_DISABLED_USER_ID }}
       E2E_ORG_OWNER_EMAIL: ${{ secrets.E2E_ORG_OWNER_EMAIL }}
       E2E_ORG_OWNER_PASSWORD: ${{ secrets.E2E_ORG_OWNER_PASSWORD }}
       E2E_ORG_OWNER_AUTH0_ID: ${{ secrets.E2E_ORG_OWNER_AUTH0_ID }}
@@ -133,10 +136,11 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps
 
-      # auth.setup.ts re-seeds BillingTable rows for the test users via direct
-      # DynamoDB writes (see tests/e2e/billing-reset.ts). The test:e2e script
-      # wraps Playwright in `sst shell` so SST Resource bindings (BillingTable
-      # name, etc.) resolve to the staging stage.
+      # auth.setup.ts re-seeds the test users' billing rows and tenant status by
+      # invoking the stage's AccountStateTestHelper Lambda (see
+      # tests/e2e/destructive/account-state.util.ts). The test:e2e script wraps
+      # Playwright in `sst shell` so SST Resource bindings (the Lambda's name,
+      # etc.) resolve to the staging stage.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:

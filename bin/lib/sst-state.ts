@@ -9,28 +9,20 @@
 // bin/lib/stage.ts's resolveStageTables, which resolves several tables at
 // once; this helper answers for one table and derives its region from the ARN.
 
-import { execFileSync } from 'node:child_process';
-
-interface StateResource {
-  type: string;
-  urn: string;
-  outputs?: { name?: string; arn?: string };
-}
+import { exportStageState, type StateResource } from './stage.ts';
 
 /**
  * The real name and region of one deployed DynamoDB table.
  *
  * `urnSuffix` names the SST component's underlying table — a `Dynamo` component
  * called `UserInfoTable` creates a table whose URN ends `::UserInfoTableTable`.
+ * Pass `resources` when the script already holds the stage's state export.
  */
-export function findTable(stage: string, urnSuffix: string): { tableName: string; region: string } {
-  const json = execFileSync('pnpm', ['exec', 'sst', 'state', 'export', '--stage', stage], {
-    encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-
-  const resources: StateResource[] = JSON.parse(json).latest?.resources ?? [];
+export function findTable(
+  stage: string,
+  urnSuffix: string,
+  resources: StateResource[] = exportStageState(stage),
+): { tableName: string; region: string } {
   const table = resources.find(
     (r) => r.type === 'aws:dynamodb/table:Table' && r.urn.endsWith(urnSuffix),
   );
