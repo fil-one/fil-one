@@ -23,7 +23,7 @@ type TaskProps = {
    * the CloudFront rewrite (`spa-rewrite.js`) passes through to the bucket;
    * anywhere else below the root it would be served the app shell.
    */
-  illustration: string;
+  image: string;
   children: React.ReactNode;
 };
 
@@ -49,12 +49,12 @@ type TaskProps = {
  * `max-width: 100%` on images, which would shrink the drawing instead. The
  * alt text is empty because the drawing says nothing the heading does not.
  */
-function Task({ title, description, illustration, children }: TaskProps) {
+function Task({ title, description, image, children }: TaskProps) {
   return (
     <div className="flex flex-1 flex-col gap-4">
       <div className="relative h-56 overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100">
         <img
-          src={illustration}
+          src={image}
           alt=""
           className="absolute left-1/2 h-full w-auto max-w-none -translate-x-1/2"
         />
@@ -136,7 +136,7 @@ export function OnboardingPage({ hasBucket, hasKey, mayInvite }: OnboardingPageP
           <Task
             title="Create a bucket"
             description="Buckets hold your objects."
-            illustration="/static/illustrations/create-bucket.svg"
+            image="/static/illustrations/create-bucket.svg"
           >
             <Button variant="primary" size="sm" href="/buckets/create">
               {hasBucket ? 'Create another bucket' : 'Create bucket'}
@@ -147,7 +147,7 @@ export function OnboardingPage({ hasBucket, hasKey, mayInvite }: OnboardingPageP
           <Task
             title="Create an API key"
             description="An API key is needed to connect an S3 client."
-            illustration="/static/illustrations/create-api-key.svg"
+            image="/static/illustrations/create-api-key.svg"
           >
             <Button variant="primary" size="sm" href="/api-keys/create">
               {hasKey ? 'Create another key' : 'Create API key'}
