@@ -244,10 +244,11 @@ export function logoutReturnTo(origin: string): string {
  * Auth0 tenant, so `resolveAuth0Domain` ignores the table outside the production
  * stage and non-production deployments keep their configured domain.
  *
- * The demo alias cannot use `auth.fil.one`: a second Auth0 custom domain requires an
- * Enterprise plan, and `auth.fil.one` sits on the same flagged TLD the alias exists
- * to escape. It uses the tenant's own domain, which stays available alongside a
- * custom domain. Consequences — passkeys and sessions do not carry between the two,
+ * The demo alias could sign in through `auth.fil.one`, but we chose not to: it sits on
+ * the same flagged TLD the alias exists to escape. A custom domain on the alias's own
+ * TLD would need a second Auth0 custom domain, which requires an Enterprise plan we do
+ * not have, so the alias uses the tenant's own domain, which stays available alongside
+ * a custom domain. Consequences — passkeys and sessions do not carry between the two,
  * because the WebAuthn relying-party ID is the Auth0 hostname — are in
  * docs/Auth0OneTimeSetup.md §4a.
  *
