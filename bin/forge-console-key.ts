@@ -24,7 +24,7 @@
 //   node bin/forge-console-key.ts prune  staging
 //
 // Every Forge region the stage offers is processed (getAvailableRegions in
-// @filone/shared, filtered to the regions FORGE_NETWORKS below knows), and
+// @filone/shared, filtered to the regions in FORGE_NETWORKS, lib/forge-network.ts), and
 // `--region` narrows the run to one of them. A stage with no Forge region,
 // production today, is refused before any AWS call.
 //
@@ -42,8 +42,8 @@
 // than version N, because `prune` deletes only version N-1 and the older key
 // would never be cleaned up: prune that tenant first. It writes SSM only after
 // the new key answers a GET on its id and signs an S3 ListBuckets (plus a
-// GetBucketVersioning when the tenant has a bucket). A tenant whose
-// verification fails keeps the key it already has.
+// GetBucketVersioning and a GetBucketCors when the tenant has a bucket). A
+// tenant whose verification fails keeps the key it already has.
 //
 // The Management API takes no idempotency key on access-key creation (see
 // management-openapi.yaml, "Idempotency"): a create it already committed comes
@@ -54,16 +54,19 @@
 // A tenant whose SSM parameter is missing or names a key the API does not have
 // keeps every key, is reported, and makes the command exit non-zero.
 //
-// Environment, one pair per Forge network (the Lambda env names, see forgeEnv in
-// sst.config.ts for each stage's URL):
-//   eu-central-3  FORGE_MANAGEMENT_API_URL,     FORGE_MANAGEMENT_API_TOKEN
-//   us-east-9     FORGE_DEV_MANAGEMENT_API_URL, FORGE_DEV_MANAGEMENT_API_TOKEN
-//                 FORGE_DEV_S3_ENDPOINT_URL (optional, a local smelt gateway)
-// Only the regions the run covers need theirs. The tokens are the stage's
-// ForgeManagementApiToken and ForgeDevManagementApiToken secrets.
+// Each region's Management API URL, and the dev network's S3 endpoint override
+// for a local smelt gateway, are read from the deployed AccountDeletionWorker's
+// environment. A variable of the same name in your shell overrides it; a
+// SMELT=true stage needs FORGE_DEV_MANAGEMENT_API_URL=http://localhost:15110
+// and FORGE_DEV_S3_ENDPOINT_URL=http://localhost:15130, since the Lambda holds
+// host.docker.internal URLs. The tokens come from the stage's
+// ForgeManagementApiToken and ForgeDevManagementApiToken secrets, or the app's
+// fallbacks, via `sst secret list`; they are never printed. Only the regions
+// the run covers are looked up.
 //
 // Talks to AWS directly using your ambient AWS credentials (no `sst shell`).
-// Resource names come from `sst state export`.
+// Resource names come from `sst state export`. The role must also call
+// lambda:GetFunctionConfiguration and read the stage's SST secrets.
 
 import {
   DynamoDBClient,
@@ -72,7 +75,13 @@ import {
   ScanCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
-import { GetBucketVersioningCommand, ListBucketsCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetBucketCorsCommand,
+  GetBucketVersioningCommand,
+  ListBucketsCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { LambdaClient } from '@aws-sdk/client-lambda';
 import { GetParameterCommand, PutParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
@@ -94,33 +103,17 @@ import {
   getConsoleKeyName,
   getNextConsoleKeyVersion,
 } from './lib/console-key-version.ts';
+import {
+  FORGE_NETWORKS,
+  getNetworkForRegion,
+  resolveForgeApi,
+  type ForgeApi,
+} from './lib/forge-network.ts';
 import { findTable } from './lib/sst-state.ts';
+import { exportStageState } from './lib/stage.ts';
 
 const USAGE =
   'Usage: node bin/forge-console-key.ts <rotate|prune> <stage> [--region <region>] [--org <orgId>] [--only-if-missing-perms] [--dry-run]';
-
-interface ForgeNetwork {
-  apiUrlEnv: string;
-  tokenEnv: string;
-  tokenSecret: string;
-  s3EndpointEnv?: string;
-}
-
-// The Forge regions and the network serving each, matching the Forge entries
-// of getOrchestratorForRegion (packages/backend/src/lib/service-orchestrator-registry.ts).
-const FORGE_NETWORKS: Partial<Record<S3Region, ForgeNetwork>> = {
-  [S3Region.EuCentral3]: {
-    apiUrlEnv: 'FORGE_MANAGEMENT_API_URL',
-    tokenEnv: 'FORGE_MANAGEMENT_API_TOKEN',
-    tokenSecret: 'ForgeManagementApiToken',
-  },
-  [S3Region.UsEast9]: {
-    apiUrlEnv: 'FORGE_DEV_MANAGEMENT_API_URL',
-    tokenEnv: 'FORGE_DEV_MANAGEMENT_API_TOKEN',
-    tokenSecret: 'ForgeDevManagementApiToken',
-    s3EndpointEnv: 'FORGE_DEV_S3_ENDPOINT_URL',
-  },
-};
 
 interface RegionContext {
   region: S3Region;
@@ -145,7 +138,7 @@ if (onlyIfMissingPermissions && command !== 'rotate') {
   exitWithUsage('--only-if-missing-perms applies to rotate only.');
 }
 
-const stageForgeRegions = getAvailableRegions(stage).filter((r) => FORGE_NETWORKS[r]);
+const stageForgeRegions = getAvailableRegions(stage).filter((r) => getNetworkForRegion(r));
 if (stageForgeRegions.length === 0) {
   console.error(`Stage "${stage}" offers no Forge region. Nothing was read or written.`);
   process.exit(1);
@@ -157,25 +150,6 @@ if (regionFilter && !stageForgeRegions.includes(regionFilter as S3Region)) {
   );
 }
 const regions = regionFilter ? [regionFilter as S3Region] : stageForgeRegions;
-
-const missingEnv = regions.flatMap((r) => {
-  const network = FORGE_NETWORKS[r]!;
-  return [network.apiUrlEnv, network.tokenEnv]
-    .filter((name) => !process.env[name])
-    .map(
-      (name) =>
-        `  ${name} (${r}${name === network.tokenEnv ? `, secret ${network.tokenSecret}` : ''})`,
-    );
-});
-if (missingEnv.length > 0) {
-  console.error(
-    `These must be set for the regions this run covers:\n${missingEnv.join('\n')}\n` +
-      "URLs are in forgeEnv in sst.config.ts; read the tokens from the stage's secrets with\n" +
-      `  pnpm exec sst secret list --stage ${stage}\n` +
-      'or pass --region to cover fewer regions.',
-  );
-  process.exit(1);
-}
 
 // The AWS SDK resolves credentials from the profile; without it the DynamoDB
 // calls fail late with an unhelpful CredentialsProviderError.
@@ -194,7 +168,8 @@ console.error(
 console.error(`Stage: ${stage}`);
 console.error(`Regions: ${regions.join(', ')}`);
 
-const { tableName, region: awsRegion } = findTable(stage, '::UserInfoTableTable');
+const resources = exportStageState(stage);
+const { tableName, region: awsRegion } = findTable(stage, '::UserInfoTableTable', resources);
 
 // `sst state export --stage X` is the only thing that ties this run to a stage,
 // so assert the resolved name matches rather than trusting the flag.
@@ -206,6 +181,15 @@ console.error(`UserInfoTable: ${tableName} (region ${awsRegion})`);
 
 const dynamo = new DynamoDBClient({ region: awsRegion });
 const ssm = new SSMClient({ region: awsRegion });
+const lambda = new LambdaClient({ region: awsRegion });
+
+// Every covered region's API before the first tenant, so a missing URL or
+// token stops the run before it changes anything.
+const forgeApis = new Map<S3Region, ForgeApi>();
+for (const region of regions) {
+  const network = FORGE_NETWORKS[getNetworkForRegion(region)!];
+  forgeApis.set(region, await resolveForgeApi(stage, network, resources, lambda));
+}
 
 let changed = 0;
 let skipped = 0;
@@ -213,16 +197,13 @@ let failed = 0;
 let orgFoundInSomeRegion = false;
 
 for (const region of regions) {
-  const network = FORGE_NETWORKS[region]!;
-  const baseUrl = process.env[network.apiUrlEnv]!;
-  const token = process.env[network.tokenEnv]!;
+  const { baseUrl, token, s3EndpointUrl } = forgeApis.get(region)!;
   const ctx: RegionContext = {
     region,
     orchestratorId: ORCHESTRATOR_ID_BY_REGION[region],
     // Resolved lazily, so the token is not held in a long-lived config object.
     client: createClient({ baseUrl, auth: () => token }),
-    s3EndpointUrl:
-      (network.s3EndpointEnv && process.env[network.s3EndpointEnv]) || getS3Endpoint(region, stage),
+    s3EndpointUrl: s3EndpointUrl ?? getS3Endpoint(region, stage),
   };
   console.error(
     `── ${region} (orchestrator ${ctx.orchestratorId}, API ${baseUrl}, S3 ${ctx.s3EndpointUrl})`,
@@ -474,9 +455,12 @@ async function verifyNewKey(
 // ── S3 data plane ───────────────────────────────────────────────
 
 /**
- * Signs a ListBuckets with the new credentials, then a GetBucketVersioning on
- * the first bucket when there is one: an action the gateway authorizes on its
- * own (fil-forge/hilt#102), which proves it honours the key's grant list.
+ * Signs a ListBuckets with the new credentials, then a GetBucketVersioning and
+ * a GetBucketCors on the first bucket when there is one: actions the gateway
+ * authorizes on their own (fil-forge/hilt#102, #107), which proves it honours
+ * the key's grant list. The CORS read is authorized before the gateway looks
+ * for a document, so a bucket without one answers NoSuchCORSConfiguration
+ * past the check, and that counts as a pass.
  */
 async function verifyS3Access(
   ctx: RegionContext,
@@ -496,7 +480,12 @@ async function verifyS3Access(
     try {
       const { Buckets } = await s3.send(new ListBucketsCommand({}));
       const bucket = Buckets?.[0]?.Name;
-      if (bucket) await s3.send(new GetBucketVersioningCommand({ Bucket: bucket }));
+      if (bucket) {
+        await s3.send(new GetBucketVersioningCommand({ Bucket: bucket }));
+        await s3.send(new GetBucketCorsCommand({ Bucket: bucket })).catch((err: unknown) => {
+          if (!(err instanceof Error && err.name === 'NoSuchCORSConfiguration')) throw err;
+        });
+      }
       return;
     } catch (err) {
       if (attempt === attempts) {

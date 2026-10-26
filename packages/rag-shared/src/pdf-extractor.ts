@@ -77,6 +77,8 @@ export async function extractTextFromPdf(bytes: Uint8Array): Promise<string> {
     }
     return pages.join('\n\n');
   } finally {
-    await pdf.destroy();
+    // pdf.js no longer offers `destroy()` on the document; destroying the
+    // loading task that produced it releases the same resources.
+    await pdf.loadingTask.destroy();
   }
 }

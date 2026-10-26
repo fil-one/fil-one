@@ -59,7 +59,7 @@ export async function scrubOrgRecords(orgId: string, members: DeletionMember[]):
   await purgeRagState(orgId);
   await destroyOrgCredentials(orgRows);
 
-  await scrubBilling(orgId, members);
+  await scrubBilling(orgId);
   await scrubMembers(orgId, members);
   await destroyAuditPartition(orgId);
 
@@ -172,22 +172,10 @@ async function purgeRagBucket(
  * The org's row carries the fence, because it is the row every reader and writer
  * addresses, and it is stamped for every deletion.
  *
- * A member's pre-re-key `CUSTOMER#` row is stamped only when this deletion also
- * ends their account. The legacy row is keyed by user, so it belongs to the
- * member's own personal org; an invited member keeps that org and its billing,
- * and stamping their row here would fence a subscription this deletion has no
- * claim on. Where the row is stamped it keeps the old fence closed until the
- * runbook's dated cleanup step deletes those rows; a row that is already gone
- * makes its own stamp a no-op.
- *
  * `stripeCustomerId` and `subscriptionId` are system identifiers and stay.
  */
-async function scrubBilling(orgId: string, members: DeletionMember[]): Promise<void> {
+async function scrubBilling(orgId: string): Promise<void> {
   await scrubSubscriptionRow(SubscriptionKeys.orgPk(orgId));
-  for (const { userId, deleteIdentity } of members) {
-    if (!deleteIdentity) continue;
-    await scrubSubscriptionRow(SubscriptionKeys.legacyPk(userId));
-  }
 }
 
 async function scrubSubscriptionRow(pk: string): Promise<void> {

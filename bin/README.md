@@ -199,7 +199,9 @@ and letting the indexer sync.
 
 **What the reset leaves in place.** The orchestrators are never called, so
 upstream tenants, buckets and access keys stay where they are — the reset
-assumes they are already gone. `OrgTable` holds membership only and is not
+assumes they are already gone. For a Forge region,
+[`reset-forge-network.ts`](#resetting-a-stage-on-a-forge-network) deletes the
+tenants as well. `OrgTable` holds membership only and is not
 read. There is no DynamoDB PITR, so the printed plan is the only audit trail;
 capture stdout with `| tee reset-region.log`.
 
@@ -208,6 +210,49 @@ SSM parameters, and call `s3vectors:GetVectorBucket` and
 `s3vectors:DeleteIndex`. A read-only profile that can read the vector bucket
 gets as far as the plan and the backup, then fails on the first write; one that
 cannot stops before the scan.
+
+## Resetting a stage on a Forge network
+
+`reset-forge-network.ts` deletes every Forge tenant one stage owns on a Forge
+network, then resets the stage's state for the network's region the same way
+`reset-region-provisioning.ts` does. Use it to start a stage over on a network.
+
+```bash
+node bin/reset-forge-network.ts --network dev --stage $USER --dry-run
+node bin/reset-forge-network.ts --network staging --stage staging
+```
+
+| Network   | Region         | Token secret                 |
+| --------- | -------------- | ---------------------------- |
+| `staging` | `eu-central-3` | `ForgeManagementApiToken`    |
+| `dev`     | `us-east-9`    | `ForgeDevManagementApiToken` |
+
+Forge cannot list tenants, and other stages share the network, so the tenants
+are the `{orchestratorId}TenantId` values in the stage's UserInfoTable. The
+Management API URL comes from the deployed `AccountDeletionWorker`'s
+environment and the token from the stage's secret (or the app's fallback), so
+no environment variables are needed. The token is never printed or written to
+the backup.
+
+A stage deployed with `SMELT=true` stores `host.docker.internal` URLs, which
+the host may not resolve. Set the Lambda's variable in your shell to override
+it:
+
+```bash
+FORGE_DEV_MANAGEMENT_API_URL=http://localhost:15110 \
+  node bin/reset-forge-network.ts --network dev --stage $USER --dry-run
+```
+
+Each account's tenant is disabled and deleted first, with retries; a tenant
+that is already gone counts as deleted. When the deletion still fails, the
+account keeps all of its FilOne state, the run moves on, lists the account at
+the end and exits 1. A re-run retries it.
+
+Prompt, `--dry-run`, `--yes` and production refusal work as in
+`reset-region-provisioning.ts`. The backup has the same format, plus `network`
+and `managementApiUrl`; it cannot bring a deleted Forge tenant back. Besides
+that script's permissions, the role needs `lambda:GetFunctionConfiguration`
+and read access to the stage's SST secrets.
 
 ## Other Scripts
 
@@ -225,6 +270,7 @@ cannot stops before the scan.
 | `tail-tenant-setup-logs.sh`        | Tail logs for the Aurora tenant setup Lambda                                                                                                                                                                   |
 | `reset-db.ts`                      | Reset the Aurora database for a stage                                                                                                                                                                          |
 | `reset-region-provisioning.ts`     | Un-provision one region for every account in a non-production stage (see above)                                                                                                                                |
+| `reset-forge-network.ts`           | Delete a non-production stage's Forge tenants on one network and un-provision its region (see above)                                                                                                           |
 | `aurora-s3-env.ts`                 | Print Aurora S3 environment variables                                                                                                                                                                          |
 | `aurora-preview-url.ts`            | Pre-signed GetObject URL for an Aurora object, plus a billing report for the owning account (deletion state, Stripe dashboard link, subscription status, latest usage)                                         |
 | `aurora-demo.ts`                   | Demo script for Aurora S3 operations                                                                                                                                                                           |
@@ -236,15 +282,17 @@ cannot stops before the scan.
 
 ### Shared helpers (`bin/lib/`)
 
-| Module                     | What it holds                                                                              |
-| -------------------------- | ------------------------------------------------------------------------------------------ |
-| `args.ts`                  | `--stage` (required, no default), `--execute`/`--dry-run`, usage and help                  |
-| `stage.ts`                 | Table names from `sst state export`, the resolved-name stage assertion, the region mapping |
-| `sst-state.ts`             | One deployed table and its region from `sst state export`, for the flag scripts            |
-| `dynamo.ts`                | Paging a Scan to the end, decoding rows, and retrying a cancelled transaction              |
-| `run-lock.ts`              | The single lock row that keeps a migration and its revert off the same table at once       |
-| `billing-rekey.ts`         | What to do with each subscription row, and the exact items that carry it out               |
-| `billing-verify.ts`        | The checks behind `backfill-billing-to-org.ts --verify` — the flip PR's merge gate         |
-| `org-conversion.ts`        | The same, for the org membership conversion                                                |
-| `trial-entitlement-org.ts` | Which org a pre-existing trial claim was spent on, for `prefill-trial-entitlement-org.ts`  |
-| `region-reset.ts`          | What un-provisioning one region deletes, per account, and the plan the operator reads      |
+| Module                     | What it holds                                                                                              |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `args.ts`                  | `--stage` (required, no default), `--execute`/`--dry-run`, usage and help                                  |
+| `stage.ts`                 | One `sst state export` per run, table names from it, the resolved-name stage assertion, the region mapping |
+| `sst-state.ts`             | One deployed table and its region from `sst state export`, for the flag scripts                            |
+| `dynamo.ts`                | Paging a Scan to the end, decoding rows, and retrying a cancelled transaction                              |
+| `run-lock.ts`              | The single lock row that keeps a migration and its revert off the same table at once                       |
+| `billing-rekey.ts`         | What to do with each subscription row, and the exact items that carry it out                               |
+| `billing-verify.ts`        | The checks behind `backfill-billing-to-org.ts --verify` — the flip PR's merge gate                         |
+| `org-conversion.ts`        | The same, for the org membership conversion                                                                |
+| `trial-entitlement-org.ts` | Which org a pre-existing trial claim was spent on, for `prefill-trial-entitlement-org.ts`                  |
+| `region-reset.ts`          | What un-provisioning one region deletes, per account, and the plan the operator reads                      |
+| `region-reset-run.ts`      | Scanning, backup, confirmation and the deletes for a region reset                                          |
+| `forge-network.ts`         | The Forge networks, and each one's Management API URL and token for a stage                                |

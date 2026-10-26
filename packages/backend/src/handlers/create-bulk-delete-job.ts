@@ -14,6 +14,7 @@ import {
   type ErrorResponse,
 } from '@filone/shared';
 
+import { canBulkDelete, type BulkDeleteRefusalReason } from '../lib/bulk-delete-access.ts';
 import {
   BulkDeleteJobExistsError,
   createBulkDeleteJob,
@@ -24,10 +25,18 @@ import {
 import { enqueueBulkDeleteJob } from '../lib/bulk-delete-queue.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import {
+  getBucketVersioningStatus,
+  type BucketVersioningStatus,
+} from '../lib/s3-bucket-operations.ts';
+import { createS3Client } from '../lib/s3-client.ts';
+import { isNoSuchBucketError } from '../lib/s3-errors.ts';
+import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import {
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
+import { getScopedMemberId } from '../lib/member-scope.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -37,10 +46,54 @@ import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
+function buildBucketNotFoundResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(404)
+    .body<ErrorResponse>({ message: 'Bucket not found' })
+    .build();
+}
+
+/**
+ * The response refusing a member's bulk deletion. A bucket outside their
+ * policies answers like a bucket that does not exist, since a distinct code
+ * would confirm it exists.
+ */
+function buildBulkDeleteRefusalResponse(
+  reason: BulkDeleteRefusalReason,
+  bucketName: string,
+): APIGatewayProxyStructuredResultV2 {
+  switch (reason) {
+    case 'bucket-not-granted':
+      return buildBucketNotFoundResponse();
+    case 'action-not-granted':
+      return new ResponseBuilder()
+        .status(403)
+        .body<ErrorResponse>({
+          message: `Your access to ${bucketName} does not permit bulk deletion.`,
+        })
+        .build();
+  }
+}
+
+/** The bucket's versioning, or undefined when the bucket does not exist. */
+async function readVersioningStatus(
+  orchestrator: RegionOrchestrator,
+  tenantId: string,
+  bucketName: string,
+): Promise<BucketVersioningStatus | undefined> {
+  try {
+    const s3 = createS3Client(await orchestrator.getS3ClientContext(tenantId));
+    return await getBucketVersioningStatus(s3, bucketName);
+  } catch (err) {
+    if (isNoSuchBucketError(err)) return undefined;
+    throw err;
+  }
+}
+
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId, membership } = getUserInfo(event);
   const bucketName = event.pathParameters?.name;
 
   if (!bucketName) {
@@ -79,6 +132,17 @@ export async function baseHandler(
 
   const { prefix, scope, idempotencyKey } = parsed.data;
 
+  const versioningStatus = await readVersioningStatus(orchestrator, tenantId, bucketName);
+  if (!versioningStatus) return buildBucketNotFoundResponse();
+
+  const memberId = getScopedMemberId(membership?.role, userId);
+  const access = await canBulkDelete(orchestrator, tenantId, memberId, {
+    bucketName,
+    scope,
+    versioningStatus,
+  });
+  if (!access.ok) return buildBulkDeleteRefusalResponse(access.reason, bucketName);
+
   // The job id is derived from the request (bucket, prefix, scope and the
   // idempotency key), so a resubmit of the same request lands on the existing
   // row instead of starting a second deletion. See deriveBulkDeleteJobId.
@@ -90,6 +154,7 @@ export async function baseHandler(
       bucketName,
       prefix,
       scope,
+      startedBy: userId,
     });
 
     try {
