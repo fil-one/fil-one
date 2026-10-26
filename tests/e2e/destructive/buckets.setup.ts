@@ -1,6 +1,6 @@
 import { test as setup } from '@playwright/test';
 import { STORAGE_STATE, requireUserId, type Role } from './roles.util.ts';
-import { activateSubscription, resetBillingState } from './billing-reset.util.ts';
+import { ACCOUNT_STATE_TIMEOUT_MS, setAccountState } from './account-state.util.ts';
 import { ensureBucketInEachRegion } from './buckets.util.ts';
 
 // Staging sometimes resets its storage layer and every bucket disappears, which
@@ -11,13 +11,15 @@ import { ensureBucketInEachRegion } from './buckets.util.ts';
 //
 // `unpaid` is seeded as `past_due`, which the subscription guard rejects with
 // 403 GRACE_PERIOD_WRITE_BLOCKED, so creating a bucket as that role needs the
-// subscription temporarily flipped to active. The role's own state is restored
-// afterwards — before any spec runs — so the dashboard and upload tests still
-// see `past_due`.
+// account temporarily switched to the `paid` state. The role's own state is
+// restored afterwards — before any spec runs — so the dashboard and upload
+// tests still see `past_due`. `disabled` rests with a canceled subscription
+// and disabled tenants, so it takes the same detour.
 const SEED_PLAN: ReadonlyArray<{ role: Role; needsActiveSubscription: boolean }> = [
   { role: 'paid', needsActiveSubscription: false },
   { role: 'trial', needsActiveSubscription: false },
   { role: 'unpaid', needsActiveSubscription: true },
+  { role: 'disabled', needsActiveSubscription: true },
 ];
 
 for (const { role, needsActiveSubscription } of SEED_PLAN) {
@@ -30,12 +32,17 @@ for (const { role, needsActiveSubscription } of SEED_PLAN) {
         return;
       }
 
+      // The step changes the account state twice, so it gets twice the budget
+      // of a single change.
+      setup.setTimeout(2 * ACCOUNT_STATE_TIMEOUT_MS);
       const userId = requireUserId(role);
-      await activateSubscription(role, userId);
       try {
+        // The Lambda writes the `paid` billing row before it syncs the tenants,
+        // so a failed sync leaves the row changed and the `finally` restores it.
+        await setAccountState(userId, 'paid');
         await ensureBucketInEachRegion(page, role);
       } finally {
-        await resetBillingState(role, userId);
+        await setAccountState(userId, role);
       }
     });
   });
