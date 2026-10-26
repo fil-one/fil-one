@@ -13,11 +13,13 @@ import { ensureBucketInEachRegion } from './buckets.util.ts';
 // 403 GRACE_PERIOD_WRITE_BLOCKED, so creating a bucket as that role needs the
 // account temporarily switched to the `paid` state. The role's own state is
 // restored afterwards — before any spec runs — so the dashboard and upload
-// tests still see `past_due`.
+// tests still see `past_due`. `disabled` rests with a canceled subscription
+// and disabled tenants, so it takes the same detour.
 const SEED_PLAN: ReadonlyArray<{ role: Role; needsActiveSubscription: boolean }> = [
   { role: 'paid', needsActiveSubscription: false },
   { role: 'trial', needsActiveSubscription: false },
   { role: 'unpaid', needsActiveSubscription: true },
+  { role: 'disabled', needsActiveSubscription: true },
 ];
 
 for (const { role, needsActiveSubscription } of SEED_PLAN) {

@@ -16,6 +16,9 @@ const REQUIRED_CREDENTIAL_VARS = [
   'E2E_TRIAL_EMAIL',
   'E2E_TRIAL_PASSWORD',
   'E2E_TRIAL_USER_ID',
+  'E2E_DISABLED_EMAIL',
+  'E2E_DISABLED_PASSWORD',
+  'E2E_DISABLED_USER_ID',
 ] as const;
 
 const missingCredentials = REQUIRED_CREDENTIAL_VARS.filter((name) => !process.env[name]);
@@ -49,6 +52,12 @@ const roles: ReadonlyArray<{
     email: process.env.E2E_TRIAL_EMAIL!,
     password: process.env.E2E_TRIAL_PASSWORD!,
     userId: process.env.E2E_TRIAL_USER_ID!,
+  },
+  {
+    name: 'disabled',
+    email: process.env.E2E_DISABLED_EMAIL!,
+    password: process.env.E2E_DISABLED_PASSWORD!,
+    userId: process.env.E2E_DISABLED_USER_ID!,
   },
 ];
 
