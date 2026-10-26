@@ -60,6 +60,7 @@ import {
   getBucketObjectLock,
 } from '../s3-bucket-operations.ts';
 import { getConsoleS3Credentials } from '../s3-credentials.ts';
+import { toAccessKeyExpiryInstant } from '../access-key-expiry.ts';
 import {
   createFthManagementClient,
   FthApiError,
@@ -318,6 +319,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
         'FTH supports service keys only; a principal-bound key needs the IAM access model',
       );
     }
+    const expiresAt = toAccessKeyExpiryInstant(keyOpts.expiresAt);
     const storageUserId = await this.getFthConsoleStorageUserId(tenantId, requestOptions);
 
     const permissions = buildFthPermissions(keyOpts.permissions, keyOpts.granularPermissions);
@@ -333,7 +335,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
       name: keyOpts.keyName,
       permissions,
       buckets,
-      expiresAt: keyOpts.expiresAt ?? null,
+      expiresAt,
     };
 
     try {
