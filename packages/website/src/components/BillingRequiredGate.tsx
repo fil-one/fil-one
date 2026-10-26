@@ -68,9 +68,7 @@ export function BillingRequiredGate() {
     }
   }, [billing, queryClient]);
 
-  // Billing that could not be read at all is not "no plan": `GET /api/billing`
-  // answers 503 for an account whose billing stands where this org cannot see
-  // it (a pre-re-key row), and the card form refuses it too. Offering a card
+  // Billing that could not be read at all is not "no plan". Offering a card
   // there is a button that can only fail, so the gate says what is wrong and
   // where to get it fixed.
   if (error && !billing) return <BillingUnavailable message={error} />;

@@ -1,18 +1,35 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContext, buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.ts';
-import { getRequestDeadline, requestDeadlineMiddleware } from './request-deadline.ts';
+import {
+  getRequestDeadline,
+  markRequestStep,
+  requestDeadlineMiddleware,
+} from './request-deadline.ts';
 
 const USER_INFO = { userId: 'any-user', orgId: 'any-org' };
 
 function runMiddleware(remainingMs: number) {
+  return startRequest(remainingMs).event;
+}
+
+function startRequest(remainingMs: number) {
   // buildEvent attaches a default deadline for handler tests; drop it so the
   // only deadline on the event is the one the middleware attaches.
   const event = buildEvent({ userInfo: USER_INFO, requestContext: { deadline: undefined } });
   const request = buildMiddyRequest(event, {
     context: buildContext({ getRemainingTimeInMillis: () => remainingMs }),
   });
-  requestDeadlineMiddleware().before(request);
-  return event;
+  const middleware = requestDeadlineMiddleware();
+  middleware.before(request);
+  return { event, request, middleware };
+}
+
+/** A request whose deadline the test fires by hand. */
+function startRequestWithManualDeadline() {
+  const deadline = new AbortController();
+  vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal);
+  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  return { ...startRequest(10_000), deadline, consoleError };
 }
 
 describe('requestDeadlineMiddleware', () => {
@@ -40,6 +57,42 @@ describe('requestDeadlineMiddleware', () => {
 
     expect(getRequestDeadline(event)).toBe(deadline);
   });
+
+  it('logs the step in flight when the deadline fires', () => {
+    const { event, deadline, consoleError } = startRequestWithManualDeadline();
+    markRequestStep(event, 'any-step');
+
+    deadline.abort();
+
+    expect(consoleError).toHaveBeenCalledWith('[request-deadline] Request deadline reached', {
+      step: 'any-step',
+      orgId: 'any-org',
+      userId: 'any-user',
+      apiRequestId: 'req-1',
+    });
+  });
+
+  it('logs nothing when the deadline fires on a handler that marks no steps', () => {
+    const { deadline, consoleError } = startRequestWithManualDeadline();
+
+    deadline.abort();
+
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it.each(['after', 'onError'] as const)(
+    'logs nothing when the deadline fires after the request ended in %s',
+    (hook) => {
+      const { event, request, middleware, deadline, consoleError } =
+        startRequestWithManualDeadline();
+      markRequestStep(event, 'any-step');
+
+      middleware[hook](request);
+      deadline.abort();
+
+      expect(consoleError).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('getRequestDeadline', () => {

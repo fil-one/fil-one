@@ -141,7 +141,7 @@ function Refused({
           Your email isn&rsquo;t verified yet, so this invitation is on hold. Verify it and
           we&rsquo;ll bring you straight back here.
         </p>
-        <Button variant="primary" href="/verify-email">
+        <Button id="accept-verify-email-button" variant="primary" href="/verify-email">
           Verify your email
         </Button>
       </Panel>

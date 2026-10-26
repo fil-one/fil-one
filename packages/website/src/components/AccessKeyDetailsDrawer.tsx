@@ -13,12 +13,14 @@ import { Link } from '@tanstack/react-router';
 
 import type { AccessKey, GranularPermission, ServiceAccessKey } from '@filone/shared';
 import {
+  BUCKET_CONFIG_PERMISSION_LABELS,
   BUCKET_INFO_PERMISSION_LABELS,
   BUCKET_PERMISSION_LABELS,
   GRANULAR_PERMISSION_LABELS,
   GRANULAR_PERMISSION_MAP,
   S3_REGION,
   getRegionLabel,
+  isBucketConfigPermission,
   isBucketInfoPermission,
   isBucketPermission,
 } from '@filone/shared';
@@ -333,6 +335,7 @@ function ServiceKeyPermissions({ accessKey }: { accessKey: ServiceAccessKey }) {
   const objectPermissions = PERMISSION_OPTIONS.filter((o) => permissions.includes(o.value));
   const bucketManagement = permissions.filter(isBucketPermission);
   const bucketInfo = permissions.filter(isBucketInfoPermission);
+  const bucketConfig = permissions.filter(isBucketConfigPermission);
   const granularPermissions = accessKey.granularPermissions ?? [];
 
   return (
@@ -353,12 +356,12 @@ function ServiceKeyPermissions({ accessKey }: { accessKey: ServiceAccessKey }) {
         </DrawerSection>
       )}
 
-      {(bucketManagement.length > 0 || bucketInfo.length > 0) && (
+      {(bucketManagement.length > 0 || bucketInfo.length > 0 || bucketConfig.length > 0) && (
         // Same section, same order as AccessKeyPermissionsFields: the
         // always-on fact first, then the bucket-info reads, then the
-        // region-gated management writes. Two sections here would say
-        // this is a different taxonomy from the one the key was built
-        // with, and it isn't.
+        // region-gated management writes, then the Forge-only configuration
+        // writes. Two sections here would say this is a different taxonomy
+        // from the one the key was built with, and it isn't.
         <DrawerSection title="Bucket management" testId="bucket-management">
           <PermissionList>
             <PermissionRow label="List all buckets" />
@@ -370,6 +373,12 @@ function ServiceKeyPermissions({ accessKey }: { accessKey: ServiceAccessKey }) {
             ))}
             {bucketManagement.map((permission) => (
               <PermissionRow key={permission} label={BUCKET_PERMISSION_LABELS[permission].label} />
+            ))}
+            {bucketConfig.map((permission) => (
+              <PermissionRow
+                key={permission}
+                label={BUCKET_CONFIG_PERMISSION_LABELS[permission].label}
+              />
             ))}
           </PermissionList>
         </DrawerSection>

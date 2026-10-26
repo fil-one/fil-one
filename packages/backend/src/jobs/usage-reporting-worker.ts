@@ -321,8 +321,7 @@ async function reconcileDeletedCustomer(params: {
   }
 
   // No userId gate. The deletion is committed against the org, which the scan
-  // already names; the user id feeds the legacy fallback and the logs and
-  // nowhere else. Skipping on a missing one left the tenant enabled for a
+  // already names; the user id feeds the logs and nowhere else. Skipping on a missing one left the tenant enabled for a
   // customer Stripe had deleted, and the log line promised a next run that
   // would find the same absent attribute and skip again.
   await startDeletionFromStripe({

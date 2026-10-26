@@ -478,6 +478,24 @@ export default $config({
         allowCredentials: true,
         maxAge: '1 day',
       },
+      transform: {
+        // Per-route CloudWatch metrics (Count, 4xx, 5xx, latencies) let the SLOs
+        // track a single route. They are billed per route and metric, so only
+        // production turns them on.
+        stage: isProduction
+          ? {
+              defaultRouteSettings: {
+                detailedMetricsEnabled: true,
+                // The AWS provider sends an unset throttling limit as 0, and a
+                // limit of 0 answers every request with 429, see
+                // https://github.com/hashicorp/terraform-provider-aws/issues/27674.
+                // These match the default account quota in us-east-2.
+                throttlingBurstLimit: 5000,
+                throttlingRateLimit: 10000,
+              },
+            }
+          : undefined,
+      },
     });
 
     // ── Website (S3 + CloudFront via sst.aws.Router) ─────────────────
@@ -631,6 +649,14 @@ export default $config({
               functionArn: spaRewriteFunction.arn,
             },
           ];
+          // SST gives every URL origin (the API routes) a 20 s read timeout,
+          // so CloudFront answers 504 while a slower API request is still
+          // running. API Gateway caps integrations at 30 s; waiting a few
+          // seconds longer lets its answer, or the handler's own, reach the
+          // browser. The cast reflects that origins are plain objects here.
+          for (const origin of args.origins as aws.types.output.cloudfront.DistributionOrigin[]) {
+            if (origin.customOriginConfig) origin.customOriginConfig.originReadTimeout = 35;
+          }
         },
       },
     });
@@ -965,7 +991,8 @@ export default $config({
       handler: 'packages/backend/src/jobs/bulk-delete-worker.handler',
       // Linking the queue covers both directions: consuming its messages and
       // enqueueing the continuation for a job too large for one invocation.
-      link: [bulkDeleteTable, userInfoTable, bulkDeleteQueue, ...managementApiTokens],
+      // OrgTable holds the starter's membership, re-read before each run.
+      link: [bulkDeleteTable, userInfoTable, orgTable, bulkDeleteQueue, ...managementApiTokens],
       environment: orchestratorEnv,
       timeout: '900 seconds',
       memory: '512 MB',
@@ -1214,6 +1241,8 @@ export default $config({
         extraEnv: { ...fthEnv, ...forgeEnv },
         // Linking the queue grants the send; the handler only enqueues the job.
         extraLink: [bulkDeleteQueue],
+        // Reads the bucket's versioning with the tenant's console S3 key.
+        permissions: s3DataPlanePermissions,
       },
       presign: {
         extraEnv: { ...fthEnv, ...forgeEnv },
@@ -1278,15 +1307,21 @@ export default $config({
       // rather than for every org; a member holding hundreds needs a worker,
       // which is FIL-1017 follow-up work. A timeout during the pass is safe by
       // design — the role is unwritten and the retry finds fewer keys.
+      // `WEBSITE_URL` on the routes that send revocation email locates the logo
+      // the email loads (email-layout.ts).
       'update-member-role': {
-        extraEnv: orchestratorEnv,
+        extraEnv: { ...orchestratorEnv, WEBSITE_URL: siteUrl },
         permissions: [{ actions: ['ssm:GetParameter'], resources: [auroraApiKeySsmArn] }],
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
         timeout: '30 seconds',
       },
       // Removing a member drops their principal on every ready `iam` region.
-      // Needs the orchestrator environment to reach those regions at all.
-      'remove-member': { extraEnv: orchestratorEnv },
+      // Needs the orchestrator environment to reach those regions at all, and
+      // the SendGrid key to tell the member which of their keys were revoked.
+      'remove-member': {
+        extraEnv: { ...orchestratorEnv, WEBSITE_URL: siteUrl },
+        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+      },
 
       // ── RAG ────────────────────────────────────────────────────────
       // RAG query playground (FIL-554): embed the question, vector-search the
@@ -1394,10 +1429,11 @@ export default $config({
       // ── Organization ───────────────────────────────────────────────
       // Ownership transfer reads the caller's MFA enrollments to decide whether a
       // fresh sign-in is enough of a step-up, so it needs the Management API
-      // credentials the account routes already carry.
+      // credentials the account routes already carry. The previous owner's
+      // privileged keys are revoked, and they are told by email.
       'transfer-ownership': {
-        extraLink: mgmtRuntimeResources,
-        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        extraLink: [...mgmtRuntimeResources, ...(sendGridApiKey ? [sendGridApiKey] : [])],
+        extraEnv: { AUTH0_MGMT_DOMAIN: auth0MgmtDomain, WEBSITE_URL: siteUrl },
       },
       // Presigns a POST into OrgLogoBucket.
       'presign-org-logo': {
@@ -1427,19 +1463,23 @@ export default $config({
       // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
       // than from the request, since the link goes to somebody else's inbox.
       // OrgLogoBucketName, to check the joined org's logo is one of its uploads.
+      // The Auth0 runtime credentials, to mark an unverified invitee's address
+      // verified through the Management API.
       'accept-invitation': {
         // Registers the new member as a principal on each ready iam region.
-        extraEnv: orchestratorEnv,
-        extraLink: [orgLogoBucketName],
+        extraEnv: { ...orchestratorEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        extraLink: [...mgmtRuntimeResources, orgLogoBucketName],
       },
       // The only route that sends mail. `SendGridApiKey` exists on staging and
       // production alone; every other stage sends no email and logs the invitation
       // by id, never the accept URL, because the URL carries the token.
       // `WEBSITE_URL` is the accept link's origin, taken from configuration rather
       // than from the request, since the link goes to somebody else's inbox.
+      // The Auth0 runtime credentials look up whether the invitee has an account,
+      // which decides whether the link opens sign-up or sign-in.
       'create-invitation': {
-        extraEnv: { WEBSITE_URL: siteUrl },
-        ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
+        extraEnv: { WEBSITE_URL: siteUrl, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        extraLink: [...mgmtRuntimeResources, ...(sendGridApiKey ? [sendGridApiKey] : [])],
       },
 
       // ── Usage and dashboard ────────────────────────────────────────
@@ -1482,7 +1522,7 @@ export default $config({
           deletionCodeHmacKey,
           ...(sendGridApiKey ? [sendGridApiKey] : []),
         ],
-        extraEnv: { ACCOUNT_DELETION_ENABLED: accountDeletionEnabled },
+        extraEnv: { ACCOUNT_DELETION_ENABLED: accountDeletionEnabled, WEBSITE_URL: siteUrl },
       },
       'confirm-account-deletion': {
         // The org-name read, salt read and step-up enrollment lookup do not fit the
@@ -1576,6 +1616,20 @@ export default $config({
       schedule: 'cron(0 8/12 * * ? *)',
       function: gracePeriodEnforcer.arn,
     });
+
+    // ── E2E account state (test-only) ───────────────────────────────
+    // Puts an E2E test account into a known state: its billing row and its
+    // tenant status in every region (tests/e2e). It can disable any tenant, so
+    // it is never deployed to production, and the handler refuses to run there.
+    if (!isProduction) {
+      createFn('AccountStateTestHelper', {
+        handler: 'packages/backend/src/jobs/account-state-test-helper.handler',
+        link: [billingTable, userInfoTable, orgTable, ...managementApiTokens],
+        environment: orchestratorEnv,
+        timeout: '120 seconds',
+        memory: '256 MB',
+      });
+    }
 
     // ── RAG indexer (cron → orchestrator → per-org worker) ──────────
     // Keeps each RAG-enabled bucket's vector index in sync with S3 contents via
@@ -1763,9 +1817,32 @@ export default $config({
               Version: '2012-10-17',
               Statement: [
                 {
+                  // FIL-1139: the broker's lookup is a reverse tenant-UUID →
+                  // org match with no key available, so Scan is unavoidable
+                  // until UserInfoTable grows a tenant-id GSI. This condition
+                  // is the enforced ceiling meanwhile: every request must
+                  // declare SPECIFIC_ATTRIBUTES (the plain StringEquals is
+                  // what blocks a bare return-everything Scan) and may only
+                  // reference the five attributes the lookup filters on and
+                  // projects — member rows, emails, invite tokens, and
+                  // credential material cannot be returned through this role.
+                  // The broker's two consumers pass Select explicitly; deploy
+                  // their change before this one.
                   Effect: 'Allow',
                   Action: ['dynamodb:Scan'],
                   Resource: [userInfoTable.arn],
+                  Condition: {
+                    'ForAllValues:StringEquals': {
+                      'dynamodb:Attributes': [
+                        'pk',
+                        'sk',
+                        'createdBy',
+                        'auroraTenantId',
+                        'fthTenantId',
+                      ],
+                    },
+                    StringEquals: { 'dynamodb:Select': 'SPECIFIC_ATTRIBUTES' },
+                  },
                 },
                 {
                   Effect: 'Allow',
@@ -1872,6 +1949,43 @@ export default $config({
         ],
       });
       s3abRespondRoleArn = s3abRespondRole.arn;
+    }
+
+    // ── PostHog warehouse reader ────────────────────────────────────
+    // IAM user for PostHog's DynamoDB source, which feeds the numbers
+    // dashboard (FIL-1587). The source needs a long-lived access key:
+    // temporary credentials expire and break its scheduled syncs, so a role
+    // will not do. Read-only, and exactly what the source calls: ListTables
+    // and DescribeTable to discover the tables, Scan to copy them (it has no
+    // incremental mode). Only the two tables the dashboard reads.
+    //
+    // The access key is created outside this stack so the secret never lands
+    // in Pulumi state or stack outputs:
+    //   aws iam create-access-key --user-name filone-posthog-warehouse-read
+    // and pasted straight into the PostHog source.
+    if (isProduction) {
+      const posthogWarehouseReader = new aws.iam.User('PosthogWarehouseReader', {
+        name: 'filone-posthog-warehouse-read',
+      });
+      new aws.iam.UserPolicy('PosthogWarehouseReaderPolicy', {
+        user: posthogWarehouseReader.name,
+        policy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Action: ['dynamodb:DescribeTable', 'dynamodb:Scan'],
+              Resource: [billingTable.arn, userInfoTable.arn],
+            },
+            {
+              // ListTables cannot be scoped to a table; it returns names only.
+              Effect: 'Allow',
+              Action: ['dynamodb:ListTables'],
+              Resource: '*',
+            },
+          ],
+        }),
+      });
     }
 
     return {

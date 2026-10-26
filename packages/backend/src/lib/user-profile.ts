@@ -72,15 +72,17 @@ export async function readUserProfile(
  * repoints: `orgId` on `USER#{userId}/PROFILE` and on `SUB#{sub}/IDENTITY`.
  *
  * Split out from {@link readUserProfile} because almost nothing needs these:
- * today only a removal that leaves the account with a floor org to log in to.
- * Both reads are strongly consistent, because the caller conditions its own
- * transaction on the values read here and must not miss a write from moments
- * ago.
+ * today a removal that leaves the account with a floor org to log in to, and
+ * the E2E account state helper. Both reads are strongly consistent, because
+ * the removal conditions its own transaction on the values read here and must
+ * not miss a write from moments ago.
  *
- * Unlike the other readers in this module, a failed read throws. The caller
+ * Unlike the other readers in this module, a failed read throws. The removal
  * decides from this whether an account is about to be left with nowhere to
  * log in, and "could not read" answered as "no sub" would skip the floor org
- * and let the removal leave the account with no org at all.
+ * and let the removal leave the account with no org at all. The E2E helper
+ * would otherwise fall back to the user's first membership and reset an org
+ * that is not the account's own.
  */
 export async function readHomeOrgPointers(userId: string): Promise<{
   sub?: string;

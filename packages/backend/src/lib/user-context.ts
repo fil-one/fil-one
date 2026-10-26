@@ -44,6 +44,8 @@ export interface AuthenticatedEvent extends APIGatewayProxyEventV2 {
     subscriptionStatus?: string;
     /** Set by requestDeadlineMiddleware; read it with getRequestDeadline. */
     deadline?: AbortSignal;
+    /** Set by markRequestStep; logged by requestDeadlineMiddleware when the deadline fires. */
+    deadlineStep?: string;
   };
 }
 

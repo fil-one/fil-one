@@ -53,6 +53,11 @@ vi.mock('../lib/invite-mailer.ts', async (importOriginal) => {
   };
 });
 
+const mockHasAuth0UserWithEmail = vi.fn<(email: string) => Promise<boolean>>();
+vi.mock('../lib/auth0-management.ts', () => ({
+  hasAuth0UserWithEmail: (email: string) => mockHasAuth0UserWithEmail(email),
+}));
+
 const ddbMock = mockClient(DynamoDBClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
@@ -220,11 +225,13 @@ function sentAcceptUrl(): string {
   return sentInvitations[0].acceptUrl;
 }
 
-/** The token out of that URL's fragment, where it now rides. */
+/** The parameters in that URL's fragment, where the token rides. */
+function sentFragment(): Record<string, string> {
+  return Object.fromEntries(new URLSearchParams(new URL(sentAcceptUrl()).hash.slice(1)));
+}
+
 function sentToken(): string {
-  const fragment = new URL(sentAcceptUrl()).hash;
-  expect(fragment.startsWith('#token=')).toBe(true);
-  return decodeURIComponent(fragment.slice('#token='.length));
+  return sentFragment().token;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +247,7 @@ describe('POST /api/org/invitations handler', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
 
+    mockHasAuth0UserWithEmail.mockResolvedValue(true);
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: INVITER_EMAIL, email_verified: true },
     });
@@ -344,6 +352,37 @@ describe('POST /api/org/invitations handler', () => {
     expect(`${url.origin}${url.pathname}`).toBe('https://app.example.com/invite/accept');
     expect(url.search).toBe('');
     expect(url.hash).toContain('token=');
+  });
+
+  it('links an invitee with no account to sign-up', async () => {
+    mockHasAuth0UserWithEmail.mockResolvedValue(false);
+
+    await handler(inviteEvent(), buildContext());
+
+    expect(sentFragment()).toStrictEqual({ token: sentToken(), signup: '1' });
+  });
+
+  it('looks the invitee up by their normalized address', async () => {
+    await handler(inviteEvent(), buildContext());
+
+    expect(mockHasAuth0UserWithEmail).toHaveBeenCalledWith('invitee@example.com');
+  });
+
+  it('links an invitee who already has an account to sign-in', async () => {
+    mockHasAuth0UserWithEmail.mockResolvedValue(true);
+
+    await handler(inviteEvent(), buildContext());
+
+    expect(sentFragment()).toStrictEqual({ token: sentToken() });
+  });
+
+  it('links to sign-in and still sends the invitation when the account lookup fails', async () => {
+    mockHasAuth0UserWithEmail.mockRejectedValue(new Error('Auth0 users-by-email failed (503)'));
+
+    const result = await handler(inviteEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 201 });
+    expect(sentFragment()).toStrictEqual({ token: sentToken() });
   });
 
   it('records the invitation in the audit log, with no secret in it', async () => {

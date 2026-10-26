@@ -20,8 +20,10 @@ import type { Permission } from './permissions.ts';
  *
  * Each key permission maps to the console permission that grants the same
  * capability: creating a bucket is `buckets.create`, deleting one is
- * `buckets.delete`, and reading a bucket's versioning or object-lock settings
- * is `buckets.read`. Mapping a capability to something stricter than its
+ * `buckets.delete`, reading a bucket's versioning or object-lock settings is
+ * `buckets.read`, and setting a bucket's CORS rules, which decide which web
+ * origins may reach it, is `buckets.policy_manage` like the policy that
+ * decides who may. Mapping a capability to something stricter than its
  * console equivalent is not conservatism — it refuses a caller the thing they
  * demonstrably hold, and a Member who creates buckets every day would be
  * unable to mint a key that does it.
@@ -35,6 +37,7 @@ export const ACCESS_KEY_PERMISSION_REQUIREMENT: Record<AccessKeyPermission, Perm
   DeleteBucket: 'buckets.delete',
   GetBucketVersioning: 'buckets.read',
   GetBucketObjectLockConfiguration: 'buckets.read',
+  PutBucketCORS: 'buckets.policy_manage',
 };
 
 /**
