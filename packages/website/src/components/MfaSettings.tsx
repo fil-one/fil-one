@@ -313,7 +313,7 @@ function PasskeyRow({
   disabled: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-md border border-[#e1e4ea] bg-zinc-50 px-3 py-2">
+    <div className="flex items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
       <div>
         <p className="text-ui font-medium text-zinc-900">{passkey.name ?? 'Passkey'}</p>
         <p className="text-meta text-zinc-500">
@@ -410,7 +410,7 @@ export function MfaSettings({ me }: { me: MeResponse }) {
       {me.mfaEnrollments.length > 0 ? <EnrolledView me={me} /> : <EnableView />}
       {showPasskeys && (
         <>
-          <div className="h-px bg-[#e1e4ea]" />
+          <div className="h-px bg-zinc-200" />
           <PasskeySettings passkeys={passkeys} />
         </>
       )}

@@ -15,7 +15,7 @@ type Story = StoryObj;
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mb-12">
-      <h2 className="mb-6 border-b border-zinc-200 pb-3 font-heading text-xl font-semibold text-zinc-900">
+      <h2 className="mb-6 border-b border-zinc-200 pb-3 text-xl font-semibold text-zinc-900">
         {title}
       </h2>
       {children}
@@ -146,7 +146,7 @@ function ColorTokens() {
       <Section title="Section-aware Colors">
         <div className="grid grid-cols-1 gap-8 sm:grid-cols-2">
           <div className="light-section rounded-xl border border-zinc-200 bg-white p-6">
-            <p className="mb-4 text-sm font-semibold text-zinc-500 uppercase tracking-wide">
+            <p className="mb-4 text-sm font-medium text-zinc-500 uppercase tracking-wide">
               .light-section
             </p>
             <div className="grid grid-cols-2 gap-3">
@@ -172,7 +172,7 @@ function ColorTokens() {
             </div>
           </div>
           <div className="dark-section rounded-xl border border-zinc-700 bg-zinc-900 p-6">
-            <p className="mb-4 text-sm font-semibold text-zinc-400 uppercase tracking-wide">
+            <p className="mb-4 text-sm font-medium text-zinc-400 uppercase tracking-wide">
               .dark-section
             </p>
             <div className="grid grid-cols-2 gap-3">
@@ -214,7 +214,7 @@ function TypographyTokens() {
   return (
     <Section title="Typography">
       <div className="mb-8">
-        <h3 className="mb-4 text-sm font-semibold text-zinc-500 uppercase tracking-wide">
+        <h3 className="mb-4 text-sm font-medium text-zinc-500 uppercase tracking-wide">
           Font Families
         </h3>
         <div className="grid grid-cols-1 gap-4">
@@ -227,7 +227,7 @@ function TypographyTokens() {
         </div>
       </div>
       <div className="mb-8">
-        <h3 className="mb-4 text-sm font-semibold text-zinc-500 uppercase tracking-wide">
+        <h3 className="mb-4 text-sm font-medium text-zinc-500 uppercase tracking-wide">
           Type Scale
         </h3>
         <div className="divide-y divide-zinc-100 rounded-xl border border-zinc-200 overflow-hidden">
@@ -250,15 +250,14 @@ function TypographyTokens() {
         </div>
       </div>
       <div className="mb-8">
-        <h3 className="mb-4 text-sm font-semibold text-zinc-500 uppercase tracking-wide">
+        <h3 className="mb-4 text-sm font-medium text-zinc-500 uppercase tracking-wide">
           Font Weights
         </h3>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           {[
             { label: 'font-normal', weight: 'font-normal', value: '400' },
             { label: 'font-medium', weight: 'font-medium', value: '500' },
-            { label: 'font-semibold', weight: 'font-semibold', value: '600' },
-            { label: 'font-bold', weight: 'font-bold', value: '700' },
+            { label: 'font-semibold', weight: 'font-semibold', value: '600, page titles only' },
           ].map(({ label, weight, value }) => (
             <div key={label} className="rounded-xl border border-zinc-200 p-4">
               <p className="mb-1 font-mono text-xs text-zinc-400">
@@ -270,7 +269,7 @@ function TypographyTokens() {
         </div>
       </div>
       <div>
-        <h3 className="mb-4 text-sm font-semibold text-zinc-500 uppercase tracking-wide">
+        <h3 className="mb-4 text-sm font-medium text-zinc-500 uppercase tracking-wide">
           Letter Spacing
         </h3>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -298,7 +297,7 @@ export const AllTokens: Story = {
     <div className="light-section min-h-screen bg-white px-10 py-12">
       <div className="mx-auto max-w-5xl">
         <div className="mb-12">
-          <h1 className="font-heading text-3xl font-bold text-zinc-900">Design Tokens</h1>
+          <h1 className="text-3xl font-bold text-zinc-900">Design Tokens</h1>
           <p className="mt-2 text-zinc-500">
             All design tokens defined in the Fil One design system.
           </p>

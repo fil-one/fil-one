@@ -4,6 +4,7 @@ import { marshall } from '@aws-sdk/util-dynamodb';
 import {
   ACCESS_KEY_PERMISSION_REQUIREMENT,
   ApiErrorCode,
+  BUCKET_CONFIG_PERMISSIONS,
   CSRF_COOKIE_NAME,
   GRANULAR_PERMISSION_MAP,
   INVITE_TOKEN_MIN_LENGTH,
@@ -151,11 +152,10 @@ const stubbedRows = new Map<string, Record<string, unknown>>();
  */
 function withActiveSubscription(): void {
   beforeEach(() => {
-    // Both rows the store reads, because it reads them together: the org row is
-    // the one it serves, and an unstubbed legacy read would reject alongside it.
-    // Spelled out rather than read from the store's key helpers, which reach
-    // the sst resources this file mocks and cannot be imported at the top.
-    for (const pk of [`ORG#${ORG_ID}`, `CUSTOMER#${USER_ID}`]) {
+    // The org row the store reads. Spelled out rather than read from the
+    // store's key helpers, which reach the sst resources this file mocks and
+    // cannot be imported at the top.
+    for (const pk of [`ORG#${ORG_ID}`]) {
       stubbedRows.set(
         rowKey('BillingTable', pk, 'SUBSCRIPTION'),
         marshall({ pk, orgId: ORG_ID, subscriptionStatus: SubscriptionStatus.Active }),
@@ -622,21 +622,28 @@ describe('the caps routes apply on top of their declared permission', () => {
    * A granular only parses alongside the object permission it hangs off, so the
    * parent comes from the same map the schema checks against. The parent is
    * always one the role holds where the granular is not, which keeps each case
-   * about the permission it names. `us-east-1` because bucket management does
-   * not parse in `eu-west-1` at all, and a body refused at the schema would
-   * answer 400 and say nothing about the cap.
+   * about the permission it names. The region is one the permission parses in,
+   * because a body refused at the schema would answer 400 and say nothing
+   * about the cap: `us-east-1` for most, since bucket management does not parse
+   * in `eu-west-1` at all, and a Forge region for a bucket-configuration write,
+   * which parses nowhere else.
    */
   const parentOf = (granular: string) =>
     Object.entries(GRANULAR_PERMISSION_MAP).find(([, granulars]) =>
       (granulars as string[]).includes(granular),
     )?.[0];
 
+  const regionFor = (keyPermission: string): S3Region =>
+    (BUCKET_CONFIG_PERMISSIONS as readonly string[]).includes(keyPermission)
+      ? S3Region.EuCentral3
+      : S3Region.UsEast1;
+
   const mintRequest = (keyPermission: string, granular: boolean): RouteRequest => ({
     body: JSON.stringify({
       keyName: 'a key',
       permissions: granular ? [parentOf(keyPermission)] : [keyPermission],
       ...(granular && { granularPermissions: [keyPermission] }),
-      region: 'us-east-1',
+      region: regionFor(keyPermission),
     }),
   });
 
@@ -707,6 +714,10 @@ describe('the caps routes apply on top of their declared permission', () => {
         accessKeyId: 'AKIA0000TESTKEY0',
         createdAt: '2026-01-01T00:00:00Z',
         status: 'active',
+        // Stays in `us-east-1` whatever the permission: the rotate cap reads
+        // the stored permissions and never parses them against the region,
+        // and a Forge region refuses a Member's rotation earlier, on the key
+        // kind, with a message that names no permission.
         region: 'us-east-1',
         createdBy: USER_ID,
         permissions: granular ? [parent] : [keyPermission],

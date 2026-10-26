@@ -52,8 +52,8 @@ describe('the policy vocabulary', () => {
     },
   );
 
-  it('offers fourteen actions', () => {
-    expect(POLICY_ACTIONS).toHaveLength(14);
+  it('offers twenty-four actions', () => {
+    expect(POLICY_ACTIONS).toHaveLength(24);
   });
 
   it('labels every action', () => {
@@ -65,19 +65,47 @@ describe('the policy vocabulary', () => {
     expect(grouped.sort()).toStrictEqual([...POLICY_ACTIONS].sort());
   });
 
-  it('puts the retention and legal-hold actions in the protect group', () => {
-    expect(getPolicyActionsInGroup('protect')).toStrictEqual([
-      's3:GetObjectRetention',
-      's3:GetObjectLegalHold',
-      's3:PutObjectRetention',
-      's3:PutObjectLegalHold',
-    ]);
+  it.each([
+    {
+      name: 'the retention and legal-hold actions',
+      group: 'protect',
+      actions: [
+        's3:GetObjectRetention',
+        's3:GetObjectLegalHold',
+        's3:PutObjectRetention',
+        's3:PutObjectLegalHold',
+      ],
+    },
+    {
+      name: 'the object tagging actions',
+      group: 'tags',
+      actions: ['s3:GetObjectTagging', 's3:PutObjectTagging', 's3:DeleteObjectTagging'],
+    },
+    {
+      name: 'the bucket configuration reads',
+      group: 'bucket',
+      actions: [
+        's3:GetBucketAcl',
+        's3:GetBucketCORS',
+        's3:GetBucketLocation',
+        's3:GetBucketObjectLockConfiguration',
+        's3:GetBucketTagging',
+        's3:GetBucketVersioning',
+      ],
+    },
+  ] as const)('puts $name in the $group group', ({ group, actions }) => {
+    expect(getPolicyActionsInGroup(group)).toStrictEqual(actions);
+  });
+
+  it('puts reading object attributes in the read group', () => {
+    expect(getPolicyActionsInGroup('read')).toContain('s3:GetObjectAttributes');
   });
 
   it('gives a creator every action but the two retention writes', () => {
     expect(CREATOR_ACTIONS).toStrictEqual([
       's3:GetObject',
       's3:GetObjectVersion',
+      's3:GetObjectAttributes',
       's3:GetObjectRetention',
       's3:GetObjectLegalHold',
       's3:ListBucket',
@@ -88,6 +116,15 @@ describe('the policy vocabulary', () => {
       's3:AbortMultipartUpload',
       's3:DeleteObject',
       's3:DeleteObjectVersion',
+      's3:GetObjectTagging',
+      's3:PutObjectTagging',
+      's3:DeleteObjectTagging',
+      's3:GetBucketAcl',
+      's3:GetBucketCORS',
+      's3:GetBucketLocation',
+      's3:GetBucketObjectLockConfiguration',
+      's3:GetBucketTagging',
+      's3:GetBucketVersioning',
     ]);
   });
 });
@@ -115,12 +152,18 @@ describe('principal ARNs', () => {
 });
 
 describe('getStatementResources', () => {
-  it('names the bucket for a bucket action', () => {
-    expect(getStatementResources(BUCKET, ['s3:ListBucket'])).toStrictEqual([BUCKET_ARN]);
+  it.each([
+    { name: 'a bucket listing', action: 's3:ListBucket' },
+    { name: 'a bucket configuration read', action: 's3:GetBucketVersioning' },
+  ] as const)('names the bucket for $name', ({ action }) => {
+    expect(getStatementResources(BUCKET, [action])).toStrictEqual([BUCKET_ARN]);
   });
 
-  it('names the objects for an object action', () => {
-    expect(getStatementResources(BUCKET, ['s3:GetObject'])).toStrictEqual([OBJECTS_ARN]);
+  it.each([
+    { name: 'an object action', action: 's3:GetObject' },
+    { name: 'an object tagging action', action: 's3:PutObjectTagging' },
+  ] as const)('names the objects for $name', ({ action }) => {
+    expect(getStatementResources(BUCKET, [action])).toStrictEqual([OBJECTS_ARN]);
   });
 
   it.each([
@@ -174,6 +217,10 @@ describe('BucketPolicySchema', () => {
       },
     },
     { name: 'a principal named by user ARN', input: withStatement({}) },
+    {
+      name: 'an object tagging action',
+      input: withStatement({ Action: ['s3:GetObjectTagging'] }),
+    },
     { name: 'the wildcard principal as the bare string', input: withStatement({ Principal: '*' }) },
     {
       name: 'the 2008 policy language version',

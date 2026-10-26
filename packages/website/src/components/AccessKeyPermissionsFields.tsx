@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type {
   AccessKeyPermission,
   BucketInfoPermission,
+  BucketConfigPermission,
   BucketPermission,
   GranularPermission,
   ObjectPermission,
@@ -11,6 +12,8 @@ import {
   ACCESS_KEY_PERMISSION_REQUIREMENT,
   BUCKET_INFO_PERMISSIONS,
   BUCKET_INFO_PERMISSION_LABELS,
+  BUCKET_CONFIG_PERMISSIONS,
+  BUCKET_CONFIG_PERMISSION_LABELS,
   BUCKET_PERMISSIONS,
   BUCKET_PERMISSION_LABELS,
   GRANULAR_PERMISSION_MAP,
@@ -18,6 +21,7 @@ import {
   GRANULAR_PERMISSION_REQUIREMENT,
   getRegionLabel,
   supportsBucketManagement,
+  supportsIamMethods,
 } from '@filone/shared';
 
 import { usePermissions } from '../lib/use-permissions.js';
@@ -88,7 +92,9 @@ export function AccessKeyPermissionsFields({
     }
   }
 
-  function toggleBucket(permission: BucketPermission | BucketInfoPermission) {
+  function toggleBucket(
+    permission: BucketPermission | BucketInfoPermission | BucketConfigPermission,
+  ) {
     if (value.includes(permission)) {
       onChange(value.filter((p) => p !== permission));
     } else {
@@ -172,7 +178,7 @@ function Section({
 }) {
   return (
     <div className="flex flex-col" data-testid={testId}>
-      <p className="mb-1 px-3 text-meta font-semibold uppercase tracking-wider text-zinc-400">
+      <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wider text-zinc-400">
         {title}
       </p>
       {children}
@@ -182,7 +188,7 @@ function Section({
 
 type BucketManagementFieldsProps = {
   permissions: AccessKeyPermission[];
-  onToggle: (permission: BucketPermission | BucketInfoPermission) => void;
+  onToggle: (permission: BucketPermission | BucketInfoPermission | BucketConfigPermission) => void;
   region: S3Region;
   /** Whether the caller's role can put this permission on a key at all. */
   mayGrant: (permission: AccessKeyPermission) => boolean;
@@ -196,6 +202,8 @@ function BucketManagementFields({
 }: BucketManagementFieldsProps) {
   const supported = supportsBucketManagement(region);
   const unsupportedReason = `Not supported in ${getRegionLabel(region)}`;
+  // A bucket-configuration write exists only on a Forge gateway.
+  const configSupported = supportsIamMethods(region);
 
   return (
     <>
@@ -235,6 +243,22 @@ function BucketManagementFields({
             checked={supported && permissions.includes(permission)}
             disabled={!supported}
             tooltip={supported ? undefined : unsupportedReason}
+            onChange={() => onToggle(permission)}
+          />
+        );
+      })}
+
+      {BUCKET_CONFIG_PERMISSIONS.filter(mayGrant).map((permission: BucketConfigPermission) => {
+        const meta = BUCKET_CONFIG_PERMISSION_LABELS[permission];
+        return (
+          <CheckboxRow
+            key={permission}
+            testId={`permission-${permission}`}
+            label={meta.label}
+            description={meta.description}
+            checked={configSupported && permissions.includes(permission)}
+            disabled={!configSupported}
+            tooltip={configSupported ? undefined : unsupportedReason}
             onChange={() => onToggle(permission)}
           />
         );

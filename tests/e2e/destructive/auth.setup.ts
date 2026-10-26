@@ -2,7 +2,7 @@ import { test as setup, expect } from '@playwright/test';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { STORAGE_STATE, type Role } from './roles.util.ts';
-import { resetBillingState } from './billing-reset.util.ts';
+import { ACCOUNT_STATE_TIMEOUT_MS, setAccountState } from './account-state.util.ts';
 import { grantEmailBeta } from './invite.util.ts';
 import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
@@ -16,6 +16,9 @@ const REQUIRED_CREDENTIAL_VARS = [
   'E2E_TRIAL_EMAIL',
   'E2E_TRIAL_PASSWORD',
   'E2E_TRIAL_USER_ID',
+  'E2E_DISABLED_EMAIL',
+  'E2E_DISABLED_PASSWORD',
+  'E2E_DISABLED_USER_ID',
 ] as const;
 
 const missingCredentials = REQUIRED_CREDENTIAL_VARS.filter((name) => !process.env[name]);
@@ -50,14 +53,22 @@ const roles: ReadonlyArray<{
     password: process.env.E2E_TRIAL_PASSWORD!,
     userId: process.env.E2E_TRIAL_USER_ID!,
   },
+  {
+    name: 'disabled',
+    email: process.env.E2E_DISABLED_EMAIL!,
+    password: process.env.E2E_DISABLED_PASSWORD!,
+    userId: process.env.E2E_DISABLED_USER_ID!,
+  },
 ];
 
 for (const role of roles) {
   setup(`authenticate as ${role.name}`, async ({ page }) => {
-    // Re-seed the BillingTable record so dashboard tests see deterministic
-    // state. Trial periods elapse and `past_due` can advance to `canceled`
-    // between scheduled runs, so the prior run's state is not safe to reuse.
-    await resetBillingState(role.name, role.userId);
+    // Re-seed the account's billing row and tenant status so dashboard tests
+    // see deterministic state. Trial periods elapse and `past_due` can advance
+    // to `canceled` between scheduled runs, so the prior run's state is not
+    // safe to reuse.
+    setup.setTimeout(ACCOUNT_STATE_TIMEOUT_MS);
+    await setAccountState(role.userId, role.name);
     await grantEmailBeta(role.email);
 
     await page.goto('/');

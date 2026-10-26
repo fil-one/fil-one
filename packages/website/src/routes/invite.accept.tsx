@@ -4,8 +4,9 @@ import { Route as rootRoute } from './__root.js';
 import { AcceptInvitationPage } from '../pages/AcceptInvitationPage.js';
 import {
   readAndStripInviteTokenFromHash,
-  stashInviteToken,
-  takeInviteToken,
+  cacheInviteToken,
+  getCachedInviteToken,
+  hasSignUpHint,
 } from '../lib/invite-token.js';
 
 /**
@@ -24,23 +25,25 @@ export const Route = createRoute({
   path: '/invite/accept',
   beforeLoad: () => {
     const fromLink = readAndStripInviteTokenFromHash();
-    if (fromLink) stashInviteToken(fromLink);
+    if (fromLink) cacheInviteToken(fromLink);
 
     // No `returnTo` in the auth flow — every login lands on `/dashboard` — so
     // the token stays stashed across the bounce and the app route sends the
-    // caller back here once they are signed in.
+    // caller back here once they are signed in. An invitee the backend found
+    // no account for goes to sign-up instead.
     if (!document.cookie.includes('hs_logged_in')) {
-      throw redirect({ href: '/login', reloadDocument: true });
+      const href = hasSignUpHint() ? '/login?screen_hint=signup' : '/login';
+      throw redirect({ href, reloadDocument: true });
     }
 
     // Taken here rather than on render, so storage is clear before any later
     // redirect could be thrown: a page that then failed to render would
     // otherwise leave the app bouncing back to it forever.
-    takeInviteToken();
+    getCachedInviteToken();
   },
   component: AcceptInvitationRoute,
 });
 
 function AcceptInvitationRoute() {
-  return <AcceptInvitationPage token={takeInviteToken()} />;
+  return <AcceptInvitationPage token={getCachedInviteToken()} />;
 }

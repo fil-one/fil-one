@@ -6,11 +6,10 @@
 // org's billing, so a second member is served by the same row as the first, and
 // ownership transfer changes role attributes and nothing here.
 //
-// The legacy `CUSTOMER#{userId}` rows are dead. Nothing reads or writes them,
-// and the rows themselves are deleted in the runbook's dated cleanup step — see
-// docs/BillingRekeyRunbook.md. The key builder keeps `legacyPk` because that
-// step, its verification, and the scan-time invariant check still have to
-// recognize one that is still standing.
+// The legacy `CUSTOMER#{userId}` rows are gone: the runbook's dated cleanup step
+// deleted them (docs/BillingRekeyRunbook.md), and no runtime code reads or
+// writes them. The key builder keeps `legacyPk` for the cleanup script and the
+// scan-time invariant check, which still have to recognize one.
 
 import {
   GetItemCommand,
@@ -108,26 +107,6 @@ export const BILLING_IDENTITY_PROJECTION = 'stripeCustomerId, subscriptionId';
 
 /** The attributes a cancellation reads to size the grace period it starts. */
 export const GRACE_STATE_PROJECTION = 'subscriptionStatus, canceledAt, gracePeriodEndsAt';
-
-/**
- * Whether a pre-re-key `CUSTOMER#` row is still standing for this user.
- *
- * Nothing reads those rows any more, so this asks one question only: has the
- * backfill missed this account? The trial claim needs to know before it mints a
- * second Stripe customer for an org that already has one. It disappears with the
- * runbook's dated cleanup step, which is what makes the question meaningless.
- */
-export async function legacyRowExists(userId: string): Promise<boolean> {
-  const { Item } = await dynamo.send(
-    new GetItemCommand({
-      TableName: Resource.BillingTable.name,
-      Key: { pk: { S: SubscriptionKeys.legacyPk(userId) }, sk: { S: SubscriptionKeys.sk() } },
-      ProjectionExpression: 'pk',
-      ConsistentRead: true,
-    }),
-  );
-  return Item !== undefined;
-}
 
 /** The attributes every row carries about who it belongs to. */
 export function ownerAttributes({
@@ -402,9 +381,9 @@ export function scannedSubscription(
  * One org, one subscription is the invariant the re-key bought. Two rows for one
  * org is one of two different things, and they do not deserve the same alarm:
  *
- * - An `ORG#` row beside a `CUSTOMER#` row of the same org is the expected state
- *   between the flip and the dated cleanup step. Nothing writes the legacy row
- *   any more, so it is a frozen leftover — logged at WARN, naming it as one.
+ * - An `ORG#` row beside a `CUSTOMER#` row of the same org is a legacy row the
+ *   dated cleanup step missed. Nothing writes the legacy row any more, so it is
+ *   a frozen leftover — logged at WARN, naming it as one.
  *   That branch is a backstop for a direct caller: `scanSubscriptions` drops
  *   non-org rows in `scannableOwner`, so a job run reports its leftovers as
  *   `Not an org row, skipping` and never reaches this line. The check stays
@@ -457,7 +436,7 @@ function reportExtraRow<T extends ScannedSubscription>(job: string, survivor: T,
   if (SubscriptionKeys.isOrgPk(survivor.pk) !== SubscriptionKeys.isOrgPk(extra.pk)) {
     console.warn(`[${job}] Leftover CUSTOMER# row beside its org row`, {
       ...detail,
-      hint: 'expected between the flip and the dated cleanup step; nothing writes it any more',
+      hint: 'a CUSTOMER# row the dated cleanup step missed; investigate',
     });
     return;
   }
@@ -501,9 +480,9 @@ export interface SubscriptionScanOptions<T extends ScannedSubscription> {
  * The scan every SUBSCRIPTION-status job runs: page the table, read the owner
  * off each row, keep one row per org.
  *
- * NON-ORG ROWS ARE EXCLUDED HERE, not later. Between the flip and the cleanup
- * step the `CUSTOMER#` rows are still standing and still carry whatever status
- * they were frozen at, so a job that scanned them would act on state nothing has
+ * NON-ORG ROWS ARE EXCLUDED HERE, not later. The dated cleanup step deleted
+ * the `CUSTOMER#` rows, but one it missed would still carry whatever status it
+ * was frozen at, so a job that scanned it would act on state nothing has
  * updated since: the grace-period enforcer would disable a paying tenant whose
  * legacy row still says `grace_period`, and the usage orchestrator would meter
  * usage to a superseded `subscriptionId`. Dropping them at the scan means a
@@ -524,7 +503,7 @@ function scannableOwner(
     console.warn(`[${job}] Not an org row, skipping`, {
       pk: owner.pk,
       orgId: owner.orgId,
-      hint: 'a CUSTOMER# row the dated cleanup step has not removed yet',
+      hint: 'a CUSTOMER# row the dated cleanup step missed; investigate',
     });
     return undefined;
   }

@@ -1065,8 +1065,16 @@ describe('issueAccessKey', () => {
       's3:GetObject',
       's3:ListBucket',
       's3:ListMultipartUploadParts',
+      's3:GetObjectTagging',
+      's3:GetObjectAttributes',
+      's3:GetBucketLocation',
+      's3:GetBucketAcl',
+      's3:GetBucketCORS',
+      's3:GetBucketTagging',
+      's3:GetEncryptionConfiguration',
       's3:PutObject',
       's3:AbortMultipartUpload',
+      's3:PutObjectTagging',
       's3:ListBucketMultipartUploads',
     ]);
   });
@@ -1130,19 +1138,22 @@ describe('issueAccessKey', () => {
     expect(mockCreateAccessKey).not.toHaveBeenCalled();
   });
 
-  it('drops bucket-info permissions the contract enum lacks, with a warning', async () => {
+  it('sends the versioning and object-lock reads a key asks for, without a warning', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mockCreateAccessKey.mockResolvedValue(ok(createdKey, 201));
 
     await orchestrator.issueAccessKey(tenantId, {
       keyName: 'My Key',
-      permissions: ['read', 'GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
+      permissions: ['GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
     });
 
     const { permissions } = mockCreateAccessKey.mock.calls[0][0].body as { permissions: string[] };
-    expect(permissions).not.toContain('s3:GetBucketVersioning');
-    expect(permissions).not.toContain('s3:GetBucketObjectLockConfiguration');
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('GetBucketVersioning'));
+    expect(permissions).toStrictEqual([
+      's3:ListAllMyBuckets',
+      's3:GetBucketVersioning',
+      's3:GetBucketObjectLockConfiguration',
+    ]);
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it('maps a 409 to AccessKeyAlreadyExistsError', async () => {

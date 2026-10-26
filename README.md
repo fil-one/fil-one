@@ -141,22 +141,23 @@ pnpm exec playwright install --with-deps
 
 #### Required env vars
 
-| Variable                                                          | Purpose                                               |
-| ----------------------------------------------------------------- | ----------------------------------------------------- |
-| `BASE_URL`                                                        | The deployed app URL (e.g. `https://staging.fil.one`) |
-| `E2E_PAID_EMAIL` / `E2E_PAID_PASSWORD` / `E2E_PAID_USER_ID`       | Paid test user (`_USER_ID` is the FilOne user id)     |
-| `E2E_UNPAID_EMAIL` / `E2E_UNPAID_PASSWORD` / `E2E_UNPAID_USER_ID` | Unpaid test user                                      |
-| `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`    | Trial test user                                       |
+| Variable                                                                | Purpose                                                                  |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `BASE_URL`                                                              | The deployed app URL (e.g. `https://staging.fil.one`)                    |
+| `E2E_PAID_EMAIL` / `E2E_PAID_PASSWORD` / `E2E_PAID_USER_ID`             | Paid test user (`_USER_ID` is the FilOne user id)                        |
+| `E2E_UNPAID_EMAIL` / `E2E_UNPAID_PASSWORD` / `E2E_UNPAID_USER_ID`       | Unpaid test user                                                         |
+| `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`          | Trial test user                                                          |
+| `E2E_DISABLED_EMAIL` / `E2E_DISABLED_PASSWORD` / `E2E_DISABLED_USER_ID` | Disabled test user (see [Disabled test account](#disabled-test-account)) |
 
-In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`) so the billing-state reset can write to the staging `BillingTable`. The E2E jobs in both workflows share the `e2e-staging` concurrency group, so only one Playwright run touches staging at a time. A nightly or manual run of `e2e-staging.yaml` skips itself while a push to main has reached `deploy-staging` and its post-deploy E2E job has not finished, because that job tests the same suite.
+In CI, all twelve credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`), so the setup can invoke the staging `AccountStateTestHelper` Lambda and the org specs can seed their DynamoDB rows. The E2E jobs in both workflows share the `e2e-staging` concurrency group, so only one Playwright run touches staging at a time. A nightly or manual run of `e2e-staging.yaml` skips itself while a push to main has reached `deploy-staging` and its post-deploy E2E job has not finished, because that job tests the same suite.
 
 #### Seeded buckets per region
 
-The bucket/upload tests in `tests/e2e/destructive/buckets.spec.ts` run once per S3 region (`eu-west-1` and `us-east-1`, see `tests/e2e/destructive/regions.util.ts`) and reuse existing buckets rather than creating them (the account-wide bucket limit is 100 and buckets are not yet deletable). Each test account — paid, unpaid, and trial — must therefore have at least one bucket in **each** region on the target stage; otherwise the test fails with a `No <region> bucket found` error.
+The bucket/upload tests in `tests/e2e/destructive/buckets.spec.ts` run once per S3 region (`eu-west-1` and `us-east-1`, see `tests/e2e/destructive/regions.util.ts`) and reuse existing buckets rather than creating them (the account-wide bucket limit is 100 and buckets are not yet deletable). Each test account (paid, unpaid, trial and disabled) must therefore have at least one bucket in **each** region on the target stage; otherwise the test fails with a `No <region> bucket found` error.
 
-Seeding is automatic for all three accounts: the `seed-buckets` Playwright project ([tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts)) runs after `setup` and calls `ensureBucketInEachRegion` ([tests/e2e/destructive/buckets.util.ts](tests/e2e/destructive/buckets.util.ts)), which creates a bucket only for regions where the account has none. This keeps the suite working when a stage resets its storage layer and all buckets disappear; creation stays conditional so repeated runs do not leak buckets toward the 100-bucket limit.
+Seeding is automatic for all four accounts: the `seed-buckets` Playwright project ([tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts)) runs after `setup` and calls `ensureBucketInEachRegion` ([tests/e2e/destructive/buckets.util.ts](tests/e2e/destructive/buckets.util.ts)), which creates a bucket only for regions where the account has none. This keeps the suite working when a stage resets its storage layer and all buckets disappear; creation stays conditional so repeated runs do not leak buckets toward the 100-bucket limit.
 
-The **unpaid** account is `past_due`, and the subscription guard rejects write requests in that state with 403 `GRACE_PERIOD_WRITE_BLOCKED`. For that role the seeding step flips `subscriptionStatus` to `active` in the `BillingTable` (`activateSubscription` in [tests/e2e/destructive/billing-reset.util.ts](tests/e2e/destructive/billing-reset.util.ts)), creates the missing buckets, then restores `past_due` in a `finally` block — before any spec runs, so the dashboard and upload tests still see the write-blocked state.
+The **unpaid** account is `past_due`, and the subscription guard rejects write requests in that state with 403 `GRACE_PERIOD_WRITE_BLOCKED`. For that role the seeding step switches the account to the `paid` state (`setAccountState` in [tests/e2e/destructive/account-state.util.ts](tests/e2e/destructive/account-state.util.ts)), creates the missing buckets, then restores the `unpaid` state in a `finally` block — before any spec runs, so the dashboard and upload tests still see the write-blocked state. The **disabled** account takes the same detour from its `disabled` state.
 
 If the bucket list itself fails (`GET /api/buckets` returning a 5xx, e.g. when a stage's per-tenant S3 credentials in SSM have gone stale), the seeding step fails loudly with the status and response body rather than mistaking the error for an empty account — and because the browser projects depend on it, the whole run stops.
 
@@ -164,7 +165,7 @@ The upload tests report backend failures the same way. An upload is two round-tr
 
 #### Running locally
 
-The `test:e2e` script wraps Playwright in `sst shell` so SST Resource bindings (e.g. `BillingTable` name) resolve to the current SST stage. Deploy a stage first, then:
+The `test:e2e` script wraps Playwright in `sst shell` so SST Resource bindings (e.g. the `AccountStateTestHelper` function name) resolve to the current SST stage. Deploy a stage first, then:
 
 ```bash
 SST_STAGE=staging \
@@ -172,10 +173,11 @@ BASE_URL=https://staging.fil.one \
 E2E_PAID_EMAIL=...   E2E_PAID_PASSWORD=...   E2E_PAID_USER_ID=<uuid> \
 E2E_UNPAID_EMAIL=... E2E_UNPAID_PASSWORD=... E2E_UNPAID_USER_ID=<uuid> \
 E2E_TRIAL_EMAIL=...  E2E_TRIAL_PASSWORD=...  E2E_TRIAL_USER_ID=<uuid> \
+E2E_DISABLED_EMAIL=... E2E_DISABLED_PASSWORD=... E2E_DISABLED_USER_ID=<uuid> \
 pnpm test:e2e --project=chromium
 ```
 
-Your local AWS credentials (e.g. via `aws sso login`) must have write access to the staging stage's `BillingTable`.
+Your local AWS credentials (e.g. via `aws sso login`) must be allowed to invoke the stage's `AccountStateTestHelper` Lambda (`lambda:InvokeFunction`) and to write the stage's DynamoDB tables, which the org specs seed directly.
 
 After a run, an HTML report is generated at `playwright-report/`. To view it:
 
@@ -187,15 +189,22 @@ pnpm exec playwright show-report
 
 #### Subscription state reset
 
-[tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) re-seeds the `BillingTable` row for each role before logging that role in. This is necessary because trial periods can elapse and `past_due` subscriptions can advance to `canceled` between scheduled runs, so prior runs' state is not safe to reuse.
+[tests/e2e/destructive/auth.setup.ts](tests/e2e/destructive/auth.setup.ts) puts each role's account into that role's state before logging it in. Trial periods can elapse and `past_due` subscriptions can advance to `canceled` between scheduled runs, so a previous run's state is not safe to reuse.
 
-The seed values come from [tests/e2e/billing-reset.ts](tests/e2e/billing-reset.ts):
+The setup calls `setAccountState(userId, role)` ([tests/e2e/destructive/account-state.util.ts](tests/e2e/destructive/account-state.util.ts)), which invokes the stage's `AccountStateTestHelper` Lambda ([packages/backend/src/jobs/account-state-test-helper.ts](packages/backend/src/jobs/account-state-test-helper.ts)). The Lambda writes the subscription status and dates to the account's org billing row, then sets the tenant status in every region the org is provisioned in:
 
-- **paid** → `active`, `currentPeriodEnd` = now + 30d
-- **unpaid** → `past_due`, `lastPaymentFailedAt` = yesterday
-- **trial** → `trialing`, `trialEndsAt` = now + 14d
+| State                | Billing row                                                                     | Tenants        |
+| -------------------- | ------------------------------------------------------------------------------- | -------------- |
+| `paid`               | `active`, `currentPeriodEnd` = now + 30d                                        | `active`       |
+| `unpaid`             | `past_due`, `currentPeriodEnd` = now + 30d, `lastPaymentFailedAt` = yesterday   | `active`       |
+| `trial`              | `trialing`, `trialEndsAt` = now + 14d                                           | `active`       |
+| `disabled`           | `canceled`                                                                      | `disabled`     |
+| `paid_grace_period`  | `grace_period`, `canceledAt` = yesterday, `gracePeriodEndsAt` = yesterday + 30d | `write-locked` |
+| `trial_grace_period` | `grace_period`, `trialEndsAt` = yesterday, `gracePeriodEndsAt` = yesterday + 7d | `write-locked` |
 
-The reset writes directly to DynamoDB (mirrors the integration-test pattern in [tests/integration/helpers.ts](tests/integration/helpers.ts)). It does **not** sync with Stripe — the local DB is the source of truth for `subscriptionStatus`, and Stripe state is allowed to drift for these test users.
+No role rests in the two grace period states. They mirror the two ways production enters `grace_period`: a canceled subscription and a trial that ended without one. `disabled` disables the tenants before it writes `canceled`, in the order the grace-period enforcer uses. The Lambda returns the org id and each region's sync outcome. It does **not** sync with Stripe: the billing row is the source of truth for `subscriptionStatus`, and Stripe state is allowed to drift for these test users.
+
+The Lambda can disable any account's tenants, so it is deployed to every stage except production, and the handler refuses to run when `FILONE_STAGE` is `production`.
 
 #### How auth works
 
@@ -205,12 +214,30 @@ The `.auth/` directory is gitignored — the JSON files are regenerated on every
 
 #### Adding a new role
 
-1. Add an entry to [tests/e2e/roles.ts](tests/e2e/roles.ts) `STORAGE_STATE`.
-2. Add the role's desired subscription state to `DESIRED_STATE` in [tests/e2e/billing-reset.ts](tests/e2e/billing-reset.ts).
-3. Add the role to the `roles` array in [tests/e2e/auth.setup.ts](tests/e2e/auth.setup.ts) (with `email`, `password`, `userId`).
-4. Add `E2E_<ROLE>_EMAIL`, `E2E_<ROLE>_PASSWORD`, `E2E_<ROLE>_USER_ID` to `REQUIRED_CREDENTIAL_VARS` in [playwright.config.ts](playwright.config.ts).
+1. Add the role's state, named after the role, to `ACCOUNT_STATES` in [packages/backend/src/jobs/account-state-test-helper.ts](packages/backend/src/jobs/account-state-test-helper.ts), and deploy it to the stages the suite runs against.
+2. Add an entry to `STORAGE_STATE` in [tests/e2e/destructive/roles.util.ts](tests/e2e/destructive/roles.util.ts).
+3. Add the role to the `roles` array in [tests/e2e/destructive/auth.setup.ts](tests/e2e/destructive/auth.setup.ts) (with `email`, `password`, `userId`).
+4. Add `E2E_<ROLE>_EMAIL`, `E2E_<ROLE>_PASSWORD`, `E2E_<ROLE>_USER_ID` to `REQUIRED_CREDENTIAL_VARS` in the same file.
 5. Add the same three vars to the `env:` block in both [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml), and provision the corresponding GitHub secrets.
 6. If the role needs a seeded bucket per region, add it to `SEED_PLAN` in [tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts), with `needsActiveSubscription: true` when its desired subscription state blocks writes.
+
+#### Disabled test account
+
+[tests/e2e/destructive/tenant-disable.spec.ts](tests/e2e/destructive/tenant-disable.spec.ts) checks that disabling an account cuts off the presigned URLs it already handed out (FIL-413). It runs on the `disabled` account, which rests in the `disabled` state: a canceled subscription and disabled tenants. Before its tests the spec switches the account to `paid`. In every region it then uploads an object, presigns a GET for it and checks that the URL serves the object. It switches the account to `disabled` afterwards. Each region gets two tests:
+
+- The URL minted before the disable must answer 403 within 60 s.
+- A new `POST /api/presign` for a GET must answer 403 `SUBSCRIPTION_CANCELED`.
+
+The account needs a one-time setup on each stage the suite runs against (staging only; the suite does not run against production, and the Lambda is not deployed there):
+
+1. Deploy the stage with the `AccountStateTestHelper` Lambda.
+2. Sign up on the stage's console with email and password, using a dedicated address, and verify the email. Only a verified email gets a trial.
+3. Log in once and open the dashboard. The first `GET /api/billing` claims the trial, which writes the org's `ORG#{orgId}/SUBSCRIPTION` row in the BillingTable; the Lambda refuses an org without one.
+4. In the same browser session, open `/api/org/members` on the stage's console (e.g. https://staging.fil.one/api/org/members). A new account is alone in its org, so the only member's `userId` is the account's FilOne user id. `bin/e2e-register-policy-users.ts` reads it the same way.
+5. Add the GitHub secrets `E2E_DISABLED_EMAIL`, `E2E_DISABLED_PASSWORD` and `E2E_DISABLED_USER_ID`. Do this before the spec lands on `main`: `auth.setup.ts` fails the whole run when any of them is missing, and the staging workflows run after every deploy.
+6. For local runs, export the same three variables or put them in `.env.e2e.local`.
+
+The first run seeds a bucket in every region (`seed-buckets`) and leaves the account disabled. A new account has no tenant in any region until its first bucket there, and a region still setting one up answers bucket creation with 503 "We are still setting up the region for you". If the first `seed-buckets` run fails that way, run it again.
 
 #### Multi-org suite
 

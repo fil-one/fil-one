@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { S3Region } from '../constants.ts';
 import {
   ACCESS_KEY_PERMISSIONS,
+  BUCKET_CONFIG_PERMISSIONS,
   BUCKET_INFO_PERMISSIONS,
   BUCKET_PERMISSIONS,
   CreateAccessKeySchema,
   GRANULAR_PERMISSIONS,
+  isBucketConfigPermission,
   isBucketInfoPermission,
   isBucketPermission,
   isObjectPermission,
@@ -46,6 +48,26 @@ describe('BUCKET_INFO_PERMISSIONS', () => {
   it('are not part of the granular permission set', () => {
     for (const p of BUCKET_INFO_PERMISSIONS) {
       expect(GRANULAR_PERMISSIONS).not.toContain(p);
+    }
+  });
+});
+
+describe('BUCKET_CONFIG_PERMISSIONS', () => {
+  it('contains the bucket-configuration write actions', () => {
+    expect([...BUCKET_CONFIG_PERMISSIONS]).toEqual(['PutBucketCORS']);
+  });
+
+  it('are part of the access-key permission set', () => {
+    for (const p of BUCKET_CONFIG_PERMISSIONS) {
+      expect(ACCESS_KEY_PERMISSIONS).toContain(p);
+    }
+  });
+
+  it('are neither bucket-management nor bucket-info permissions', () => {
+    for (const p of BUCKET_CONFIG_PERMISSIONS) {
+      expect(isBucketPermission(p)).toBe(false);
+      expect(isBucketInfoPermission(p)).toBe(false);
+      expect(isBucketConfigPermission(p)).toBe(true);
     }
   });
 });
@@ -147,6 +169,28 @@ describe('CreateAccessKeySchema bucket permissions', () => {
       code: 'custom',
       path: ['permissions'],
       message: 'Bucket management permissions are not supported in the selected region',
+    });
+  });
+
+  it('accepts PutBucketCORS in a Forge region', () => {
+    const result = CreateAccessKeySchema.safeParse({
+      ...base,
+      permissions: ['read', 'PutBucketCORS'],
+      region: S3Region.EuCentral3,
+    });
+    expect(result).toMatchObject({ success: true });
+  });
+
+  it.each([S3Region.UsEast1, S3Region.EuWest1])('rejects PutBucketCORS in %s', (region) => {
+    const result = CreateAccessKeySchema.safeParse({
+      ...base,
+      permissions: ['read', 'PutBucketCORS'],
+      region,
+    });
+    expect(result).toMatchZodValidationError({
+      code: 'custom',
+      path: ['permissions'],
+      message: 'Bucket configuration permissions are not supported in the selected region',
     });
   });
 

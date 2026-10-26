@@ -15,10 +15,9 @@ import { Resource } from 'sst';
 //
 // The console can only reach these states through somebody else's session — an
 // invitation is redeemed by the person it names, and a second member exists only
-// because one was accepted — so the rows are written here instead, the way
-// billing-reset.util.ts re-seeds BillingTable. Every shape below mirrors the
-// writer it stands in for; the source of truth for each is named above it, and a
-// divergence is a bug in this file rather than a variation:
+// because one was accepted — so the rows are written here instead. Every shape
+// below mirrors the writer it stands in for; the source of truth for each is
+// named above it, and a divergence is a bug in this file rather than a variation:
 //
 // - packages/backend/src/lib/invitations.ts  — INVITE# and INVITETOKEN# rows
 // - packages/backend/src/lib/membership-changes.ts — MEMBER#/MEMBERSHIP# rows
@@ -488,7 +487,8 @@ async function restoreOwnerSeatBefore({
  *
  * The teardown every spec that seeds a second membership owes the suite: an E2E
  * user left in two organizations renders an org switcher the next run's specs do
- * not expect, and billing-reset would have a second membership to choose from.
+ * not expect, and the account-state helper's membership fallback would have a
+ * second org to choose from.
  * Unconditional, so it is also the repair for a spec whose own removal step
  * already ran.
  */

@@ -60,14 +60,14 @@ export function BucketDrawer({ bucket, onClose, onStopIndexing }: BucketDrawerPr
         data-testid="bucket-drawer-overlay"
         aria-hidden="true"
         onClick={handleClose}
-        className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 ${shown ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+        className={`fixed inset-0 z-30 bg-black/40 transition-opacity duration-200 ${shown ? 'opacity-100 ease-out' : 'pointer-events-none opacity-0 ease-in'}`}
       />
       <div
         data-testid="bucket-drawer-panel"
         role="dialog"
         aria-modal="true"
         aria-label={`RAG query playground for ${bucket.name}`}
-        className={`fixed inset-y-0 right-0 z-40 flex w-[460px] flex-col bg-white shadow-xl transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed inset-y-0 right-0 z-40 flex w-[460px] flex-col bg-white shadow-xl transition-transform duration-200 motion-reduce:duration-0 ${shown ? 'translate-x-0 ease-out' : 'translate-x-full ease-in'}`}
       >
         <DrawerHeader bucket={bucket} onClose={handleClose} />
         <StatsBar bucket={bucket} />
@@ -136,7 +136,7 @@ function DrawerHeader({ bucket, onClose }: DrawerHeaderProps) {
       className="flex flex-shrink-0 items-center justify-between border-b border-zinc-100 px-5 py-4"
     >
       <div className="flex items-center gap-3 text-xs">
-        <span data-testid="bucket-drawer-title" className="text-sm font-semibold text-zinc-900">
+        <span data-testid="bucket-drawer-title" className="text-sm font-medium text-zinc-900">
           {bucket.name}
         </span>
         {/* Same component as the bucket row, so the drawer cannot claim a
@@ -227,7 +227,7 @@ function AskSection({
 
   return (
     <div data-testid="bucket-drawer-ask" className="px-5 py-5">
-      <p className="mb-3 text-meta font-semibold uppercase tracking-widest text-zinc-500">
+      <p className="mb-3 text-meta font-medium uppercase tracking-widest text-zinc-500">
         Ask a question
       </p>
       <div className="flex gap-2">
@@ -277,7 +277,7 @@ function AskSection({
 function QueryFromCodeSection({ bucket }: { bucket: RagBucket }) {
   return (
     <div data-testid="bucket-drawer-code" className="border-t border-zinc-100 px-5 py-5">
-      <p className="mb-3 text-meta font-semibold uppercase tracking-widest text-zinc-500">
+      <p className="mb-3 text-meta font-medium uppercase tracking-widest text-zinc-500">
         Query from code
       </p>
       <CodeBlock

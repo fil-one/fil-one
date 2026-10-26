@@ -5,7 +5,7 @@ import { Route } from './invite.accept.js';
 import {
   hasPendingInviteToken,
   resetTakenInviteToken,
-  takeInviteToken,
+  getCachedInviteToken,
 } from '../lib/invite-token.js';
 
 const TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -13,6 +13,17 @@ const TOKEN = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 /** `beforeLoad` is called by the router with a context bag this route ignores. */
 function runBeforeLoad() {
   return (Route.options.beforeLoad as () => void)();
+}
+
+/** Where `beforeLoad` redirected to; fails the test when it did not redirect. */
+function redirectHref(): string | undefined {
+  try {
+    runBeforeLoad();
+  } catch (thrown) {
+    expect(isRedirect(thrown)).toBe(true);
+    return (thrown as Response & { options: { href?: string } }).options.href;
+  }
+  return expect.unreachable('beforeLoad should have redirected');
 }
 
 function setCookie(value: string) {
@@ -35,7 +46,7 @@ describe('the accept route’s beforeLoad', () => {
     runBeforeLoad();
 
     expect(window.location.hash).toBe('');
-    expect(takeInviteToken()).toBe(TOKEN);
+    expect(getCachedInviteToken()).toBe(TOKEN);
   });
 
   it('strips the fragment before anything could have called the API', () => {
@@ -61,16 +72,28 @@ describe('the accept route’s beforeLoad', () => {
     expect(window.location.hash).toBe('');
   });
 
-  it('sends a signed-out caller to login', () => {
+  it.each([
+    { link: `#token=${TOKEN}`, href: '/login' },
+    { link: `#token=${TOKEN}&signup=1`, href: '/login?screen_hint=signup' },
+  ])('sends a signed-out caller from $link to $href', ({ link, href }) => {
+    window.history.replaceState(null, '', `/invite/accept${link}`);
     setCookie('');
 
-    try {
-      runBeforeLoad();
-      expect.unreachable('beforeLoad should have redirected');
-    } catch (thrown) {
-      expect(isRedirect(thrown)).toBe(true);
-      expect((thrown as Response & { options: { href?: string } }).options.href).toBe('/login');
-    }
+    expect(redirectHref()).toBe(href);
+  });
+
+  it('sends a signed-out caller to sign-up on the second run too, when the fragment is gone', () => {
+    window.history.replaceState(null, '', `/invite/accept#token=${TOKEN}&signup=1`);
+    setCookie('');
+    redirectHref();
+
+    expect(redirectHref()).toBe('/login?screen_hint=signup');
+  });
+
+  it('lets a signed-in caller through whatever the link hints', () => {
+    window.history.replaceState(null, '', `/invite/accept#token=${TOKEN}&signup=1`);
+
+    expect(() => runBeforeLoad()).not.toThrow();
   });
 
   it('leaves storage clear once the token has been taken', () => {
@@ -86,6 +109,6 @@ describe('the accept route’s beforeLoad', () => {
 
     runBeforeLoad();
 
-    expect(takeInviteToken()).toBeNull();
+    expect(getCachedInviteToken()).toBeNull();
   });
 });

@@ -136,8 +136,8 @@ describe('activate-subscription baseHandler', () => {
     });
     mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
     mockIsOrgDeleting.mockResolvedValue(false);
-    // The billing read asks both keys at once. Absent unless a test says
-    // otherwise, so a row only exists where the test put one.
+    // The billing row is absent unless a test says otherwise, so a row only
+    // exists where the test put one.
     ddbMock.on(GetItemCommand).resolves({});
   });
 
@@ -229,9 +229,8 @@ describe('activate-subscription baseHandler', () => {
   });
 
   it('refuses to activate when the org has no billing row of its own', async () => {
-    // A `CUSTOMER#` row the cleanup step has not deleted yet cannot stand in
-    // for the org's: activating off it would charge a Stripe customer the org
-    // does not own.
+    // A `CUSTOMER#` row the cleanup step missed cannot stand in for the org's:
+    // activating off it would charge a Stripe customer the org does not own.
     ddbMock
       .on(GetItemCommand, { Key: ORG_KEY })
       .resolves({})
