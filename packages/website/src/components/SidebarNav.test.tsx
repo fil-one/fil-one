@@ -136,6 +136,8 @@ const UNIQUE_TESTIDS = [
   'nav-audit',
   'org-switcher-button',
   'user-menu-button',
+  'sidebar-docs-link',
+  'sidebar-support-link',
 ];
 
 describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => {
@@ -172,6 +174,38 @@ describe('SidebarNav footer', () => {
     expect(within(desktop).queryByRole('button', { name: 'Report a bug' })).not.toBeInTheDocument();
     expect(within(drawer).getByTestId('status-indicator')).toBeInTheDocument();
     expect(within(drawer).getByRole('button', { name: 'Report a bug' })).toBeInTheDocument();
+  });
+
+  // Both copies carry them: the drawer has no user menu, so it is the only
+  // place a phone reaches them.
+  it.each([0, 1])('links to Documentation and Support from sidebar copy %i', (index) => {
+    const { container } = renderBothSidebars();
+    const copy = container.querySelectorAll('nav')[index];
+
+    expect(within(copy).getByRole('link', { name: 'Support' })).toHaveAttribute('href', '/support');
+    expect(within(copy).getByRole('link', { name: 'Documentation' })).toBeInTheDocument();
+  });
+
+  it('closes the drawer when Support is followed', () => {
+    const onClose = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner, ORG_ME);
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <SidebarNav
+            collapsed={false}
+            onClose={onClose}
+            showUserProfile={false}
+            showTestIds={false}
+          />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'Support' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('opens the bug-report dialog from the drawer', async () => {

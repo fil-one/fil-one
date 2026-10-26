@@ -76,10 +76,12 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
                 collapsed ? 'w-full justify-center py-1.5' : 'w-full gap-2 px-2 py-1.5',
               ].join(' ')}
             >
-              <OrgAvatar name={orgName} logoUrl={logoUrl} />
+              {/* 24px, a step under the avatar's default, to sit with the 13px
+                  name, the way `UserMenu` sizes its avatar at the call site. */}
+              <OrgAvatar name={orgName} logoUrl={logoUrl} className="h-6 w-6" />
               {!collapsed && (
                 <>
-                  <span className="min-w-0 flex-1 truncate text-left text-sm font-medium leading-tight text-zinc-900">
+                  <span className="min-w-0 flex-1 truncate text-left text-ui font-medium leading-tight text-zinc-900">
                     {orgName}
                   </span>
                   <CaretDownIcon size={14} className="flex-shrink-0 text-zinc-400" />

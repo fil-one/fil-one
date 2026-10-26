@@ -1,4 +1,7 @@
 import {
+  ArrowUpRightIcon,
+  BookOpenIcon,
+  ChatCircleIcon,
   ClockCounterClockwiseIcon,
   CreditCardIcon,
   DatabaseIcon,
@@ -8,10 +11,12 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
+import { DOCS_URL } from '@filone/shared';
 import type { Permission } from '@filone/shared';
 import { usePermissions } from '../lib/use-permissions.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
+import { BaseLink } from './BaseLink.js';
 import { OrgSwitcherMenu } from './OrgSwitcherMenu.js';
 import { ReportBugButton } from './ReportBugButton.js';
 import { StatusBanners } from './SidebarStatusBanners.js';
@@ -160,6 +165,74 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
   );
 }
 
+const helpLinks = [
+  {
+    href: DOCS_URL,
+    icon: BookOpenIcon,
+    label: 'Documentation',
+    testId: 'sidebar-docs-link',
+    external: true,
+  },
+  {
+    href: '/support',
+    icon: ChatCircleIcon,
+    label: 'Support',
+    testId: 'sidebar-support-link',
+    external: false,
+  },
+];
+
+type HelpLinksProps = Omit<NavLinksProps, 'matchRoute'>;
+
+/**
+ * Documentation and Support, in the footer of both the sidebar and the mobile
+ * drawer, so they are in view without opening a menu. A step quieter than the
+ * page links (smaller grey text, no active state): they are places to get
+ * help, not pages of the org.
+ */
+function HelpLinks({ collapsed, onClose, showTestIds }: HelpLinksProps) {
+  return (
+    <>
+      {helpLinks.map(({ href, icon: Icon, label, testId, external }) => {
+        const link = (
+          <BaseLink
+            href={href}
+            data-testid={showTestIds ? testId : undefined}
+            aria-label={label}
+            onClick={onClose}
+            className={[
+              'flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 focus-visible:brand-outline',
+              collapsed ? 'justify-center' : '',
+            ].join(' ')}
+          >
+            <Icon size={16} className="flex-shrink-0 text-zinc-400" aria-hidden="true" />
+            {!collapsed && (
+              <>
+                <span className="flex-1">{label}</span>
+                {external && (
+                  <ArrowUpRightIcon
+                    size={12}
+                    className="flex-shrink-0 text-zinc-400"
+                    aria-hidden="true"
+                  />
+                )}
+              </>
+            )}
+          </BaseLink>
+        );
+        if (collapsed) {
+          return (
+            <Tooltip key={href} content={label} side="right">
+              {link}
+            </Tooltip>
+          );
+        }
+        return <div key={href}>{link}</div>;
+      })}
+    </>
+  );
+}
+
 export function SidebarNav({
   collapsed,
   onClose,
@@ -240,11 +313,14 @@ export function SidebarNav({
           />
         )}
 
-        {/* Footer: user identity (also carries Documentation/Support now). Bug
-            report and system status have moved to the content window's bottom
-            bar on desktop; they stay here only in the mobile drawer, which has
-            no such bar. */}
+        {/* Footer: Documentation and Support, then user identity. Bug report
+            and system status sit in the content window's bottom bar on
+            desktop; they appear here only in the mobile drawer, which has no
+            such bar. */}
         <div className="p-2 flex flex-col gap-0.5">
+          <HelpLinks collapsed={collapsed} onClose={onClose} showTestIds={showTestIds} />
+          {/* Sets the help links apart from the account and app controls below. */}
+          <div className="my-1 border-t border-zinc-100" aria-hidden="true" />
           {showUserProfile && (
             <UserMenu
               src={me?.picture}
