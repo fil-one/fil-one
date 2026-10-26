@@ -1,10 +1,4 @@
-import {
-  SquaresFourIcon,
-  DatabaseIcon,
-  KeyIcon,
-  ChatTeardropDotsIcon,
-  RobotIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { SquaresFourIcon, DatabaseIcon, KeyIcon } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
 import type { Permission } from '@filone/shared';
@@ -37,48 +31,19 @@ type NavItem = {
   permission?: Permission;
 };
 
-type NavGroup = {
-  label?: string;
-  items: NavItem[];
-};
-
-const navGroups: NavGroup[] = [
+// One unlabelled list: with two storage pages, a "Storage" heading only added
+// noise. The org's own pages live in the org switcher menu.
+const navItems: NavItem[] = [
+  { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard', testId: 'nav-dashboard' },
+  { path: '/buckets', icon: DatabaseIcon, label: 'Buckets', testId: 'nav-buckets' },
   {
-    items: [
-      { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard', testId: 'nav-dashboard' },
-    ],
-  },
-  {
-    label: 'Storage',
-    items: [
-      { path: '/buckets', icon: DatabaseIcon, label: 'Buckets', testId: 'nav-buckets' },
-      {
-        path: '/api-keys',
-        icon: KeyIcon,
-        label: 'API Keys',
-        testId: 'nav-api-keys',
-        // ReadOnly holds no `keys.*`, so the list request is refused and the
-        // page has nothing but the connection reference to offer.
-        permission: 'keys.manage_own',
-      },
-    ],
-  },
-  {
-    label: 'AI Tools',
-    items: [
-      {
-        path: '/bucket-intelligence',
-        icon: ChatTeardropDotsIcon,
-        label: 'Bucket Intelligence',
-        testId: 'nav-bucket-intelligence',
-      },
-      {
-        path: '/ai-agent-toolkit',
-        icon: RobotIcon,
-        label: 'AI Agent Toolkit',
-        testId: 'nav-ai-agent-toolkit',
-      },
-    ],
+    path: '/api-keys',
+    icon: KeyIcon,
+    label: 'API Keys',
+    testId: 'nav-api-keys',
+    // ReadOnly holds no `keys.*`, so the list request is refused and the
+    // page has nothing but the connection reference to offer.
+    permission: 'keys.manage_own',
   },
 ];
 
@@ -94,53 +59,39 @@ type NavLinksProps = {
 function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
   const { has } = usePermissions();
   return (
-    <div className="flex flex-col p-2">
-      {navGroups.map((group, gi) => (
-        <div key={gi} className={gi > 0 ? 'mt-2' : ''}>
-          {!collapsed && group.label && (
-            <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wide text-zinc-400">
-              {group.label}
-            </p>
-          )}
-          <div className="flex flex-col gap-0.5">
-            {group.items
-              .filter((item) => !item.permission || has(item.permission))
-              .map(({ path, icon: Icon, label, testId }) => {
-                const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
-                const link = (
-                  <Link
-                    key={path}
-                    to={path}
-                    data-testid={showTestIds ? testId : undefined}
-                    aria-label={label}
-                    onClick={onClose}
-                    className={[
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-                      collapsed ? 'justify-center' : '',
-                      isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                  >
-                    <Icon
-                      size={18}
-                      className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`}
-                    />
-                    {!collapsed && <span className="flex-1">{label}</span>}
-                  </Link>
-                );
-                if (collapsed) {
-                  return (
-                    <Tooltip key={path} content={label} side="right">
-                      {link}
-                    </Tooltip>
-                  );
-                }
-                return <div key={path}>{link}</div>;
-              })}
-          </div>
-        </div>
-      ))}
+    <div className="flex flex-col gap-0.5 p-2">
+      {navItems
+        .filter((item) => !item.permission || has(item.permission))
+        .map(({ path, icon: Icon, label, testId }) => {
+          const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
+          const link = (
+            <Link
+              key={path}
+              to={path}
+              data-testid={showTestIds ? testId : undefined}
+              aria-label={label}
+              onClick={onClose}
+              className={[
+                'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                collapsed ? 'justify-center' : '',
+                isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              <Icon size={18} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
+              {!collapsed && <span className="flex-1">{label}</span>}
+            </Link>
+          );
+          if (collapsed) {
+            return (
+              <Tooltip key={path} content={label} side="right">
+                {link}
+              </Tooltip>
+            );
+          }
+          return <div key={path}>{link}</div>;
+        })}
     </div>
   );
 }

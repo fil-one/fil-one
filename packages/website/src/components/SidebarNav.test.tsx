@@ -194,6 +194,19 @@ describe('SidebarNav — the org switcher', () => {
   });
 });
 
+describe('SidebarNav, the page links', () => {
+  it('links an Owner to the workspace pages only, leaving the org pages to the org menu', () => {
+    const { container } = renderBothSidebars(OrgRole.Owner);
+
+    const links = [...container.querySelectorAll('[data-testid^="nav-"]')];
+    expect(links.map((link) => link.getAttribute('data-testid'))).toStrictEqual([
+      'nav-dashboard',
+      'nav-buckets',
+      'nav-api-keys',
+    ]);
+  });
+});
+
 describe('SidebarNav — the API Keys entry', () => {
   it.each([OrgRole.Owner, OrgRole.Admin, OrgRole.Member])(
     'renders for %s, who holds keys.manage_own',
