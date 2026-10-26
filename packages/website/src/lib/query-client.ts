@@ -146,16 +146,6 @@ export const queryKeys = {
   auditEvents: (params: string) => ['audit', 'events', params] as const,
   instatusSummary: ['instatus-summary'] as const,
   preferences: ['preferences'] as const,
-  // RAG Pipeline (FIL-555). Distinct from `buckets` so the RAG surface can be
-  // refetched/invalidated independently of the storage buckets list.
-  ragBuckets: ['rag-buckets'] as const,
-  // ['rag-bucket-enabled'] is the prefix — invalidateQueries on this key also
-  // invalidates all per-bucket enablement queries (prefix match).
-  ragBucketEnabled: ['rag-bucket-enabled'] as const,
-  ragBucketEnabledFor: (bucketName: string, region: S3Region) =>
-    ['rag-bucket-enabled', bucketName, region] as const,
-  // RAG API keys (query-endpoint bearer tokens) — distinct from `accessKeys`.
-  ragApiKeys: ['rag-api-keys'] as const,
   // Never fetched — only ever `setQueryData`'d by `switchToOrg` and read by
   // `usePendingOrgSwitchTarget`. Deliberately its own key rather than a field
   // folded into `['me']`: it carries only what the sidebar needs to paint the
