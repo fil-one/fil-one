@@ -41,6 +41,12 @@ describe('resolveAuth0Domain', () => {
     );
   });
 
+  it('uses the custom domain for the app.filone.com host', () => {
+    expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': 'app.filone.com' }))).toBe(
+      'auth.fil.one',
+    );
+  });
+
   it('normalises host casing and whitespace', () => {
     expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': '  APP.FILONE.AI ' }))).toBe(
       'fil-one.us.auth0.com',

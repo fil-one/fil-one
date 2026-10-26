@@ -82,9 +82,13 @@ The custom domain (`auth.fil.one`) is the WebAuthn relying-party identifier bake
 
 Note this concerns _replacing_ the custom domain. Adding a second login domain leaves `auth.fil.one` untouched, because each domain carries its own relying-party identifier and therefore its own passkey enrollments.
 
-**4a. Demo-alias login domain (FIL-897):**
+**4a. Console alias login domains (FIL-897, FIL-1376):**
 
-The console is also served from unlisted demo-alias hostnames (`PROD_CONSOLE_ALIAS_HOSTS` in `packages/shared/src/constants.ts`, currently `app.filone.ai`) for use when `fil.one` is blocklisted. Those hostnames **cannot** use `auth.fil.one`: it sits on the same flagged TLD the alias exists to escape, and a second Auth0 custom domain requires an Enterprise plan. They authenticate against the tenant's own domain (`fil-one.us.auth0.com`) instead, which remains available alongside a custom domain.
+The console is also served from alias hostnames (`PROD_CONSOLE_ALIAS_HOSTS` in `packages/shared/src/constants.ts`): `app.filone.ai`, an unlisted demo alias for use when `fil.one` is blocklisted, and `app.filone.com`, the domain the console is moving to.
+
+The demo alias **cannot** use `auth.fil.one`: it sits on the same flagged TLD the alias exists to escape, and a second Auth0 custom domain requires an Enterprise plan. It authenticates against the tenant's own domain (`fil-one.us.auth0.com`) instead, which remains available alongside a custom domain. The consequences below apply to it.
+
+`app.filone.com` authenticates against `auth.fil.one`, like `app.fil.one`, so existing passkeys keep working there and login stays branded. Login itself moves to `auth.filone.com` later (FIL-1542).
 
 Worth knowing while you are in this file: `filone.ai` is also the domain this tenant sends from (`no-reply@filone.ai`, set as `default_from_address` by the same setup Lambda). Serving a login page under it couples the alias's web reputation to the deliverability of every verification, password-reset and MFA email. That was an accepted trade in FIL-897, taken because the zone already existed and needed no registration or delegation — but if the alias is ever reported for phishing, check mail deliverability, not just the console.
 
@@ -100,10 +104,10 @@ Consequences to expect, none of them a regression:
 No dashboard work is needed to add an alias, since the tenant domain already exists. Adding a _new_ alias hostname means all of the following — each omission leaves a silently half-working alias:
 
 1. `PROD_CONSOLE_ALIAS_HOSTS` in `packages/shared/src/constants.ts`. The first entry is the ACM cert's primary domain, which is how `sst.config.ts` finds the cert.
-2. `AUTH0_DOMAIN_BY_CONSOLE_ORIGIN` in the same file, or its login goes through `auth.fil.one` on the flagged TLD.
+2. `AUTH0_DOMAIN_BY_CONSOLE_ORIGIN` in the same file. A missing entry silently falls back to `auth.fil.one`, so decide which domain the alias signs in through.
 3. `MARKETING_URL_BY_CONSOLE_ORIGIN` in the same file, or signing out returns the user to `fil.one` — the domain the alias exists to route around. The completeness tests in `packages/shared/src/constants.test.ts` fail if you miss either table.
 4. `CONSOLE_ORIGIN_BY_SITE_HOST` in `fil-one/website` `src/lib/console-url.ts`, or the marketing CTAs on the alias point at the canonical console. Separate repo, so nothing enforces this.
-5. The CloudFront certificate and DNS in `fil-one/infrastructure` `environments/prod/filone-ai.tf`.
+5. The CloudFront certificate and DNS in `fil-one/infrastructure` `environments/prod/filone-com.tf`. The certificate must cover every console hostname, and its primary domain must stay `PROD_CONSOLE_ALIAS_HOSTS[0]`.
 6. The `Version` property on `SetupStack` in `sst.config.ts` — the custom resource only re-runs on a property change, so without a bump the new callback URL is never registered.
 
 **5. Verification after first deploy:**
