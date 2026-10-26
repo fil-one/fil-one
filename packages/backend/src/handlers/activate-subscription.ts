@@ -12,6 +12,7 @@ import type { ActivateSubscriptionResponse } from '@filone/shared';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.ts';
 import { getSubscription } from '../lib/subscription-store.ts';
 import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
+import { createOrUpdateSubscription } from '../lib/reactivate-subscription.ts';
 import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.ts';
@@ -103,15 +104,17 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   }
 
   // 5. Create or update subscription
-  const subscription = await createOrUpdateSubscription({
+  const activation = await createOrUpdateSubscription({
     stripe,
     record,
     paymentMethodId,
-    secrets,
+    priceId: secrets.STRIPE_PRICE_ID,
     userId,
     orgId,
     promotionCodeId,
   });
+  if (!activation.ok) return activation.refusal;
+  const subscription = activation.value;
 
   // Guard: reject if subscription is not in a usable state after activation.
   // e.g. Stripe returns 'incomplete' when 3DS challenge is required but not completed.
@@ -146,72 +149,6 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   };
 
   return new ResponseBuilder().status(200).body(response).build();
-}
-
-interface CreateOrUpdateSubscriptionParams {
-  stripe: ReturnType<typeof getStripeClient>;
-  record: SubscriptionRecord;
-  paymentMethodId: string;
-  secrets: ReturnType<typeof getBillingSecrets>;
-  userId: string;
-  orgId: string;
-  promotionCodeId?: string;
-}
-
-async function createOrUpdateSubscription({
-  stripe,
-  record,
-  paymentMethodId,
-  secrets,
-  userId,
-  orgId,
-  promotionCodeId,
-}: CreateOrUpdateSubscriptionParams) {
-  // Canceled subscriptions are terminal in Stripe and cannot be updated; reactivation
-  // must create a fresh subscription even though the stale subscriptionId still sits in DDB.
-  const isCanceled =
-    record.subscriptionStatus === SubscriptionStatus.GracePeriod ||
-    record.subscriptionStatus === SubscriptionStatus.Canceled;
-
-  const discounts = promotionCodeId ? [{ promotion_code: promotionCodeId }] : undefined;
-
-  if (record.subscriptionId && !isCanceled) {
-    const { subscriptionId } = record;
-    // Step 1: Attach payment method
-    await stripe.subscriptions.update(subscriptionId, {
-      default_payment_method: paymentMethodId,
-    });
-    // Step 2: Persist the discount on its own update so it's in place before the
-    // trial-end update generates the first paid invoice. Bundling discounts and
-    // trial_end into the same call leaves invoice ordering ambiguous.
-    if (promotionCodeId) {
-      await stripe.subscriptions.update(subscriptionId, {
-        discounts: [{ promotion_code: promotionCodeId }],
-      });
-    }
-    // Step 3: End trial — invoice is generated from the now-discounted subscription.
-    return stripe.subscriptions.update(subscriptionId, {
-      trial_end: 'now',
-      expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-    });
-  }
-  if (!record.subscriptionId) {
-    console.warn('[activate-subscription] No existing subscription found for user, creating new', {
-      userId,
-    });
-  }
-  // The metadata is what every webhook writer resolves the org from. A
-  // subscription created without it arrives at the webhook naming no org, and
-  // that subscription's whole lifecycle — status changes, payment failures,
-  // cancellation — cannot be written at all.
-  return stripe.subscriptions.create({
-    customer: record.stripeCustomerId!,
-    items: [{ price: secrets.STRIPE_PRICE_ID }],
-    default_payment_method: paymentMethodId,
-    metadata: { userId, orgId },
-    ...(discounts ? { discounts } : {}),
-    expand: ['latest_invoice.payment_intent', 'default_payment_method'],
-  });
 }
 
 function resolveSavedPaymentMethod(record: SubscriptionRecord): PaymentMethodResolution {
