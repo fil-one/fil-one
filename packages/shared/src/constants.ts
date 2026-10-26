@@ -245,9 +245,9 @@ export function logoutReturnTo(origin: string): string {
  * stage and non-production deployments keep their configured domain.
  *
  * The demo alias has no custom auth domain of its own, because a second Auth0 custom
- * domain requires an Enterprise plan, so it uses the tenant's own domain. Consequences — passkeys and sessions do not carry between the two,
- * because the WebAuthn relying-party ID is the Auth0 hostname — are in
- * docs/Auth0OneTimeSetup.md §4a.
+ * domain requires an Enterprise plan, so it uses the tenant's own domain. Consequences
+ * — passkeys and sessions do not carry between the two, because the WebAuthn
+ * relying-party ID is the Auth0 hostname — are in docs/Auth0OneTimeSetup.md §4a.
  *
  * app.filone.com is the future canonical host, so it signs in through `auth.fil.one`,
  * where existing passkeys keep working, until login itself moves to filone.com.
