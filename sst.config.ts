@@ -534,6 +534,8 @@ export default $config({
           contentSecurityPolicy: {
             // img-src: our own uploads, plus the social providers' picture hosts
             // (`pictureHost` in connection-providers.ts), the only pictures /me shows.
+            // connect-src: both status hosts, so the status badge keeps working when the
+            // Instatus page moves from status.fil.one to status.filone.com (FIL-1379).
             contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com ${orgLogoOrigin}; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://status.fil.one https://status.filone.com ${s3GatewayUrls} ${orgLogoOrigin}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
