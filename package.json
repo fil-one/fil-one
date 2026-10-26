@@ -39,7 +39,7 @@
     "@aws-sdk/client-lambda": "^3.1156.0",
     "@aws-sdk/client-s3": "^3.1156.0",
     "@filone/oxlint-rules": "workspace:*",
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.64.1",
     "@pulumi/aws": "^7.23.0",
     "@pulumi/command": "^1.2.1",
     "@types/node": "^24.12.0",
