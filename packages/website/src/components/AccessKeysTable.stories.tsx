@@ -200,7 +200,7 @@ export const EmptyOwnKeysOnly: Story = {
     keys: [],
     onCreateOpen: () => {},
     emptyDescription:
-      'You can only see the keys you create. Admins see every key in the organization.',
+      'You can only see the keys you create. Owners and Admins see every key in the organization.',
   },
 };
 

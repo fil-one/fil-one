@@ -143,7 +143,7 @@ function AccessKeysTab({
           // Member reads an empty list as the org's keys having gone missing.
           {...(listsOwnKeysOnly && {
             emptyDescription:
-              'You can only see the keys you create. Admins see every key in the organization.',
+              'You can only see the keys you create. Owners and Admins see every key in the organization.',
           })}
         />
       )}

@@ -171,7 +171,7 @@ describe('ApiKeysPage: an empty key list', () => {
 
     expect(
       await screen.findByText(
-        'You can only see the keys you create. Admins see every key in the organization.',
+        'You can only see the keys you create. Owners and Admins see every key in the organization.',
       ),
     ).toBeInTheDocument();
   });
