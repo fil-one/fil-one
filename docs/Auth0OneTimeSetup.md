@@ -86,7 +86,7 @@ Note this concerns _replacing_ the custom domain. Adding a second login domain l
 
 The console is also served from alias hostnames (`PROD_CONSOLE_ALIAS_HOSTS` in `packages/shared/src/constants.ts`): `app.filone.ai`, an unlisted demo alias for use when `fil.one` is blocklisted, and `app.filone.com`, the domain the console is moving to.
 
-The demo alias could sign in through `auth.fil.one`, but we chose not to: it sits on the same flagged TLD the alias exists to escape. A custom domain on the alias's own TLD would need a second Auth0 custom domain, which requires an Enterprise plan we do not have. The demo alias therefore authenticates against the tenant's own domain (`fil-one.us.auth0.com`), which remains available alongside a custom domain. The consequences below apply to it.
+The demo alias has no custom auth domain of its own, because a second Auth0 custom domain requires an Enterprise plan, so it authenticates against the tenant's own domain (`fil-one.us.auth0.com`). The consequences below apply to it.
 
 `app.filone.com` authenticates against `auth.fil.one`, like `app.fil.one`, so existing passkeys keep working there and login stays branded. Login itself moves to `auth.filone.com` later (FIL-1542).
 
