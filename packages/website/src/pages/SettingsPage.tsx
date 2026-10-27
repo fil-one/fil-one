@@ -14,7 +14,7 @@ import { OrganizationsSection } from './OrganizationsSection.js';
 import { ProfileAvatarPicker } from '../components/ProfileAvatarPicker.js';
 import { SectionCard } from '../components/SectionCard.js';
 import { SettingRow } from '../components/SettingRow';
-import { Spinner } from '../components/Spinner';
+import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import {
   changePassword,
@@ -470,27 +470,48 @@ export function SettingsPage() {
     staleTime: ME_STALE_TIME,
   });
 
-  if (isPending || !me) {
-    return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading settings" />
-      </div>
-    );
-  }
-
   return (
     <PageLayout
       title="Settings"
       headingId="settings-heading"
       description="Manage your profile and preferences"
     >
-      <div className="flex max-w-2xl flex-col gap-6">
-        <ProfileSection me={me} />
-        <OrganizationsSection me={me} />
-        <NotificationsSection />
-        <SecuritySection me={me} />
-        <DangerZoneSection />
-      </div>
+      {isPending || !me ? (
+        <SettingsSkeleton />
+      ) : (
+        <div className="flex max-w-2xl flex-col gap-6">
+          <ProfileSection me={me} />
+          <OrganizationsSection me={me} />
+          <NotificationsSection />
+          <SecuritySection me={me} />
+          <DangerZoneSection />
+        </div>
+      )}
     </PageLayout>
+  );
+}
+
+const SKELETON_SECTIONS = [
+  { section: 'profile', height: 'h-64' },
+  { section: 'organizations', height: 'h-24' },
+  { section: 'notifications', height: 'h-16' },
+  { section: 'security', height: 'h-28' },
+  { section: 'danger-zone', height: 'h-16' },
+];
+
+/**
+ * One heading and card per section, in the order the real ones render, inside
+ * the page shell so the header does not blank while `/me` loads.
+ */
+function SettingsSkeleton() {
+  return (
+    <div role="status" aria-label="Loading settings" className="flex max-w-2xl flex-col gap-6">
+      {SKELETON_SECTIONS.map(({ section, height }) => (
+        <div key={section} className="flex flex-col gap-2">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className={`rounded-xl ${height}`} />
+        </div>
+      ))}
+    </div>
   );
 }
