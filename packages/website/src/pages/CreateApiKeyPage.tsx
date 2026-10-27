@@ -7,9 +7,10 @@ import { S3_REGION, type S3Region } from '@filone/shared';
 import { Heading } from '../components/Heading/Heading';
 import { AccessKeyFormFields } from '../components/AccessKeyFormFields.js';
 import { Button } from '../components/Button.js';
+import { Card } from '../components/Card.js';
 import { IconButton } from '../components/IconButton.js';
+import { InfoAside } from '../components/InfoAside.js';
 import { SaveCredentialsModal } from '../components/SaveCredentialsModal.js';
-import { SlowOperationIndicator } from '../components/SlowOperationIndicator.js';
 import { useAccessKeyForm } from '../lib/use-access-key-form.js';
 
 // ---------------------------------------------------------------------------
@@ -58,67 +59,53 @@ export function CreateApiKeyPage() {
           </div>
         </div>
 
-        {/* Two-column layout */}
-        <div className="flex gap-8">
+        {/* Two columns once both fit beside the app sidebar; stacked below that */}
+        <div className="flex flex-col gap-6 xl:flex-row xl:gap-10">
           {/* Left: form */}
-          <form onSubmit={form.handleSubmit} className="flex flex-1 flex-col gap-6">
-            <div className="rounded-lg border border-zinc-200 bg-white p-6">
+          <Card className="w-full max-w-[520px] shrink-0">
+            <form onSubmit={form.handleSubmit} className="flex flex-col gap-5">
               <AccessKeyFormFields form={form} region={region} onRegionChange={setRegion} />
-            </div>
 
-            <Button
-              id="create-api-key-submit-button"
-              type="submit"
-              variant="primary"
-              disabled={!form.canSubmit}
-            >
-              {form.creating ? 'Creating...' : 'Create API key'}
-            </Button>
-            <SlowOperationIndicator isLoading={form.creating} operation="Creating access key" />
-          </form>
+              <Button
+                id="create-api-key-submit-button"
+                type="submit"
+                variant="primary"
+                size="lg"
+                disabled={!form.canSubmit}
+                loading={form.creating}
+                loadingLabel="Creating API key"
+              >
+                Create API key
+              </Button>
+            </form>
+          </Card>
 
-          {/* Right: info panel */}
-          <div className="w-64 shrink-0">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wider text-zinc-500">
-              Good to know
-            </p>
-            <p className="mb-4 text-sm font-medium text-zinc-700">
-              Keep these in mind when creating keys.
-            </p>
-            <div className="flex flex-col gap-4 text-sm text-zinc-600">
-              <div>
-                <p className="mb-1 font-medium text-zinc-800">Keep your secret safe</p>
-                <p>
-                  Your secret access key grants full access to your data. Never share it with
-                  anyone, including support. Store it in a secure location like a password manager
-                  or secrets vault.
-                </p>
-              </div>
-              {form.keyType === 'principal' ? (
-                <div>
-                  <p className="mb-1 font-medium text-zinc-800">Follows the bucket policies</p>
-                  <p>
-                    This key can do whatever each bucket's policy lets you do, and changes to a
-                    policy reach it without reissuing it.
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="mb-1 font-medium text-zinc-800">Scope by bucket</p>
-                  <p>
-                    Restrict keys to specific buckets to follow the principle of least privilege.
-                  </p>
-                </div>
-              )}
-              <div>
-                <p className="mb-1 font-medium text-zinc-800">Set an expiry</p>
-                <p>
-                  Keys can be set to expire automatically. Use short-lived keys for temporary
-                  access.
-                </p>
-              </div>
-            </div>
-          </div>
+          <InfoAside
+            title="Good to know"
+            items={[
+              {
+                title: 'Keep your secret safe',
+                description:
+                  'Your secret access key grants full access to your data. Never share it with anyone, including support. Store it in a secure location like a password manager or secrets vault.',
+              },
+              form.keyType === 'principal'
+                ? {
+                    title: 'Follows the bucket policies',
+                    description:
+                      "This key can do whatever each bucket's policy lets you do, and changes to a policy reach it without reissuing it.",
+                  }
+                : {
+                    title: 'Scope by bucket',
+                    description:
+                      'Restrict keys to specific buckets to follow the principle of least privilege.',
+                  },
+              {
+                title: 'Set an expiry',
+                description:
+                  'Keys can be set to expire automatically. Use short-lived keys for temporary access.',
+              },
+            ]}
+          />
         </div>
       </div>
 
