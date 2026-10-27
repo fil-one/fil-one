@@ -2,10 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { PlanId, SubscriptionStatus, TB_BYTES } from '@filone/shared';
 import type { Subscription } from '@filone/shared';
 
+import { formatDate } from './time.js';
+
 import {
   billingPeriodRange,
   costDisclosure,
   daysLeftLabel,
+  discountLabel,
+  estimateDiscountNote,
   storageCostCents,
   paymentPosture,
   planTitle,
@@ -209,6 +213,7 @@ describe('costDisclosure', () => {
       kind: 'estimate',
       cents: 1497,
       minimumApplied: false,
+      discounted: false,
     });
   });
 
@@ -217,6 +222,46 @@ describe('costDisclosure', () => {
       kind: 'estimate',
       cents: 499,
       minimumApplied: true,
+      discounted: false,
+    });
+  });
+
+  it('takes a percentage discount off the estimate', () => {
+    const discounts = [{ duration: 'forever' as const, percentOff: 20 }];
+    expect(costDisclosure(subscription({ ...SELF_SERVE, discounts }), 3 * TB_BYTES)).toEqual({
+      kind: 'estimate',
+      cents: 1198,
+      minimumApplied: false,
+      discounted: true,
+    });
+  });
+
+  it('takes a discount off the monthly minimum when the minimum is what is billed', () => {
+    const discounts = [{ duration: 'once' as const, amountOffCents: 100 }];
+    expect(costDisclosure(subscription({ ...SELF_SERVE, discounts }), 0)).toEqual({
+      kind: 'estimate',
+      cents: 399,
+      minimumApplied: true,
+      discounted: true,
+    });
+  });
+
+  it('applies each discount to what the one before it left', () => {
+    const discounts = [
+      { duration: 'forever' as const, amountOffCents: 100 },
+      { duration: 'forever' as const, percentOff: 50 },
+    ];
+    // 1000 less 100 is 900, then 50% off is 450. Taking the 50% off the
+    // original 1000 instead would give 400.
+    expect(
+      costDisclosure(subscription({ pricePerTbCents: 1000, discounts }), TB_BYTES),
+    ).toMatchObject({ cents: 450 });
+  });
+
+  it('estimates nothing owed, never a credit, when a fixed discount exceeds the bill', () => {
+    const discounts = [{ duration: 'once' as const, amountOffCents: 10_000 }];
+    expect(costDisclosure(subscription({ ...SELF_SERVE, discounts }), 0)).toMatchObject({
+      cents: 0,
     });
   });
 
@@ -305,5 +350,60 @@ describe('statusBadge', () => {
       tone: 'amber',
       dot: false,
     });
+  });
+});
+
+describe('discountLabel', () => {
+  it.each([
+    [
+      'a percentage for one invoice',
+      { duration: 'once', percentOff: 20 },
+      '20% off your next invoice',
+    ],
+    [
+      'a fixed amount for good',
+      { duration: 'forever', amountOffCents: 1000 },
+      '$10.00 off every invoice',
+    ],
+    [
+      'a checked code lasting months',
+      { duration: 'repeating', durationInMonths: 3, percentOff: 15 },
+      '15% off for 3 months',
+    ],
+    [
+      'a checked code lasting one month',
+      { duration: 'repeating', durationInMonths: 1, percentOff: 15 },
+      '15% off for 1 month',
+    ],
+  ] as const)('describes %s', (_case, discount, expected) => {
+    expect(discountLabel(discount)).toBe(expected);
+  });
+
+  it('gives the end date of a running discount rather than its length', () => {
+    const endsAt = daysFromNow(60);
+    expect(
+      discountLabel({ duration: 'repeating', durationInMonths: 3, endsAt, percentOff: 15 }),
+    ).toBe(`15% off until ${formatDate(endsAt)}`);
+  });
+});
+
+describe('estimateDiscountNote', () => {
+  it.each([
+    ['a percentage', [{ duration: 'forever', percentOff: 20 }], 'Including 20% discount'],
+    ['a fixed amount', [{ duration: 'once', amountOffCents: 1000 }], 'Including $10.00 discount'],
+    [
+      'several discounts, without adding them up',
+      [
+        { duration: 'forever', percentOff: 20 },
+        { duration: 'once', amountOffCents: 1000 },
+      ],
+      'Including discounts',
+    ],
+  ] as const)('names %s', (_case, discounts, expected) => {
+    expect(estimateDiscountNote([...discounts])).toBe(expected);
+  });
+
+  it('says nothing when there is no discount', () => {
+    expect(estimateDiscountNote([])).toBeNull();
   });
 });
