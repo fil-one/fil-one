@@ -483,9 +483,9 @@ export function DashboardPage() {
           )}
         </div>
 
-        {activities.length === 0 && usage.buckets.count > 0 ? (
+        {activities.length === 0 && (usage.buckets.count > 0 || usage.accessKeys.count > 0) ? (
           // The feed holds the audit log's retention window, so an org whose
-          // buckets are all older than it has buckets and no activity.
+          // buckets and keys are all older than it has resources and no activity.
           <EmptyStateCard
             icon={ClockCounterClockwiseIcon}
             iconColor="grey"

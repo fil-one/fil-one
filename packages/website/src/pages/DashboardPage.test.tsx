@@ -245,12 +245,12 @@ describe('DashboardPage — trial banner', () => {
 });
 
 describe('DashboardPage — bucket buttons', () => {
-  // The default activity mock is empty, so for an org with no buckets the empty
-  // activity card renders its button too.
+  // The default activity mock is empty, so for an org with no buckets and no
+  // keys the empty activity card renders its button too.
   it.each(['New bucket', 'Create bucket'])(
     'opens the create bucket page from the "%s" button',
     async (name) => {
-      mockGetUsage.mockResolvedValue({ ...USAGE, buckets: { count: 0 } });
+      mockGetUsage.mockResolvedValue({ ...USAGE, buckets: { count: 0 }, accessKeys: { count: 0 } });
       renderPage();
 
       expect(await screen.findByRole('link', { name })).toHaveAttribute('href', '/buckets/create');
@@ -282,10 +282,17 @@ describe('DashboardPage — recent activity', () => {
     expect(hrefs).not.toContain('/audit');
   });
 
-  it('says there is no recent activity, without a create button, for an org that has buckets', async () => {
-    renderPage();
+  it.each([
+    ['buckets', { buckets: { count: 2 }, accessKeys: { count: 0 } }],
+    ['only access keys', { buckets: { count: 0 }, accessKeys: { count: 1 } }],
+  ])(
+    'says there is no recent activity, without a create button, for an org that has %s',
+    async (_case, counts) => {
+      mockGetUsage.mockResolvedValue({ ...USAGE, ...counts });
+      renderPage();
 
-    expect(await screen.findByText('No recent activity')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Create bucket' })).not.toBeInTheDocument();
-  });
+      expect(await screen.findByText('No recent activity')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Create bucket' })).not.toBeInTheDocument();
+    },
+  );
 });
