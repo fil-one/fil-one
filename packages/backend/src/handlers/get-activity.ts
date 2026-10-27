@@ -9,7 +9,11 @@ import { getDynamoClient } from '../lib/ddb-client.ts';
 import { keyScope, withinScope } from '../lib/key-scope.ts';
 import type { KeyScope } from '../lib/key-scope.ts';
 import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
-import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
+import {
+  getRequestDeadline,
+  requestDeadlineMiddleware,
+  trackRequestStep,
+} from '../middleware/request-deadline.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -47,14 +51,16 @@ function reportDuration(
 }
 
 // Times an awaited phase, emits its duration as a metric, and hands back both
-// the result and the elapsed ms so the caller can log a combined summary.
+// the result and the elapsed ms so the caller can log a combined summary. The
+// phase is also a request step, so a deadline that fires during it names it.
 async function timed<T>(
+  event: AuthenticatedEvent,
   phase: string,
   fn: () => Promise<T>,
 ): Promise<{ result: T; durationMs: number }> {
   const start = performance.now();
   try {
-    const result = await fn();
+    const result = await trackRequestStep(event, phase, fn);
     const durationMs = performance.now() - start;
     reportDuration('GetActivityPhaseDuration', { handler: 'get-activity', phase }, durationMs);
     return { result, durationMs };
@@ -91,20 +97,24 @@ export async function baseHandler(
   const signal = getRequestDeadline(event);
   // The dashboard aggregates activity across every region the org is provisioned
   // in, so resolve the ready tenant on each available orchestrator.
-  const { result: regions, durationMs: resolveRegionsMs } = await timed('resolveRegions', () =>
-    getProvisionedRegions(orgId),
+  const { result: regions, durationMs: resolveRegionsMs } = await timed(
+    event,
+    'resolveRegions',
+    () => getProvisionedRegions(orgId),
   );
 
   const [
     { result: bucketActivities, durationMs: bucketActivitiesMs },
     { result: keyActivities, durationMs: keyActivitiesMs },
   ] = await Promise.all([
-    timed('fetchBucketActivities', () => fetchBucketActivities(orgId, regions, signal)),
+    timed(event, 'fetchBucketActivities', () =>
+      fetchBucketActivities(event, orgId, regions, signal),
+    ),
     // Timed only when it runs: a phase duration emitted for a fetch that was
     // skipped reports a 0ms DynamoDB query that never happened.
     scope.sees === 'none'
       ? Promise.resolve({ result: [] as RecentActivity[], durationMs: 0 })
-      : timed('fetchAccessKeyActivities', () => fetchAccessKeyActivities(orgId, scope)),
+      : timed(event, 'fetchAccessKeyActivities', () => fetchAccessKeyActivities(orgId, scope)),
   ]);
 
   // TODO: Re-add object activities once we have an event system with Aurora.
@@ -126,7 +136,7 @@ export async function baseHandler(
   // non-production stages: production logs at WARN (sst.config.ts), so there
   // the GetActivityPhaseDuration series emitted by timed() is the diagnostic,
   // at one-minute granularity. A phase that never completes (Lambda timeout)
-  // emits neither the metric nor this line.
+  // emits neither the metric nor this line; the request-deadline log names it.
   console.log('[get-activity] completed', {
     orgId,
     regionCount: regions.length,
@@ -145,13 +155,16 @@ export async function baseHandler(
 }
 
 async function fetchBucketActivities(
+  event: AuthenticatedEvent,
   orgId: string,
   regions: ProvisionedRegion[],
   signal: AbortSignal,
 ): Promise<RecentActivity[]> {
   const perRegion = await Promise.all(
     regions.map(({ orchestrator, tenantId }) =>
-      listBucketActivities(orgId, orchestrator, tenantId, signal),
+      trackRequestStep(event, `listBuckets:${orchestrator.region}`, () =>
+        listBucketActivities(orgId, orchestrator, tenantId, signal),
+      ),
     ),
   );
   return perRegion.flat();
@@ -174,7 +187,7 @@ async function listBucketActivities(
     // This line ships only on non-production stages: production logs at WARN
     // (sst.config.ts), so there ListBucketsDuration is the diagnostic, at
     // one-minute granularity. A listBuckets that never returns (Lambda timeout)
-    // emits neither the metric nor this line.
+    // emits neither the metric nor this line; the request-deadline log names it.
     console.log('[get-activity] listed buckets', {
       orgId,
       tenantId,
