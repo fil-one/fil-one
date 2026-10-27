@@ -663,7 +663,7 @@ describe('get-activity baseHandler (request deadline)', () => {
     void baseHandler(event);
 
     await vi.waitFor(() =>
-      expect(event.requestContext.deadlineStepsInFlight).toStrictEqual([
+      expect([...(event.requestContext.deadlineStepsInFlight?.values() ?? [])]).toStrictEqual([
         'fetchBucketActivities',
         'listBuckets:us-east-1',
       ]),

@@ -339,7 +339,9 @@ describe('get-usage baseHandler (request deadline)', () => {
     void baseHandler(event);
 
     await vi.waitFor(() =>
-      expect(event.requestContext.deadlineStepsInFlight).toStrictEqual(['listBuckets:us-east-1']),
+      expect([...(event.requestContext.deadlineStepsInFlight?.values() ?? [])]).toStrictEqual([
+        'listBuckets:us-east-1',
+      ]),
     );
   });
 });

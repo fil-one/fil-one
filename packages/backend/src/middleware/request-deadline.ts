@@ -12,7 +12,7 @@ export const REQUEST_DEADLINE_MARGIN_MS = 500;
 type DeadlineRequestContext = APIGatewayProxyEventV2['requestContext'] & {
   deadline: AbortSignal;
   deadlineStep?: string;
-  deadlineStepsInFlight?: string[];
+  deadlineStepsInFlight?: Map<string, string>;
   userInfo?: { orgId?: string; userId?: string };
 };
 
@@ -51,7 +51,7 @@ export function requestDeadlineMiddleware() {
       console.error('[request-deadline] Request deadline reached', {
         ...(deadlineStep !== undefined && { step: deadlineStep }),
         // A copy: the steps still running settle after this line is written.
-        stepsInFlight: [...(requestContext.deadlineStepsInFlight ?? [])],
+        stepsInFlight: [...(requestContext.deadlineStepsInFlight?.values() ?? [])],
         orgId: requestContext.userInfo?.orgId,
         userId: requestContext.userInfo?.userId,
         apiRequestId: requestContext.requestId,
@@ -105,11 +105,14 @@ export async function trackRequestStep<T>(
   step: string,
   run: () => Promise<T>,
 ): Promise<T> {
-  const stepsInFlight = (event.requestContext.deadlineStepsInFlight ??= []);
-  stepsInFlight.push(step);
+  const stepsInFlight = (event.requestContext.deadlineStepsInFlight ??= new Map());
+  // Keyed by a fresh id rather than the step name, so each call removes its own
+  // entry even when another call with the same name is running beside it.
+  const stepId = crypto.randomUUID();
+  stepsInFlight.set(stepId, step);
   try {
     return await run();
   } finally {
-    stepsInFlight.splice(stepsInFlight.indexOf(step), 1);
+    stepsInFlight.delete(stepId);
   }
 }

@@ -101,6 +101,19 @@ describe('requestDeadlineMiddleware', () => {
     );
   });
 
+  it('keeps a step in flight while another call of the same name is still running', async () => {
+    const { event, deadline, consoleError } = startRequestWithManualDeadline();
+    void trackRequestStep(event, 'any-step', () => new Promise(() => {}));
+    await trackRequestStep(event, 'any-step', async () => {});
+
+    deadline.abort();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      '[request-deadline] Request deadline reached',
+      expect.objectContaining({ stepsInFlight: ['any-step'] }),
+    );
+  });
+
   it.each([
     { outcome: 'resolved', run: async () => 'any-result' },
     { outcome: 'rejected', run: async () => Promise.reject(new Error('any-failure')) },
