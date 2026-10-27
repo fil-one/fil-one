@@ -10,7 +10,12 @@ vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { queryAllAuditEvents, queryAuditEvents, resolveWindow } from './audit-query.ts';
+import {
+  queryActivityEvents,
+  queryAllAuditEvents,
+  queryAuditEvents,
+  resolveWindow,
+} from './audit-query.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const OTHER_ORG = '99999999-8888-7777-6666-555555555555';
@@ -403,5 +408,162 @@ describe('queryAllAuditEvents', () => {
     const result = await queryAllAuditEvents({ orgId: ORG_ID, filters: WINDOW, maxRows: 2 });
 
     expect(result.truncated).toBe(true);
+  });
+});
+
+describe('queryActivityEvents', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    ddbMock.reset();
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  /** The type placeholders' values the filter names, as plain strings. */
+  function filteredTypes(): string[] {
+    const values = unmarshall(queryInput().ExpressionAttributeValues!);
+    return Object.entries(values)
+      .filter(([placeholder]) => /Type\d+$/.test(placeholder))
+      .map(([, value]) => value as string);
+  }
+
+  it("reads the caller's org newest first from the start of retention", async () => {
+    await queryActivityEvents({
+      orgId: ORG_ID,
+      bucketEvents: { sees: 'all' },
+      keyEvents: { sees: 'all' },
+      limit: 10,
+    });
+
+    const earliest = new Date(
+      Date.parse(NOW) - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    expect(queryInput()).toMatchObject({
+      KeyConditionExpression: 'pk = :pk AND sk >= :from',
+      ScanIndexForward: false,
+    });
+    expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
+      ':pk': `ORG#${ORG_ID}`,
+      ':from': earliest,
+    });
+  });
+
+  it('keeps only completions that succeeded', async () => {
+    await queryActivityEvents({
+      orgId: ORG_ID,
+      bucketEvents: { sees: 'all' },
+      keyEvents: { sees: 'all' },
+      limit: 10,
+    });
+
+    expect(queryInput().FilterExpression).toContain('#outcome = :succeeded');
+    expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
+      ':succeeded': 'succeeded',
+    });
+  });
+
+  it('reads bucket and S3 key events for a reader who sees every key', async () => {
+    await queryActivityEvents({
+      orgId: ORG_ID,
+      bucketEvents: { sees: 'all' },
+      keyEvents: { sees: 'all' },
+      limit: 10,
+    });
+
+    expect(filteredTypes()).toStrictEqual([
+      'bucket.created',
+      'bucket.deleted',
+      'key.created',
+      'key.deleted',
+    ]);
+    expect(queryInput().FilterExpression).toContain('details.keyKind = :s3');
+    expect(queryInput().FilterExpression).not.toContain('actor.id');
+  });
+
+  it('narrows key events to those the reader acted on when they see only their own', async () => {
+    await queryActivityEvents({
+      orgId: ORG_ID,
+      bucketEvents: { sees: 'all' },
+      keyEvents: { sees: 'own', actorId: USER_ID },
+      limit: 10,
+    });
+
+    expect(queryInput().FilterExpression).toContain('actor.id = :keyActorId');
+    expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
+      ':keyActorId': USER_ID,
+    });
+  });
+
+  it('narrows bucket events to those the reader acted on when they see only their own', async () => {
+    await queryActivityEvents({
+      orgId: ORG_ID,
+      bucketEvents: { sees: 'own', actorId: USER_ID },
+      keyEvents: { sees: 'none' },
+      limit: 10,
+    });
+
+    expect(queryInput().FilterExpression).toContain('actor.id = :bucketActorId');
+    expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
+      ':bucketActorId': USER_ID,
+    });
+  });
+
+  it('reads bucket events from every actor for a reader who sees the whole org', async () => {
+    await queryActivityEvents({
+      orgId: ORG_ID,
+      bucketEvents: { sees: 'all' },
+      keyEvents: { sees: 'none' },
+      limit: 10,
+    });
+
+    expect(queryInput().FilterExpression).not.toContain('actor.id');
+  });
+
+  it('reads bucket events only for a reader who sees no keys', async () => {
+    await queryActivityEvents({
+      orgId: ORG_ID,
+      bucketEvents: { sees: 'all' },
+      keyEvents: { sees: 'none' },
+      limit: 10,
+    });
+
+    expect(filteredTypes()).toStrictEqual(['bucket.created', 'bucket.deleted']);
+  });
+
+  it('keeps reading pages until the limit is matched', async () => {
+    ddbMock
+      .on(QueryCommand)
+      .resolvesOnce({ Items: [], LastEvaluatedKey: marshall({ pk: 'any', sk: 'any' }) })
+      .resolvesOnce({ Items: [storedEvent('2026-08-10T00:00:00.000Z', 'evt-1')] });
+
+    const result = await queryActivityEvents({
+      orgId: ORG_ID,
+      bucketEvents: { sees: 'all' },
+      keyEvents: { sees: 'all' },
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({ events: [{ eventId: 'evt-1' }], cost: { pages: 2 } });
+  });
+
+  it('stops reading once the limit is matched and returns no more than it', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        storedEvent('2026-08-10T00:00:00.000Z', 'evt-1'),
+        storedEvent('2026-08-09T00:00:00.000Z', 'evt-2'),
+      ],
+      LastEvaluatedKey: marshall({ pk: 'any', sk: 'any' }),
+    });
+
+    const result = await queryActivityEvents({
+      orgId: ORG_ID,
+      bucketEvents: { sees: 'all' },
+      keyEvents: { sees: 'all' },
+      limit: 1,
+    });
+
+    expect(result).toMatchObject({ events: [{ eventId: 'evt-1' }], cost: { pages: 1 } });
+    expect(result.events).toHaveLength(1);
   });
 });

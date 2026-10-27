@@ -3,13 +3,14 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, isSupportedRegion, S3_REGION } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
+import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import { BucketNotEmptyError } from '../lib/errors.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
-import { getUserInfo } from '../lib/user-context.ts';
+import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
@@ -28,7 +29,7 @@ export async function baseHandler(
       .build();
   }
 
-  const { orgId } = getUserInfo(event);
+  const { orgId, userId } = getUserInfo(event);
 
   // The bucket's own region, as every other bucket-addressed route reads it.
   // Hardcoding the default sent every delete to Aurora: a bucket in another
@@ -47,9 +48,21 @@ export async function baseHandler(
       .build();
   }
 
+  // Best-effort, as on create: an audit outage must not stop a bucket being
+  // deleted.
+  const bucketAudit = await twoPhaseAudit({
+    type: 'bucket.deleted',
+    mode: 'best-effort',
+    actor: userActor({ userId, email: getVerifiedEmail(event) }),
+    orgId,
+    subject: AuditSubjects.bucket(region, bucketName),
+    details: { region, bucketName },
+  });
+
   try {
     await orchestrator.deleteBucket(tenantId, bucketName, { signal });
   } catch (err) {
+    await bucketAudit.complete({ outcome: 'failed' });
     if (err instanceof BucketNotEmptyError) {
       return new ResponseBuilder()
         .status(409)
@@ -61,6 +74,7 @@ export async function baseHandler(
     }
     throw err;
   }
+  await bucketAudit.complete({ outcome: 'succeeded' });
 
   return {
     statusCode: 204,

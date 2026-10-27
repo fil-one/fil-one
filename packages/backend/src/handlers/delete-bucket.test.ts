@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { mockClient } from 'aws-sdk-client-mock';
+import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
-}));
+vi.mock('sst', () => sstResourceMock());
 
 const mockIsTenantReady = vi.fn();
 const mockOrchestratorDeleteBucket = vi.fn();
@@ -44,6 +44,21 @@ import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 
+const ddbMock = mockClient(DynamoDBClient);
+
+/** The audit events the handler appended, as records. */
+function getAuditEvents() {
+  return ddbMock
+    .commandCalls(PutItemCommand)
+    .map((call) => unmarshall(call.args[0].input.Item ?? {}));
+}
+
+function deleteEvent(bucketName = 'my-bucket') {
+  const event = buildEvent({ userInfo: USER_INFO });
+  event.pathParameters = { name: bucketName };
+  return event;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -51,6 +66,8 @@ const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
 describe('delete-bucket baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(PutItemCommand).resolves({});
     mockIsTenantReady.mockReturnValue('aurora-t-1');
   });
 
@@ -161,5 +178,60 @@ describe('delete-bucket baseHandler', () => {
     event.pathParameters = { name: 'my-bucket' };
 
     await expect(baseHandler(event)).rejects.toThrow('S3 gateway unavailable');
+  });
+
+  describe('audit', () => {
+    it('records a bucket.deleted intent naming the region and bucket before the delete', async () => {
+      mockOrchestratorDeleteBucket.mockImplementation(async () => {
+        expect(getAuditEvents()).toMatchObject([{ type: 'bucket.deleted', phase: 'intent' }]);
+      });
+
+      await baseHandler(deleteEvent());
+
+      expect(getAuditEvents()[0]).toMatchObject({
+        type: 'bucket.deleted',
+        phase: 'intent',
+        actor: { kind: 'user', id: 'user-1' },
+        orgId: 'org-1',
+        subject: 'bucket:eu-west-1/my-bucket',
+        details: { region: 'eu-west-1', bucketName: 'my-bucket' },
+      });
+    });
+
+    it('completes the bucket.deleted as succeeded when the delete goes through', async () => {
+      mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
+
+      await baseHandler(deleteEvent());
+
+      expect(getAuditEvents()[1]).toMatchObject({
+        type: 'bucket.deleted',
+        phase: 'completion',
+        outcome: 'succeeded',
+      });
+    });
+
+    it.each([
+      ['the bucket still holds objects', new BucketNotEmptyError('my-bucket')],
+      ['the storage system fails', new Error('S3 gateway unavailable')],
+    ])('completes the bucket.deleted as failed when %s', async (_case, err) => {
+      mockOrchestratorDeleteBucket.mockRejectedValue(err);
+
+      await baseHandler(deleteEvent()).catch(() => undefined);
+
+      expect(getAuditEvents()[1]).toMatchObject({
+        type: 'bucket.deleted',
+        phase: 'completion',
+        outcome: 'failed',
+      });
+    });
+
+    it('deletes the bucket even when the audit log cannot be written', async () => {
+      ddbMock.on(PutItemCommand).rejects(new Error('audit table unavailable'));
+      mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
+
+      const result = await baseHandler(deleteEvent());
+
+      expect(result).toMatchObject({ statusCode: 204 });
+    });
   });
 });

@@ -51,6 +51,8 @@ export const AUDIT_EVENT_TYPES = [
   'bucket_policy.created',
   'bucket_policy.updated',
   'bucket_policy.deleted',
+  'bucket.created',
+  'bucket.deleted',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -74,6 +76,9 @@ export function isAuditEventType(value: string): value is AuditEventType {
  * the two leaves a visible dangling intent instead of revoked credentials with
  * no record. They also appear single-phase, and every membership change that
  * touches no vendor takes that form.
+ *
+ * Bucket and bucket policy events, because a bucket and its policy live at the
+ * storage system and nothing local is written alongside them.
  */
 export const TWO_PHASE_AUDIT_EVENT_TYPES = [
   'key.created',
@@ -85,6 +90,8 @@ export const TWO_PHASE_AUDIT_EVENT_TYPES = [
   'bucket_policy.created',
   'bucket_policy.updated',
   'bucket_policy.deleted',
+  'bucket.created',
+  'bucket.deleted',
 ] as const;
 export type TwoPhaseAuditEventType = (typeof TWO_PHASE_AUDIT_EVENT_TYPES)[number];
 
@@ -215,6 +222,15 @@ export type BucketPolicyEventDetails = {
   statements?: number;
   /** How many distinct members the document names. Absent on a delete or a wildcard-only policy. */
   principals?: number;
+};
+
+/**
+ * Shared by the two `bucket.*` events. A type alias for the same reason as
+ * {@link BucketPolicyEventDetails}.
+ */
+export type BucketEventDetails = {
+  region: string;
+  bucketName: string;
 };
 
 /**
@@ -368,6 +384,14 @@ export interface AuditEventDetails {
   'bucket_policy.updated': BucketPolicyEventDetails;
   'bucket_policy.deleted': BucketPolicyEventDetails;
   /**
+   * A bucket created or deleted at the storage system. Two-phase for the same
+   * reason as the policy events: the bucket lives at the vendor and nothing
+   * local records it. The dashboard's activity feed reads these, so a bucket
+   * the feed shows is one the audit log shows too.
+   */
+  'bucket.created': BucketEventDetails;
+  'bucket.deleted': BucketEventDetails;
+  /**
    * The one event written on a read path, and the highest-signal action the log
    * records: it is the one that takes an org's security history out of the
    * system. The filters travel with it, because who exported everything and who
@@ -496,6 +520,9 @@ export type VendorBackedKeyEvent = Extract<AuditEvent, { details: { keyKind: 's3
 /** A bucket-policy event: the document lives at the vendor, like an S3 key. */
 export type BucketPolicyEvent = Extract<AuditEvent, { type: `bucket_policy.${string}` }>;
 
+/** A bucket event: the bucket lives at the vendor, like its policy. */
+export type BucketEvent = Extract<AuditEvent, { type: `bucket.${string}` }>;
+
 /**
  * An event that may ride a local transaction — what `commitAudited` accepts.
  *
@@ -504,7 +531,7 @@ export type BucketPolicyEvent = Extract<AuditEvent, { type: `bucket_policy.${str
  */
 export type CommittableAuditEvent = Exclude<
   AuditEvent,
-  (VendorBackedKeyEvent | BucketPolicyEvent) & AuditSinglePhase
+  (VendorBackedKeyEvent | BucketPolicyEvent | BucketEvent) & AuditSinglePhase
 >;
 
 /**
@@ -565,6 +592,8 @@ export const AUDIT_EVENT_TYPE_LABELS: Record<AuditEventType, string> = {
   'bucket_policy.created': 'Bucket policy created',
   'bucket_policy.updated': 'Bucket policy updated',
   'bucket_policy.deleted': 'Bucket policy deleted',
+  'bucket.created': 'Bucket created',
+  'bucket.deleted': 'Bucket deleted',
 };
 
 /**

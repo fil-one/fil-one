@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, PlanId, SubscriptionStatus } from '@filone/shared';
-import type { BillingInfo, UsageResponse } from '@filone/shared';
+import type { BillingInfo, MeResponse, UsageResponse } from '@filone/shared';
 
 import { seedPermissions } from '../lib/test-permissions.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -69,9 +69,9 @@ function contractedBilling(): BillingInfo {
   };
 }
 
-function renderPage(role: OrgRole = OrgRole.Owner) {
+function renderPage(role: OrgRole = OrgRole.Owner, me: Partial<MeResponse> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, role);
+  seedPermissions(client, role, me);
   const view = render(
     <QueryClientProvider client={client}>
       <DashboardPage />
@@ -245,13 +245,47 @@ describe('DashboardPage — trial banner', () => {
 });
 
 describe('DashboardPage — bucket buttons', () => {
-  // The default activity mock is empty, so the empty activity card renders its button too.
+  // The default activity mock is empty, so for an org with no buckets the empty
+  // activity card renders its button too.
   it.each(['New bucket', 'Create bucket'])(
     'opens the create bucket page from the "%s" button',
     async (name) => {
+      mockGetUsage.mockResolvedValue({ ...USAGE, buckets: { count: 0 } });
       renderPage();
 
       expect(await screen.findByRole('link', { name })).toHaveAttribute('href', '/buckets/create');
     },
   );
+});
+
+describe('DashboardPage — recent activity', () => {
+  it('opens the audit log from "View all" for a role that may read it', async () => {
+    renderPage(OrgRole.Admin);
+
+    await screen.findByText('Recent Activity');
+    const hrefs = screen
+      .getAllByRole('link', { name: 'View all' })
+      .map((link) => link.getAttribute('href'));
+    expect(hrefs).toContain('/audit');
+  });
+
+  it.each([
+    ['a Member, who cannot read the audit log', OrgRole.Member, {}],
+    ['an org outside the organizations beta', OrgRole.Owner, { orgsBeta: false }],
+  ])('offers no link to the audit log to %s', async (_case, role, me) => {
+    renderPage(role, me);
+
+    await screen.findByText('Recent Activity');
+    const hrefs = screen
+      .queryAllByRole('link', { name: 'View all' })
+      .map((link) => link.getAttribute('href'));
+    expect(hrefs).not.toContain('/audit');
+  });
+
+  it('says there is no recent activity, without a create button, for an org that has buckets', async () => {
+    renderPage();
+
+    expect(await screen.findByText('No recent activity')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Create bucket' })).not.toBeInTheDocument();
+  });
 });

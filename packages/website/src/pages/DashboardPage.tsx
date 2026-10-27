@@ -24,7 +24,13 @@ import { IconBox } from '../components/IconBox';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
 
-import { getActivityActionLabel, PlanId, SubscriptionStatus, getUsageLimits } from '@filone/shared';
+import {
+  AUDIT_RETENTION_DAYS,
+  getActivityActionLabel,
+  PlanId,
+  SubscriptionStatus,
+  getUsageLimits,
+} from '@filone/shared';
 import type { RecentActivity } from '@filone/shared';
 
 import { getUsage, getBilling, getActivity } from '../lib/api.js';
@@ -32,7 +38,7 @@ import { daysUntil, formatDateTime, timeAgo } from '../lib/time.js';
 import { costDisclosure, formatCents, planTitle, pricingLine } from '../lib/billing-view.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { RequirePermission } from '../components/RequirePermission';
-import { useHasPermission } from '../lib/use-permissions.js';
+import { useHasPermission, usePermissions } from '../lib/use-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -104,6 +110,11 @@ export function DashboardPage() {
   // the only thing that depends on billing, and they are simply absent for a
   // role that cannot read it.
   const mayReadBilling = useHasPermission('billing.view');
+  // The feed is read from the audit log, so its "View all" opens the audit
+  // page. Only where that page exists for the caller: it is a page of the
+  // organizations beta, and Owner and Admin only.
+  const { has, orgsBeta } = usePermissions();
+  const mayViewAuditLog = orgsBeta && has('audit.view');
 
   const { data: usage, isPending: usagePending } = useQuery({
     queryKey: queryKeys.usage,
@@ -461,13 +472,28 @@ export function DashboardPage() {
 
       {/* 8. Recent Activity */}
       <Card>
-        <div className="mb-3">
-          <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-meta font-medium uppercase tracking-wider text-zinc-500">
             Recent Activity
           </h2>
+          {mayViewAuditLog && (
+            <AppLink href="/audit" className="text-meta">
+              View all
+            </AppLink>
+          )}
         </div>
 
-        {activities.length === 0 ? (
+        {activities.length === 0 && usage.buckets.count > 0 ? (
+          // The feed holds the audit log's retention window, so an org whose
+          // buckets are all older than it has buckets and no activity.
+          <EmptyStateCard
+            icon={ClockCounterClockwiseIcon}
+            iconColor="grey"
+            title="No recent activity"
+            description={`Bucket and key changes from the last ${AUDIT_RETENTION_DAYS} days appear here`}
+            bordered={false}
+          />
+        ) : activities.length === 0 ? (
           <EmptyStateCard
             icon={ClockCounterClockwiseIcon}
             iconColor="grey"

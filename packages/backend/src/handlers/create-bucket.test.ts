@@ -287,7 +287,8 @@ describe('create-bucket baseHandler', () => {
   describe('on a region serving the iam access model', () => {
     const buildIamRegionBody = () =>
       JSON.stringify({ bucketName: 'my-bucket', region: IAM_REGION });
-    const findAuditEvent = (phase: string) => getAuditEvents().find((e) => e.phase === phase);
+    const findAuditEvent = (phase: string) =>
+      getAuditEvents().find((e) => e.type === 'bucket_policy.created' && e.phase === phase);
 
     beforeEach(() => {
       mockCreateBucket.mockResolvedValue(undefined);
@@ -407,11 +408,77 @@ describe('create-bucket baseHandler', () => {
     expect(mockCreateBucket.mock.calls[0]![1]).not.toHaveProperty('policy');
   });
 
-  it('writes no audit event on a service-keys region', async () => {
+  it('writes no bucket policy event on a service-keys region', async () => {
     mockCreateBucket.mockResolvedValue(undefined);
 
     await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
 
-    expect(getAuditEvents()).toStrictEqual([]);
+    expect(getAuditEvents().map((e) => e.type)).not.toContain('bucket_policy.created');
+  });
+
+  describe('bucket.created audit', () => {
+    const findBucketEvent = (phase: string) =>
+      getAuditEvents().find((e) => e.type === 'bucket.created' && e.phase === phase);
+
+    it('records a bucket.created intent naming the region and bucket before the create', async () => {
+      mockCreateBucket.mockImplementation(async () => {
+        expect(findBucketEvent('intent')).toBeDefined();
+      });
+
+      await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+      expect(findBucketEvent('intent')).toMatchObject({
+        actor: { kind: 'user', id: USER_1 },
+        orgId: 'org-1',
+        subject: `bucket:${S3_REGION}/my-bucket`,
+        details: { region: S3_REGION, bucketName: 'my-bucket' },
+      });
+    });
+
+    it('completes the bucket.created as succeeded when the create goes through', async () => {
+      mockCreateBucket.mockResolvedValue(undefined);
+
+      await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+      expect(findBucketEvent('completion')).toMatchObject({ outcome: 'succeeded' });
+    });
+
+    // Each of these fails after the storage system created the bucket, so the
+    // bucket exists and the event says so.
+    it.each([
+      ['its configuration fails', new BucketConfigurationError('my-bucket')],
+      ['its policy is refused', new PolicyValidationError('unknown principal')],
+      ['its policy cannot be published', new PolicyPublishError()],
+    ])('completes the bucket.created as succeeded when %s', async (_case, err) => {
+      mockCreateBucket.mockRejectedValue(err);
+
+      await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(findBucketEvent('completion')).toMatchObject({ outcome: 'succeeded' });
+    });
+
+    it.each([
+      ['the name is taken', new BucketAlreadyExistsError('my-bucket')],
+      ['the storage system fails', new Error('S3 gateway unavailable')],
+    ])('completes the bucket.created as failed when %s', async (_case, err) => {
+      mockCreateBucket.mockRejectedValue(err);
+
+      await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(findBucketEvent('completion')).toMatchObject({ outcome: 'failed' });
+    });
+
+    it('creates the bucket even when the audit log cannot be written', async () => {
+      ddbMock.on(PutItemCommand).rejects(new Error('audit table unavailable'));
+      mockCreateBucket.mockResolvedValue(undefined);
+
+      const result = await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+      expect(result).toMatchObject({ statusCode: 201 });
+    });
   });
 });

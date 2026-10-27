@@ -81,6 +81,8 @@ const DETAILS: { [T in AuditEventType]: AuditEventDetails[T] } = {
   },
   'bucket_policy.updated': { region: 'us-east-9', bucketName: 'photos', trigger: 'policy_edited' },
   'bucket_policy.deleted': { region: 'us-east-9', bucketName: 'photos', trigger: 'policy_edited' },
+  'bucket.created': { region: 'us-east-9', bucketName: 'photos' },
+  'bucket.deleted': { region: 'us-east-9', bucketName: 'photos' },
 };
 
 function renamed(): AuditEventRecord<'org.renamed'> {

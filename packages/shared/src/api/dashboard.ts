@@ -60,7 +60,8 @@ interface BaseActivity {
 
 export interface BucketActivity extends BaseActivity {
   resourceType: 'bucket';
-  action: 'bucket.created' | 'bucket.deleted';
+  /** Derived from the audit union, as on {@link KeyActivity}: the feed reads the audit log. */
+  action: Extract<AuditEventType, 'bucket.created' | 'bucket.deleted'>;
 }
 
 export interface ObjectActivity extends BaseActivity {

@@ -3,7 +3,7 @@ import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { AUDIT_RETENTION_DAYS } from '@filone/shared';
-import type { AuditEvent, AuditQueryFilters, AuditWindow } from '@filone/shared';
+import type { AuditEvent, AuditEventType, AuditQueryFilters, AuditWindow } from '@filone/shared';
 import { AuditKeys } from './audit.ts';
 import { getDynamoClient } from './ddb-client.ts';
 import type { DynamoCursor } from './ddb-paging.ts';
@@ -200,6 +200,157 @@ export async function queryAllAuditEvents({
   const page = await queryAuditEvents({ orgId, filters, limit: maxRows + 1 });
   const truncated = page.events.length > maxRows;
   return { ...page, truncated };
+}
+
+/** The bucket events the dashboard feed shows, narrowed by {@link ActivityScope}. */
+const ACTIVITY_BUCKET_EVENT_TYPES: AuditEventType[] = ['bucket.created', 'bucket.deleted'];
+/** The key events the dashboard feed shows, narrowed by {@link ActivityScope}. */
+const ACTIVITY_KEY_EVENT_TYPES: AuditEventType[] = ['key.created', 'key.deleted'];
+
+/**
+ * Which events of one kind a feed reader may see: the whole org's, only those
+ * the reader acted on, or none.
+ */
+export type ActivityScope = { sees: 'all' } | { sees: 'own'; actorId: string } | { sees: 'none' };
+
+/**
+ * Bucket events are never `none`: the feed's route requires `buckets.read`, so
+ * every reader sees at least their own.
+ */
+export type ActivityBucketScope = Exclude<ActivityScope, { sees: 'none' }>;
+
+/**
+ * The newest bucket and key events that succeeded, for the dashboard's
+ * activity feed.
+ *
+ * The feed is the audit log seen through a narrower filter, so a row it shows
+ * is a row the audit page shows too. Only completions that succeeded qualify:
+ * an intent, or an attempt the storage system refused, is history for the audit
+ * page but not activity. Key events are S3 keys only, the ones the API keys
+ * page lists.
+ *
+ * Reads the base table newest first and filters, draining until `limit`
+ * events match or the retention window ends, for the reason
+ * {@link queryAuditEvents} drains. There is no cursor: the feed has no next
+ * page.
+ */
+export async function queryActivityEvents({
+  orgId,
+  bucketEvents,
+  keyEvents,
+  limit,
+}: {
+  orgId: string;
+  bucketEvents: ActivityBucketScope;
+  keyEvents: ActivityScope;
+  limit: number;
+}): Promise<{ events: AuditEvent[]; cost: AuditQueryCost }> {
+  // Retention's lower bound. The feed reads up to now, so no upper bound is set.
+  const { from } = resolveWindow({ to: new Date().toISOString() });
+  const cost: AuditQueryCost = { pages: 0, rows: 0 };
+  const events: AuditEvent[] = [];
+  let startKey: DynamoCursor;
+
+  do {
+    const page = await getDynamoClient().send(
+      new QueryCommand(activityQueryInput({ orgId, bucketEvents, keyEvents, from, startKey })),
+    );
+    cost.pages += 1;
+    cost.rows += page.Items?.length ?? 0;
+    events.push(...(page.Items ?? []).map(unmarshallAuditEvent));
+    startKey = page.LastEvaluatedKey;
+  } while (startKey && events.length < limit);
+
+  return { events: events.slice(0, limit), cost };
+}
+
+function activityQueryInput({
+  orgId,
+  bucketEvents,
+  keyEvents,
+  from,
+  startKey,
+}: {
+  orgId: string;
+  bucketEvents: ActivityBucketScope;
+  keyEvents: ActivityScope;
+  from: string;
+  startKey: DynamoCursor;
+}) {
+  const values: Record<string, unknown> = {
+    ':pk': AuditKeys.orgPk(orgId),
+    ':from': from,
+    ':now': Math.floor(Date.now() / 1000),
+    ':succeeded': 'succeeded',
+  };
+  const names: Record<string, string> = { '#ttl': 'ttl', '#type': 'type', '#outcome': 'outcome' };
+
+  const bucketFilter = scopedFilter('bucket', ACTIVITY_BUCKET_EVENT_TYPES, bucketEvents, values);
+  const keyFilter = scopedFilter('key', ACTIVITY_KEY_EVENT_TYPES, keyEvents, values);
+  const typeFilter = keyFilter ? `((${bucketFilter}) OR (${keyFilter}))` : `(${bucketFilter})`;
+
+  return {
+    TableName: auditTableName(),
+    KeyConditionExpression: 'pk = :pk AND sk >= :from',
+    // The TTL clause is the one `queryInput` explains: DynamoDB serves expired
+    // rows until it gets round to deleting them.
+    FilterExpression: `#ttl > :now AND #outcome = :succeeded AND ${typeFilter}`,
+    ExpressionAttributeNames: names,
+    ExpressionAttributeValues: marshall(values),
+    // Newest first.
+    ScanIndexForward: false,
+    ...(startKey ? { ExclusiveStartKey: startKey } : {}),
+  };
+}
+
+/**
+ * The clause selecting one kind of event under its scope, or undefined when the
+ * reader sees none of that kind. Key events are S3 keys only.
+ */
+function scopedFilter(
+  kind: 'bucket',
+  types: AuditEventType[],
+  scope: ActivityBucketScope,
+  values: Record<string, unknown>,
+): string;
+function scopedFilter(
+  kind: 'key',
+  types: AuditEventType[],
+  scope: ActivityScope,
+  values: Record<string, unknown>,
+): string | undefined;
+function scopedFilter(
+  kind: 'bucket' | 'key',
+  types: AuditEventType[],
+  scope: ActivityScope,
+  values: Record<string, unknown>,
+): string | undefined {
+  if (scope.sees === 'none') return undefined;
+  const clauses = [`#type IN (${typeList(kind, types, values)})`];
+  if (kind === 'key') {
+    clauses.push('details.keyKind = :s3');
+    values[':s3'] = 's3';
+  }
+  if (scope.sees === 'own') {
+    clauses.push(`actor.id = :${kind}ActorId`);
+    values[`:${kind}ActorId`] = scope.actorId;
+  }
+  return clauses.join(' AND ');
+}
+
+/** Binds each type to its own placeholder and returns the placeholders, for an `IN`. */
+function typeList(
+  prefix: string,
+  types: AuditEventType[],
+  values: Record<string, unknown>,
+): string {
+  return types
+    .map((type, index) => {
+      const placeholder = `:${prefix}Type${index}`;
+      values[placeholder] = type;
+      return placeholder;
+    })
+    .join(', ');
 }
 
 /** The Query for whichever path the filters select. */
