@@ -14,11 +14,8 @@ import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.t
 import {
   BucketAlreadyExistsError,
   BucketConfigurationError,
-  PolicyConflictError,
-  PolicyPreconditionFailedError,
-  PolicyPublishError,
+  BucketPolicyWriteError,
   PolicyValidationError,
-  PrincipalNotFoundError,
 } from '../lib/errors.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import {
@@ -103,21 +100,23 @@ export async function baseHandler(
       ...(policy ? { policy } : {}),
     });
   } catch (err) {
-    await bucketAudit.complete({ outcome: bucketOutcomeOf(err) });
+    await bucketAudit.complete({ outcome: getBucketOutcome(err) });
+    // The refusal and the rethrow answer for the policy write's own error.
+    const failure = unwrapPolicyWriteError(err);
     // The bucket was created but couldn't be fully configured. Surface the
     // actionable message so the caller can finish setup via the S3 API instead
     // of getting the generic 500 from errorHandlerMiddleware. The orchestrator
     // writes the policy before the configuration calls, so that write succeeded.
-    if (err instanceof BucketConfigurationError) {
+    if (failure instanceof BucketConfigurationError) {
       await policyAudit?.complete({ outcome: 'succeeded', details: completionDetails });
       return new ResponseBuilder()
         .status(500)
-        .body<ErrorResponse>({ message: err.message })
+        .body<ErrorResponse>({ message: failure.message })
         .build();
     }
     await policyAudit?.complete({ outcome: 'failed' });
-    const refusal = toCreateRefusalResponse(err, bucketName);
-    if (!refusal) throw err;
+    const refusal = toCreateRefusalResponse(failure, bucketName);
+    if (!refusal) throw failure;
     return refusal;
   }
   await bucketAudit.complete({ outcome: 'succeeded' });
@@ -178,20 +177,19 @@ export const handler = middy(baseHandler)
   .use(errorHandlerMiddleware());
 
 /**
- * How a failed create ends for the bucket itself. The orchestrator writes the
- * policy and then the configuration after the bucket, so a failure at either
- * leaves a bucket behind, and its `bucket.created` succeeded even though the
- * request did not.
+ * How a failed create ends for the bucket itself. The orchestrator raises these
+ * two only after the storage system created the bucket, so the bucket exists and
+ * its `bucket.created` succeeded even though the request did not.
  */
-function bucketOutcomeOf(err: unknown): AuditOutcome {
-  const createdBeforeFailing =
-    err instanceof BucketConfigurationError ||
-    err instanceof PolicyValidationError ||
-    err instanceof PolicyPublishError ||
-    err instanceof PolicyConflictError ||
-    err instanceof PolicyPreconditionFailedError ||
-    err instanceof PrincipalNotFoundError;
-  return createdBeforeFailing ? 'succeeded' : 'failed';
+function getBucketOutcome(err: unknown): AuditOutcome {
+  return err instanceof BucketConfigurationError || err instanceof BucketPolicyWriteError
+    ? 'succeeded'
+    : 'failed';
+}
+
+/** The policy write's own error when the create failed there, and the error itself otherwise. */
+function unwrapPolicyWriteError(err: unknown): unknown {
+  return err instanceof BucketPolicyWriteError ? err.cause : err;
 }
 
 /**

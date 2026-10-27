@@ -77,7 +77,7 @@ export interface KeyActivity extends BaseActivity {
    * calling the same thing two names: the dashboard renders "deleted", so the
    * event type is `key.deleted` and both read from one list.
    */
-  action: Extract<AuditEventType, 'key.created' | 'key.deleted'>;
+  action: Extract<AuditEventType, 'key.created' | 'key.rotated' | 'key.deleted'>;
 }
 
 export type RecentActivity = BucketActivity | ObjectActivity | KeyActivity;
@@ -92,6 +92,7 @@ export const ACTIVITY_ACTION_LABELS: Record<RecentActivity['action'], string> = 
   'object.uploaded': 'Uploaded',
   'object.deleted': 'Deleted',
   'key.created': 'Created',
+  'key.rotated': 'Rotated',
   'key.deleted': 'Deleted',
 };
 

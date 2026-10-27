@@ -205,7 +205,7 @@ export async function queryAllAuditEvents({
 /** The bucket events the dashboard feed shows, narrowed by {@link ActivityScope}. */
 const ACTIVITY_BUCKET_EVENT_TYPES: AuditEventType[] = ['bucket.created', 'bucket.deleted'];
 /** The key events the dashboard feed shows, narrowed by {@link ActivityScope}. */
-const ACTIVITY_KEY_EVENT_TYPES: AuditEventType[] = ['key.created', 'key.deleted'];
+const ACTIVITY_KEY_EVENT_TYPES: AuditEventType[] = ['key.created', 'key.rotated', 'key.deleted'];
 
 /**
  * Which events of one kind a feed reader may see: the whole org's, only those
@@ -253,7 +253,7 @@ export async function queryActivityEvents({
 
   do {
     const page = await getDynamoClient().send(
-      new QueryCommand(activityQueryInput({ orgId, bucketEvents, keyEvents, from, startKey })),
+      new QueryCommand(buildActivityQueryInput({ orgId, bucketEvents, keyEvents, from, startKey })),
     );
     cost.pages += 1;
     cost.rows += page.Items?.length ?? 0;
@@ -264,7 +264,7 @@ export async function queryActivityEvents({
   return { events: events.slice(0, limit), cost };
 }
 
-function activityQueryInput({
+function buildActivityQueryInput({
   orgId,
   bucketEvents,
   keyEvents,
@@ -285,8 +285,8 @@ function activityQueryInput({
   };
   const names: Record<string, string> = { '#ttl': 'ttl', '#type': 'type', '#outcome': 'outcome' };
 
-  const bucketFilter = scopedFilter('bucket', ACTIVITY_BUCKET_EVENT_TYPES, bucketEvents, values);
-  const keyFilter = scopedFilter('key', ACTIVITY_KEY_EVENT_TYPES, keyEvents, values);
+  const bucketFilter = buildBucketFilter(bucketEvents, values);
+  const keyFilter = buildKeyFilter(keyEvents, values);
   const typeFilter = keyFilter ? `((${bucketFilter}) OR (${keyFilter}))` : `(${bucketFilter})`;
 
   return {
@@ -303,43 +303,44 @@ function activityQueryInput({
   };
 }
 
-/**
- * The clause selecting one kind of event under its scope, or undefined when the
- * reader sees none of that kind. Key events are S3 keys only.
- */
-function scopedFilter(
-  kind: 'bucket',
-  types: AuditEventType[],
-  scope: ActivityBucketScope,
-  values: Record<string, unknown>,
-): string;
-function scopedFilter(
-  kind: 'key',
-  types: AuditEventType[],
-  scope: ActivityScope,
-  values: Record<string, unknown>,
-): string | undefined;
-function scopedFilter(
-  kind: 'bucket' | 'key',
-  types: AuditEventType[],
-  scope: ActivityScope,
-  values: Record<string, unknown>,
-): string | undefined {
-  if (scope.sees === 'none') return undefined;
-  const clauses = [`#type IN (${typeList(kind, types, values)})`];
-  if (kind === 'key') {
-    clauses.push('details.keyKind = :s3');
-    values[':s3'] = 's3';
-  }
+/** The clause selecting the bucket events a reader may see. */
+function buildBucketFilter(scope: ActivityBucketScope, values: Record<string, unknown>): string {
+  const clauses = [`#type IN (${bindTypeList('bucket', ACTIVITY_BUCKET_EVENT_TYPES, values)})`];
   if (scope.sees === 'own') {
-    clauses.push(`actor.id = :${kind}ActorId`);
-    values[`:${kind}ActorId`] = scope.actorId;
+    clauses.push('actor.id = :bucketActorId');
+    values[':bucketActorId'] = scope.actorId;
+  }
+  return clauses.join(' AND ');
+}
+
+/**
+ * The clause selecting the S3 key events a reader may see, or undefined when
+ * they see none.
+ *
+ * A rotation writes its own `key.rotated` and then revokes the old credential
+ * under a `key.deleted` with reason `rotation`. The feed shows the rotation and
+ * leaves that delete out: the key it names is still live under its new
+ * credential. Only `key.deleted` carries a reason, so the clause touches no
+ * other type.
+ */
+function buildKeyFilter(scope: ActivityScope, values: Record<string, unknown>): string | undefined {
+  if (scope.sees === 'none') return undefined;
+  const clauses = [
+    `#type IN (${bindTypeList('key', ACTIVITY_KEY_EVENT_TYPES, values)})`,
+    'details.keyKind = :s3',
+    'NOT details.reason = :rotation',
+  ];
+  values[':s3'] = 's3';
+  values[':rotation'] = 'rotation';
+  if (scope.sees === 'own') {
+    clauses.push('actor.id = :keyActorId');
+    values[':keyActorId'] = scope.actorId;
   }
   return clauses.join(' AND ');
 }
 
 /** Binds each type to its own placeholder and returns the placeholders, for an `IN`. */
-function typeList(
+function bindTypeList(
   prefix: string,
   types: AuditEventType[],
   values: Record<string, unknown>,

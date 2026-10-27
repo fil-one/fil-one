@@ -40,6 +40,20 @@ export class BucketConfigurationError extends Error {
   }
 }
 
+// The bucket was created, and the first policy written after it failed. The
+// policy write's own error is the cause. Wrapped so a caller can tell the bucket
+// exists whatever that error was: the write can fail in more ways than the
+// policy errors below name (a 403, a NoSuchBucket read right after the create,
+// a response missing its ETag).
+export class BucketPolicyWriteError extends Error {
+  readonly bucketName: string;
+  constructor(bucketName: string, options: ErrorOptions & { cause: unknown }) {
+    super(`Bucket "${bucketName}" was created, but its first policy could not be written`, options);
+    this.name = 'BucketPolicyWriteError';
+    this.bucketName = bucketName;
+  }
+}
+
 // Thrown by data-plane reads (e.g. getBucketUsageMetrics) when the bucket is not
 // found or is not owned by the tenant. The ownership check is tenant-scoped, so a
 // bucket belonging to another tenant surfaces as not-found rather than leaking its

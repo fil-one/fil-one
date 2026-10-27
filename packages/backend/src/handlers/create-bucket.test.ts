@@ -55,6 +55,7 @@ import { baseHandler } from './create-bucket.ts';
 import {
   BucketAlreadyExistsError,
   BucketConfigurationError,
+  BucketPolicyWriteError,
   PolicyPublishError,
   PolicyValidationError,
 } from '../lib/errors.ts';
@@ -71,6 +72,11 @@ const USER_1 = '00000000-0000-0000-0000-000000000001';
 const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
 const parseResponseBody = (result: { body?: string }) => JSON.parse(result.body ?? '{}');
+
+/** A failure at the first policy write, wrapped as the orchestrator raises it. */
+function policyWriteFailure(cause: unknown) {
+  return new BucketPolicyWriteError('my-bucket', { cause });
+}
 
 function validBody() {
   return JSON.stringify({ bucketName: 'my-bucket', region: S3_REGION });
@@ -354,7 +360,9 @@ describe('create-bucket baseHandler', () => {
     });
 
     it('answers 400 when the storage system refuses the policy written after the create', async () => {
-      mockCreateBucket.mockRejectedValue(new PolicyValidationError('unknown principal'));
+      mockCreateBucket.mockRejectedValue(
+        policyWriteFailure(new PolicyValidationError('unknown principal')),
+      );
 
       const result = await baseHandler(
         buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }),
@@ -367,7 +375,9 @@ describe('create-bucket baseHandler', () => {
     });
 
     it('records the policy write as failed when the storage system refuses the policy', async () => {
-      mockCreateBucket.mockRejectedValue(new PolicyValidationError('unknown principal'));
+      mockCreateBucket.mockRejectedValue(
+        policyWriteFailure(new PolicyValidationError('unknown principal')),
+      );
 
       await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }));
 
@@ -378,7 +388,7 @@ describe('create-bucket baseHandler', () => {
     });
 
     it('rethrows a PolicyPublishError from the policy write', async () => {
-      mockCreateBucket.mockRejectedValue(new PolicyPublishError());
+      mockCreateBucket.mockRejectedValue(policyWriteFailure(new PolicyPublishError()));
 
       // errorHandlerMiddleware renders what baseHandler throws as a 500.
       await expect(
@@ -387,7 +397,7 @@ describe('create-bucket baseHandler', () => {
     });
 
     it('records the policy write as failed when it cannot be published', async () => {
-      mockCreateBucket.mockRejectedValue(new PolicyPublishError());
+      mockCreateBucket.mockRejectedValue(policyWriteFailure(new PolicyPublishError()));
 
       await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO })).catch(
         () => undefined,
@@ -447,8 +457,9 @@ describe('create-bucket baseHandler', () => {
     // bucket exists and the event says so.
     it.each([
       ['its configuration fails', new BucketConfigurationError('my-bucket')],
-      ['its policy is refused', new PolicyValidationError('unknown principal')],
-      ['its policy cannot be published', new PolicyPublishError()],
+      ['its policy is refused', policyWriteFailure(new PolicyValidationError('unknown principal'))],
+      // An error the policy classes do not name, such as a 403 from the gateway.
+      ['its policy write fails any other way', policyWriteFailure(new Error('AccessDenied'))],
     ])('completes the bucket.created as succeeded when %s', async (_case, err) => {
       mockCreateBucket.mockRejectedValue(err);
 

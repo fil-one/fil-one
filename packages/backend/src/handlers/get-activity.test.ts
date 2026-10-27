@@ -6,12 +6,6 @@ import type { AuditEvent, AuditEventType } from '@filone/shared';
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
-}));
-
 const mockQueryActivityEvents = vi.fn();
 vi.mock('../lib/audit-query.ts', () => ({
   queryActivityEvents: (...args: unknown[]) => mockQueryActivityEvents(...args),
@@ -102,7 +96,7 @@ describe('get-activity baseHandler', () => {
     },
   );
 
-  it.each(['key.created', 'key.deleted'] as const)(
+  it.each(['key.created', 'key.rotated', 'key.deleted'] as const)(
     'renders a %s event as a key row named by the key',
     async (type) => {
       resolveEvents(auditEvent(type, { keyKind: 's3', keyName: 'any-key' }, 'e-1'));

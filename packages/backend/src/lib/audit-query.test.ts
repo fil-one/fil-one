@@ -420,14 +420,6 @@ describe('queryActivityEvents', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  /** The type placeholders' values the filter names, as plain strings. */
-  function filteredTypes(): string[] {
-    const values = unmarshall(queryInput().ExpressionAttributeValues!);
-    return Object.entries(values)
-      .filter(([placeholder]) => /Type\d+$/.test(placeholder))
-      .map(([, value]) => value as string);
-  }
-
   it("reads the caller's org newest first from the start of retention", async () => {
     await queryActivityEvents({
       orgId: ORG_ID,
@@ -449,86 +441,57 @@ describe('queryActivityEvents', () => {
     });
   });
 
-  it('keeps only completions that succeeded', async () => {
-    await queryActivityEvents({
-      orgId: ORG_ID,
-      bucketEvents: { sees: 'all' },
-      keyEvents: { sees: 'all' },
-      limit: 10,
-    });
+  // Asserted whole rather than by fragment: a clause landing in the wrong group,
+  // such as the key-only `keyKind` check applied to every event, hides every
+  // bucket row and would still contain each expected fragment.
+  const BUCKETS = '#type IN (:bucketType0, :bucketType1)';
+  const KEYS =
+    '#type IN (:keyType0, :keyType1, :keyType2) AND details.keyKind = :s3 AND NOT details.reason = :rotation';
+  const BUCKET_TYPES = { ':bucketType0': 'bucket.created', ':bucketType1': 'bucket.deleted' };
+  const KEY_TYPES = {
+    ':keyType0': 'key.created',
+    ':keyType1': 'key.rotated',
+    ':keyType2': 'key.deleted',
+    ':s3': 's3',
+    ':rotation': 'rotation',
+  };
 
-    expect(queryInput().FilterExpression).toContain('#outcome = :succeeded');
-    expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
+  it.each([
+    [
+      'the whole org’s succeeded bucket and S3 key events, rotation deletes left out, for Owner and Admin',
+      { bucketEvents: { sees: 'all' }, keyEvents: { sees: 'all' } } as const,
+      `#ttl > :now AND #outcome = :succeeded AND ((${BUCKETS}) OR (${KEYS}))`,
+      { ...BUCKET_TYPES, ...KEY_TYPES },
+    ],
+    [
+      'only the bucket and key events the reader acted on, for a Member',
+      {
+        bucketEvents: { sees: 'own', actorId: USER_ID },
+        keyEvents: { sees: 'own', actorId: USER_ID },
+      } as const,
+      `#ttl > :now AND #outcome = :succeeded AND ((${BUCKETS} AND actor.id = :bucketActorId) OR (${KEYS} AND actor.id = :keyActorId))`,
+      { ...BUCKET_TYPES, ...KEY_TYPES, ':bucketActorId': USER_ID, ':keyActorId': USER_ID },
+    ],
+    [
+      'only the bucket events the reader acted on and no key events, for ReadOnly',
+      { bucketEvents: { sees: 'own', actorId: USER_ID }, keyEvents: { sees: 'none' } } as const,
+      `#ttl > :now AND #outcome = :succeeded AND (${BUCKETS} AND actor.id = :bucketActorId)`,
+      { ...BUCKET_TYPES, ':bucketActorId': USER_ID },
+    ],
+  ])('filters to %s', async (_case, scopes, filterExpression, boundValues) => {
+    await queryActivityEvents({ orgId: ORG_ID, ...scopes, limit: 10 });
+
+    expect(queryInput().FilterExpression).toStrictEqual(filterExpression);
+    const {
+      ':pk': _pk,
+      ':from': _from,
+      ...values
+    } = unmarshall(queryInput().ExpressionAttributeValues!);
+    expect(values).toStrictEqual({
+      ':now': Math.floor(Date.parse(NOW) / 1000),
       ':succeeded': 'succeeded',
+      ...boundValues,
     });
-  });
-
-  it('reads bucket and S3 key events for a reader who sees every key', async () => {
-    await queryActivityEvents({
-      orgId: ORG_ID,
-      bucketEvents: { sees: 'all' },
-      keyEvents: { sees: 'all' },
-      limit: 10,
-    });
-
-    expect(filteredTypes()).toStrictEqual([
-      'bucket.created',
-      'bucket.deleted',
-      'key.created',
-      'key.deleted',
-    ]);
-    expect(queryInput().FilterExpression).toContain('details.keyKind = :s3');
-    expect(queryInput().FilterExpression).not.toContain('actor.id');
-  });
-
-  it('narrows key events to those the reader acted on when they see only their own', async () => {
-    await queryActivityEvents({
-      orgId: ORG_ID,
-      bucketEvents: { sees: 'all' },
-      keyEvents: { sees: 'own', actorId: USER_ID },
-      limit: 10,
-    });
-
-    expect(queryInput().FilterExpression).toContain('actor.id = :keyActorId');
-    expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
-      ':keyActorId': USER_ID,
-    });
-  });
-
-  it('narrows bucket events to those the reader acted on when they see only their own', async () => {
-    await queryActivityEvents({
-      orgId: ORG_ID,
-      bucketEvents: { sees: 'own', actorId: USER_ID },
-      keyEvents: { sees: 'none' },
-      limit: 10,
-    });
-
-    expect(queryInput().FilterExpression).toContain('actor.id = :bucketActorId');
-    expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
-      ':bucketActorId': USER_ID,
-    });
-  });
-
-  it('reads bucket events from every actor for a reader who sees the whole org', async () => {
-    await queryActivityEvents({
-      orgId: ORG_ID,
-      bucketEvents: { sees: 'all' },
-      keyEvents: { sees: 'none' },
-      limit: 10,
-    });
-
-    expect(queryInput().FilterExpression).not.toContain('actor.id');
-  });
-
-  it('reads bucket events only for a reader who sees no keys', async () => {
-    await queryActivityEvents({
-      orgId: ORG_ID,
-      bucketEvents: { sees: 'all' },
-      keyEvents: { sees: 'none' },
-      limit: 10,
-    });
-
-    expect(filteredTypes()).toStrictEqual(['bucket.created', 'bucket.deleted']);
   });
 
   it('keeps reading pages until the limit is matched', async () => {

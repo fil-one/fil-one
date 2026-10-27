@@ -38,13 +38,13 @@ export async function baseHandler(
   const { events, cost } = await trackRequestStep(event, 'queryActivityEvents', () =>
     queryActivityEvents({
       orgId,
-      bucketEvents: activityBucketEvents(event),
-      keyEvents: activityKeyEvents(event),
+      bucketEvents: getBucketEventScope(event),
+      keyEvents: getKeyEventScope(event),
       limit,
     }),
   );
 
-  const activities = events.flatMap(toActivity);
+  const activities = events.flatMap(mapToActivities);
   reportAuditQuery({
     route: 'activity',
     cost,
@@ -63,7 +63,7 @@ export async function baseHandler(
  * Reading what the caller did is the narrowing that needs no storage-system call;
  * it also hides a bucket someone else created and then shared with them.
  */
-function activityBucketEvents(event: AuthenticatedEvent): ActivityBucketScope {
+function getBucketEventScope(event: AuthenticatedEvent): ActivityBucketScope {
   const { userId, membership } = getUserInfo(event);
   const memberId = getScopedMemberId(membership?.role, userId);
   return memberId ? { sees: 'own', actorId: memberId } : { sees: 'all' };
@@ -74,7 +74,7 @@ function activityBucketEvents(event: AuthenticatedEvent): ActivityBucketScope {
  * whole org's under `keys.manage_all`, those the caller acted on under
  * `keys.manage_own`, and none for a ReadOnly member who holds neither.
  */
-function activityKeyEvents(event: AuthenticatedEvent): ActivityScope {
+function getKeyEventScope(event: AuthenticatedEvent): ActivityScope {
   const scope = keyScope(event);
   return scope.sees === 'own' ? { sees: 'own', actorId: scope.userId } : scope;
 }
@@ -83,7 +83,7 @@ function activityKeyEvents(event: AuthenticatedEvent): ActivityScope {
  * One audit event as a feed row. Empty for a type the feed does not render, so
  * a filter widened on the read side cannot reach the console unlabelled.
  */
-function toActivity(event: AuditEvent): RecentActivity[] {
+function mapToActivities(event: AuditEvent): RecentActivity[] {
   const base = { id: event.eventId, timestamp: event.createdAt };
   switch (event.type) {
     case 'bucket.created':
@@ -97,6 +97,7 @@ function toActivity(event: AuditEvent): RecentActivity[] {
         },
       ];
     case 'key.created':
+    case 'key.rotated':
     case 'key.deleted':
       return [
         {
