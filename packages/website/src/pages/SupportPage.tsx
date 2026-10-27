@@ -43,8 +43,18 @@ const FAQ_ITEMS: AccordionItem[] = [
   },
   {
     title: 'How do I migrate from Storacha or another S3-compatible provider?',
-    content:
-      "Fil One is S3-compatible, so tools like rclone work out of the box. Point rclone at s3.eu-west-1.filonecontent.com with your Fil One credentials and sync your data across. If you need help with a larger migration, reach out and we'll guide you through it.",
+    // Each region has its own endpoint, so the answer links to the list rather than naming one.
+    content: (
+      <>
+        Fil One is S3-compatible, so tools like rclone work out of the box. Point rclone at your
+        bucket&apos;s{' '}
+        <Link href={`${DOCS_URL}/sdk/overview#connection-details`} variant="accent">
+          region endpoint
+        </Link>{' '}
+        with your Fil One credentials and sync your data across. If you need help with a larger
+        migration, reach out and we&apos;ll guide you through it.
+      </>
+    ),
   },
   {
     title: 'Can I pay with FIL tokens?',
