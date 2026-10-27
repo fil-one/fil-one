@@ -6,7 +6,7 @@ import { ensureBucketInEachRegion } from './buckets.util.ts';
 // Staging sometimes resets its storage layer and every bucket disappears, which
 // breaks the upload tests in buckets.spec.ts. This project re-seeds one bucket
 // per region for every role. It runs once per role (after `auth.setup.ts`, see
-// the `seed-buckets` project in playwright.config.ts) instead of racing across
+// the `destructive-seed-buckets` project in playwright.config.ts) instead of racing across
 // the parallel browser projects.
 //
 // `unpaid` is seeded as `past_due`, which the subscription guard rejects with
