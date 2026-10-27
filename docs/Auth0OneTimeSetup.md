@@ -103,11 +103,11 @@ Consequences to expect, none of them a regression:
 
 No dashboard work is needed to add an alias, since the tenant domain already exists. Adding a _new_ alias hostname means all of the following — each omission leaves a silently half-working alias:
 
-1. `PROD_CONSOLE_ALIAS_HOSTS` in `packages/shared/src/constants.ts`. The first entry is the ACM cert's primary domain, which is how `sst.config.ts` finds the cert.
+1. `PROD_CONSOLE_ALIAS_HOSTS` in `packages/shared/src/constants.ts`.
 2. `AUTH0_DOMAIN_BY_CONSOLE_ORIGIN` in the same file. A missing entry silently falls back to `auth.fil.one`, so decide which domain the alias signs in through.
 3. `MARKETING_URL_BY_CONSOLE_ORIGIN` in the same file, or signing out returns the user to `fil.one` — the domain the alias exists to route around. The completeness tests in `packages/shared/src/constants.test.ts` fail if you miss either table.
 4. `CONSOLE_ORIGIN_BY_SITE_HOST` in `fil-one/website` `src/lib/console-url.ts`, or the marketing CTAs on the alias point at the canonical console. Separate repo, so nothing enforces this.
-5. The CloudFront certificate and DNS in `fil-one/infrastructure` `environments/prod/filone-com.tf`. The certificate must cover every console hostname, and its primary domain must stay `PROD_CONSOLE_ALIAS_HOSTS[0]`.
+5. The CloudFront certificate and DNS in `fil-one/infrastructure` `environments/prod/filone-com.tf`. The certificate must cover every console hostname. `sst.config.ts` finds it by its domain name, `app.filone.com`.
 6. The `Version` property on `SetupStack` in `sst.config.ts` — the custom resource only re-runs on a property change, so without a bump the new callback URL is never registered.
 
 **5. Verification after first deploy:**

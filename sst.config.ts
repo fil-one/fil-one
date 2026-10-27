@@ -420,16 +420,14 @@ export default $config({
     // ACM cert must be in us-east-1 for CloudFront. Ephemeral stages share a
     // wildcard cert for *.dev.fil.one provisioned in the fil-one/infrastructure repo.
     //
-    // In production the cert is looked up by its alias name rather than by
-    // domainName: CloudFront allows one viewer certificate per distribution, so a
-    // single cert has to carry every alias, and the one provisioned for this
-    // purpose deliberately uses the first alias host as its primary domain so the
-    // lookup cannot also match the older app.fil.one-only cert it supersedes.
+    // CloudFront allows one viewer certificate per distribution, so in production a
+    // single cert carries app.fil.one and every alias. It is named after
+    // app.filone.com, the console's next canonical host, and looked up by that name.
     // See environments/prod/filone-com.tf in fil-one/infrastructure.
     const certDomain = isEphemeralStage
       ? '*.dev.fil.one'
       : isProduction
-        ? PROD_CONSOLE_ALIAS_HOSTS[0]
+        ? 'app.filone.com'
         : domainName;
     const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
     const cert = isLocal
@@ -440,7 +438,7 @@ export default $config({
             statuses: ['ISSUED'],
             // The lookup errors if more than one ISSUED cert matches. That happens
             // transiently whenever a cert is replaced rather than mutated in place,
-            // since both carry the same primary domain until the old one is retired.
+            // since both carry the same domain name until the old one is retired.
             // Picking the newest is right: the older one is the one going away.
             mostRecent: true,
           },

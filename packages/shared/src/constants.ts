@@ -200,9 +200,9 @@ export const PROD_CONSOLE_HOST = 'app.fil.one';
  * app.filone.ai, and app.filone.com, the domain the console is moving to.
  *
  * These are alternate domain names on the same CloudFront distribution serving the
- * same bundle — not a separate deployment. The first entry is the ACM cert's primary
- * domain, which is how sst.config.ts finds the cert. See environments/prod/filone-com.tf
- * in fil-one/infrastructure, and docs/Auth0OneTimeSetup.md §4a.
+ * same bundle — not a separate deployment. The CloudFront cert must cover every entry;
+ * see environments/prod/filone-com.tf in fil-one/infrastructure, and
+ * docs/Auth0OneTimeSetup.md §4a.
  */
 export const PROD_CONSOLE_ALIAS_HOSTS = ['app.filone.ai', 'app.filone.com'] as const;
 
