@@ -104,6 +104,25 @@ describe('submitSupportForm', () => {
     ]);
   });
 
+  it('leaves out the name fields when the name is an email address', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      name: 'any@example.com',
+      organization: 'any-org',
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toStrictEqual([
+      { objectTypeId: '0-1', name: 'company', value: 'any-org' },
+      { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
+      { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
+      { objectTypeId: '0-5', name: 'content', value: 'any message' },
+    ]);
+  });
+
   it('joins multiple categories with semicolons', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 

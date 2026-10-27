@@ -53,7 +53,10 @@ export async function submitContactSalesForm(fields: ContactSalesFields): Promis
 }
 
 type SupportFields = {
-  /** The signed-in user's full name. Absent when their sign-in method gave none. */
+  /**
+   * The signed-in user's full name. Absent when their sign-in method gave none,
+   * and the email address itself for a password account that never set one.
+   */
   name?: string;
   /** The active organization's name, sent as HubSpot's `company` property. */
   organization: string;
@@ -64,7 +67,10 @@ type SupportFields = {
 
 export async function submitSupportForm(fields: SupportFields): Promise<void> {
   const hubspotFields: HubSpotField[] = [];
-  if (fields.name) {
+  // A name holding an @ is an email address standing in for a name, and would
+  // show on the ticket as the person's first name. HubSpot's First Name is
+  // optional, so the contact is created from the email alone.
+  if (fields.name && !fields.name.includes('@')) {
     const [firstName, ...lastName] = fields.name.split(' ');
     hubspotFields.push(
       { objectTypeId: '0-1', name: 'firstname', value: firstName },
