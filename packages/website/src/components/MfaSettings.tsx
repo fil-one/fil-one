@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { PlusIcon } from '@phosphor-icons/react/dist/ssr';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 
 import { Button } from './Button';
@@ -70,7 +71,13 @@ function MethodRow({
         <p className="text-ui font-medium text-zinc-900">{label}</p>
         <p className="text-xs text-zinc-500">{details.join(' · ')}</p>
       </div>
-      <Button variant="ghost" size="sm" onClick={onRequestRemove} disabled={disabled}>
+      <Button
+        variant="tertiary"
+        size="sm"
+        aria-label={`Remove ${label}`}
+        onClick={onRequestRemove}
+        disabled={disabled}
+      >
         Remove
       </Button>
     </li>
@@ -201,7 +208,7 @@ function RecoveryCodeSection() {
         description="Generate a single-use code for signing in if you lose access to your authenticator"
         action={
           <Button
-            variant="ghost"
+            variant="tertiary"
             size="sm"
             onClick={() => setConfirmRegenerate(true)}
             disabled={regenerate.isPending}
@@ -243,10 +250,12 @@ function EnrolledView({ me }: { me: MeResponse }) {
           <Button
             variant="ghost"
             size="sm"
+            icon={PlusIcon}
+            aria-label={enroll.isPending ? undefined : 'Add two-factor method'}
             onClick={() => enroll.mutate()}
             disabled={enroll.isPending}
           >
-            {enroll.isPending ? 'Redirecting...' : 'Add authenticator or key'}
+            {enroll.isPending ? 'Redirecting...' : 'Add method'}
           </Button>
         }
       />
@@ -267,7 +276,7 @@ function EnrolledView({ me }: { me: MeResponse }) {
           only repeat its Remove. */}
       {me.mfaEnrollments.length > 1 && (
         <Button
-          variant="ghost"
+          variant="tertiary"
           size="sm"
           className="self-start"
           onClick={() => setConfirmDisable(true)}

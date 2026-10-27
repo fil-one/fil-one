@@ -397,7 +397,7 @@ function SecuritySection({ me }: { me: MeResponse }) {
             description="Change your account password"
             action={
               <Button
-                variant="ghost"
+                variant="tertiary"
                 size="sm"
                 onClick={() => changePasswordMutation.mutate()}
                 disabled={changePasswordMutation.isPending}
