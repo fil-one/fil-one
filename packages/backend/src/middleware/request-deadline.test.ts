@@ -4,6 +4,7 @@ import {
   getRequestDeadline,
   markRequestStep,
   requestDeadlineMiddleware,
+  trackRequestStep,
 } from './request-deadline.ts';
 
 const USER_INFO = { userId: 'any-user', orgId: 'any-org' };
@@ -66,18 +67,53 @@ describe('requestDeadlineMiddleware', () => {
 
     expect(consoleError).toHaveBeenCalledWith('[request-deadline] Request deadline reached', {
       step: 'any-step',
+      stepsInFlight: [],
       orgId: 'any-org',
       userId: 'any-user',
       apiRequestId: 'req-1',
     });
   });
 
-  it('logs nothing when the deadline fires on a handler that marks no steps', () => {
+  it('logs the deadline when it fires on a handler that marks no steps', () => {
     const { deadline, consoleError } = startRequestWithManualDeadline();
 
     deadline.abort();
 
-    expect(consoleError).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith('[request-deadline] Request deadline reached', {
+      stepsInFlight: [],
+      orgId: 'any-org',
+      userId: 'any-user',
+      apiRequestId: 'req-1',
+    });
+  });
+
+  it('names every tracked step still running when the deadline fires', async () => {
+    const { event, deadline, consoleError } = startRequestWithManualDeadline();
+    await trackRequestStep(event, 'any-settled-step', async () => {});
+    void trackRequestStep(event, 'any-hung-step', () => new Promise(() => {}));
+    void trackRequestStep(event, 'other-hung-step', () => new Promise(() => {}));
+
+    deadline.abort();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      '[request-deadline] Request deadline reached',
+      expect.objectContaining({ stepsInFlight: ['any-hung-step', 'other-hung-step'] }),
+    );
+  });
+
+  it.each([
+    { outcome: 'resolved', run: async () => 'any-result' },
+    { outcome: 'rejected', run: async () => Promise.reject(new Error('any-failure')) },
+  ])('drops a tracked step from the log once it has $outcome', async ({ run }) => {
+    const { event, deadline, consoleError } = startRequestWithManualDeadline();
+    await trackRequestStep(event, 'any-step', run).catch(() => {});
+
+    deadline.abort();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      '[request-deadline] Request deadline reached',
+      expect.objectContaining({ stepsInFlight: [] }),
+    );
   });
 
   it.each(['after', 'onError'] as const)(

@@ -5,9 +5,13 @@ import type { UsageResponse, TenantStatus } from '@filone/shared';
 import { countAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
-import { getProvisionedRegions } from '../lib/region-helpers.ts';
-import type { RegionOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
-import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
+import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
+import type { TenantInfo } from '../lib/service-orchestrator.ts';
+import {
+  getRequestDeadline,
+  requestDeadlineMiddleware,
+  trackRequestStep,
+} from '../middleware/request-deadline.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -34,11 +38,15 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 
   // Access keys live in DynamoDB, not in any region's orchestrator, so this is
   // independent of how many regions answer below, including none.
-  const accessKeyCount = await countAccessKeysInScope(orgId, keyScope(event));
+  const accessKeyCount = await trackRequestStep(event, 'countAccessKeysInScope', () =>
+    countAccessKeysInScope(orgId, keyScope(event)),
+  );
 
   // The dashboard aggregates usage across every region the org is provisioned
   // in, so resolve the ready tenant on each available orchestrator.
-  const regions = await getProvisionedRegions(orgId);
+  const regions = await trackRequestStep(event, 'getProvisionedRegions', () =>
+    getProvisionedRegions(orgId),
+  );
 
   if (regions.length === 0) {
     const response: UsageResponse = {
@@ -58,8 +66,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // Swallow per-orchestrator errors so one region's outage still renders the
   // rest: settle every fetch, log the failures, and keep the successes.
   const settled = await Promise.allSettled(
-    regions.map(({ orchestrator, tenantId }) =>
-      fetchRegionUsage(orchestrator, tenantId, { from: thirtyDaysAgo, to: now }, signal),
+    regions.map((region) =>
+      fetchRegionUsage(event, region, { from: thirtyDaysAgo, to: now }, signal),
     ),
   );
 
@@ -129,20 +137,26 @@ function aggregateRegionUsages(regionUsages: RegionUsage[], accessKeyCount: numb
 }
 
 async function fetchRegionUsage(
-  orchestrator: RegionOrchestrator,
-  tenantId: string,
+  event: AuthenticatedEvent,
+  { orchestrator, tenantId }: ProvisionedRegion,
   window: { from: Date; to: Date },
   signal: AbortSignal,
 ): Promise<RegionUsage> {
   const { from, to } = window;
   const [metrics, info, buckets] = await Promise.all([
-    orchestrator.getTenantUsageMetrics(
-      tenantId,
-      { from: from.toISOString(), to: to.toISOString(), interval: '1d' },
-      { signal },
+    trackRequestStep(event, `getTenantUsageMetrics:${orchestrator.region}`, () =>
+      orchestrator.getTenantUsageMetrics(
+        tenantId,
+        { from: from.toISOString(), to: to.toISOString(), interval: '1d' },
+        { signal },
+      ),
     ),
-    orchestrator.getTenantInfo(tenantId, { signal }),
-    orchestrator.listBuckets(tenantId, undefined, { signal }),
+    trackRequestStep(event, `getTenantInfo:${orchestrator.region}`, () =>
+      orchestrator.getTenantInfo(tenantId, { signal }),
+    ),
+    trackRequestStep(event, `listBuckets:${orchestrator.region}`, () =>
+      orchestrator.listBuckets(tenantId, undefined, { signal }),
+    ),
   ]);
 
   // Storage is point-in-time: take the most recent reading. Egress is

@@ -319,3 +319,27 @@ describe('get-usage baseHandler', () => {
     errorSpy.mockRestore();
   });
 });
+
+describe('get-usage baseHandler (request deadline)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    stubAccessKeyRows();
+  });
+
+  // A call that ignores the deadline holds the handler until the Lambda timeout;
+  // the deadline log then names it among the steps still in flight.
+  it("names a region's listBuckets as in flight while it hangs after every other call has answered", async () => {
+    const aurora = fakeOrchestrator('aurora', { region: S3Region.EuWest1 });
+    const fth = fakeOrchestrator('fth', { region: S3Region.UsEast1 });
+    fth.listBuckets.mockReturnValue(new Promise(() => {}));
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    const event = authenticatedEvent();
+
+    void baseHandler(event);
+
+    await vi.waitFor(() =>
+      expect(event.requestContext.deadlineStepsInFlight).toStrictEqual(['listBuckets:us-east-1']),
+    );
+  });
+});

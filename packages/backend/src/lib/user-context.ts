@@ -46,6 +46,8 @@ export interface AuthenticatedEvent extends APIGatewayProxyEventV2 {
     deadline?: AbortSignal;
     /** Set by markRequestStep; logged by requestDeadlineMiddleware when the deadline fires. */
     deadlineStep?: string;
+    /** Kept by trackRequestStep; logged by requestDeadlineMiddleware when the deadline fires. */
+    deadlineStepsInFlight?: string[];
   };
 }
 

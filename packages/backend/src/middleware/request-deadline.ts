@@ -12,6 +12,7 @@ export const REQUEST_DEADLINE_MARGIN_MS = 500;
 type DeadlineRequestContext = APIGatewayProxyEventV2['requestContext'] & {
   deadline: AbortSignal;
   deadlineStep?: string;
+  deadlineStepsInFlight?: string[];
   userInfo?: { orgId?: string; userId?: string };
 };
 
@@ -33,9 +34,10 @@ const stopDeadlineLogs = new WeakMap<APIGatewayProxyEventV2, () => void>();
  * route's configured timeout, and the time spent in middleware and in reads
  * before the first upstream call counts against it.
  *
- * When the deadline fires on a handler that marked its steps with
- * {@link markRequestStep}, the step in flight is logged. That names the call
- * even when it takes no signal and goes on hanging until the Lambda timeout.
+ * When the deadline fires it is logged, with the step marked by
+ * {@link markRequestStep} and every step {@link trackRequestStep} still has in
+ * flight. That names the call even when it takes no signal and goes on hanging
+ * until the Lambda timeout.
  */
 export function requestDeadlineMiddleware() {
   const before = (request: DeadlineRequest): void => {
@@ -44,18 +46,20 @@ export function requestDeadlineMiddleware() {
     const deadline = AbortSignal.timeout(Math.max(0, remainingMs - REQUEST_DEADLINE_MARGIN_MS));
     requestContext.deadline = deadline;
 
-    const logStepInFlight = () => {
-      if (requestContext.deadlineStep === undefined) return;
+    const logDeadlineReached = () => {
+      const { deadlineStep } = requestContext;
       console.error('[request-deadline] Request deadline reached', {
-        step: requestContext.deadlineStep,
+        ...(deadlineStep !== undefined && { step: deadlineStep }),
+        // A copy: the steps still running settle after this line is written.
+        stepsInFlight: [...(requestContext.deadlineStepsInFlight ?? [])],
         orgId: requestContext.userInfo?.orgId,
         userId: requestContext.userInfo?.userId,
         apiRequestId: requestContext.requestId,
       });
     };
-    deadline.addEventListener('abort', logStepInFlight, { once: true });
+    deadline.addEventListener('abort', logDeadlineReached, { once: true });
     stopDeadlineLogs.set(request.event, () =>
-      deadline.removeEventListener('abort', logStepInFlight),
+      deadline.removeEventListener('abort', logDeadlineReached),
     );
   };
 
@@ -88,4 +92,24 @@ export function getRequestDeadline(event: AuthenticatedEvent): AbortSignal {
  */
 export function markRequestStep(event: AuthenticatedEvent, step: string): void {
   event.requestContext.deadlineStep = step;
+}
+
+/**
+ * Runs one upstream call as a named step, for the log line
+ * {@link requestDeadlineMiddleware} writes if the deadline fires before the
+ * call settles. Unlike {@link markRequestStep} it suits calls that run
+ * concurrently: the log names every step still running.
+ */
+export async function trackRequestStep<T>(
+  event: AuthenticatedEvent,
+  step: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const stepsInFlight = (event.requestContext.deadlineStepsInFlight ??= []);
+  stepsInFlight.push(step);
+  try {
+    return await run();
+  } finally {
+    stepsInFlight.splice(stepsInFlight.indexOf(step), 1);
+  }
 }
