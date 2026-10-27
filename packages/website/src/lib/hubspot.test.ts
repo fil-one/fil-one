@@ -55,10 +55,10 @@ describe('submitSupportForm', () => {
         fields: [
           { objectTypeId: '0-1', name: 'firstname', value: 'Jane' },
           { objectTypeId: '0-1', name: 'lastname', value: 'Doe' },
-          { objectTypeId: '0-1', name: 'company', value: 'Acme Inc' },
           { objectTypeId: '0-1', name: 'email', value: 'jane@acme.com' },
           { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'PRODUCT_ISSUE' },
           { objectTypeId: '0-5', name: 'content', value: 'Help needed' },
+          { objectTypeId: '0-5', name: 'filone_org_name', value: 'Acme Inc' },
           { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
         ],
         context: {
@@ -101,10 +101,10 @@ describe('submitSupportForm', () => {
     });
 
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toStrictEqual([
-      { objectTypeId: '0-1', name: 'company', value: 'any-org' },
       { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
       { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
       { objectTypeId: '0-5', name: 'content', value: 'any message' },
+      { objectTypeId: '0-5', name: 'filone_org_name', value: 'any-org' },
       { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
     ]);
   });
@@ -122,31 +122,12 @@ describe('submitSupportForm', () => {
     });
 
     expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toStrictEqual([
-      { objectTypeId: '0-1', name: 'company', value: 'any-org' },
       { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
       { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
       { objectTypeId: '0-5', name: 'content', value: 'any message' },
+      { objectTypeId: '0-5', name: 'filone_org_name', value: 'any-org' },
       { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
     ]);
-  });
-
-  it('sends the user id on the contact when the user has one', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true });
-
-    await submitSupportForm({
-      organization: 'any-org',
-      orgId: 'any-org-id',
-      userId: 'any-user-id',
-      email: 'any@example.com',
-      categories: ['GENERAL_INQUIRY'],
-      message: 'any message',
-    });
-
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toContainEqual({
-      objectTypeId: '0-1',
-      name: 'filone_user_id',
-      value: 'any-user-id',
-    });
   });
 
   it('joins multiple categories with semicolons', async () => {

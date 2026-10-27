@@ -126,7 +126,6 @@ export function SupportPage() {
         name: me.name,
         organization: me.orgName,
         orgId: me.orgId,
-        userId: me.userId,
         email: me.email || formEmail.trim(),
         categories: [formCategory],
         message: formMessage.trim(),
