@@ -105,106 +105,115 @@ export function SupportPage() {
     <PageLayout
       title="Support"
       headingId="support-heading"
+      // Centered like Create bucket. The side padding drops at xl, where the page is wider
+      // than the column, so the form and help column get the full 860px.
+      maxWidth="max-w-[860px]"
+      className="xl:px-0"
       description="We typically respond within 1 business day"
     >
       {/* Two columns once both fit beside the app sidebar; stacked below that, as on Create bucket */}
       <div className="flex flex-col gap-6 pb-12 xl:flex-row xl:gap-10">
-        <Card padding="none" className="w-full max-w-[520px] shrink-0 self-start">
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-6">
-            {needsEmail && (
-              <FormField label="Email" htmlFor="support-email">
-                <Input
-                  id="support-email"
-                  type="email"
-                  value={formEmail}
-                  onChange={setFormEmail}
-                  placeholder="you@example.com"
+        <div className="flex w-full max-w-[520px] shrink-0 flex-col gap-8">
+          <Card padding="none">
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-6">
+              {needsEmail && (
+                <FormField label="Email" htmlFor="support-email">
+                  <Input
+                    id="support-email"
+                    type="email"
+                    value={formEmail}
+                    onChange={setFormEmail}
+                    placeholder="you@example.com"
+                    required
+                  />
+                </FormField>
+              )}
+
+              <FormField label="Category">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {CATEGORY_OPTIONS.map((option) => (
+                    <RadioOption
+                      key={option.value}
+                      name="category"
+                      value={option.value}
+                      checked={formCategory === option.value}
+                      onChange={() => setFormCategory(option.value)}
+                    >
+                      {option.label}
+                    </RadioOption>
+                  ))}
+                </div>
+              </FormField>
+
+              <FormField label="Message" htmlFor="support-message">
+                <Textarea
+                  id="support-message"
+                  value={formMessage}
+                  onChange={setFormMessage}
+                  placeholder="How can we help?"
                   required
+                  rows={4}
                 />
               </FormField>
-            )}
 
-            <FormField label="Category">
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {CATEGORY_OPTIONS.map((option) => (
-                  <RadioOption
-                    key={option.value}
-                    name="category"
-                    value={option.value}
-                    checked={formCategory === option.value}
-                    onChange={() => setFormCategory(option.value)}
-                  >
-                    {option.label}
-                  </RadioOption>
-                ))}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                {me?.email && (
+                  <p className="text-xs text-(--color-paragraph-text-subtle)">
+                    We&apos;ll reply to {me.email} about {me.orgName}.
+                  </p>
+                )}
+                <Button
+                  id="support-submit-button"
+                  variant="primary"
+                  type="submit"
+                  disabled={!me}
+                  loading={submitting}
+                  loadingLabel="Sending message"
+                >
+                  Send message
+                </Button>
               </div>
-            </FormField>
+            </form>
+          </Card>
 
-            <FormField label="Message" htmlFor="support-message">
-              <Textarea
-                id="support-message"
-                value={formMessage}
-                onChange={setFormMessage}
-                placeholder="How can we help?"
-                required
-                rows={4}
-              />
-            </FormField>
-
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-              {me?.email && (
-                <p className="text-xs text-(--color-paragraph-text-subtle)">
-                  We&apos;ll reply to {me.email} about {me.orgName}.
-                </p>
-              )}
-              <Button
-                id="support-submit-button"
-                variant="primary"
-                type="submit"
-                disabled={!me}
-                loading={submitting}
-                loadingLabel="Sending message"
-              >
-                Send message
-              </Button>
-            </div>
-          </form>
-        </Card>
-
-        <div className="flex w-full max-w-[520px] flex-col gap-6 xl:w-60 xl:shrink-0">
           <InfoAside
-            title="More help"
-            items={[
-              {
-                title: 'Documentation',
-                description: (
-                  <>
-                    Guides for buckets, API keys, and S3 clients.{' '}
-                    <Link href={DOCS_URL} variant="accent">
-                      Read the docs
-                    </Link>
-                  </>
-                ),
-              },
-              {
-                title: 'Found a bug?',
-                description: (
-                  <>
-                    Tell us what went wrong and we&apos;ll look into it.{' '}
-                    <button
-                      type="button"
-                      onClick={() => setReportBugOpen(true)}
-                      className="font-medium text-brand-600 hover:underline focus-visible:brand-outline"
-                    >
-                      Report a bug
-                    </button>
-                  </>
-                ),
-              },
-            ]}
+            title="Common questions"
+            items={FAQ_ITEMS}
+            className="xl:static xl:w-full xl:pt-0"
           />
-          <InfoAside title="Common questions" items={FAQ_ITEMS} />
         </div>
+
+        <InfoAside
+          title="More help"
+          items={[
+            {
+              title: 'Documentation',
+              description: (
+                <>
+                  Guides for buckets, API keys, and S3 clients.{' '}
+                  <Link href={DOCS_URL} variant="accent">
+                    Read the docs
+                  </Link>
+                </>
+              ),
+            },
+            {
+              title: 'Found a bug?',
+              description: (
+                <>
+                  Tell us what went wrong and we&apos;ll look into it.{' '}
+                  <button
+                    type="button"
+                    onClick={() => setReportBugOpen(true)}
+                    className="font-medium text-brand-600 hover:underline focus-visible:brand-outline"
+                  >
+                    Report a bug
+                  </button>
+                </>
+              ),
+            },
+          ]}
+        />
       </div>
       <ReportBugDialog open={reportBugOpen} onClose={() => setReportBugOpen(false)} />
     </PageLayout>
