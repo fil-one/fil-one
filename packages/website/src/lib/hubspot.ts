@@ -53,23 +53,30 @@ export async function submitContactSalesForm(fields: ContactSalesFields): Promis
 }
 
 type SupportFields = {
-  firstName: string;
-  lastName: string;
-  company: string;
+  /** The signed-in user's full name. Absent when their sign-in method gave none. */
+  name?: string;
+  /** The active organization's name, sent as HubSpot's `company` property. */
+  organization: string;
   email: string;
   categories: string[];
   message: string;
 };
 
 export async function submitSupportForm(fields: SupportFields): Promise<void> {
-  const hubspotFields: HubSpotField[] = [
-    { objectTypeId: '0-1', name: 'firstname', value: fields.firstName },
-    { objectTypeId: '0-1', name: 'lastname', value: fields.lastName },
-    { objectTypeId: '0-1', name: 'company', value: fields.company },
+  const hubspotFields: HubSpotField[] = [];
+  if (fields.name) {
+    const [firstName, ...lastName] = fields.name.split(' ');
+    hubspotFields.push(
+      { objectTypeId: '0-1', name: 'firstname', value: firstName },
+      { objectTypeId: '0-1', name: 'lastname', value: lastName.join(' ') },
+    );
+  }
+  hubspotFields.push(
+    { objectTypeId: '0-1', name: 'company', value: fields.organization },
     { objectTypeId: '0-1', name: 'email', value: fields.email },
     { objectTypeId: '0-5', name: 'hs_ticket_category', value: fields.categories.join(';') },
     { objectTypeId: '0-5', name: 'content', value: fields.message },
-  ];
+  );
 
   return submitToHubSpot(HUBSPOT_SUPPORT_FORM_ID, hubspotFields, 'Support');
 }
