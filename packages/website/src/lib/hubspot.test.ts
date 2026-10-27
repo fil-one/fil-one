@@ -41,6 +41,7 @@ describe('submitSupportForm', () => {
     await submitSupportForm({
       name: 'Jane Doe',
       organization: 'Acme Inc',
+      orgId: 'any-org-id',
       email: 'jane@acme.com',
       categories: ['PRODUCT_ISSUE'],
       message: 'Help needed',
@@ -58,6 +59,7 @@ describe('submitSupportForm', () => {
           { objectTypeId: '0-1', name: 'email', value: 'jane@acme.com' },
           { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'PRODUCT_ISSUE' },
           { objectTypeId: '0-5', name: 'content', value: 'Help needed' },
+          { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
         ],
         context: {
           pageUri: 'https://app.fil.one/support',
@@ -73,6 +75,7 @@ describe('submitSupportForm', () => {
     await submitSupportForm({
       name: 'any first multi-part last',
       organization: 'any-org',
+      orgId: 'any-org-id',
       email: 'any@example.com',
       categories: ['GENERAL_INQUIRY'],
       message: 'any message',
@@ -91,6 +94,7 @@ describe('submitSupportForm', () => {
 
     await submitSupportForm({
       organization: 'any-org',
+      orgId: 'any-org-id',
       email: 'any@example.com',
       categories: ['GENERAL_INQUIRY'],
       message: 'any message',
@@ -101,6 +105,7 @@ describe('submitSupportForm', () => {
       { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
       { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
       { objectTypeId: '0-5', name: 'content', value: 'any message' },
+      { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
     ]);
   });
 
@@ -110,6 +115,7 @@ describe('submitSupportForm', () => {
     await submitSupportForm({
       name: 'any@example.com',
       organization: 'any-org',
+      orgId: 'any-org-id',
       email: 'any@example.com',
       categories: ['GENERAL_INQUIRY'],
       message: 'any message',
@@ -120,7 +126,27 @@ describe('submitSupportForm', () => {
       { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
       { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
       { objectTypeId: '0-5', name: 'content', value: 'any message' },
+      { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
     ]);
+  });
+
+  it('sends the user id on the contact when the user has one', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      organization: 'any-org',
+      orgId: 'any-org-id',
+      userId: 'any-user-id',
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toContainEqual({
+      objectTypeId: '0-1',
+      name: 'filone_user_id',
+      value: 'any-user-id',
+    });
   });
 
   it('joins multiple categories with semicolons', async () => {
@@ -129,6 +155,7 @@ describe('submitSupportForm', () => {
     await submitSupportForm({
       name: 'John Smith',
       organization: 'Test Corp',
+      orgId: 'any-org-id',
       email: 'john@test.com',
       categories: ['PRODUCT_ISSUE', 'BILLING_ISSUE', 'FEATURE_REQUEST'],
       message: 'Multiple issues',
@@ -149,6 +176,7 @@ describe('submitSupportForm', () => {
     await submitSupportForm({
       name: 'Test User',
       organization: 'Company',
+      orgId: 'any-org-id',
       email: 'test@example.com',
       categories: [],
       message: 'No category',
@@ -170,6 +198,7 @@ describe('submitSupportForm', () => {
       submitSupportForm({
         name: 'Jane Doe',
         organization: 'Acme',
+        orgId: 'any-org-id',
         email: 'jane@acme.com',
         categories: ['GENERAL_INQUIRY'],
         message: 'Test',
@@ -184,6 +213,7 @@ describe('submitSupportForm', () => {
       submitSupportForm({
         name: 'Jane Doe',
         organization: 'Acme',
+        orgId: 'any-org-id',
         email: 'jane@acme.com',
         categories: ['PRODUCT_ISSUE'],
         message: 'Test',

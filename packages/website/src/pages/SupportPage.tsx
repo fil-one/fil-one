@@ -125,6 +125,8 @@ export function SupportPage() {
       await submitSupportForm({
         name: me.name,
         organization: me.orgName,
+        orgId: me.orgId,
+        userId: me.userId,
         email: me.email || formEmail.trim(),
         categories: [formCategory],
         message: formMessage.trim(),

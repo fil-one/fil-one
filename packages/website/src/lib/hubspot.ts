@@ -60,6 +60,14 @@ type SupportFields = {
   name?: string;
   /** The active organization's name, sent as HubSpot's `company` property. */
   organization: string;
+  /**
+   * The active organization's id, on the ticket rather than the contact: one
+   * person can write in from several organizations, and a contact property
+   * would hold only the latest.
+   */
+  orgId: string;
+  /** The signed-in user's id, on the contact, since it never changes. */
+  userId?: string;
   email: string;
   categories: string[];
   message: string;
@@ -82,7 +90,11 @@ export async function submitSupportForm(fields: SupportFields): Promise<void> {
     { objectTypeId: '0-1', name: 'email', value: fields.email },
     { objectTypeId: '0-5', name: 'hs_ticket_category', value: fields.categories.join(';') },
     { objectTypeId: '0-5', name: 'content', value: fields.message },
+    { objectTypeId: '0-5', name: 'filone_org_id', value: fields.orgId },
   );
+  if (fields.userId) {
+    hubspotFields.push({ objectTypeId: '0-1', name: 'filone_user_id', value: fields.userId });
+  }
 
   return submitToHubSpot(HUBSPOT_SUPPORT_FORM_ID, hubspotFields, 'Support');
 }
