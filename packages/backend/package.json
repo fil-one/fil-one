@@ -30,8 +30,8 @@
     "psl": "^1.15.0",
     "quick-lru": "^7.3.0",
     "sst": "^4.17.2",
-    "stripe": "^23.0.0",
-    "validator": "^13.15.26"
+    "stripe": "^23.0.1",
+    "validator": "^13.15.35"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.161",

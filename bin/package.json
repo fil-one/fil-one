@@ -18,7 +18,7 @@
     "@filone/aurora-portal-client": "workspace:*",
     "@filone/orchestrator-client": "workspace:*",
     "sst": "^4.17.2",
-    "stripe": "^23.0.0"
+    "stripe": "^23.0.1"
   },
   "devDependencies": {
     "@filone/backend": "workspace:*",
