@@ -39,29 +39,46 @@ function formatEnrollmentType(type: MfaEnrollment['type']): string {
   }
 }
 
-function EnrollmentRow({
-  enrollment,
+/**
+ * The enrolled two-factor methods and passkeys, as one bordered list with a
+ * divider between rows rather than a filled box per row: inside the Security
+ * card, a box per method read as a card within a card.
+ */
+function MethodList({ children }: { children: React.ReactNode }) {
+  return (
+    <ul className="flex flex-col divide-y divide-zinc-200 rounded-lg border border-zinc-200">
+      {children}
+    </ul>
+  );
+}
+
+function MethodRow({
+  label,
+  details,
   onRequestRemove,
+  disabled,
 }: {
-  enrollment: MfaEnrollment;
+  label: string;
+  /** The parts of the second line, joined with a middle dot. */
+  details: string[];
   onRequestRemove: () => void;
+  disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-      <div>
-        <p className="text-sm font-medium text-zinc-900">{formatEnrollmentType(enrollment.type)}</p>
-        <p className="text-xs text-zinc-500">
-          {enrollment.name ? `${enrollment.name} — ` : ''}
-          {enrollment.createdAt
-            ? `Added ${new Date(enrollment.createdAt).toLocaleDateString()}`
-            : 'Enrolled'}
-        </p>
+    <li className="flex items-center justify-between gap-4 px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-ui font-medium text-zinc-900">{label}</p>
+        <p className="text-xs text-zinc-500">{details.join(' · ')}</p>
       </div>
-      <Button variant="ghost" size="sm" onClick={onRequestRemove}>
+      <Button variant="ghost" size="sm" onClick={onRequestRemove} disabled={disabled}>
         Remove
       </Button>
-    </div>
+    </li>
   );
+}
+
+function getAddedOn(createdAt: string | undefined): string {
+  return createdAt ? `Added ${formatDate(createdAt)}` : 'Enrolled';
 }
 
 function useEnrolledMfaMutations() {
@@ -141,7 +158,7 @@ function EnrolledDialogs({
         open={confirmDisable}
         onClose={closeDisable}
         onConfirm={onDisable}
-        title="Remove all MFA methods"
+        title="Remove all methods"
         description="Two-factor authentication will be disabled and you will no longer be challenged on login. This cannot be undone."
         confirmLabel="Remove all"
       />
@@ -233,22 +250,33 @@ function EnrolledView({ me }: { me: MeResponse }) {
           </Button>
         }
       />
-      <div className="flex flex-col gap-2 ml-0.5">
+      <MethodList>
         {me.mfaEnrollments.map((enrollment) => (
-          <EnrollmentRow
+          <MethodRow
             key={enrollment.id}
-            enrollment={enrollment}
+            label={formatEnrollmentType(enrollment.type)}
+            details={[enrollment.name, getAddedOn(enrollment.createdAt)].filter(
+              (part): part is string => Boolean(part),
+            )}
             onRequestRemove={() => setConfirmDeleteId(enrollment.id)}
           />
         ))}
-        <button
-          className="text-xs text-red-500 hover:text-red-700 self-start"
+      </MethodList>
+      {/* Removing the last method already turns two-factor off (the backend
+          tears down the recovery code with it), so with one method this would
+          only repeat its Remove. */}
+      {me.mfaEnrollments.length > 1 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="self-start"
           onClick={() => setConfirmDisable(true)}
           disabled={disable.isPending}
         >
-          Remove all MFA methods
-        </button>
-      </div>
+          Remove all methods
+        </Button>
+      )}
+      <div className="h-px bg-zinc-200" />
       <RecoveryCodeSection />
       <EnrolledDialogs
         enrollmentBeingDeleted={enrollmentBeingDeleted}
@@ -303,30 +331,6 @@ function mostRecentPasskey(passkeys: PasskeyEnrollment[]): PasskeyEnrollment | u
     .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))[0];
 }
 
-function PasskeyRow({
-  passkey,
-  onRequestRemove,
-  disabled,
-}: {
-  passkey: PasskeyEnrollment;
-  onRequestRemove: () => void;
-  disabled: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-      <div>
-        <p className="text-ui font-medium text-zinc-900">{passkey.name ?? 'Passkey'}</p>
-        <p className="text-meta text-zinc-500">
-          {passkey.createdAt ? `Added ${formatDate(passkey.createdAt)}` : 'Enrolled'}
-        </p>
-      </div>
-      <Button variant="ghost" size="sm" onClick={onRequestRemove} disabled={disabled}>
-        Remove
-      </Button>
-    </div>
-  );
-}
-
 function PasskeySettings({ passkeys }: { passkeys: PasskeyEnrollment[] }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -351,25 +355,26 @@ function PasskeySettings({ passkeys }: { passkeys: PasskeyEnrollment[] }) {
   const count = passkeys.length;
   const description =
     count === 0
-      ? "No passkeys yet — you'll be prompted to add one on your next sign-in"
+      ? "No passkeys yet. You'll be prompted to add one on your next sign-in"
       : recent?.createdAt
-        ? `${count} of ${PASSKEY_PER_USER_LIMIT} enrolled — most recent added ${formatDate(recent.createdAt)}`
+        ? `${count} of ${PASSKEY_PER_USER_LIMIT} enrolled, most recent added ${formatDate(recent.createdAt)}`
         : `${count} of ${PASSKEY_PER_USER_LIMIT} enrolled`;
 
   return (
     <>
       <SettingRow label="Passkeys" description={description} action={null} />
       {count > 0 && (
-        <div className="flex flex-col gap-2 ml-0.5">
+        <MethodList>
           {passkeys.map((p) => (
-            <PasskeyRow
+            <MethodRow
               key={p.id}
-              passkey={p}
+              label={p.name ?? 'Passkey'}
+              details={[getAddedOn(p.createdAt)]}
               onRequestRemove={() => setConfirmDeleteId(p.id)}
               disabled={remove.isPending}
             />
           ))}
-        </div>
+        </MethodList>
       )}
       <ConfirmDialog
         open={passkeyBeingDeleted !== undefined}
