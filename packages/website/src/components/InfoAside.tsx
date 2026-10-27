@@ -41,7 +41,7 @@ export function InfoAside({ title, items, className }: InfoAsideProps) {
             )}
           >
             <span className="text-xs font-medium text-zinc-900">{item.title}</span>
-            <p className="text-xs leading-relaxed text-zinc-500">{item.description}</p>
+            <p className="text-xs leading-relaxed text-pretty text-zinc-500">{item.description}</p>
           </div>
         ))}
       </div>
