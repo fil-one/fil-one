@@ -762,6 +762,7 @@ describe('activate-subscription baseHandler', () => {
         code: 'WELCOME20',
         active: true,
         limit: 1,
+        expand: ['data.promotion.coupon'],
       });
       expect(mockSubscriptionsUpdate).toHaveBeenCalledTimes(3);
       expect(mockSubscriptionsUpdate).toHaveBeenNthCalledWith(1, 'sub_trial_123', {

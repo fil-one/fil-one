@@ -9,6 +9,7 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import type { ActivateSubscriptionResponse } from '@filone/shared';
+import { findActivePromotionCode } from '../lib/promotion-codes.ts';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.ts';
 import { getSubscription } from '../lib/subscription-store.ts';
 import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
@@ -85,12 +86,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // 4. Resolve promo code against Stripe before we mutate any subscription state.
   let promotionCodeId: string | undefined;
   if (promotionCode) {
-    const matches = await stripe.promotionCodes.list({
-      code: promotionCode,
-      active: true,
-      limit: 1,
-    });
-    promotionCodeId = matches.data[0]?.id;
+    promotionCodeId = (await findActivePromotionCode(stripe, promotionCode))?.id;
     if (!promotionCodeId) {
       return new ResponseBuilder()
         .status(400)

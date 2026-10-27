@@ -3,8 +3,9 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { PlanId, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
-import type { BillingInfo, ErrorResponse } from '@filone/shared';
+import type { BillingInfo, ErrorResponse, SubscriptionDiscount } from '@filone/shared';
 import type Stripe from 'stripe';
+import { describeSubscriptionDiscount } from '../lib/promotion-codes.ts';
 import { getStripeClient } from '../lib/stripe-client.ts';
 import {
   getSubscription,
@@ -63,6 +64,7 @@ export async function baseHandler(
     const response = buildBillingResponse(billingRecord, currentStatus, {
       paymentMethod: cachedPaymentMethod(billingRecord),
       ...describePrice(billingRecord.stripePrice),
+      discounts: [],
     });
     return new ResponseBuilder().status(200).body(response).build();
   }
@@ -113,6 +115,8 @@ interface StripeSubscriptionDetails {
   planName: string | undefined;
   /** The per-TB monthly rate, when the price states one unambiguously. */
   pricePerTbCents: number | undefined;
+  /** Read live from Stripe only, so empty whenever Stripe was not reached. */
+  discounts: SubscriptionDiscount[];
 }
 
 /** Everything the response says about the billed price, from one snapshot. */
@@ -222,18 +226,29 @@ async function resolveStripeSubscriptionDetails(
 ): Promise<StripeSubscriptionDetails | null> {
   let paymentMethod: BillingInfo['paymentMethod'];
   let price: StripePriceDetails | undefined;
+  let discounts: SubscriptionDiscount[] = [];
 
   if (billingRecord.subscriptionId) {
     const stripe = getStripeClient();
     try {
       const subscription = await stripe.subscriptions.retrieve(billingRecord.subscriptionId, {
-        // Tiers carry the monthly minimum and are not returned by default, and
-        // the product carries the name of the plan the customer is on.
-        expand: ['default_payment_method', 'items.data.price.tiers', 'items.data.price.product'],
+        // Tiers carry the monthly minimum and are not returned by default, the
+        // product carries the name of the plan the customer is on, and the
+        // coupon and promo code say what each discount takes off.
+        expand: [
+          'default_payment_method',
+          'items.data.price.tiers',
+          'items.data.price.product',
+          'discounts.source.coupon',
+          'discounts.promotion_code',
+        ],
       });
 
       paymentMethod = toPaymentMethod(subscription.default_payment_method);
       price = await resolveLivePrice(subscription, billingRecord, owner);
+      discounts = subscription.discounts
+        .map(describeSubscriptionDiscount)
+        .filter((discount) => discount !== undefined);
     } catch (err) {
       console.warn('[get-billing] Failed to fetch Stripe subscription', {
         error: (err as Error).message,
@@ -249,6 +264,7 @@ async function resolveStripeSubscriptionDetails(
     // Use cached payment method from DB if Stripe fetch didn't return one
     paymentMethod: paymentMethod ?? cachedPaymentMethod(billingRecord),
     ...describePrice(price),
+    discounts,
   };
 }
 
@@ -449,7 +465,13 @@ async function evaluateStatusTransitions(
 function buildBillingResponse(
   billingRecord: SubscriptionRecord,
   currentStatus: SubscriptionStatus,
-  { paymentMethod, monthlyMinimumCents, planName, pricePerTbCents }: StripeSubscriptionDetails,
+  {
+    paymentMethod,
+    monthlyMinimumCents,
+    planName,
+    pricePerTbCents,
+    discounts,
+  }: StripeSubscriptionDetails,
 ): BillingInfo {
   const isActivePlan =
     currentStatus === SubscriptionStatus.Active ||
@@ -481,6 +503,7 @@ function buildBillingResponse(
       ...(monthlyMinimumCents ? { monthlyMinimumCents } : {}),
       ...(planName ? { planName } : {}),
       ...(pricePerTbCents ? { pricePerTbCents } : {}),
+      ...(discounts.length > 0 ? { discounts } : {}),
     },
     paymentMethod,
   };
