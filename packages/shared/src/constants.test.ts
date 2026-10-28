@@ -129,18 +129,18 @@ describe('getAuth0Domain', () => {
 });
 
 describe('getStageFromHostname', () => {
-  it('returns Production for "app.fil.one"', () => {
-    expect(getStageFromHostname('app.fil.one')).toBe(Stage.Production);
+  it('returns Production for the canonical host "app.filone.com"', () => {
+    expect(getStageFromHostname('app.filone.com')).toBe(Stage.Production);
   });
 
   for (const hostname of PROD_CONSOLE_ALIAS_HOSTS) {
-    it(`returns Production for the demo alias "${hostname}"`, () => {
+    it(`returns Production for the alias "${hostname}"`, () => {
       expect(getStageFromHostname(hostname)).toBe(Stage.Production);
     });
   }
 
   it('ignores hostname casing', () => {
-    expect(getStageFromHostname('APP.FIL.ONE')).toBe(Stage.Production);
+    expect(getStageFromHostname('APP.FILONE.COM')).toBe(Stage.Production);
   });
 
   const nonProductionHostnames = [
