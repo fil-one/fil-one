@@ -495,9 +495,9 @@ describe('setup-integrations', () => {
       });
     });
 
-    // Teardown removes every URL of the old host list, and app.fil.one is on both
-    // the old list and the new one. It stays registered only because setup runs
-    // after teardown and adds it back.
+    // Teardown removes every callback and web origin of the old host list, and
+    // app.fil.one is on both the old list and the new one. It stays registered
+    // only because setup runs after teardown and adds it back.
     it('keeps the previous canonical host registered when production moves its SiteUrl', async () => {
       const auth0Client = stubAuth0Fetch({
         callbacks: [
