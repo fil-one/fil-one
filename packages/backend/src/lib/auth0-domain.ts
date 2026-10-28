@@ -16,7 +16,7 @@ import { AUTH0_DOMAIN_BY_CONSOLE_ORIGIN, Stage } from '@filone/shared';
  * validation — it can deny a login, never complete one.
  *
  * The table is consulted on the production stage alone: every domain in it belongs
- * to the production Auth0 tenant, and the demo aliases exist only on the production
+ * to the production Auth0 tenant, and the alias hosts exist only on the production
  * distribution. Without the stage check a staging or ephemeral deployment handed a
  * forged production host would point its login at the production tenant.
  *
