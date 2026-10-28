@@ -13,9 +13,15 @@ export type CodeBlockProps = {
    * supplies the surrounding chrome.
    */
   minimal?: boolean;
+  /**
+   * Wraps long lines instead of scrolling them, keeping the code's own line
+   * breaks. For a narrow column, where a value cut off at the edge cannot be
+   * checked before it is pasted. Applies to the minimal presentation.
+   */
+  wrap?: boolean;
 };
 
-export function CodeBlock({ code, language, className, minimal }: CodeBlockProps) {
+export function CodeBlock({ code, language, className, minimal, wrap }: CodeBlockProps) {
   const { copied, copy } = useCopyToClipboard();
 
   const CopyIcon = copied ? CheckIcon : CopySimpleIcon;
@@ -38,7 +44,7 @@ export function CodeBlock({ code, language, className, minimal }: CodeBlockProps
         >
           <CopyIcon width={14} height={14} />
         </button>
-        <pre className="overflow-x-auto">
+        <pre className={wrap ? 'break-all whitespace-pre-wrap' : 'overflow-x-auto'}>
           <code>{code}</code>
         </pre>
       </div>

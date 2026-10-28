@@ -20,7 +20,14 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
           const isLast = index === items.length - 1;
 
           return (
-            <li key={item.href ?? item.label} className="flex items-center gap-2">
+            // The current page's crumb starts at zero width and grows into what is
+            // left of the line, so a long last label (an object's file name)
+            // truncates in place. It drops to a line of its own only when less
+            // than min-w-16 is left, where it would show nothing but an ellipsis.
+            <li
+              key={item.href ?? item.label}
+              className={clsx('flex items-center gap-2', isLast && 'max-w-full min-w-16 flex-1')}
+            >
               {index > 0 && (
                 <span aria-hidden="true" className="text-zinc-400 select-none">
                   /
@@ -39,7 +46,10 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
                 </BaseLink>
               ) : (
                 <span
-                  className={clsx(isLast ? 'font-medium text-zinc-950' : 'text-zinc-600')}
+                  className={clsx(
+                    isLast ? 'min-w-0 truncate font-medium text-zinc-950' : 'text-zinc-600',
+                  )}
+                  title={isLast ? item.label : undefined}
                   aria-current={isLast ? 'page' : undefined}
                 >
                   {item.label}
