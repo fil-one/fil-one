@@ -1,4 +1,4 @@
-import { UpdateItemCommand, type TransactWriteItem } from '@aws-sdk/client-dynamodb';
+import { UpdateItemCommand, type Put, type TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole } from '@filone/shared';
 import type { AuditEvent } from '@filone/shared';
@@ -6,6 +6,7 @@ import { AuditSubjects, auditEvent, commitAudited, userActor } from './audit.ts'
 import { getDynamoClient } from './ddb-client.ts';
 import { OrgKeys } from './org-membership.ts';
 import type { OrgMembership } from './org-membership.ts';
+import type { PendingAccount } from './user-context.ts';
 import { OrgSetupStatus } from './org-setup-status.ts';
 import { ORGS_BETA_SK } from './orgs-beta.ts';
 import { deriveOrgName } from './suggest-org-name.ts';
@@ -352,45 +353,110 @@ function accountRows({
   name?: string;
   now: string;
 }): TransactWriteItem[] {
-  const tableName = Resource.UserInfoTable.name;
-
+  const { identity, profile } = identityRows({ sub, userId, orgId, email, name, now });
   return [
-    {
-      Put: {
-        TableName: tableName,
-        Item: {
-          pk: { S: `SUB#${sub}` },
-          sk: { S: 'IDENTITY' },
-          userId: { S: userId },
-          orgId: { S: orgId },
-          createdAt: { S: now },
-          // What the profile's address and name were last stamped from. This
-          // row is read on every authenticated request; the profile is not, so
-          // the markers are what keep the stamp off the hot path.
-          ...(email ? { profileEmail: { S: email } } : {}),
-          ...(name ? { profileName: { S: name } } : {}),
-        },
-        ConditionExpression: 'attribute_not_exists(pk)',
-      },
-    },
-    {
-      Put: {
-        TableName: tableName,
-        Item: {
-          pk: { S: `USER#${userId}` },
-          sk: { S: 'PROFILE' },
-          sub: { S: sub },
-          orgId: { S: orgId },
-          createdAt: { S: now },
-          ...(email ? { email: { S: email } } : {}),
-          ...(name ? { name: { S: name } } : {}),
-        },
-      },
-    },
+    { Put: identity },
+    { Put: profile },
     // The name here is derived, not chosen. False sends the account through
     // the naming step; `PATCH /api/org` flips it.
     ...orgRows({ orgId, orgName, userId, now, source: 'signup', nameConfirmed: false }),
   ];
+}
+
+/**
+ * The account an invitation creates: the identity and user profile alone, both
+ * naming the inviting org. The caller adds the membership in the same
+ * transaction, so the account never exists without the org it was made for.
+ *
+ * A first login claims the identity key, as signup does. A deleted account
+ * replaces its stamped identity row, and only while the stamp is the one the
+ * request read: anything that rewrote the row since cancels the transaction
+ * rather than being overwritten.
+ */
+export function inviteeAccountRows({
+  account,
+  orgId,
+  email,
+}: {
+  account: PendingAccount;
+  orgId: string;
+  /** Verified by the acceptance before it writes. */
+  email: string;
+}): TransactWriteItem[] {
+  const { identity, profile } = identityRows({
+    sub: account.sub,
+    userId: account.userId,
+    orgId,
+    email,
+    name: account.name,
+    now: new Date().toISOString(),
+  });
+  if (account.kind === 'new') return [{ Put: identity }, { Put: profile }];
+
+  return [
+    {
+      Put: {
+        ...identity,
+        ConditionExpression: 'deletedAt = :deletedAt',
+        ExpressionAttributeValues: { ':deletedAt': { S: account.deletedAt } },
+      },
+    },
+    { Put: profile },
+  ];
+}
+
+/**
+ * The identity row and the user profile, both naming the account's home org.
+ * `email` is stamped only when verified, and `name` carries no such gate. The
+ * identity row records what the profile was last stamped from.
+ */
+function identityRows({
+  sub,
+  userId,
+  orgId,
+  email,
+  name,
+  now,
+}: {
+  sub: string;
+  userId: string;
+  orgId: string;
+  email?: string;
+  name?: string;
+  now: string;
+}): { identity: Put; profile: Put } {
+  const tableName = Resource.UserInfoTable.name;
+
+  return {
+    identity: {
+      TableName: tableName,
+      Item: {
+        pk: { S: `SUB#${sub}` },
+        sk: { S: 'IDENTITY' },
+        userId: { S: userId },
+        orgId: { S: orgId },
+        createdAt: { S: now },
+        // What the profile's address and name were last stamped from. This
+        // row is read on every authenticated request; the profile is not, so
+        // the markers are what keep the stamp off the hot path.
+        ...(email ? { profileEmail: { S: email } } : {}),
+        ...(name ? { profileName: { S: name } } : {}),
+      },
+      ConditionExpression: 'attribute_not_exists(pk)',
+    },
+    profile: {
+      TableName: tableName,
+      Item: {
+        pk: { S: `USER#${userId}` },
+        sk: { S: 'PROFILE' },
+        sub: { S: sub },
+        orgId: { S: orgId },
+        createdAt: { S: now },
+        ...(email ? { email: { S: email } } : {}),
+        ...(name ? { name: { S: name } } : {}),
+      },
+    },
+  };
 }
 
 /**

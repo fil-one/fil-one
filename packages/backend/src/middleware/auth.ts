@@ -8,11 +8,17 @@ import type {
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
-import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
+import type {
+  AuthenticatedEvent,
+  PendingAccount,
+  PendingAccountEvent,
+  UserInfo,
+} from '../lib/user-context.ts';
 import { ApiErrorCode } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import {
   accountDeletedResponse,
+  accountDeletionInProgressResponse,
   COOKIE_NAMES,
   TOKEN_MAX_AGE,
   makeCookieHeader,
@@ -96,7 +102,13 @@ function getJWKS(domain: string): ReturnType<typeof createRemoteJWKSet> {
 
 import { parseCookies } from '../lib/cookies.ts';
 import { CSRF_COOKIE_NAME } from '@filone/shared';
-import { AccountDeletedError, isIdentityTombstoned } from '../lib/identity-tombstone.ts';
+import {
+  AccountDeletedError,
+  AccountDeletionInProgressError,
+  hasDeletionFinished,
+  isIdentityTombstoned,
+} from '../lib/identity-tombstone.ts';
+import type { TombstonedIdentityRow } from '../lib/identity-tombstone.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
@@ -279,6 +291,7 @@ async function attachIdentity({
   emailVerified,
   name,
   picture,
+  deferAccountCreation,
 }: {
   event: APIGatewayProxyEventV2;
   sub: string;
@@ -286,11 +299,28 @@ async function attachIdentity({
   emailVerified: boolean;
   name: string | null;
   picture: string | null;
+  deferAccountCreation: boolean;
 }): Promise<void> {
-  const resolved = await resolveUserAndOrg(sub, email, emailVerified, name);
-  (
-    event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
-  ).userInfo = {
+  const resolved = await resolveUserAndOrg({
+    sub,
+    email,
+    emailVerified,
+    name,
+    deferAccountCreation,
+  });
+  // The request carries exactly one of `userInfo` and `pendingAccount`. Typed
+  // with both optional so this can set one and remove the other: a second token
+  // path replaces whatever a failed first one attached.
+  const requestContext = event.requestContext as Partial<
+    AuthenticatedEvent['requestContext'] & PendingAccountEvent['requestContext']
+  >;
+  if ('kind' in resolved) {
+    delete requestContext.userInfo;
+    requestContext.pendingAccount = resolved;
+    return;
+  }
+  delete requestContext.pendingAccount;
+  requestContext.userInfo = {
     sub,
     userId: resolved.userId,
     orgId: resolved.orgId,
@@ -374,12 +404,49 @@ interface ResolvedIdentity {
   membership?: OrgMembership;
 }
 
-async function resolveUserAndOrg(
-  sub: string,
-  email: string | null,
-  emailVerified: boolean,
-  name: string | null,
-): Promise<ResolvedIdentity> {
+/**
+ * A deleted account, let back in once its deletion has finished. The scrub
+ * stamps the identity before the teardown's last steps run, so the stamp alone
+ * does not say it has.
+ */
+async function resolveRejoiningAccount(
+  identityRow: TombstonedIdentityRow,
+  claims: IdentityClaims,
+): Promise<PendingAccount> {
+  const deletedOrgId = identityRow.orgId?.S;
+  // A row naming no org has no deletion to wait for, and none to prove finished.
+  if (!deletedOrgId) throw new AccountDeletedError();
+  if (!(await hasDeletionFinished(deletedOrgId))) throw new AccountDeletionInProgressError();
+  return { kind: 'rejoining', deletedAt: identityRow.deletedAt.S, ...pendingAccountFields(claims) };
+}
+
+function pendingAccountFields({ sub, email, emailVerified, name }: IdentityClaims) {
+  return {
+    sub,
+    userId: crypto.randomUUID(),
+    ...(email ? { email } : {}),
+    emailVerified,
+    ...(name ? { name } : {}),
+  };
+}
+
+interface IdentityClaims {
+  sub: string;
+  email: string | null;
+  emailVerified: boolean;
+  name: string | null;
+}
+
+/**
+ * The caller's account, created here on their first request. With
+ * `deferAccountCreation` the account is not created: the route creates it
+ * itself, and this returns what it needs to.
+ */
+async function resolveUserAndOrg({
+  deferAccountCreation,
+  ...claims
+}: IdentityClaims & { deferAccountCreation: boolean }): Promise<ResolvedIdentity | PendingAccount> {
+  const { sub, email, emailVerified, name } = claims;
   const tableName = Resource.UserInfoTable.name;
 
   // Look up existing mapping
@@ -394,7 +461,10 @@ async function resolveUserAndOrg(
   );
 
   // Before the userId/orgId branch, so a stamped row can never be read as a new signup.
-  if (isIdentityTombstoned(result.Item)) throw new AccountDeletedError();
+  if (isIdentityTombstoned(result.Item)) {
+    if (!deferAccountCreation) throw new AccountDeletedError();
+    return resolveRejoiningAccount(result.Item, claims);
+  }
 
   if (result.Item?.userId?.S && result.Item?.orgId?.S) {
     const userId = result.Item.userId.S;
@@ -402,7 +472,11 @@ async function resolveUserAndOrg(
 
     // The session fence. On the org profile, so the confirm transaction stays three
     // items at any org size. Ahead of the backfill: a deleted org must not trigger it.
-    if (await isOrgDeleting(orgId)) throw new AccountDeletedError();
+    // A route that lets a deleted account start over says when it can: the
+    // identity is stamped only later in the same teardown.
+    if (await isOrgDeleting(orgId)) {
+      throw deferAccountCreation ? new AccountDeletionInProgressError() : new AccountDeletedError();
+    }
 
     if (!email) {
       console.error(
@@ -426,7 +500,20 @@ async function resolveUserAndOrg(
     return { userId, orgId, email };
   }
 
-  // New user — create user, org, and membership records atomically.
+  // The route writes the account beside what it is for, so it never holds an
+  // org nobody asked for.
+  if (deferAccountCreation) return { kind: 'new', ...pendingAccountFields(claims) };
+
+  return createAccount(claims);
+}
+
+/** A first login's account: user, org, and membership, written together. */
+async function createAccount({
+  sub,
+  email,
+  emailVerified,
+  name,
+}: IdentityClaims): Promise<ResolvedIdentity> {
   const userId = crypto.randomUUID();
   const orgId = crypto.randomUUID();
   const orgName = deriveOrgName(name ?? undefined, email ?? undefined);
@@ -471,6 +558,7 @@ async function tryValidateAccessToken({
   issuer,
   clientId,
   failureLabel,
+  deferAccountCreation,
 }: {
   request: AuthMiddlewareRequest;
   accessToken: string;
@@ -480,6 +568,7 @@ async function tryValidateAccessToken({
   issuer: string;
   clientId: string;
   failureLabel: string;
+  deferAccountCreation: boolean;
 }): Promise<boolean> {
   try {
     const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
@@ -493,6 +582,7 @@ async function tryValidateAccessToken({
       emailVerified: idClaims.emailVerified,
       name: idClaims.name,
       picture: idClaims.picture,
+      deferAccountCreation,
     });
     return true;
   } catch (err) {
@@ -517,6 +607,7 @@ async function tryRefreshTokens({
   jwks,
   issuer,
   clientId,
+  deferAccountCreation,
 }: {
   request: AuthMiddlewareRequest;
   refreshToken: string | undefined;
@@ -525,6 +616,7 @@ async function tryRefreshTokens({
   jwks: ReturnType<typeof createRemoteJWKSet>;
   issuer: string;
   clientId: string;
+  deferAccountCreation: boolean;
 }): Promise<boolean> {
   if (!refreshToken) {
     if (forceRefresh) {
@@ -563,6 +655,7 @@ async function tryRefreshTokens({
     emailVerified: refreshedClaims.emailVerified,
     name: refreshedClaims.name,
     picture: refreshedClaims.picture,
+    deferAccountCreation,
   });
   return true;
 }
@@ -584,6 +677,15 @@ export interface AuthMiddlewareOptions {
    * be able to refuse the request whose answer is what clears the stash.
    */
   orgHeaderFallback?: boolean;
+  /**
+   * Leave a caller with no account without one, instead of creating it with a
+   * personal org, and attach a `pendingAccount` in place of `userInfo`. A
+   * deleted account whose deletion has finished is let through the same way.
+   *
+   * `POST /api/invitations/accept` alone sets this. An invitee's first request
+   * is the accept, and the account it creates belongs to the inviting org only.
+   */
+  deferAccountCreation?: boolean;
 }
 
 /**
@@ -681,6 +783,9 @@ async function completeAuthentication(
   const gated = verifiedEmailGate(requireVerifiedEmail, request);
   if (gated) return withRefreshedCookies(request, gated);
 
+  // No account, so no org to resolve and no standing in one.
+  if ('pendingAccount' in request.event.requestContext) return undefined;
+
   const event = request.event as AuthenticatedEvent;
   const claims = request.internal.idTokenClaims ?? EMPTY_ID_CLAIMS;
 
@@ -712,6 +817,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     try {
       return await authenticate(request);
     } catch (err) {
+      if (err instanceof AccountDeletionInProgressError) return accountDeletionInProgressResponse();
       if (err instanceof AccountDeletedError) return accountDeletedResponse();
       throw err;
     }
@@ -749,6 +855,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
       audience,
       issuer,
       clientId: secrets.AUTH0_CLIENT_ID,
+      deferAccountCreation: options.deferAccountCreation ?? false,
     };
 
     // Step 1: Validate existing access token (skip if forceRefresh — we need fresh claims)
@@ -771,6 +878,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
       jwks,
       issuer,
       clientId: secrets.AUTH0_CLIENT_ID,
+      deferAccountCreation: validateArgs.deferAccountCreation,
     });
     if (refreshed) return completeAuthentication(request, options);
 

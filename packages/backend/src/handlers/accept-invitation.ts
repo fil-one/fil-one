@@ -19,6 +19,8 @@ import {
   membershipRows,
   ownerCountItem,
 } from '../lib/membership-changes.ts';
+import type { LabelledItems } from '../lib/membership-changes.ts';
+import { inviteeAccountRows } from '../lib/account-creation.ts';
 import { registerMemberPrincipal } from '../lib/member-principals.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
 import {
@@ -29,8 +31,8 @@ import {
 } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
-import type { AuthenticatedEvent } from '../lib/user-context.ts';
-import { getUserInfo } from '../lib/user-context.ts';
+import type { AccountCreatingEvent, PendingAccount } from '../lib/user-context.ts';
+import { getUserInfo, isPendingAccountEvent } from '../lib/user-context.ts';
 import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
@@ -65,6 +67,12 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  *   fence every guarded writer carries, as item 0,
  * - the same fence on the ACCEPTER's own org, when it is a different one: their
  *   deletion is what would end their identity while this membership is written,
+ * - for a caller with no account yet, the account itself: identity and user
+ *   profile, both naming the inviting org. The console sends an invitee here
+ *   before any other request, so their first login creates no personal org,
+ *   and the account never exists apart from the membership it was made for. A
+ *   deleted account whose deletion has finished comes back the same way, under
+ *   a new userId,
  * - the membership row and its inverse item,
  * - the invitation marked accepted, conditional on it still being pending,
  * - the token lookup deleted, which is what makes the token single-use,
@@ -79,9 +87,13 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * only two moments the control plane learns a verified address.
  */
 export async function baseHandler(
-  event: AuthenticatedEvent,
+  event: AccountCreatingEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { sub, userId, email, emailVerified } = getUserInfo(event);
+  const caller = isPendingAccountEvent(event)
+    ? event.requestContext.pendingAccount
+    : getUserInfo(event);
+  const pendingAccount = 'kind' in caller ? caller : undefined;
+  const { sub, userId, email, emailVerified } = caller;
 
   const parsed = parseJsonBody(event.body, AcceptInvitationSchema);
   if ('error' in parsed) return parsed.error;
@@ -96,10 +108,13 @@ export async function baseHandler(
     return emailMismatchResponse();
   }
 
-  const [existing, accepterOrgId] = await Promise.all([
-    resolveMembership(invitation.orgId, userId),
-    accepterOrgFence(userId, invitation.orgId),
-  ]);
+  // An account this request creates has no membership and no org of its own yet.
+  const [existing, accepterOrgId] = pendingAccount
+    ? [undefined, undefined]
+    : await Promise.all([
+        resolveMembership(invitation.orgId, userId),
+        accepterOrgFence(userId, invitation.orgId),
+      ]);
 
   const verificationFailure = await verifyInvitedAddress({
     sub,
@@ -110,21 +125,18 @@ export async function baseHandler(
   if (verificationFailure) return verificationFailure;
   const verifiedEmail = email;
 
-  const items = existing ? [] : joinItems(invitation, userId);
-  const labels = existing ? [] : joinLabels(invitation);
+  const { items, labels } = acceptItems({
+    invitation,
+    userId,
+    verifiedEmail,
+    alreadyMember: Boolean(existing),
+    accepterOrgId,
+    pendingAccount,
+  });
 
   try {
     await commitAudited({
-      // The fence is item 0, where `isGuardRejection` reads it, and it rides
-      // both shapes of the transaction. An org resolving its teardown targets
-      // must gain no member, and an invitation into it is no longer usable even
-      // for somebody who is already inside.
-      items: [
-        orgNotDeletingCheck(invitation.orgId),
-        ...(accepterOrgId ? [orgNotDeletingCheck(accepterOrgId)] : []),
-        ...items,
-        ...retireInvitationItems(invitation, 'accepted'),
-      ],
+      items,
       event: acceptedEvent({
         invitation,
         userId,
@@ -133,11 +145,12 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return await acceptFailureResponse(
-      err,
-      ['org', ...(accepterOrgId ? ['accepterOrg'] : []), ...labels, 'invitation', 'token'],
-      { invitation, userId, verifiedEmail, accepterOrgId },
-    );
+    return await acceptFailureResponse(err, labels, {
+      invitation,
+      userId,
+      verifiedEmail,
+      accepterOrgId,
+    });
   }
 
   // The member is in the org before they become a principal on each region
@@ -189,6 +202,56 @@ async function verifyInvitedAddress({
     });
     return emailVerificationFailedResponse();
   }
+}
+
+/**
+ * The acceptance's transaction, each item beside the label a cancellation names
+ * it by.
+ *
+ * The fence is item 0, where `isGuardRejection` reads it, and it rides every
+ * shape of the transaction. An org resolving its teardown targets must gain no
+ * member, and an invitation into it is no longer usable even for somebody who is
+ * already inside.
+ */
+function acceptItems({
+  invitation,
+  userId,
+  verifiedEmail,
+  alreadyMember,
+  accepterOrgId,
+  pendingAccount,
+}: {
+  invitation: InvitationRecord;
+  userId: string;
+  verifiedEmail: string;
+  alreadyMember: boolean;
+  accepterOrgId?: string;
+  /** The account this acceptance creates, written beside the membership it is for. */
+  pendingAccount?: PendingAccount;
+}): LabelledItems {
+  return {
+    items: [
+      orgNotDeletingCheck(invitation.orgId),
+      ...(accepterOrgId ? [orgNotDeletingCheck(accepterOrgId)] : []),
+      ...(pendingAccount
+        ? inviteeAccountRows({
+            account: pendingAccount,
+            orgId: invitation.orgId,
+            email: verifiedEmail,
+          })
+        : []),
+      ...(alreadyMember ? [] : joinItems(invitation, userId)),
+      ...retireInvitationItems(invitation, 'accepted'),
+    ],
+    labels: [
+      'org',
+      ...(accepterOrgId ? ['accepterOrg'] : []),
+      ...(pendingAccount ? ['identity', 'profile'] : []),
+      ...(alreadyMember ? [] : joinLabels(invitation)),
+      'invitation',
+      'token',
+    ],
+  };
 }
 
 /**
@@ -288,6 +351,11 @@ async function acceptFailureResponse(
   // rather than about the invitation: the same one their next request would get
   // once the session fence's read catches up.
   if (failed.includes('accepterOrg')) throw new OrgDeletingError(accepterOrgId!);
+
+  // The account this request was creating exists already: another tab signed
+  // in first, or a deleted account's row changed. The whole transaction
+  // cancelled, so the invitation is still pending and the link works again.
+  if (failed.includes('identity')) return accountChangedResponse();
 
   if (failed.includes('membership')) {
     const existing = await resolveMembership(invitation.orgId, userId);
@@ -450,6 +518,15 @@ function emailVerificationFailedResponse(): APIGatewayProxyStructuredResultV2 {
     .build();
 }
 
+function accountChangedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'Your account changed while we were setting it up. Open the invitation link again.',
+    })
+    .build();
+}
+
 function inviterAuthorityResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(403)
@@ -472,6 +549,6 @@ function ownerCountUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   // The handler verifies the address itself, from the invitation reaching it.
-  .use(authMiddleware({ requireVerifiedEmail: false }))
+  .use(authMiddleware({ requireVerifiedEmail: false, deferAccountCreation: true }))
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

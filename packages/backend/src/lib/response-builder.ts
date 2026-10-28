@@ -127,6 +127,20 @@ export function accountDeletedResponse(): APIGatewayProxyStructuredResultV2 {
     .build();
 }
 
+/**
+ * 409 with no `ACCOUNT_DELETED` code: the console treats that code as a session
+ * that has ended and leaves the page, while this caller can come back in once
+ * the deletion finishes, and the page should say so.
+ */
+export function accountDeletionInProgressResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'Your previous account is still being deleted. Try again in a few minutes.',
+    })
+    .build();
+}
+
 export function imageUploadRateLimitedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(429)

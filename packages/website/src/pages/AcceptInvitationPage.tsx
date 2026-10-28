@@ -49,11 +49,19 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
   // reload, and this page is holding a single-use token in memory. A tab left
   // pointing at an org the caller has since left would reload mid-accept and
   // come back with nothing to redeem.
+  //
+  // Only for the email mismatch, the one refusal that shows the address. A
+  // caller with no account yet has no `/me` to read: it would create the
+  // personal org the accept is there to avoid, or, for a deleted account,
+  // navigate to `/account-deleted` over the refusal it was meant to explain.
   const { data: me } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe({ skipOrgReconcile: true }),
     staleTime: ME_STALE_TIME,
-    enabled: token !== null && outcome.status === 'refused',
+    enabled:
+      token !== null &&
+      outcome.status === 'refused' &&
+      errorCodeOf(outcome.error) === ApiErrorCode.INVITE_EMAIL_MISMATCH,
   });
 
   // Once. React runs effects twice in development's strict mode, and the token

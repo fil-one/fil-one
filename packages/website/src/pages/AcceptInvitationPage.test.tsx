@@ -88,13 +88,15 @@ function apiError(message: string, status: number, code?: string): Error {
   return Object.assign(new Error(message), { status, code });
 }
 
+async function resetMocks() {
+  vi.clearAllMocks();
+  // An answer one test gives `/me` must not reach the next one.
+  const { getMe } = await import('../lib/api.js');
+  vi.mocked(getMe).mockReset();
+}
+
 describe('AcceptInvitationPage', () => {
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    // An answer one test gives `/me` must not reach the next one.
-    const { getMe } = await import('../lib/api.js');
-    vi.mocked(getMe).mockReset();
-  });
+  beforeEach(resetMocks);
 
   it('says the link is no longer valid when there is no token to redeem', async () => {
     renderPage(null);
@@ -297,6 +299,12 @@ describe('AcceptInvitationPage', () => {
     // nothing left to redeem, the same loss a 401 bounce would leave behind.
     await waitFor(() => expect(hasPendingInviteToken()).toBe(true));
   });
+});
+
+// `/me` is read only to explain a refusal, and when it is read decides whether
+// it can race the accept or undo it.
+describe('AcceptInvitationPage reading /me', () => {
+  beforeEach(resetMocks);
 
   it('reads /me without the reconciliation that would reload the page', async () => {
     mockAccept.mockRejectedValue(
@@ -315,6 +323,26 @@ describe('AcceptInvitationPage', () => {
     // The reload the reconcile performs would destroy the token this page is
     // holding, and the org it is joining is not the org the stash is about.
     await waitFor(() => expect(getMe).toHaveBeenCalledWith({ skipOrgReconcile: true }));
+  });
+
+  it('does not read /me for a refusal that shows no address', async () => {
+    mockAccept.mockRejectedValue(
+      apiError('Your previous account is still being deleted. Try again in a few minutes.', 409),
+    );
+    const { getMe } = await import('../lib/api.js');
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>{withRouter(TOKEN)}</ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    // A caller with no account yet would get one from /me, with the personal
+    // org the accept exists to avoid; a deleted one would be sent to
+    // /account-deleted over this sentence.
+    expect(await screen.findByTestId('accept-failed')).toHaveTextContent('still being deleted');
+    expect(getMe).not.toHaveBeenCalled();
   });
 
   it('does not put /me in flight beside the accept it explains', async () => {

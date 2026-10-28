@@ -7,6 +7,7 @@ import {
   TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
+import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
@@ -273,6 +274,42 @@ function body(result: unknown) {
   return JSON.parse((result as { body: string }).body);
 }
 
+/** The org a deleted account belonged to, whose teardown the tests finish or not. */
+const DELETED_ORG_ID = '44444444-4444-4444-4444-444444444444';
+const DELETED_USER_ID = 'any-deleted-user-id';
+const DELETED_AT = '2026-10-01T00:00:00.000Z';
+
+/** The caller's identity row, or none for a caller signing in for the first time. */
+function stubIdentityRow(item: Record<string, AttributeValue> | undefined) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+    })
+    .resolves(item ? { Item: item } : {});
+}
+
+/** An identity the account deletion stamped, and the state of that deletion. */
+function stubDeletedAccount(status: 'PENDING' | 'DONE') {
+  stubIdentityRow({
+    pk: { S: `SUB#${MOCK_SUB}` },
+    sk: { S: 'IDENTITY' },
+    userId: { S: DELETED_USER_ID },
+    orgId: { S: DELETED_ORG_ID },
+    deletedAt: { S: DELETED_AT },
+  });
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${DELETED_ORG_ID}` }, sk: { S: 'DELETION' } },
+    })
+    .resolves({ Item: { status: { S: status } } });
+}
+
+function putAt(items: TransactWriteItem[], pk: string) {
+  return items.find((item) => item.Put?.Item?.pk?.S === pk)?.Put;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -282,6 +319,8 @@ describe('POST /api/invitations/accept handler', () => {
     vi.clearAllMocks();
     mockMarkAuth0EmailVerified.mockReset();
     mockGetAuth0UserEmail.mockReset();
+    // Back to resolving: one test makes it reject, and `clearAllMocks` keeps that.
+    mockRegisterMemberPrincipal.mockReset();
     ddbMock.reset();
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -974,5 +1013,106 @@ describe('POST /api/invitations/accept handler', () => {
     await handler(acceptEvent(), buildContext());
 
     expect(mockRegisterMemberPrincipal).not.toHaveBeenCalled();
+  });
+
+  describe('for a caller with no account yet', () => {
+    beforeEach(() => {
+      stubIdentityRow(undefined);
+    });
+
+    it('creates the account in the inviting org, with no org of its own', async () => {
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      // One transaction in the whole request: no signup ran before the accept.
+      const items = transactItems();
+      const identity = putAt(items, `SUB#${MOCK_SUB}`);
+      expect(identity).toMatchObject({
+        TableName: 'UserInfoTable',
+        Item: { orgId: { S: INVITING_ORG_ID }, profileEmail: { S: EMAIL } },
+        ConditionExpression: 'attribute_not_exists(pk)',
+      });
+      const userId = identity!.Item!.userId.S!;
+      expect(putAt(items, `USER#${userId}`)).toMatchObject({
+        Item: { sk: { S: 'PROFILE' }, orgId: { S: INVITING_ORG_ID }, email: { S: EMAIL } },
+      });
+      expect(
+        items.find((item) => item.Put?.Item?.sk?.S === OrgKeys.memberSk(userId))?.Put,
+      ).toMatchObject({ Item: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) } } });
+      // No org profile: the only org the account has is the one it joined.
+      expect(
+        items.filter(
+          (item) => item.Put?.Item?.pk?.S?.startsWith('ORG#') && item.Put.Item.sk?.S === 'PROFILE',
+        ),
+      ).toStrictEqual([]);
+    });
+
+    it('answers 409 and leaves the invitation pending when the account appeared meanwhile', async () => {
+      // Another tab's first request created the account between the read and
+      // the write. Item 1 is the identity: the fence is item 0.
+      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 9));
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 409 });
+      expect(body(result)).toStrictEqual({
+        message:
+          'Your account changed while we were setting it up. Open the invitation link again.',
+      });
+    });
+
+    it('creates no account when the invitation is no longer valid', async () => {
+      stubUnknownToken();
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 404 });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+    });
+  });
+
+  describe('for a caller whose account was deleted', () => {
+    it('replaces the deleted identity with a new account once the deletion has finished', async () => {
+      stubDeletedAccount('DONE');
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      const identity = putAt(transactItems(), `SUB#${MOCK_SUB}`);
+      expect(identity).toMatchObject({
+        Item: { orgId: { S: INVITING_ORG_ID } },
+        ConditionExpression: 'deletedAt = :deletedAt',
+        ExpressionAttributeValues: { ':deletedAt': { S: DELETED_AT } },
+      });
+      expect(identity!.Item!.userId.S).not.toBe(DELETED_USER_ID);
+      expect(identity!.Item!.deletedAt).toBeUndefined();
+    });
+
+    it('answers that the deletion is still running, and writes nothing, until it finishes', async () => {
+      stubDeletedAccount('PENDING');
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 409 });
+      expect(body(result)).toStrictEqual({
+        message: 'Your previous account is still being deleted. Try again in a few minutes.',
+      });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+    });
+
+    it('answers that the deletion is still running before the identity is stamped', async () => {
+      // The teardown fences the org first and stamps the identity near its end.
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `ORG#${PERSONAL_ORG_ID}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({ Item: { deleting: { BOOL: true } } });
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 409 });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+    });
   });
 });
