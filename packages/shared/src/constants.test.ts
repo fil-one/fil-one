@@ -152,6 +152,7 @@ describe('getStageFromHostname', () => {
     // Guards against this ever being relaxed into a suffix or substring match.
     // Each of these is a hostname an attacker could control that ends with,
     // starts with, or contains a production host.
+    'app.filone.com.attacker.example',
     'app.fil.one.attacker.example',
     'app.filone.ai.attacker.example',
     'notapp.filone.ai',
