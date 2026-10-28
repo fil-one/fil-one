@@ -13,7 +13,7 @@ import { Link } from '../components/Link';
 import { PageLayout } from '../components/PageLayout.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { SectionCard } from '../components/SectionCard.js';
-import { Spinner } from '../components/Spinner';
+import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { errorMessageOf, getMe, updateOrg } from '../lib/api.js';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
@@ -231,13 +231,7 @@ function OrganizationDetails() {
     return <Alert variant="red" description={error?.message ?? 'Failed to load organization'} />;
   }
 
-  if (isPending || !me) {
-    return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading organization" />
-      </div>
-    );
-  }
+  if (isPending || !me) return <EditOrganizationSkeleton />;
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
@@ -245,6 +239,30 @@ function OrganizationDetails() {
       <RequirePermission permission="org.delete">
         <DangerSection me={me} />
       </RequirePermission>
+    </div>
+  );
+}
+
+const SKELETON_SECTIONS = [
+  { section: 'general', height: 'h-44' },
+  { section: 'danger-zone', height: 'h-[78px]' },
+];
+
+/**
+ * One heading bar and one card per section, at the height of the real ones, in
+ * the page shell so the header does not blank while `/me` loads. Both sections
+ * show even for a caller who will not see the danger zone: until permissions
+ * arrive the page cannot know.
+ */
+function EditOrganizationSkeleton() {
+  return (
+    <div role="status" aria-label="Loading organization" className="flex max-w-2xl flex-col gap-6">
+      {SKELETON_SECTIONS.map(({ section, height }) => (
+        <div key={section} className="flex flex-col gap-2">
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className={`rounded-xl ${height}`} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -267,9 +285,7 @@ export function EditOrganizationPage() {
       permission="org.rename"
       pending={
         <PageLayout title="Edit organization">
-          <div className="flex items-center justify-center p-16">
-            <Spinner ariaLabel="Loading organization" />
-          </div>
+          <EditOrganizationSkeleton />
         </PageLayout>
       }
       fallback={

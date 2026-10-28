@@ -119,7 +119,26 @@ describe('EditOrganizationPage', () => {
     expect(mockUpdateOrg).not.toHaveBeenCalled();
   });
 
-  it('shows an error instead of a spinner when /me fails to load', async () => {
+  it('shows a placeholder heading and card for each section under the page title while /me loads', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner, me(OrgRole.Owner));
+    // Never settles, so the page stays loading.
+    mockGetMe.mockReturnValue(new Promise(() => {}));
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <EditOrganizationPage />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Edit organization' })).toBeInTheDocument();
+    const loading = await screen.findByRole('status', { name: 'Loading organization' });
+    // A heading bar and a card for General, and the same for Danger zone.
+    expect(loading.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(4);
+  });
+
+  it('shows an error instead of the loading state when /me fails to load', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     seedPermissions(client, OrgRole.Owner, me(OrgRole.Owner));
     mockGetMe.mockRejectedValue(new Error('Could not load your account'));
