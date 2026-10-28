@@ -412,17 +412,17 @@ export default $config({
         : `${stage}.dev.fil.one`;
 
     // Extra hostnames the production console answers on: the unlisted demo alias for
-    // when fil.one is blocklisted, and app.filone.com, the domain the console is
-    // moving to. They are alternate domain names on this same distribution, not
-    // another deployment.
+    // when fil.one is blocklisted, and app.fil.one, the console's previous canonical
+    // host. They are alternate domain names on this same distribution, not another
+    // deployment.
     const aliasHosts = isProduction ? [...PROD_CONSOLE_ALIAS_HOSTS] : [];
 
     // ACM cert must be in us-east-1 for CloudFront. Ephemeral stages share a
     // wildcard cert for *.dev.fil.one provisioned in the fil-one/infrastructure repo.
     //
     // CloudFront allows one viewer certificate per distribution, so in production a
-    // single cert carries app.fil.one and every alias. It is named after
-    // app.filone.com, the console's next canonical host, and looked up by that name.
+    // single cert carries the canonical host and every alias. It is named after
+    // app.filone.com, the console's canonical host, and looked up by that name.
     // See environments/prod/filone-com.tf in fil-one/infrastructure.
     const certDomain = isEphemeralStage
       ? '*.dev.fil.one'
