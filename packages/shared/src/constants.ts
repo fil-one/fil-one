@@ -267,7 +267,7 @@ const PRODUCTION_HOSTS: ReadonlySet<string> = new Set([
 /**
  * Infer the deployment stage from the hostname a deployment is served on.
  *
- * Production is served from {@link PROD_CONSOLE_HOST} and its demo aliases;
+ * Production is served from {@link PROD_CONSOLE_HOST} and its aliases;
  * staging, per-PR previews and personal dev all share a non-production Auth0
  * tenant and are treated as {@link Stage.Staging} for the purposes of
  * stage-derived config (Auth0 domain, S3 endpoint, etc.).

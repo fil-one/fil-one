@@ -32,7 +32,9 @@ test('paid user logs out and session cookies are cleared', async ({ browser }) =
   // the production marketing site instead is the regression this guards.
   const consoleOrigin = new URL(process.env.BASE_URL!).origin;
   expect(visited.some((url) => new URL(url).origin === consoleOrigin)).toBe(true);
-  expect(visited.some((url) => /^https:\/\/(www\.)?fil\.one\/?$/.test(url))).toBe(false);
+  expect(visited.some((url) => /^https:\/\/(www\.)?(fil\.one|filone\.com)\/?$/.test(url))).toBe(
+    false,
+  );
 
   const cookies = await context.cookies();
   for (const name of AUTH_COOKIES) {

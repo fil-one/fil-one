@@ -625,9 +625,9 @@ export default $config({
         ? undefined
         : {
             name: domainName,
-            // Demo aliases keep visitors on the alias hostname (unlike `redirects`,
-            // which would bounce them back to the blocklisted canonical host). The
-            // cert above must cover every entry or CloudFront rejects the deploy.
+            // Aliases keep visitors on the hostname they came in on (unlike
+            // `redirects`, which would send them to the canonical host). The cert
+            // above must cover every entry or CloudFront rejects the deploy.
             aliases: aliasHosts,
             // Ephemeral stages: SST creates the Route 53 alias in the delegated
             // dev.fil.one zone. Staging/prod: records are managed in Cloudflare

@@ -187,6 +187,10 @@ describe('authMiddleware', () => {
       }
 
       it('validates against the custom domain on the canonical host', async () => {
+        expect(await issuerUsedFor('app.filone.com')).toBe('https://auth.fil.one/');
+      });
+
+      it('validates against the custom domain on the previous canonical host', async () => {
         expect(await issuerUsedFor('app.fil.one')).toBe('https://auth.fil.one/');
       });
 

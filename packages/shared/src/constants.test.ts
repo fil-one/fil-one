@@ -218,7 +218,7 @@ describe('alias constants', () => {
 
   // The one exception is app.fil.one itself, the previous canonical host, which
   // stays an alias so existing links keep working until it redirects.
-  it('keeps aliases off the flagged domain they exist to avoid', () => {
+  it('keeps every alias but the previous canonical host off fil.one', () => {
     for (const host of PROD_CONSOLE_ALIAS_HOSTS) {
       if (host === 'app.fil.one') continue;
       expect(host.endsWith('.fil.one'), host).toBe(false);

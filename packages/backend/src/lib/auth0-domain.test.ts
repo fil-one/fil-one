@@ -29,7 +29,7 @@ describe('resolveAuth0Domain', () => {
   });
 
   it('uses the custom domain for the canonical console host', () => {
-    expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': 'app.fil.one' }))).toBe(
+    expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': 'app.filone.com' }))).toBe(
       'auth.fil.one',
     );
   });
@@ -41,8 +41,8 @@ describe('resolveAuth0Domain', () => {
     );
   });
 
-  it('uses the custom domain for the app.filone.com host', () => {
-    expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': 'app.filone.com' }))).toBe(
+  it('uses the custom domain for the previous canonical host', () => {
+    expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': 'app.fil.one' }))).toBe(
       'auth.fil.one',
     );
   });
