@@ -9,16 +9,18 @@ import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ShareObjectModal } from './ShareObjectModal';
 import { EmptyStateCard } from './EmptyStateCard';
+import { NoObjectsShown, ObjectsToolbar } from './ObjectsToolbar';
 import { Table } from './Table/Table';
 import { FolderRow, ObjectEntryRows, SECONDARY_COLUMN } from './ObjectBrowserRows';
 import { BulkActionsBar } from './BulkActionsBar';
 import type { RowActions, RowSelection } from './ObjectBrowserRows';
 import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
 import type { BrowseEntry } from '../lib/object-grouping.js';
-import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
 import type { ObjectSelection, SelectableVersion } from '../lib/object-selection.js';
 import { descendantSelectionIds, useObjectSelection } from '../lib/object-selection.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
+import { nextObjectSort, type ObjectSort, type ObjectSortKey } from '../lib/object-table.js';
+import { useObjectTableView } from '../lib/use-object-table-view.js';
 
 export { countObjects } from '../lib/object-grouping.js';
 
@@ -211,8 +213,9 @@ function ObjectTable({
   actions,
   selection,
   rowSelection,
-  idsAtPrefix,
+  shownIds,
   listingTruncated,
+  sort,
 }: {
   entries: BrowseEntry[];
   latestVersions: SelectableVersion[];
@@ -223,10 +226,20 @@ function ObjectTable({
   actions: RowActions;
   selection: ObjectSelection;
   rowSelection: RowSelection;
-  idsAtPrefix: string[];
+  /** Selection ids the header checkbox covers: what the table shows, search applied. */
+  shownIds: string[];
   listingTruncated: boolean;
+  /** Absent below the controls threshold, which leaves the heads plain and inert. */
+  sort?: { value: ObjectSort; onChange: (sort: ObjectSort) => void };
 }) {
-  const allSelected = selection.areAllSelected(idsAtPrefix);
+  const allSelected = selection.areAllSelected(shownIds);
+  const sortProps = (key: ObjectSortKey) =>
+    sort
+      ? {
+          onSort: () => sort.onChange(nextObjectSort(sort.value, key)),
+          sortDirection: sort.value.key === key ? sort.value.direction : undefined,
+        }
+      : {};
 
   return (
     <Table>
@@ -235,19 +248,23 @@ function ObjectTable({
           {rowSelection.selectable && (
             <Table.SelectHead
               checked={allSelected}
-              onChange={() => selection.setMany(idsAtPrefix, !allSelected)}
+              onChange={() => selection.setMany(shownIds, !allSelected)}
               label={listingTruncated ? 'Select all loaded objects' : 'Select all objects'}
             />
           )}
-          <Table.Head>Name</Table.Head>
+          <Table.Head {...sortProps('name')}>Name</Table.Head>
           {versioningEnabled && (
             <>
               <Table.Head className={SECONDARY_COLUMN}>Version</Table.Head>
               <Table.Head className={SECONDARY_COLUMN}>Status</Table.Head>
             </>
           )}
-          <Table.Head className={SECONDARY_COLUMN}>Size</Table.Head>
-          <Table.Head className={SECONDARY_COLUMN}>Last Modified</Table.Head>
+          <Table.Head {...sortProps('size')} className={SECONDARY_COLUMN}>
+            Size
+          </Table.Head>
+          <Table.Head {...sortProps('lastModified')} className={SECONDARY_COLUMN}>
+            Last Modified
+          </Table.Head>
           <Table.Head aria-label="Actions" />
         </Table.Row>
       </Table.Header>
@@ -366,6 +383,7 @@ export function ObjectBrowser({
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const share = useRowShare();
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  const view = useObjectTableView(versions, currentPrefix);
   const selection = useObjectSelection(versions);
   const selectedCount = selection.selected.size;
 
@@ -416,14 +434,6 @@ export function ObjectBrowser({
     );
   }
 
-  const groups = groupVersionsByKey(versions);
-  const entries = getEntriesAtPrefix(groups, currentPrefix);
-  const latestVersions: SelectableVersion[] = groups.map((group) => ({
-    key: group.key,
-    versionId: group.latest.versionId,
-  }));
-  const idsAtPrefix = descendantSelectionIds(latestVersions, currentPrefix);
-
   return (
     <div className="mt-4">
       {currentPrefix && (
@@ -436,9 +446,24 @@ export function ObjectBrowser({
 
       {listingTruncated && (
         <TruncatedListingNotice
-          loadedCount={groups.length}
+          loadedCount={view.loadedCount}
           totalObjectCount={totalObjectCount}
           selectable={rowSelection.selectable}
+        />
+      )}
+
+      {view.showControls && (
+        <ObjectsToolbar
+          query={view.query}
+          // A new search drops the selection, so a bulk delete cannot reach an
+          // object the search has hidden.
+          onQueryChange={(query) => {
+            view.setQuery(query);
+            selection.clear();
+          }}
+          inFolder={currentPrefix !== ''}
+          matchCount={view.entries.length}
+          totalCount={view.idsAtPrefix.length}
         />
       )}
 
@@ -451,14 +476,16 @@ export function ObjectBrowser({
         />
       )}
 
-      {entries.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
-          <p className="text-sm text-zinc-500">No objects at this path</p>
-        </div>
+      {view.entries.length === 0 ? (
+        <NoObjectsShown
+          searching={view.searching}
+          inFolder={currentPrefix !== ''}
+          onClearSearch={() => view.setQuery('')}
+        />
       ) : (
         <ObjectTable
-          entries={entries}
-          latestVersions={latestVersions}
+          entries={view.entries}
+          latestVersions={view.latestVersions}
           versioningEnabled={versioningEnabled}
           expandedKeys={expandedKeys}
           onToggleExpand={toggleExpand}
@@ -466,8 +493,9 @@ export function ObjectBrowser({
           actions={rowActions}
           selection={selection}
           rowSelection={rowSelection}
-          idsAtPrefix={idsAtPrefix}
+          shownIds={view.shownIds}
           listingTruncated={listingTruncated}
+          sort={view.sort}
         />
       )}
 
