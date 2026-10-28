@@ -21,7 +21,7 @@ export type ToggleConfirmModalProps = {
  * `RagIndexerCron` in sst.config.ts), NOT by uploads, so a bucket is not
  * queryable the moment it is enabled. Earlier copy claimed "new uploads are
  * indexed automatically", which read as instant and set the wrong expectation.
- * The 6-hour figure matches docs.fil.one/bucket-intelligence.
+ * The 6-hour figure matches docs.filone.com/bucket-intelligence.
  *
  * "Indexes" prevents the "enabled it, got 0 files indexed" dead end on buckets
  * of images, video, or CSVs. Source of truth for the list:

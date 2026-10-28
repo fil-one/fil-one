@@ -666,7 +666,7 @@ describe('setup-integrations', () => {
         ],
         // Each console origin maps to its own marketing site, so logging out of
         // the alias does not land on the domain the alias exists to avoid.
-        allowed_logout_urls: ['https://fil.one', 'https://filone.ai'],
+        allowed_logout_urls: ['https://www.filone.com', 'https://filone.ai'],
         web_origins: ['https://app.fil.one', 'https://app.filone.ai'],
         // Auth0 permits exactly one, so it stays on the canonical host.
         initiate_login_uri: 'https://app.fil.one/login',

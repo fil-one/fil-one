@@ -22,7 +22,7 @@ vi.mock('../lib/auth-secrets.ts', () => ({
 process.env.WEBSITE_URL = 'https://app.example.com';
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.ALLOWED_REDIRECT_ORIGINS =
-  'https://app.fil.one,https://app.filone.ai,https://staging.fil.one';
+  'https://app.filone.com,https://app.fil.one,https://app.filone.ai,https://staging.fil.one';
 
 import { handler } from './auth-logout.ts';
 
@@ -75,7 +75,11 @@ describe('auth-logout handler', () => {
     }
 
     it('sends the canonical console to the canonical marketing site', async () => {
-      expect(await returnToFor('app.fil.one')).toBe('https://fil.one');
+      expect(await returnToFor('app.filone.com')).toBe('https://www.filone.com');
+    });
+
+    it('sends the previous canonical console to the canonical marketing site', async () => {
+      expect(await returnToFor('app.fil.one')).toBe('https://www.filone.com');
     });
 
     it('keeps a demo-alias logout on the alias marketing site', async () => {

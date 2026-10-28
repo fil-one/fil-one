@@ -174,11 +174,11 @@ describe('alias constants', () => {
   });
 
   // An alias console must not send a signed-out user to fil.one, which the demo
-  // alias exists to route around and the filone.com console is moving away from.
+  // alias exists to route around and the old app.fil.one host has moved away from.
   it.each([
     ['https://app.filone.ai', 'https://filone.ai'],
-    ['https://app.filone.com', 'https://www.filone.com'],
-  ])('keeps the %s console on its own marketing domain', (origin, marketingUrl) => {
+    ['https://app.fil.one', 'https://www.filone.com'],
+  ])('keeps the %s console off the fil.one marketing site', (origin, marketingUrl) => {
     expect(MARKETING_URL_BY_CONSOLE_ORIGIN[origin]).toBe(marketingUrl);
   });
 
@@ -201,9 +201,12 @@ describe('alias constants', () => {
 
   // Passkeys are bound to the Auth0 hostname, so any other domain would strand the
   // passkeys customers enrolled on app.fil.one.
-  it('signs app.filone.com in through the Auth0 custom domain', () => {
-    expect(AUTH0_DOMAIN_BY_CONSOLE_ORIGIN['https://app.filone.com']).toBe('auth.fil.one');
-  });
+  it.each([['https://app.filone.com'], ['https://app.fil.one']])(
+    'signs %s in through the Auth0 custom domain',
+    (origin) => {
+      expect(AUTH0_DOMAIN_BY_CONSOLE_ORIGIN[origin]).toBe('auth.fil.one');
+    },
+  );
 
   // getStageFromHostname lowercases its input before comparing, so an entry
   // carrying any uppercase could never match.
@@ -213,24 +216,27 @@ describe('alias constants', () => {
     }
   });
 
+  // The one exception is app.fil.one itself, the previous canonical host, which
+  // stays an alias so existing links keep working until it redirects.
   it('keeps aliases off the flagged domain they exist to avoid', () => {
     for (const host of PROD_CONSOLE_ALIAS_HOSTS) {
-      expect(host.endsWith('.fil.one')).toBe(false);
+      if (host === 'app.fil.one') continue;
+      expect(host.endsWith('.fil.one'), host).toBe(false);
     }
   });
 });
 
 describe('logoutReturnTo', () => {
   it('hands a production console off to its marketing site', () => {
-    expect(logoutReturnTo(`https://${PROD_CONSOLE_HOST}`)).toBe('https://fil.one');
+    expect(logoutReturnTo(`https://${PROD_CONSOLE_HOST}`)).toBe('https://www.filone.com');
   });
 
   it('hands a demo alias off to the alias marketing site', () => {
     expect(logoutReturnTo('https://app.filone.ai')).toBe('https://filone.ai');
   });
 
-  it('hands app.filone.com off to the filone.com marketing site', () => {
-    expect(logoutReturnTo('https://app.filone.com')).toBe('https://www.filone.com');
+  it('hands app.fil.one off to the filone.com marketing site', () => {
+    expect(logoutReturnTo('https://app.fil.one')).toBe('https://www.filone.com');
   });
 
   // Non-production stages have no marketing site of their own, and being thrown onto
