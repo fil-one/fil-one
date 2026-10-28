@@ -825,12 +825,17 @@ describe('setup-integrations', () => {
 
       stubAuth0Fetch({
         callbacks: [
-          'https://app.fil.one/api/auth/callback',
+          'https://app.filone.com/api/auth/callback',
           'https://app.filone.ai/api/auth/callback',
+          'https://app.fil.one/api/auth/callback',
         ],
-        allowed_logout_urls: ['https://fil.one', 'https://filone.ai', 'https://staging.fil.one'],
-        web_origins: ['https://app.fil.one', 'https://app.filone.ai'],
-        initiate_login_uri: 'https://app.fil.one/login',
+        allowed_logout_urls: [
+          'https://www.filone.com',
+          'https://filone.ai',
+          'https://staging.fil.one',
+        ],
+        web_origins: ['https://app.filone.com', 'https://app.filone.ai', 'https://app.fil.one'],
+        initiate_login_uri: 'https://app.filone.com/login',
       });
 
       await handler(
@@ -839,8 +844,8 @@ describe('setup-integrations', () => {
           PhysicalResourceId: 'filone-setup-production',
           ResourceProperties: {
             ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
-            SiteUrl: 'https://app.fil.one',
-            SiteAliasUrls: 'https://app.filone.ai',
+            SiteUrl: 'https://app.filone.com',
+            SiteAliasUrls: 'https://app.filone.ai,https://app.fil.one',
             Stage: 'production',
           },
         }),
@@ -848,9 +853,13 @@ describe('setup-integrations', () => {
 
       expect(capturedAuth0PatchBody).toEqual({
         callbacks: [],
-        // Both marketing sites are shared by every stage, and staging's console
+        // The marketing sites are shared by every stage, and staging's console
         // entry belongs to staging, so none of them may be removed here.
-        allowed_logout_urls: ['https://fil.one', 'https://filone.ai', 'https://staging.fil.one'],
+        allowed_logout_urls: [
+          'https://www.filone.com',
+          'https://filone.ai',
+          'https://staging.fil.one',
+        ],
         web_origins: [],
         initiate_login_uri: '',
       });
