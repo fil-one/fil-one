@@ -117,20 +117,7 @@ export function useMemberActionScope(): {
   role: OrgRole | undefined;
   /** Whether the caller may manage members at all. */
   mayManage: boolean;
-  /**
-   * Whether the caller may see and issue invitations — `members.manage` and an
-   * org in the beta, which is what `POST /api/org/invitations` asks.
-   *
-   * The permission alone is not the question. A caller who belongs to more than
-   * one org reaches the members page in every one of them, so an Owner of a
-   * personal org outside the beta would otherwise be offered a form whose only
-   * possible answer is a 403.
-   *
-   * This gates the form and nothing else. Listing and revoking are `mayManage`,
-   * because `accept-invitation` carries no beta gate: an org dropped from the
-   * beta still has redeemable tokens, and revoke is the only way to withdraw
-   * them.
-   */
+  /** Whether the caller may issue invitations, which `members.manage` grants. */
   mayInvite: boolean;
   /** Whether the caller may transfer the Owner seat. */
   mayTransfer: boolean;
@@ -144,7 +131,7 @@ export function useMemberActionScope(): {
    */
   assignableRoles: readonly OrgRole[];
 } {
-  const { has, userId, role, orgsBeta } = usePermissions();
+  const { has, userId, role } = usePermissions();
 
   // An absent role is not one of the four, so every shared predicate below
   // refuses it. Spelled as the empty string rather than coerced, because the
@@ -155,7 +142,7 @@ export function useMemberActionScope(): {
     userId,
     role,
     mayManage: has('members.manage'),
-    mayInvite: has('members.manage') && orgsBeta,
+    mayInvite: has('members.manage'),
     mayTransfer: has('org.transfer'),
     mayManageTarget: (targetRole: string) => canManageTargetRole(actorRole, targetRole),
     mayChangeRole: (fromRole: string, toRole: string) => canChangeRole(actorRole, fromRole, toRole),

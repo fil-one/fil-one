@@ -170,7 +170,6 @@ describe('the active org stash', () => {
         emailVerified: true,
         mfaEnrollments: [],
         ragAccess: false,
-        orgsBeta: false,
         billingActive: true,
       });
       // Fails only once the new org's `/me` has landed in the cache.

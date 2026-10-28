@@ -3,7 +3,6 @@ import {
   DeleteItemCommand,
   DynamoDBClient,
   GetItemCommand,
-  PutItemCommand,
   QueryCommand,
   TransactWriteItemsCommand,
   UpdateItemCommand,
@@ -22,7 +21,6 @@ import { Resource } from 'sst';
 // - packages/backend/src/lib/invitations.ts  — INVITE# and INVITETOKEN# rows
 // - packages/backend/src/lib/membership-changes.ts — MEMBER#/MEMBERSHIP# rows
 //                                                    and the ownerCount counter
-// - packages/backend/src/lib/orgs-beta.ts    — the ORGS_BETA grant rows
 //
 // Two rules the teardowns keep, because the rest of the suite depends on them:
 // every E2E user ends a run in exactly one organization (their own), and that
@@ -55,7 +53,6 @@ const INVITE_TOKEN_SK = 'LOOKUP';
 const INVITE_SK_PREFIX = 'INVITE#';
 const MEMBER_SK_PREFIX = 'MEMBER#';
 const ORG_META_SK = 'META';
-const ORGS_BETA_SK = 'ORGS_BETA';
 /** The revision every owner-set write bumps — OWNER_SET_REV_ATTRIBUTE in membership-changes.ts. */
 const OWNER_SET_REV_ATTRIBUTE = 'ownerSetRev';
 
@@ -120,57 +117,6 @@ export async function readOrgName(orgId: string): Promise<string> {
     throw new Error(`Organization ${orgId} has no name on its ORG#${orgId}/PROFILE row.`);
   }
   return name;
-}
-
-// ---------------------------------------------------------------------------
-// The organizations beta, which gates creating an invitation
-// ---------------------------------------------------------------------------
-
-/**
- * Grant the beta to a whole organization, or to one address.
- *
- * Two rows grant it and presence is the whole grant (lib/orgs-beta.ts). Which
- * one a spec uses is not cosmetic: specs run concurrently against the same
- * staging accounts, so two of them sharing a key would have the first teardown
- * revoke a grant the second still needs. One key per spec keeps them apart.
- */
-export async function grantOrgBeta(orgId: string): Promise<void> {
-  await putBetaRow(orgPk(orgId));
-}
-
-export async function revokeOrgBeta(orgId: string): Promise<void> {
-  await deleteBetaRow(orgPk(orgId));
-}
-
-export async function grantEmailBeta(email: string): Promise<void> {
-  await putBetaRow(allowlistPk(email));
-}
-
-export async function revokeEmailBeta(email: string): Promise<void> {
-  await deleteBetaRow(allowlistPk(email));
-}
-
-/** Lowercased, as the gate looks it up. */
-function allowlistPk(email: string): string {
-  return `ALLOWLIST#${email.trim().toLowerCase()}`;
-}
-
-async function putBetaRow(pk: string): Promise<void> {
-  await getDynamoClient().send(
-    new PutItemCommand({
-      TableName: tableName('UserInfoTable'),
-      Item: { pk: { S: pk }, sk: { S: ORGS_BETA_SK }, grantedBy: { S: 'e2e' } },
-    }),
-  );
-}
-
-async function deleteBetaRow(pk: string): Promise<void> {
-  await getDynamoClient().send(
-    new DeleteItemCommand({
-      TableName: tableName('UserInfoTable'),
-      Key: { pk: { S: pk }, sk: { S: ORGS_BETA_SK } },
-    }),
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -606,7 +552,7 @@ export interface CleanupStep {
  * Run every teardown step, including the ones after a step that threw.
  *
  * A teardown is a list of independent repairs — a seat, a membership pair, a
- * counter, a beta grant — and a bare `await` sequence gives the first transient
+ * counter — and a bare `await` sequence gives the first transient
  * failure the power to abandon all of them. `TransactWriteItems` can be
  * cancelled by throttling or a conflict at any point, and the org the run
  * abandons is the org the next run inherits: two Admins and no Owner fails a

@@ -29,7 +29,6 @@ function meWith(ragAccess: boolean): MeResponse {
     email: 'user@example.com',
     mfaEnrollments: [],
     ragAccess,
-    orgsBeta: false,
     billingActive: true,
   };
 }

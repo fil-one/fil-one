@@ -115,16 +115,6 @@ function callerHolds(role: OrgRole) {
   stubMembershipRead(ddbMock, { orgId: ORG_ID, userId: USER_ID, role });
 }
 
-/** The beta flag, as either of the two rows that grant it. */
-function grantBeta(pk: string) {
-  ddbMock
-    .on(GetItemCommand, {
-      TableName: 'UserInfoTable',
-      Key: { pk: { S: pk }, sk: { S: 'ORGS_BETA' } },
-    })
-    .resolves({ Item: { pk: { S: pk }, sk: { S: 'ORGS_BETA' } } });
-}
-
 function invitationRow({
   inviteId,
   emailNorm,
@@ -277,7 +267,6 @@ describe('POST /api/org/invitations handler', () => {
     ddbMock.on(TransactWriteItemsCommand).resolves({});
     ddbMock.on(UpdateItemCommand).resolves({});
     stubPendingInvitations(0);
-    grantBeta(`ALLOWLIST#${INVITER_EMAIL}`);
     callerHolds(OrgRole.Owner);
   });
 
@@ -426,55 +415,6 @@ describe('POST /api/org/invitations handler', () => {
       inviteEvent({ email: INVITED_EMAIL, role: OrgRole.Admin }),
       buildContext(),
     );
-
-    expect(result).toMatchObject({ statusCode: 201 });
-  });
-
-  it('refuses when neither beta row exists', async () => {
-    ddbMock.reset();
-    ddbMock.on(GetItemCommand).resolves({});
-    ddbMock.on(TransactWriteItemsCommand).resolves({});
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
-      })
-      .resolves({
-        Item: {
-          pk: { S: `SUB#${MOCK_SUB}` },
-          sk: { S: 'IDENTITY' },
-          userId: { S: USER_ID },
-          orgId: { S: ORG_ID },
-        },
-      });
-    stubPendingInvitations(0);
-    callerHolds(OrgRole.Owner);
-
-    const result = await handler(inviteEvent(), buildContext());
-
-    expect(result).toMatchObject({ statusCode: 403 });
-    // Its own code, not the absence of one: this is the feature not being on
-    // for them rather than their role refusing them, and the console has a
-    // state for it that no other code-less 403 should reach.
-    expect(body(result).code).toBe(ApiErrorCode.INVITES_NOT_ENABLED);
-    expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
-  });
-
-  it('accepts the org’s own beta row, for a caller with no allowlist row', async () => {
-    grantBeta(`ORG#${ORG_ID}`);
-
-    const result = await handler(inviteEvent(), buildContext());
-
-    expect(result).toMatchObject({ statusCode: 201 });
-  });
-
-  it('accepts a verified @fil.org caller who holds no beta row', async () => {
-    // The default allowlist row is keyed to INVITER_EMAIL, so it does not match.
-    mockJwtVerify.mockResolvedValue({
-      payload: { sub: MOCK_SUB, email: 'any-person@fil.org', email_verified: true },
-    });
-
-    const result = await handler(inviteEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 201 });
   });

@@ -14,8 +14,7 @@ export function requireUserId(role: Role): string {
   return requireCredential(`E2E_${role.toUpperCase()}_USER_ID`);
 }
 
-// The role's address, which the org specs need for the two things an invitation
-// is matched by: who it was sent to, and whose allowlist row grants the beta.
+// The role's address, which the org specs log in with and match invitations to.
 export function requireEmail(role: Role): string {
   return requireCredential(`E2E_${role.toUpperCase()}_EMAIL`);
 }

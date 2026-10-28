@@ -3,7 +3,6 @@ import { createRoute } from '@tanstack/react-router';
 
 import { Route as appRoute } from '../_app';
 import { OrganizationPage } from '../../pages/OrganizationPage';
-import { RequireOrgsBeta } from '../../components/RequireOrgsBeta';
 import { RequirePermissionPage } from '../../components/RequirePermissionPage';
 
 /**
@@ -17,15 +16,13 @@ const membersSearchSchema = z.object({
 function MembersRoute() {
   const { tab } = Route.useSearch();
   return (
-    <RequireOrgsBeta>
-      <RequirePermissionPage
-        permission="members.read"
-        title="Members"
-        deniedMessage="Reading this organization's members is not part of your role."
-      >
-        <OrganizationPage tab={tab} />
-      </RequirePermissionPage>
-    </RequireOrgsBeta>
+    <RequirePermissionPage
+      permission="members.read"
+      title="Members"
+      deniedMessage="Reading this organization's members is not part of your role."
+    >
+      <OrganizationPage tab={tab} />
+    </RequirePermissionPage>
   );
 }
 

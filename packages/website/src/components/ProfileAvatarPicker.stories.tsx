@@ -14,7 +14,6 @@ const BASE_ME: MeResponse = {
   email: 'ada@example.com',
   mfaEnrollments: [],
   ragAccess: false,
-  orgsBeta: false,
   billingActive: true,
 };
 

@@ -32,8 +32,7 @@ export const INVITE_EXPIRY_DAYS = 14;
  * much mail it can send: revoking frees a slot immediately, and re-inviting an
  * address that already has a live invitation replaces that one rather than
  * taking a second slot. Volume over time is a per-org send throttle, which the
- * API does not have — the ORGS_BETA allowlist is what stands in for it while
- * every account that can invite is one we admitted by hand.
+ * API does not have.
  *
  * Small on purpose: a real team invites people a handful at a time.
  */

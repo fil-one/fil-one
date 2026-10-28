@@ -56,17 +56,6 @@ export interface MeResponse {
    */
   floorOrg?: boolean;
   /**
-   * Whether the organizations beta is switched on for this caller — their own
-   * allowlist row, or {@link MeResponse.orgId}'s. Computed server-side like
-   * {@link MeResponse.ragAccess}, from the same predicate the invitation
-   * endpoint refuses on, so the console hides a members surface the server
-   * would then refuse to populate rather than discovering the refusal.
-   *
-   * It answers for the active org only. Switching orgs re-reads `/me`, which is
-   * what makes the answer follow the org rather than the session.
-   */
-  orgsBeta: boolean;
-  /**
    * Whether the active org has usable billing — a plan chosen, trial or paid,
    * as opposed to never having had one. Computed server-side like
    * {@link MeResponse.ragAccess}, and visible to every role rather than gated
