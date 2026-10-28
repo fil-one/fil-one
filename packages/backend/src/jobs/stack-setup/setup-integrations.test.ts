@@ -830,6 +830,7 @@ describe('setup-integrations', () => {
           'https://app.fil.one/api/auth/callback',
         ],
         allowed_logout_urls: [
+          'https://fil.one',
           'https://www.filone.com',
           'https://filone.ai',
           'https://staging.fil.one',
@@ -856,6 +857,7 @@ describe('setup-integrations', () => {
         // The marketing sites are shared by every stage, and staging's console
         // entry belongs to staging, so none of them may be removed here.
         allowed_logout_urls: [
+          'https://fil.one',
           'https://www.filone.com',
           'https://filone.ai',
           'https://staging.fil.one',
