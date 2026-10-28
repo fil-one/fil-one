@@ -505,7 +505,7 @@ describe('setup-integrations', () => {
           'https://app.filone.ai/api/auth/callback',
           'https://app.filone.com/api/auth/callback',
         ],
-        allowed_logout_urls: ['https://www.fil.one', 'https://filone.ai'],
+        allowed_logout_urls: ['https://fil.one', 'https://filone.ai', 'https://www.filone.com'],
         web_origins: ['https://app.fil.one', 'https://app.filone.ai', 'https://app.filone.com'],
         initiate_login_uri: 'https://app.fil.one/login',
       });
@@ -540,8 +540,9 @@ describe('setup-integrations', () => {
           'https://app.fil.one/api/auth/callback',
         ],
         // Teardown leaves marketing logout URLs alone, since other stages share
-        // them, so the old site's entry stays alongside the new one.
-        allowed_logout_urls: ['https://www.fil.one', 'https://filone.ai', 'https://www.filone.com'],
+        // them, so the old site's entry stays. www.filone.com was already there
+        // for the app.filone.com alias, so setup adds nothing.
+        allowed_logout_urls: ['https://fil.one', 'https://filone.ai', 'https://www.filone.com'],
         web_origins: ['https://app.filone.com', 'https://app.filone.ai', 'https://app.fil.one'],
         initiate_login_uri: 'https://app.filone.com/login',
       });
