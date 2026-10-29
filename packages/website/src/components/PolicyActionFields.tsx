@@ -70,7 +70,7 @@ export function PolicyActionFields({ value, onChange }: PolicyActionFieldsProps)
         if (actions.length === 0) return null;
         return (
           <div key={group} className="flex flex-col" data-testid={`policy-actions-group-${group}`}>
-            <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wider text-zinc-400">
+            <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wider text-zinc-500">
               {POLICY_ACTION_GROUP_LABELS[group]}
             </p>
             {actions.map((action) => (
