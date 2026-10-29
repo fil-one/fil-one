@@ -40,6 +40,9 @@ entry, nothing ever reads "deleted", and its bucket entries came from a
   storage system.
 - The feed starts empty for buckets and keys created before this shipped, and holds
   90 days.
+- The audit log records bucket changes made through the console. A bucket created
+  or deleted with the S3 API directly, such as from the `aws` CLI, appears on the
+  Buckets page but not in the feed or on the audit page.
 - Below Admin, a bucket another member created and shared with the reader does not
   appear, and neither does a revocation another member made to the reader's key.
 - `get-activity` reports `AuditQueryDuration` under `route=activity`. The

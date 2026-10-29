@@ -229,31 +229,35 @@ export type ActivityBucketScope = Exclude<ActivityScope, { sees: 'none' }>;
  * page but not activity. Key events are S3 keys only, the ones the API keys
  * page lists.
  *
- * Reads the base table newest first and filters, draining until `limit`
- * events match or the retention window ends, for the reason
- * {@link queryAuditEvents} drains. There is no cursor: the feed has no next
- * page.
+ * Reads the base table newest first over `from` (inclusive) to `to`
+ * (exclusive) and filters, draining until `limit` events match or the window
+ * ends, for the reason {@link queryAuditEvents} drains. There is no cursor: the
+ * feed has no next page.
  */
 export async function queryActivityEvents({
   orgId,
   bucketEvents,
   keyEvents,
+  from,
+  to,
   limit,
 }: {
   orgId: string;
   bucketEvents: ActivityBucketScope;
   keyEvents: ActivityScope;
+  from: string;
+  to: string;
   limit: number;
 }): Promise<{ events: AuditEvent[]; cost: AuditQueryCost }> {
-  // Retention's lower bound. The feed reads up to now, so no upper bound is set.
-  const { from } = resolveWindow({ to: new Date().toISOString() });
   const cost: AuditQueryCost = { pages: 0, rows: 0 };
   const events: AuditEvent[] = [];
   let startKey: DynamoCursor;
 
   do {
     const page = await getDynamoClient().send(
-      new QueryCommand(buildActivityQueryInput({ orgId, bucketEvents, keyEvents, from, startKey })),
+      new QueryCommand(
+        buildActivityQueryInput({ orgId, bucketEvents, keyEvents, from, to, startKey }),
+      ),
     );
     cost.pages += 1;
     cost.rows += page.Items?.length ?? 0;
@@ -269,17 +273,21 @@ function buildActivityQueryInput({
   bucketEvents,
   keyEvents,
   from,
+  to,
   startKey,
 }: {
   orgId: string;
   bucketEvents: ActivityBucketScope;
   keyEvents: ActivityScope;
   from: string;
+  to: string;
   startKey: DynamoCursor;
 }) {
   const values: Record<string, unknown> = {
     ':pk': AuditKeys.orgPk(orgId),
     ':from': from,
+    // Exclusive, as `queryInput` explains for the same bound.
+    ':to': to,
     ':now': Math.floor(Date.now() / 1000),
     ':succeeded': 'succeeded',
   };
@@ -291,7 +299,7 @@ function buildActivityQueryInput({
 
   return {
     TableName: auditTableName(),
-    KeyConditionExpression: 'pk = :pk AND sk >= :from',
+    KeyConditionExpression: 'pk = :pk AND sk BETWEEN :from AND :to',
     // The TTL clause is the one `queryInput` explains: DynamoDB serves expired
     // rows until it gets round to deleting them.
     FilterExpression: `#ttl > :now AND #outcome = :succeeded AND ${typeFilter}`,

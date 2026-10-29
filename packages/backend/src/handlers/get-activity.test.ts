@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OrgRole } from '@filone/shared';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { AUDIT_RETENTION_DAYS, OrgRole } from '@filone/shared';
 import type { AuditEvent, AuditEventType } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -7,7 +7,8 @@ import type { AuditEvent, AuditEventType } from '@filone/shared';
 // ---------------------------------------------------------------------------
 
 const mockQueryActivityEvents = vi.fn();
-vi.mock('../lib/audit-query.ts', () => ({
+vi.mock('../lib/audit-query.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/audit-query.ts')>()),
   queryActivityEvents: (...args: unknown[]) => mockQueryActivityEvents(...args),
 }));
 
@@ -145,6 +146,26 @@ describe('get-activity baseHandler', () => {
     expect(mockQueryActivityEvents).toHaveBeenCalledWith(
       expect.objectContaining({ orgId: USER_INFO.orgId, limit }),
     );
+  });
+
+  describe('window', () => {
+    const NOW = '2026-10-15T12:00:00.000Z';
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(NOW));
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('asks the audit log for the whole retention window up to now', async () => {
+      await getActivities();
+
+      const earliest = new Date(
+        Date.parse(NOW) - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      expect(mockQueryActivityEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ from: earliest, to: NOW }),
+      );
+    });
   });
 
   it('reports the read under the activity route', async () => {

@@ -412,6 +412,8 @@ describe('queryAllAuditEvents', () => {
 });
 
 describe('queryActivityEvents', () => {
+  const ACTIVITY_WINDOW = { from: '2026-08-01T00:00:00.000Z', to: NOW };
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
@@ -420,24 +422,23 @@ describe('queryActivityEvents', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("reads the caller's org newest first from the start of retention", async () => {
+  it("reads the caller's org newest first over the window it is given", async () => {
     await queryActivityEvents({
       orgId: ORG_ID,
       bucketEvents: { sees: 'all' },
       keyEvents: { sees: 'all' },
+      ...ACTIVITY_WINDOW,
       limit: 10,
     });
 
-    const earliest = new Date(
-      Date.parse(NOW) - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
-    ).toISOString();
     expect(queryInput()).toMatchObject({
-      KeyConditionExpression: 'pk = :pk AND sk >= :from',
+      KeyConditionExpression: 'pk = :pk AND sk BETWEEN :from AND :to',
       ScanIndexForward: false,
     });
     expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
       ':pk': `ORG#${ORG_ID}`,
-      ':from': earliest,
+      ':from': ACTIVITY_WINDOW.from,
+      ':to': ACTIVITY_WINDOW.to,
     });
   });
 
@@ -479,12 +480,13 @@ describe('queryActivityEvents', () => {
       { ...BUCKET_TYPES, ':bucketActorId': USER_ID },
     ],
   ])('filters to %s', async (_case, scopes, filterExpression, boundValues) => {
-    await queryActivityEvents({ orgId: ORG_ID, ...scopes, limit: 10 });
+    await queryActivityEvents({ orgId: ORG_ID, ...scopes, ...ACTIVITY_WINDOW, limit: 10 });
 
     expect(queryInput().FilterExpression).toStrictEqual(filterExpression);
     const {
       ':pk': _pk,
       ':from': _from,
+      ':to': _to,
       ...values
     } = unmarshall(queryInput().ExpressionAttributeValues!);
     expect(values).toStrictEqual({
@@ -504,6 +506,7 @@ describe('queryActivityEvents', () => {
       orgId: ORG_ID,
       bucketEvents: { sees: 'all' },
       keyEvents: { sees: 'all' },
+      ...ACTIVITY_WINDOW,
       limit: 1,
     });
 
@@ -523,6 +526,7 @@ describe('queryActivityEvents', () => {
       orgId: ORG_ID,
       bucketEvents: { sees: 'all' },
       keyEvents: { sees: 'all' },
+      ...ACTIVITY_WINDOW,
       limit: 1,
     });
 

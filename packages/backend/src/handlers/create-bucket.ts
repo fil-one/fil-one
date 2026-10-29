@@ -99,24 +99,24 @@ export async function baseHandler(
       retention,
       ...(policy ? { policy } : {}),
     });
-  } catch (err) {
-    await bucketAudit.complete({ outcome: getBucketOutcome(err) });
+  } catch (thrown) {
+    await bucketAudit.complete({ outcome: getBucketOutcome(thrown) });
     // The refusal and the rethrow answer for the policy write's own error.
-    const failure = unwrapPolicyWriteError(err);
+    const err = unwrapPolicyWriteError(thrown);
     // The bucket was created but couldn't be fully configured. Surface the
     // actionable message so the caller can finish setup via the S3 API instead
     // of getting the generic 500 from errorHandlerMiddleware. The orchestrator
     // writes the policy before the configuration calls, so that write succeeded.
-    if (failure instanceof BucketConfigurationError) {
+    if (err instanceof BucketConfigurationError) {
       await policyAudit?.complete({ outcome: 'succeeded', details: completionDetails });
       return new ResponseBuilder()
         .status(500)
-        .body<ErrorResponse>({ message: failure.message })
+        .body<ErrorResponse>({ message: err.message })
         .build();
     }
     await policyAudit?.complete({ outcome: 'failed' });
-    const refusal = toCreateRefusalResponse(failure, bucketName);
-    if (!refusal) throw failure;
+    const refusal = toCreateRefusalResponse(err, bucketName);
+    if (!refusal) throw err;
     return refusal;
   }
   await bucketAudit.complete({ outcome: 'succeeded' });

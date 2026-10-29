@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { AuditEvent, RecentActivity, RecentActivityResponse } from '@filone/shared';
-import { queryActivityEvents } from '../lib/audit-query.ts';
+import { queryActivityEvents, resolveWindow } from '../lib/audit-query.ts';
 import type { ActivityBucketScope, ActivityScope } from '../lib/audit-query.ts';
 import { reportAuditQuery } from '../lib/audit-metrics.ts';
 import { keyScope } from '../lib/key-scope.ts';
@@ -23,6 +23,9 @@ import { requestDeadlineMiddleware, trackRequestStep } from '../middleware/reque
  * Owner and Admin only; this feed is open to every role under `buckets.read`
  * because it carries only bucket and key events, and below Admin only the ones
  * the caller acted on.
+ *
+ * The audit log records what the console did, so a bucket created or deleted
+ * with the S3 API directly appears on the Buckets page but never here.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -33,6 +36,8 @@ export async function baseHandler(
     50,
   );
 
+  // The whole retention window up to now: the feed takes no dates.
+  const { from, to } = resolveWindow({ to: new Date().toISOString() });
   const start = performance.now();
   // A named step, so a read still draining when the deadline fires is logged.
   const { events, cost } = await trackRequestStep(event, 'queryActivityEvents', () =>
@@ -40,6 +45,8 @@ export async function baseHandler(
       orgId,
       bucketEvents: getBucketEventScope(event),
       keyEvents: getKeyEventScope(event),
+      from,
+      to,
       limit,
     }),
   );
