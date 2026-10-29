@@ -86,7 +86,7 @@ function ChartTooltip({
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 shadow-md">
-      <p className="mb-0.5 text-xs font-medium uppercase tracking-wider text-zinc-400">
+      <p className="mb-0.5 text-xs font-medium uppercase tracking-wider text-zinc-500">
         {formatLabel(label as string)}
       </p>
       <p className="text-xs text-zinc-700">
