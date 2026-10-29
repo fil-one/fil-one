@@ -1,6 +1,6 @@
 # Bucket policy e2e suite
 
-End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run against a stage whose Forge region serves the `iam` access model: locally `us-east-9`, backed by a smelt network; on a remote stage `eu-central-3`. The `full-*` projects ignore this directory, so the suite runs only as the `policies` project.
+End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run against a stage whose Forge region serves the `iam` access model: locally `us-east-9`, backed by a smelt network; on a remote stage `eu-central-3`. The suite runs only in its own `policies-*` projects. Tags in the specs choose where a test runs. `policies-chromium`, `policies-firefox` and `policies-webkit` run the spec files side by side, each file in order. A test that opens no page and only sends API or S3 requests is tagged `@api` and runs in Chromium only; every other test also runs in Firefox and WebKit. A test that changes what other tests see, such as the member's bucket list in `policy-member-ui` or the roster in `policy-lifecycle`, is tagged `@serial` and runs alone afterwards, in `policies-serial-chromium`, `policies-serial-firefox` and `policies-serial-webkit`. `pnpm test:e2e:policies` runs them all (`--project='policies-*'`), and CI runs the same with `--workers=2`. Locally, the WebKit page tests fail: smelt serves Ingot over plain `http`, and WebKit blocks those requests from the `https` console.
 
 ## What they need
 
@@ -32,7 +32,7 @@ export AWS_REGION=us-east-2 BASE_URL=https://staging.fil.one
 SST_STAGE=staging pnpm test:e2e:policies
 ```
 
-`E2E_POLICY_REGION` and `E2E_POLICY_S3_ENDPOINT` override the region and the S3 endpoint; by default a remote stage uses `eu-central-3` and the endpoint `getS3Endpoint` derives for it. The staging Forge network has to run Hilt and Ingot with the policy operations. In CI, `e2e-staging.yaml` runs the project when the `E2E_POLICY_*` secrets are set.
+`E2E_POLICY_REGION` and `E2E_POLICY_S3_ENDPOINT` override the region and the S3 endpoint; by default a remote stage uses `eu-central-3` and the endpoint `getS3Endpoint` derives for it. The staging Forge network has to run Hilt and Ingot with the policy operations. In CI, `e2e-staging.yaml` (nightly) and `test-staging.yaml` (after each staging deploy, before production) run it through `e2e-suites.yaml`, in its own job beside the destructive and multi-org suites.
 
 `policies-setup` logs all five accounts in and claims and activates the Owner's subscription. It then seats the other four in the Owner's organization: the Admin, the Member, the ReadOnly user, and the Leaver as a Member.
 
