@@ -1,9 +1,10 @@
 import z from 'zod';
 import { createRoute, redirect } from '@tanstack/react-router';
-import { S3Region } from '@filone/shared';
+import { S3Region, listBucketsUnavailableMessage } from '@filone/shared';
 import type { ListBucketsResponse } from '@filone/shared';
 import { Route as appRoute } from '../_app';
 import { BucketDetailPage, BucketErrorState } from '../../pages/BucketDetailPage';
+import { BucketRegionChooser } from '../../components/BucketRegionChooser';
 import { apiRequest } from '../../lib/api.js';
 import { LIST_STALE_TIME, queryClient, queryKeys } from '../../lib/query-client.js';
 
@@ -17,38 +18,75 @@ const bucketSearchSchema = z.object({
   region: regionSchema.optional(),
 });
 
+/** What the buckets listing says about a name, when it cannot settle on one region. */
+export interface BucketRegionLookup {
+  /** Regions holding a bucket by this name. */
+  regions: S3Region[];
+  /** Regions whose listing failed, so they may hold one too. */
+  unavailableRegions: S3Region[];
+}
+
+async function findBucketRegions(bucketName: string): Promise<BucketRegionLookup> {
+  const { buckets, unavailableRegions = [] } = await queryClient.fetchQuery({
+    queryKey: queryKeys.buckets,
+    queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
+    staleTime: LIST_STALE_TIME,
+  });
+  // The listing types a region as any string; only one this console knows can
+  // go in the URL.
+  const regions = buckets
+    .filter((b) => b.bucketName === bucketName)
+    .flatMap((b) => {
+      const region = regionSchema.safeParse(b.region);
+      return region.success ? [region.data] : [];
+    });
+  return { regions, unavailableRegions };
+}
+
 function BucketDetailRoute() {
   const { bucketName } = Route.useParams();
   const { prefix, region } = Route.useSearch();
-  // `beforeLoad` redirects whenever the bucket exists, so no region here means
-  // no bucket by this name.
-  if (!region) {
-    return <BucketErrorState bucketName={bucketName} error={null} fallback="Bucket not found" />;
+  const { regionLookup } = Route.useRouteContext();
+  if (region) {
+    return <BucketDetailPage bucketName={bucketName} prefix={prefix} region={region} />;
   }
-  return <BucketDetailPage bucketName={bucketName} prefix={prefix} region={region} />;
+  // `beforeLoad` sets the lookup whenever the URL has no region.
+  const { regions, unavailableRegions } = regionLookup ?? { regions: [], unavailableRegions: [] };
+  if (regions.length === 0) {
+    const fallback =
+      unavailableRegions.length > 0
+        ? listBucketsUnavailableMessage(unavailableRegions)
+        : 'Bucket not found';
+    return <BucketErrorState bucketName={bucketName} error={null} fallback={fallback} />;
+  }
+  return (
+    <BucketRegionChooser
+      bucketName={bucketName}
+      regions={regions}
+      unavailableRegions={unavailableRegions}
+    />
+  );
 }
 
 export const Route = createRoute({
   path: '/buckets/$bucketName',
   getParentRoute: () => appRoute,
   beforeLoad: async ({ params, search }) => {
-    if (search.region) return;
-    const { buckets } = await queryClient.fetchQuery({
-      queryKey: queryKeys.buckets,
-      queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
-      staleTime: LIST_STALE_TIME,
-    });
-    const bucket = buckets.find((b) => b.bucketName === params.bucketName);
-    // The listing types a region as any string; only one this console knows
-    // can go in the URL.
-    const region = regionSchema.safeParse(bucket?.region);
-    if (!region.success) return;
-    throw redirect({
-      to: '/buckets/$bucketName',
-      params,
-      search: { ...search, region: region.data },
-      replace: true,
-    });
+    if (search.region) return { regionLookup: undefined };
+    const regionLookup = await findBucketRegions(params.bucketName);
+    const { regions, unavailableRegions } = regionLookup;
+    // Open the bucket only when the listing proves it is the one by that name:
+    // a second match, or a region that did not answer, leaves the choice to
+    // the user.
+    if (regions.length === 1 && unavailableRegions.length === 0) {
+      throw redirect({
+        to: '/buckets/$bucketName',
+        params,
+        search: { ...search, region: regions[0] },
+        replace: true,
+      });
+    }
+    return { regionLookup };
   },
   component: BucketDetailRoute,
   validateSearch: bucketSearchSchema,
