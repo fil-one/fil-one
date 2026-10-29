@@ -70,8 +70,8 @@ function invalidateRevokedKeyViews(client: QueryClient, revokedCount: number): v
   // exist as keys the next attempt will revoke.
   void client.invalidateQueries({ queryKey: queryKeys.roleChangePreviews });
   // `/usage` counts keys per org, not per member, so revoking somebody else's
-  // moves the caller's own dashboard tile and the quick-setup checklist that
-  // reads it. Its stale window is five minutes, the longest of the three.
+  // moves the caller's own dashboard tile that reads it. Its stale window is
+  // five minutes, the longest of the three.
   void client.invalidateQueries({ queryKey: queryKeys.usage });
 }
 
