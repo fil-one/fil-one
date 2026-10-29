@@ -58,6 +58,53 @@ export function getUserInfo(event: AuthenticatedEvent): UserInfo {
   return event.requestContext.userInfo;
 }
 
+/** What Auth0 says about a caller who has no account here yet. */
+interface PendingAccountFields {
+  sub: string;
+  /** Minted for the account the route will create, and unused if it creates none. */
+  userId: string;
+  email?: string;
+  emailVerified: boolean;
+  name?: string;
+}
+
+/** A caller signing in for the first time. */
+export interface NewAccount extends PendingAccountFields {
+  kind: 'new';
+}
+
+/**
+ * A caller whose earlier account was deleted and whose deletion has finished.
+ * Their Auth0 sub came back unchanged, as a Google login's does, so their
+ * identity row still carries the deletion stamp.
+ */
+export interface RejoiningAccount extends PendingAccountFields {
+  kind: 'rejoining';
+  /** The stamp on the identity row, which the new account replaces only if it is still there. */
+  deletedAt: string;
+}
+
+export type PendingAccount = NewAccount | RejoiningAccount;
+
+/**
+ * A request from a caller with no account, on a route that creates the account
+ * itself (`authMiddleware({ deferAccountCreation: true })`). It carries the
+ * pending account in place of `userInfo`: there is no org or membership to
+ * resolve yet. `Omit` keeps every other field the authenticated request carries.
+ */
+export interface PendingAccountEvent extends APIGatewayProxyEventV2 {
+  requestContext: Omit<AuthenticatedEvent['requestContext'], 'userInfo'> & {
+    pendingAccount: PendingAccount;
+  };
+}
+
+/** What a route with deferred account creation receives. */
+export type AccountCreatingEvent = AuthenticatedEvent | PendingAccountEvent;
+
+export function isPendingAccountEvent(event: AccountCreatingEvent): event is PendingAccountEvent {
+  return 'pendingAccount' in event.requestContext;
+}
+
 /**
  * The user's email, but only when it has been verified — suitable for
  * allowlist checks (e.g. Foundation early-access regions). Returns `undefined`
