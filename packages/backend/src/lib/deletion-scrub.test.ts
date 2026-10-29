@@ -6,6 +6,8 @@ import {
   DynamoDBClient,
   QueryCommand,
   ScanCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -502,11 +504,44 @@ describe('scrubOrgRecords', () => {
       expect(scrubbedKeys()).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
     });
 
-    // Nowhere to send them: the account survives, pointing at a deleted org.
-    it('leaves the rows alone when the member has no other org', async () => {
-      await scrubOrgRecords(ORG, KEPT);
+    // Invited here and nowhere else: without a floor org the account would
+    // keep naming the deleted org and be refused on every request.
+    it('gives a survivor with no other org a floor org and moves them onto it', async () => {
+      await scrubOrgRecords(ORG, [KEPT[0]]);
 
-      expect(repoints()).toEqual([]);
+      const transactions = ddbMock.commandCalls(TransactWriteItemsCommand);
+      expect(transactions).toHaveLength(1);
+      const items = transactions[0].args[0].input.TransactItems ?? [];
+      const floorOrgId = items
+        .find(
+          (item) => item.Put?.Item?.sk?.S === 'PROFILE' && item.Put.Item.pk?.S?.startsWith('ORG#'),
+        )
+        ?.Put?.Item?.pk?.S?.slice('ORG#'.length);
+      const moves = items
+        .filter((item) => item.Update?.UpdateExpression === 'SET orgId = :orgId')
+        .map((item) => ({
+          key: `${item.Update!.Key!.pk!.S}/${item.Update!.Key!.sk!.S}`,
+          to: item.Update!.ExpressionAttributeValues![':orgId'],
+          expected: item.Update!.ExpressionAttributeValues![':expected'],
+        }));
+      expect(moves).toStrictEqual([
+        { key: 'SUB#auth0|one/IDENTITY', to: { S: floorOrgId }, expected: { S: ORG } },
+        { key: 'USER#user-1/PROFILE', to: { S: floorOrgId }, expected: { S: ORG } },
+      ]);
+    });
+
+    // A re-drive after the move, or a home that never named this org.
+    it('creates nothing when the move finds the home no longer names the deleting org', async () => {
+      ddbMock.on(TransactWriteItemsCommand).rejects(
+        new TransactionCanceledException({
+          $metadata: {},
+          message: 'cancelled',
+          CancellationReasons: [{ Code: 'ConditionalCheckFailed' }],
+        }),
+      );
+
+      await expect(scrubOrgRecords(ORG, [KEPT[0]])).resolves.toBeUndefined();
+      expect(scrubbedKeys()).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
     });
 
     it('leaves the rows of a member whose account is ending alone', async () => {

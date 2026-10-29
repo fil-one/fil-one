@@ -65,7 +65,8 @@ export interface DeletionMember {
    * false) and who has another membership to move to: the one they joined
    * earliest, and the smallest org id among those they joined at the same
    * moment. Chosen here so both rows move to the same org and a re-driven pass
-   * makes the same choice.
+   * makes the same choice. A survivor with no other membership gets a floor
+   * org from the scrub instead.
    */
   homeOrgId?: string;
   /**

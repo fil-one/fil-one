@@ -3,6 +3,7 @@ import {
   DeleteItemCommand,
   QueryCommand,
   ScanCommand,
+  TransactionCanceledException,
   UpdateItemCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
@@ -15,7 +16,8 @@ import {
   deleteManifestEntry,
   loadManifest,
 } from '../jobs/rag-indexer-manifest.ts';
-import { AuditKeys } from './audit.ts';
+import { prepareFloorOrg } from './account-creation.ts';
+import { AuditKeys, commitAudited } from './audit.ts';
 import { getDynamoClient } from './ddb-client.ts';
 import { collectPages } from './ddb-paging.ts';
 import { RAGKeys } from './dynamo-records.ts';
@@ -23,6 +25,7 @@ import { OrgKeys } from './org-membership.ts';
 import type { DeletionMember } from './deletion-record.ts';
 import { RagApiKeyKeys } from './rag-api-keys.ts';
 import { SubscriptionKeys } from './subscription-store.ts';
+import { readUserProfile } from './user-profile.ts';
 
 type Item = Record<string, AttributeValue>;
 
@@ -247,9 +250,9 @@ async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<v
  * any `X-Org-Id` header is looked at. A member left naming this org would keep
  * their Auth0 user and their rows and still be refused on every request.
  *
- * `homeOrgId` is absent when the member has no other membership to move to —
- * an invited sole member, whose account survives with nowhere to send it. The
- * rows are left as they are; there is no org to name.
+ * `homeOrgId` is absent when the member has no other membership to move to:
+ * an invited member whose only org this was. They get a floor org to move to
+ * instead, the same one a removal gives a member it leaves with none.
  *
  * Both writes are conditioned on the row still naming the deleting org, so a
  * re-drive after the move lands on a row that no longer matches and changes
@@ -257,9 +260,48 @@ async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<v
  */
 async function repointHomeOrg(orgId: string, member: DeletionMember): Promise<void> {
   const { homeOrgId } = member;
-  if (!homeOrgId) return;
+  if (!homeOrgId) return await moveToFloorOrg(orgId, member);
   await repointRow({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }, orgId, homeOrgId);
   await repointRow({ pk: `USER#${member.userId}`, sk: 'PROFILE' }, orgId, homeOrgId);
+}
+
+/**
+ * Create a floor org for a surviving member with no other org and move both
+ * home-org pointers onto it, in one transaction.
+ *
+ * The moves are conditioned on each pointer still naming the deleting org, so
+ * a re-drive after the move cancels and creates nothing. A pointer that names
+ * some other org cancels it too, and is logged: that account was not homed
+ * here, and this pass cannot tell where it should go.
+ */
+async function moveToFloorOrg(orgId: string, member: DeletionMember): Promise<void> {
+  const profile = await readUserProfile(member.userId, { consistentRead: true });
+  const floorOrg = await prepareFloorOrg({
+    userId: member.userId,
+    sub: member.sub,
+    homeOrgIds: { profile: orgId, identity: orgId },
+    name: profile?.name,
+    email: profile?.email,
+  });
+  try {
+    await commitAudited({ items: floorOrg.items, event: floorOrg.event });
+  } catch (err) {
+    if (!isConditionCancellation(err)) throw err;
+    console.warn(
+      '[deletion-scrub] home org no longer names the deleting org; no floor org created',
+      {
+        orgId,
+        userId: member.userId,
+      },
+    );
+  }
+}
+
+function isConditionCancellation(err: unknown): boolean {
+  return (
+    err instanceof TransactionCanceledException &&
+    (err.CancellationReasons ?? []).some((reason) => reason.Code === 'ConditionalCheckFailed')
+  );
 }
 
 async function repointRow(
