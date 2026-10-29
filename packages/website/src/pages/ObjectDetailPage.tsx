@@ -1,42 +1,32 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import {
-  ArrowLeftIcon,
-  DownloadSimpleIcon,
-  LinkIcon,
-  LockIcon,
-  TagIcon,
-  TrashIcon,
-} from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 
 import { Alert } from '../components/Alert';
-import { Badge } from '../components/Badge';
 import { Card } from '../components/Card';
-import { Heading } from '../components/Heading/Heading';
-import { Breadcrumb } from '../components/Breadcrumb';
-import { CodeBlock } from '../components/CodeBlock';
 import { ConfirmDialog } from '../components/ConfirmDialog';
-import { CopyableField } from '../components/CopyableField';
-import { IconButton } from '../components/IconButton';
+import { ObjectAccessAside } from '../components/ObjectAccessAside';
+import { ObjectDetailHeader, ObjectHeaderActions } from '../components/ObjectDetailHeader';
+import { formatRetainUntil, ObjectDetailsCard } from '../components/ObjectDetailsCard';
+import { ObjectPreviewCard } from '../components/ObjectPreview';
 import { ShareObjectModal } from '../components/ShareObjectModal';
-import { Spinner } from '../components/Spinner';
+import { Skeleton } from '../components/Skeleton';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
-import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
 import type {
   ObjectMetadataResponse,
   ObjectRetentionInfo,
   GetBucketResponse,
-  ListObjectVersionsResponse,
   S3Region,
 } from '@filone/shared';
-import { FILONE_STAGE } from '../env';
+import { apiRequest } from '../lib/api.js';
+import { getFolderPrefixes } from '../lib/object-preview.js';
+import { getVersionState, useObjectVersions } from '../lib/object-versions.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { useHasPermission } from '../lib/use-permissions.js';
-import { SHARE_UNAVAILABLE_TOOLTIP, useCanShareObjects } from '../lib/use-can-share-objects.js';
+import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
-import { queryKeys, queryClient } from '../lib/query-client.js';
+import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys, queryClient } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
 import {
   parseHeadObjectResponse,
@@ -47,12 +37,6 @@ import {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const retentionDateFormat = new Intl.DateTimeFormat(undefined, {
-  month: 'short',
-  day: 'numeric',
-  year: 'numeric',
-});
 
 function buildMetadataResponse(
   head: ReturnType<typeof parseHeadObjectResponse>,
@@ -68,10 +52,6 @@ function buildMetadataResponse(
     ...(retention && { retention }),
   };
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export type ObjectDetailPageProps = {
   bucketName: string;
@@ -101,27 +81,40 @@ async function fetchObjectRetention(
   }
 }
 
-// eslint-disable-next-line max-lines-per-function, complexity/complexity
-export function ObjectDetailPage({
-  bucketName,
-  region,
-  objectKey,
-  versionId,
-}: ObjectDetailPageProps) {
-  const navigate = useNavigate();
+/**
+ * The bucket's settings, under the bucket page's own key and cache times, so
+ * arriving from there costs nothing. Fetched here too because a shared link or a
+ * reload lands on this page cold, and Object Lock decides whether the object can
+ * hold a retention period at all.
+ */
+function bucketQueryOptions(bucketName: string, region: S3Region) {
+  return {
+    queryKey: queryKeys.bucket(bucketName, region),
+    staleTime: LIST_STALE_TIME,
+    gcTime: LIST_GC_TIME,
+    queryFn: () =>
+      apiRequest<GetBucketResponse>(
+        `/buckets/${encodeURIComponent(bucketName)}?${new URLSearchParams({ region }).toString()}`,
+      ),
+  };
+}
 
-  const {
-    data: metadata,
-    isPending,
-    isError,
-    error,
-  } = useQuery({
+async function isObjectLockEnabled(bucketName: string, region: S3Region): Promise<boolean> {
+  try {
+    const { bucket } = await queryClient.ensureQueryData(bucketQueryOptions(bucketName, region));
+    return bucket.objectLockEnabled ?? false;
+  } catch {
+    // Without the bucket's settings the object's own details still load; only the
+    // retention lookup is skipped
+    return false;
+  }
+}
+
+function useObjectMetadata({ bucketName, region, objectKey, versionId }: ObjectDetailPageProps) {
+  return useQuery({
     queryKey: queryKeys.objectMetadata(bucketName, objectKey, versionId),
     queryFn: async (): Promise<ObjectMetadataResponse> => {
-      const cachedBucket = queryClient.getQueryData<GetBucketResponse>(
-        queryKeys.bucket(bucketName, region),
-      );
-      const hasObjectLock = cachedBucket?.bucket.objectLockEnabled ?? false;
+      const hasObjectLock = await isObjectLockEnabled(bucketName, region);
 
       const ops = [
         {
@@ -154,12 +147,60 @@ export function ObjectDetailPage({
       return buildMetadataResponse(head, retention);
     },
   });
+}
 
-  // Pull version history from the bucket object listing cache (no extra fetch)
-  const cachedVersions = queryClient.getQueryData<ListObjectVersionsResponse>(
-    queryKeys.objects(bucketName, region),
-  );
-  const objectVersions = (cachedVersions?.versions ?? []).filter((v) => v.key === objectKey);
+/**
+ * What Delete will do, which depends on what it targets. A version named in the
+ * URL is removed for good and the rest stay. Without one, a versioned bucket
+ * keeps every version and hides the object behind a delete marker, so calling
+ * that permanent, as this dialog used to, was wrong.
+ */
+function getDeleteCopy(
+  versionId: string | undefined,
+  isVersioned: boolean,
+): { title: string; description: string; confirmLabel: string } {
+  if (versionId) {
+    return {
+      title: 'Delete version',
+      description:
+        'This version will be permanently deleted. Other versions of the object stay in its history.',
+      confirmLabel: 'Delete version',
+    };
+  }
+  if (isVersioned) {
+    return {
+      title: 'Delete object',
+      description:
+        'The object will be hidden behind a delete marker. Its earlier versions stay in its history.',
+      confirmLabel: 'Delete object',
+    };
+  }
+  return {
+    title: 'Delete object',
+    description: 'This object will be permanently deleted. This action cannot be undone.',
+    confirmLabel: 'Delete object',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/**
+ * One object: what it looks like, what it is, and how to reach it from code.
+ *
+ * Laid out like the create bucket page: a 520px column of cards and, once both
+ * fit beside the app sidebar, a quiet column beside it. The aside holds the API
+ * access details, which are reference material rather than facts about the
+ * object, so they sit apart from the details card instead of competing with it.
+ */
+export function ObjectDetailPage(props: ObjectDetailPageProps) {
+  const { bucketName, region, objectKey, versionId } = props;
+  const navigate = useNavigate();
+  const { data: metadata, isPending, isError, error } = useObjectMetadata(props);
+  const bucketQuery = useQuery(bucketQueryOptions(bucketName, region));
+  const { data: versions = [] } = useObjectVersions(bucketName, region, objectKey);
+  const versionState = getVersionState(versions, versionId);
 
   const mayDelete = useHasPermission('objects.delete');
   const canShare = useCanShareObjects();
@@ -168,207 +209,99 @@ export function ObjectDetailPage({
   const [confirmDeleteOpen, setConfirmDeleteOpen] = usePermittedDialog(false, mayDelete);
   const [shareOpen, setShareOpen] = useState(false);
 
-  const objectActions = useObjectActions({
-    bucketName,
-    region,
-    onDeleted: () => {
+  // Back to the folder the object sits in, which is where the user came from
+  const parentPrefix = getFolderPrefixes(objectKey).at(-1)?.prefix;
+  const returnToFolder = () =>
+    void navigate({
+      to: '/buckets/$bucketName',
+      params: { bucketName },
+      search: { region, ...(parentPrefix && { prefix: parentPrefix }) },
+    });
+
+  // Deleting one version of several leaves the object, so the page goes to what
+  // is now its latest; anything else leaves nothing here to show
+  const afterDelete = () => {
+    void queryClient.invalidateQueries({ queryKey: ['objects', bucketName, region] });
+    void queryClient.invalidateQueries({ queryKey: ['object-metadata', bucketName, objectKey] });
+    if (versionId && versions.length > 1) {
       void navigate({
-        to: '/buckets/$bucketName',
+        to: '/buckets/$bucketName/objects',
         params: { bucketName },
-        search: { region },
+        search: { key: objectKey, region },
       });
-    },
-  });
-
-  if (isPending) {
-    return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading object details" size={32} />
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div className="p-10">
-        <Breadcrumb
-          items={[
-            { label: 'Buckets', href: '/buckets' },
-            { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
-            { label: objectKey },
-          ]}
-        />
-        <Alert variant="red" description={error?.message ?? 'Failed to load object metadata'} />
-      </div>
-    );
-  }
-
-  // Parse tags from metadata
-  let tags: string[] = [];
-  if (metadata?.metadata.tags) {
-    try {
-      const parsed: unknown = JSON.parse(metadata.metadata.tags);
-      if (Array.isArray(parsed)) {
-        tags = parsed.filter((t): t is string => typeof t === 'string');
-      }
-    } catch {
-      // ignore invalid JSON
+    } else {
+      returnToFolder();
     }
-  }
+  };
 
-  // Strip surrounding quotes from ETag (S3 returns it wrapped in double-quotes).
-  const etag = metadata?.etag?.replace(/^"|"$/g, '');
-
-  const s3Path = `s3://${bucketName}/${objectKey}`;
-
-  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
-
-  const apiExample = `# Retrieve via S3 API
-aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
-  --endpoint-url ${s3Endpoint}`;
+  const objectActions = useObjectActions({ bucketName, region, onDeleted: afterDelete });
+  const download = () => void objectActions.downloadObject(objectKey, versionId);
+  const deleteCopy = getDeleteCopy(versionId, versionState.isVersioned);
 
   return (
-    <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
-      {/* Breadcrumb */}
-      <Breadcrumb
-        items={[
-          { label: 'Buckets', href: '/buckets' },
-          { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
-          { label: objectKey },
-        ]}
-      />
-
-      {/* Page header */}
-      <div className="mt-6 mb-6 flex items-center gap-3">
-        <IconButton
-          icon={ArrowLeftIcon}
-          aria-label="Back to bucket"
-          onClick={() =>
-            void navigate({
-              to: '/buckets/$bucketName',
-              params: { bucketName },
-              search: { region },
-            })
-          }
-        />
-        <div className="min-w-0 flex-1">
-          <Heading id="object-detail-heading" tag="h1" className="truncate">
-            {objectKey}
-          </Heading>
-          <p className="text-sm text-(--color-paragraph-text-subtle)">{bucketName}</p>
-        </div>
-
-        <div className="flex items-center gap-1">
-          <IconButton
-            id="object-download-button"
-            icon={DownloadSimpleIcon}
-            aria-label="Download object"
-            tooltip="Download"
-            tooltipSide="bottom"
-            onClick={() => void objectActions.downloadObject(objectKey, versionId)}
-          />
-          <IconButton
-            id="object-share-button"
-            icon={LinkIcon}
-            aria-label="Share object"
-            tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
-            tooltipSide="bottom"
-            disabled={!canShare}
-            onClick={() => setShareOpen(true)}
-          />
-          {mayDelete && (
-            <IconButton
-              id="object-delete-button"
-              icon={TrashIcon}
-              aria-label="Delete object"
-              tooltip="Delete"
-              tooltipSide="bottom"
-              onClick={() => setConfirmDeleteOpen(true)}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* Object details card */}
-      <Card>
-        <Heading tag="h2" size="sm" className="mb-3">
-          Object details
-        </Heading>
-        <div className="flex flex-col gap-1">
-          <DetailRow label="Name" value={objectKey} />
-          {metadata && <DetailRow label="Size" value={formatBytes(metadata.sizeBytes)} />}
-          <DetailRow label="Bucket" value={bucketName} />
-          <CopyableDetailRow label="S3 Path" value={s3Path} />
-          {versionId && <CopyableDetailRow label="Version ID" value={versionId} />}
-          {etag && <CopyableDetailRow label="ETag" value={etag} />}
-          <div className="flex min-h-9 items-center justify-between">
-            <span className="text-sm text-(--color-paragraph-text-subtle)">Retention</span>
-            {metadata?.retention ? (
-              <span className="flex items-center gap-1.5 font-mono text-xs text-(--color-text-base)">
-                <LockIcon size={12} />
-                {metadata.retention.mode === 'COMPLIANCE' ? 'Compliance' : 'Governance'}
-                {' \u00b7 Expires '}
-                {retentionDateFormat.format(new Date(metadata.retention.retainUntilDate))}
-              </span>
-            ) : (
-              <span className="text-sm text-(--color-paragraph-text-subtle)">None</span>
-            )}
-          </div>
-          {metadata?.metadata.description && (
-            <div className="flex min-h-9 items-start justify-between gap-4 py-2">
-              <span className="shrink-0 text-sm text-(--color-paragraph-text-subtle)">
-                Description
-              </span>
-              <span className="text-right text-sm text-(--color-text-base)">
-                {metadata.metadata.description}
-              </span>
-            </div>
-          )}
-          <div className="flex min-h-9 items-start justify-between py-2">
-            <span className="shrink-0 text-sm text-(--color-paragraph-text-subtle)">Tags</span>
-            {tags.length > 0 ? (
-              <div className="flex flex-wrap justify-end gap-1.5">
-                {tags.map((tag) => (
-                  <Badge key={tag} color="blue" size="sm">
-                    <TagIcon size={10} />
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            ) : (
-              <span className="text-sm text-(--color-paragraph-text-subtle)">None</span>
-            )}
-          </div>
-        </div>
-      </Card>
-
-      {metadata?.retention && metadata.retention.mode === 'COMPLIANCE' && (
-        <div className="mt-6">
-          <Alert
-            variant="red"
-            title="Compliance retention lock"
-            description={`This object is locked until ${retentionDateFormat.format(new Date(metadata.retention.retainUntilDate))}. It cannot be deleted before this date.`}
-          />
-        </div>
-      )}
-
-      {/* Version history */}
-      <VersionHistoryCard
-        versions={objectVersions}
-        currentVersionId={versionId}
+    <div className="mx-auto flex max-w-[860px] flex-col gap-6 px-5 pt-6 pb-12 sm:px-8 lg:px-10 lg:pt-10 xl:px-0">
+      <ObjectDetailHeader
         bucketName={bucketName}
         region={region}
+        objectKey={objectKey}
+        versionState={versionState}
+        onBack={returnToFolder}
+        actions={
+          <ObjectHeaderActions
+            s3Uri={`s3://${bucketName}/${objectKey}`}
+            isVersion={Boolean(versionId)}
+            canShare={canShare}
+            mayDelete={mayDelete}
+            onDownload={download}
+            onShare={() => setShareOpen(true)}
+            onDelete={() => setConfirmDeleteOpen(true)}
+          />
+        }
       />
 
-      {/* API access example card */}
-      <Card className="mt-6">
-        <Heading tag="h2" size="sm" className="mb-3">
-          API access example
-        </Heading>
-        <CodeBlock code={apiExample} language="bash" />
-      </Card>
+      {/* Two columns once both fit beside the app sidebar; stacked below that */}
+      <div className="flex flex-col gap-6 xl:flex-row xl:gap-10">
+        <div className="flex w-full max-w-[520px] shrink-0 flex-col gap-6">
+          {isError ? (
+            <Alert variant="red" description={error?.message ?? 'Failed to load object details'} />
+          ) : isPending ? (
+            <ObjectBodySkeleton />
+          ) : (
+            <>
+              {metadata.retention?.mode === 'COMPLIANCE' && (
+                <Alert
+                  variant="red"
+                  title="Compliance retention lock"
+                  description={`This object is locked until ${formatRetainUntil(metadata.retention.retainUntilDate)}. It cannot be deleted before this date.`}
+                />
+              )}
+              <ObjectPreviewCard
+                bucketName={bucketName}
+                region={region}
+                objectKey={objectKey}
+                versionId={versionId}
+                sizeBytes={metadata.sizeBytes}
+                contentType={metadata.contentType}
+                onDownload={download}
+              />
+              <ObjectDetailsCard
+                metadata={metadata}
+                versionId={versionState.shownVersionId}
+                objectLockEnabled={bucketQuery.data?.bucket.objectLockEnabled ?? false}
+              />
+              <VersionHistoryCard
+                versions={versions}
+                currentVersionId={versionState.shown?.versionId ?? versionId}
+                bucketName={bucketName}
+                region={region}
+              />
+            </>
+          )}
+        </div>
 
-      {/* Share dialog */}
+        <ObjectAccessAside bucketName={bucketName} region={region} objectKey={objectKey} />
+      </div>
+
       <ShareObjectModal
         open={shareOpen}
         onClose={() => setShareOpen(false)}
@@ -378,37 +311,37 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         versionId={versionId}
       />
 
-      {/* Delete confirmation */}
       <ConfirmDialog
         open={confirmDeleteOpen}
         onClose={() => setConfirmDeleteOpen(false)}
         onConfirm={() => objectActions.deleteObject(objectKey, versionId)}
-        title="Delete object"
-        description="This object will be permanently deleted. This action cannot be undone."
-        confirmLabel="Delete object"
+        {...deleteCopy}
       />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Detail row helper
+// Loading
 // ---------------------------------------------------------------------------
 
-function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+/**
+ * Stands in for the preview and details cards while the object's metadata is in
+ * flight, at roughly their height, so the cards do not push the page down when
+ * they land. The header needs nothing from the request, so it renders at once.
+ */
+function ObjectBodySkeleton() {
   return (
-    <div className="flex min-h-9 items-center justify-between">
-      <span className="text-sm text-(--color-paragraph-text-subtle)">{label}</span>
-      <span className={`text-sm text-(--color-text-base) ${mono ? 'font-mono' : ''}`}>{value}</span>
-    </div>
-  );
-}
-
-function CopyableDetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex min-h-9 items-center justify-between gap-4">
-      <span className="text-sm text-(--color-paragraph-text-subtle)">{label}</span>
-      <CopyableField label="" value={value} />
+    <div role="status" aria-label="Loading object details" className="flex flex-col gap-6">
+      <Skeleton className="h-72 rounded-xl" />
+      <Card>
+        <Skeleton className="mb-4 h-5 w-16" />
+        <div className="flex flex-col gap-3">
+          {['size', 'type', 'modified', 'etag', 'retention', 'tags'].map((row) => (
+            <Skeleton key={row} className="h-5 w-2/3" />
+          ))}
+        </div>
+      </Card>
     </div>
   );
 }

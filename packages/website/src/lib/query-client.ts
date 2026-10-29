@@ -115,6 +115,12 @@ export const queryKeys = {
   objects: (bucketName: string, region: S3Region) => ['objects', bucketName, region] as const,
   objectMetadata: (bucketName: string, objectKey: string, versionId?: string) =>
     ['object-metadata', bucketName, objectKey, ...(versionId ? [versionId] : [])] as const,
+  // Under the ['objects', bucket, region] prefix, so invalidating the bucket's
+  // listing after a delete refreshes this key's history too
+  objectVersions: (bucketName: string, region: S3Region, objectKey: string) =>
+    ['objects', bucketName, region, 'versions', objectKey] as const,
+  objectPreviewUrl: (bucketName: string, objectKey: string, versionId?: string) =>
+    ['object-preview', bucketName, objectKey, ...(versionId ? [versionId] : [])] as const,
   // ['access-keys'] is the prefix — invalidateQueries on this key also invalidates
   // all bucket-scoped access key queries (prefix match).
   accessKeys: ['access-keys'] as const,
