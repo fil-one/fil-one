@@ -227,15 +227,16 @@ function stubOwnerCount(ownerCount: number | undefined) {
 /**
  * The `USER#{userId}/PROFILE` row: where a member's address lives, and also
  * their `sub` and home-org pointer, which {@link readHomeOrgPointers} projects
- * for the floor-org repoint, so one stub serves both reads. `sub` defaults to
- * absent, matching every test that never asks the floor-org path to run; the
- * tests that do pass one, and `homeOrgId` defaults to the org being left.
+ * for the home-org repoints, so one stub serves both reads. `sub` defaults to
+ * absent, matching every test that never asks for a repoint; the tests that do
+ * pass one. `homeOrgId` defaults to an org the account stays in, so a removal
+ * repoints nothing unless a test homes the account in the org being left.
  */
 function stubTargetProfile(
   email: string | undefined,
   userId = TARGET_ID,
   sub?: string,
-  homeOrgId = ORG_ID,
+  homeOrgId = 'other-org-1',
 ) {
   ddbMock
     .on(GetItemCommand, {
@@ -262,7 +263,7 @@ function stubTargetIdentity(sub: string, homeOrgId: string) {
     .resolves({ Item: { orgId: { S: homeOrgId } } });
 }
 
-/** The repoint `Update`s a floor org adds, keyed by which pointer they move. */
+/** The home-org repoint `Update`s, keyed by which pointer they move. */
 function homeRepoints() {
   const items = transactItems();
   return {
@@ -926,10 +927,54 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     expect(result).toMatchObject({ statusCode: 400 });
   });
 
+  describe('the home org', () => {
+    it('moves onto the org that remains when the account is homed in the org it leaves', async () => {
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
+
+      const result = await handler(removeEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      const { identity, profile } = homeRepoints();
+      const repointOntoRemaining = {
+        UpdateExpression: 'SET orgId = :orgId',
+        ConditionExpression: 'attribute_exists(pk) AND orgId = :expected',
+        ExpressionAttributeValues: {
+          ':orgId': { S: 'other-org-1' },
+          ':expected': { S: ORG_ID },
+        },
+      };
+      expect(identity).toMatchObject({
+        Key: { pk: { S: 'SUB#auth0|target' } },
+        ...repointOntoRemaining,
+      });
+      expect(profile).toMatchObject(repointOntoRemaining);
+    });
+
+    it('stays where it is when the account is homed in an org it keeps', async () => {
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', 'other-org-1');
+
+      await handler(removeEvent(), buildContext());
+
+      expect(homeRepoints()).toStrictEqual({ identity: undefined, profile: undefined });
+    });
+
+    it('returns 409 when a repoint finds the home org already moved', async () => {
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
+      // The membership delete pair, the remaining-membership check, then the
+      // profile repoint at index 3, the identity repoint, the fence, the event.
+      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(3, 7));
+
+      const result = await handler(removeEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 409 });
+      expect(body(result).message).toContain('account changed while this was in flight');
+    });
+  });
+
   describe('the floor org', () => {
     it('is created, and the account repointed onto it, when the removal leaves zero memberships', async () => {
       stubMembershipCount(1);
-      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target');
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
 
       const result = await handler(removeEvent(), buildContext());
 
@@ -957,7 +1002,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     // and says why the account has no organization first.
     it('marks the floor org as one, unnamed', async () => {
       stubMembershipCount(1);
-      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target');
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
 
       await handler(removeEvent(), buildContext());
 
@@ -990,7 +1035,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     it('repoints a pointer that names nothing, on condition it still names nothing', async () => {
       stubMembershipCount(1);
-      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target');
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
       ddbMock
         .on(GetItemCommand, {
           TableName: 'UserInfoTable',
@@ -1048,7 +1093,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     it('lays out its rows, its audit Put, then the fence and the event', async () => {
       stubMembershipCount(1);
-      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target');
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
 
       await handler(removeEvent(), buildContext());
 
@@ -1068,7 +1113,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     it('returns 409 when creating it loses a race', async () => {
       stubMembershipCount(1);
-      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target');
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
       // The layout above: index 2 is the floor org's first row.
       ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(2, 11));
 
@@ -1080,7 +1125,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     it('returns 409 when its own audit Put loses the race, not just its other rows', async () => {
       stubMembershipCount(1);
-      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target');
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
       // Index 8 is the floor org's own audit Put, its last item. The fence
       // after it answers 409 "try again" too, so the message is what shows the
       // label landed on the floor org and not on the fence.
@@ -1094,7 +1139,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     it('still reads a fence refusal after the floor org as the fence', async () => {
       stubMembershipCount(1);
-      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target');
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
       ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(9, 11));
 
       const result = await handler(removeEvent(), buildContext());

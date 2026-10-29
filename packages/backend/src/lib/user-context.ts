@@ -37,6 +37,32 @@ export interface UserInfo {
   apiKeySession?: true;
 }
 
+/**
+ * A signed-in caller who has no account yet, on a route that creates the
+ * account itself (`authMiddleware({ deferAccountCreation: true })`). There is
+ * no org to resolve, so the middleware sets this instead of `userInfo`.
+ * `userId` is freshly minted and becomes the account's id if the route writes
+ * it.
+ */
+export interface NewAccountCaller {
+  sub: string;
+  userId: string;
+  email?: string;
+  emailVerified: boolean;
+  name?: string;
+}
+
+/** What a route that defers account creation receives for a caller with no account. */
+export interface NewAccountEvent extends APIGatewayProxyEventV2 {
+  requestContext: APIGatewayProxyEventV2['requestContext'] & { newAccount: NewAccountCaller };
+}
+
+export function isNewAccountEvent(
+  event: AuthenticatedEvent | NewAccountEvent,
+): event is NewAccountEvent {
+  return 'newAccount' in event.requestContext;
+}
+
 export interface AuthenticatedEvent extends APIGatewayProxyEventV2 {
   requestContext: APIGatewayProxyEventV2['requestContext'] & {
     userInfo: UserInfo;

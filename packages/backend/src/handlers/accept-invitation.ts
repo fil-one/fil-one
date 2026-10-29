@@ -5,6 +5,7 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { AcceptInvitationSchema, ApiErrorCode, OrgRole } from '@filone/shared';
 import type { AcceptInvitationResponse, ErrorResponse } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
+import { identityRows } from '../lib/account-creation.ts';
 import { getAuth0UserEmail, markAuth0EmailVerified } from '../lib/auth0-management.ts';
 import {
   isInvitationUsable,
@@ -21,6 +22,7 @@ import {
 } from '../lib/membership-changes.ts';
 import { registerMemberPrincipal } from '../lib/member-principals.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
+import type { OrgMembership } from '../lib/org-membership.ts';
 import {
   OrgDeletingError,
   isGuardRejection,
@@ -29,8 +31,13 @@ import {
 } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
-import type { AuthenticatedEvent } from '../lib/user-context.ts';
-import { getUserInfo } from '../lib/user-context.ts';
+import type {
+  AuthenticatedEvent,
+  NewAccountCaller,
+  NewAccountEvent,
+  UserInfo,
+} from '../lib/user-context.ts';
+import { getUserInfo, isNewAccountEvent } from '../lib/user-context.ts';
 import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
@@ -73,15 +80,23 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  *   invitation, so an invitation cannot outlive its issuer's authority,
  * - and the audit event.
  *
+ * A caller signing in for the first time has no account yet: the middleware
+ * defers creating one here, and the transaction writes the identity and user
+ * profile beside the membership, with the inviting org as the account's home.
+ * So an invited account never gets an org of its own it did not ask for. When
+ * the invitation is refused nothing is written, and the account is created the
+ * ordinary way, with its own org, by the next request.
+ *
  * After it lands, the accepter's now-verified address is stamped on their
  * `USER#{userId}/PROFILE` row. That is the row a removal reads to find the
  * invitations addressed TO the member it is removing, and acceptance is one of
  * only two moments the control plane learns a verified address.
  */
 export async function baseHandler(
-  event: AuthenticatedEvent,
+  event: AuthenticatedEvent | NewAccountEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { sub, userId, email, emailVerified } = getUserInfo(event);
+  const { caller, newAccount } = resolveCaller(event);
+  const { sub, userId, email, emailVerified } = caller;
 
   const parsed = parseJsonBody(event.body, AcceptInvitationSchema);
   if ('error' in parsed) return parsed.error;
@@ -96,10 +111,11 @@ export async function baseHandler(
     return emailMismatchResponse();
   }
 
-  const [existing, accepterOrgId] = await Promise.all([
-    resolveMembership(invitation.orgId, userId),
-    accepterOrgFence(userId, invitation.orgId),
-  ]);
+  const { existing, accepterOrgId } = await readAccepterStanding({
+    invitingOrgId: invitation.orgId,
+    userId,
+    newAccount,
+  });
 
   const verificationFailure = await verifyInvitedAddress({
     sub,
@@ -110,8 +126,9 @@ export async function baseHandler(
   if (verificationFailure) return verificationFailure;
   const verifiedEmail = email;
 
-  const items = existing ? [] : joinItems(invitation, userId);
-  const labels = existing ? [] : joinLabels(invitation);
+  const { items, labels } = existing
+    ? { items: [], labels: [] }
+    : joinTransaction({ invitation, userId, verifiedEmail, newAccount });
 
   try {
     await commitAudited({
@@ -153,6 +170,73 @@ export async function baseHandler(
     role: existing?.role ?? invitation.role,
     alreadyMember: Boolean(existing),
   });
+}
+
+/** The signed-in caller, and whether they have an account yet. */
+function resolveCaller(event: AuthenticatedEvent | NewAccountEvent): {
+  caller: UserInfo | NewAccountCaller;
+  newAccount?: NewAccountCaller;
+} {
+  if (isNewAccountEvent(event)) {
+    const { newAccount } = event.requestContext;
+    return { caller: newAccount, newAccount };
+  }
+  return { caller: getUserInfo(event) };
+}
+
+/**
+ * The caller's membership of the inviting org, if they already hold one, and
+ * their own org when the transaction has to fence it. A new account belongs to
+ * no org and has no home org to fence.
+ */
+async function readAccepterStanding({
+  invitingOrgId,
+  userId,
+  newAccount,
+}: {
+  invitingOrgId: string;
+  userId: string;
+  newAccount?: NewAccountCaller;
+}): Promise<{ existing?: OrgMembership; accepterOrgId?: string }> {
+  if (newAccount) return {};
+  const [existing, accepterOrgId] = await Promise.all([
+    resolveMembership(invitingOrgId, userId),
+    accepterOrgFence(userId, invitingOrgId),
+  ]);
+  return { existing, accepterOrgId };
+}
+
+/**
+ * The rows joining costs, with their labels in the same order. A new account
+ * adds its own identity and profile ahead of them, homed in the inviting org.
+ */
+function joinTransaction({
+  invitation,
+  userId,
+  verifiedEmail,
+  newAccount,
+}: {
+  invitation: InvitationRecord;
+  userId: string;
+  verifiedEmail: string;
+  newAccount?: NewAccountCaller;
+}): { items: TransactWriteItem[]; labels: string[] } {
+  const join = { items: joinItems(invitation, userId), labels: joinLabels(invitation) };
+  if (!newAccount) return join;
+  return {
+    items: [
+      ...identityRows({
+        sub: newAccount.sub,
+        userId,
+        homeOrgId: invitation.orgId,
+        email: verifiedEmail,
+        name: newAccount.name,
+        now: new Date().toISOString(),
+      }),
+      ...join.items,
+    ],
+    labels: ['identity', 'profile', ...join.labels],
+  };
 }
 
 /**
@@ -283,6 +367,9 @@ async function acceptFailureResponse(
 
   const failed = cancelledLabels(err, labels);
   if (failed.length === 0) throw err;
+
+  // Another request created this account first, with the same sign-in.
+  if (failed.includes('identity')) return accountRaceResponse();
 
   // The accepter's own org is going away, so the answer is about their account
   // rather than about the invitation: the same one their next request would get
@@ -440,6 +527,19 @@ function emailMismatchResponse(): APIGatewayProxyStructuredResultV2 {
     .build();
 }
 
+/**
+ * Two first requests from one new sign-in raced, and the other one created the
+ * account. Nothing was written here, and reloading reads the account it made.
+ */
+function accountRaceResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'Your account was just set up in another window. Reload this page.',
+    })
+    .build();
+}
+
 /** Nothing was written, so the same link works on a retry. */
 function emailVerificationFailedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
@@ -472,6 +572,6 @@ function ownerCountUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   // The handler verifies the address itself, from the invitation reaching it.
-  .use(authMiddleware({ requireVerifiedEmail: false }))
+  .use(authMiddleware({ requireVerifiedEmail: false, deferAccountCreation: true }))
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

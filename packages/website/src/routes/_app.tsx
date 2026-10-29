@@ -76,11 +76,10 @@ function namingRedirect(me: MeResponse): '/left-organization' | '/create-organiz
 /**
  * Whether the org `/me` answered for is the only one the account belongs to.
  *
- * Every account has an unnamed personal org from signup, including one that
- * signed up through an invitation and only ever works in the team org. A new
- * tab resolves to that personal org (the tab has not chosen one yet), so
- * asking for a name whenever it is unnamed would stop that person on every
- * fresh tab to name an org they never asked for. The naming step is for an
+ * An account that signed up before joining a team keeps the unnamed org it
+ * signed up with, and a new tab resolves to it (the tab has not chosen one
+ * yet). Asking for a name whenever it is unnamed would stop that person on
+ * every fresh tab to name an org they may never use. The naming step is for an
  * account with nowhere else to be: a brand-new signup.
  */
 function isOnlyMembership(me: MeResponse): boolean {

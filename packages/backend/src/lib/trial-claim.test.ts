@@ -69,14 +69,19 @@ describe('claimTrialIfEligible', () => {
     expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(0);
   });
 
-  it('does not claim in somebody else’s org', async () => {
-    const invited = soloOwner({
-      membership: { orgId: ORG_ID, userId: USER_ID, role: OrgRole.Member, source: 'invitation' },
-    } as Partial<UserInfo>);
+  // An invitation joins somebody else's org. A manual org is one the account
+  // created after the fact, or the floor org a removal made.
+  it.each(['invitation', 'manual'] as const)(
+    'does not claim in a solo org the account joined by %s',
+    async (source) => {
+      const caller = soloOwner({
+        membership: { orgId: ORG_ID, userId: USER_ID, role: OrgRole.Owner, source },
+      } as Partial<UserInfo>);
 
-    await expect(claimTrialIfEligible(invited)).resolves.toBe('not-own-org');
-    expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
-  });
+      await expect(claimTrialIfEligible(caller)).resolves.toBe('not-own-org');
+      expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+    },
+  );
 
   it('refuses an owner who also holds an org they created', async () => {
     mockListMemberships.mockResolvedValue([
@@ -86,29 +91,6 @@ describe('claimTrialIfEligible', () => {
 
     await expect(claimTrialIfEligible(soloOwner())).resolves.toBe('not-own-org');
     expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
-  });
-
-  // Solo in an org they created, or the floor org a removal made: the
-  // entitlement decides, and is told the org did not come with the account.
-  it('hands the membership source to the entitlement for a solo manual org', async () => {
-    const floor = soloOwner({
-      membership: { orgId: ORG_ID, userId: USER_ID, role: OrgRole.Owner, source: 'manual' },
-    } as Partial<UserInfo>);
-
-    await claimTrialIfEligible(floor);
-
-    expect(mockEnsureTrialEntitlement.mock.calls).toEqual([
-      [
-        {
-          sub: 'auth0|sub-1',
-          userId: USER_ID,
-          orgId: ORG_ID,
-          email: 'user@example.com',
-          emailVerified: true,
-          membershipSource: 'manual',
-        },
-      ],
-    ]);
   });
 
   it('reports not-entitled when the claim is already spent', async () => {

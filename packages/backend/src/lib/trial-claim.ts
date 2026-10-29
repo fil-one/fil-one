@@ -44,8 +44,10 @@ export function isTrialClaimable(record: SubscriptionRecord | undefined): boolea
 /**
  * Claim the trial when this caller may spend theirs on this org.
  *
- * Only in their own org, and only while it is the only one they belong to
- * (ADR §5). Without the personal-org condition this would create Stripe billing
+ * Only in the org that came with their account, and only while it is the only
+ * one they belong to (ADR §5). An org the account created, or the floor org a
+ * removal made, never earns one: the trial belongs to a new account, not to
+ * every org somebody makes after joining someone else's. Without the personal-org condition this would create Stripe billing
  * on somebody else's org, anchoring that org's subscription to this caller's
  * Stripe customer; without the sole-membership condition, every employee of an
  * org who ever opened their personal dashboard would mint a trial nobody asked
@@ -54,8 +56,9 @@ export function isTrialClaimable(record: SubscriptionRecord | undefined): boolea
  *
  * Decided from stored rows, never from the request: `X-Org-Id` names the org but
  * cannot prove whose it is. `source` says how the membership came to be — an
- * invitation is somebody else's org by construction — and the inverse items say
- * how many orgs the caller belongs to.
+ * invitation is somebody else's org by construction, and a manual one is not
+ * the account's own — and the inverse items say how many orgs the caller
+ * belongs to.
  */
 export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialClaimOutcome> {
   const { sub, userId, orgId, email, emailVerified, apiKeySession } = userInfo;
@@ -87,10 +90,11 @@ async function isSoloPersonalOrg({ userId, orgId, membership }: UserInfo): Promi
     });
     return false;
   }
-  if (membership.source === 'invitation') {
-    console.warn('[trial-claim] Membership arrived by invitation — refusing the claim', {
+  if (membership.source === 'invitation' || membership.source === 'manual') {
+    console.warn('[trial-claim] Not the org that came with the account — refusing the claim', {
       userId,
       orgId,
+      source: membership.source,
     });
     return false;
   }
