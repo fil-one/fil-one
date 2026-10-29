@@ -22,7 +22,6 @@ import {
 } from '../lib/membership-changes.ts';
 import { registerMemberPrincipal } from '../lib/member-principals.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
-import type { OrgMembership } from '../lib/org-membership.ts';
 import {
   OrgDeletingError,
   isGuardRejection,
@@ -111,11 +110,13 @@ export async function baseHandler(
     return emailMismatchResponse();
   }
 
-  const { existing, accepterOrgId } = await readAccepterStanding({
-    invitingOrgId: invitation.orgId,
-    userId,
-    isPendingAccountCreation,
-  });
+  // A new account belongs to no org and has no home org to fence.
+  const [existing, accepterOrgId] = isPendingAccountCreation
+    ? []
+    : await Promise.all([
+        resolveMembership(invitation.orgId, userId),
+        accepterOrgFence(userId, invitation.orgId),
+      ]);
 
   const verificationFailure = await verifyInvitedAddress({
     sub,
@@ -184,28 +185,6 @@ function resolveCaller(event: AuthenticatedEvent | NewAccountEvent): {
     return { caller: event.requestContext.newAccount, isPendingAccountCreation: true };
   }
   return { caller: getUserInfo(event), isPendingAccountCreation: false };
-}
-
-/**
- * The caller's membership of the inviting org, if they already hold one, and
- * their own org when the transaction has to fence it. A new account belongs to
- * no org and has no home org to fence.
- */
-async function readAccepterStanding({
-  invitingOrgId,
-  userId,
-  isPendingAccountCreation,
-}: {
-  invitingOrgId: string;
-  userId: string;
-  isPendingAccountCreation: boolean;
-}): Promise<{ existing?: OrgMembership; accepterOrgId?: string }> {
-  if (isPendingAccountCreation) return {};
-  const [existing, accepterOrgId] = await Promise.all([
-    resolveMembership(invitingOrgId, userId),
-    accepterOrgFence(userId, invitingOrgId),
-  ]);
-  return { existing, accepterOrgId };
 }
 
 /**
