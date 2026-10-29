@@ -95,7 +95,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 export async function baseHandler(
   event: AuthenticatedEvent | NewAccountEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { caller, newAccount } = resolveCaller(event);
+  const { caller, isPendingAccountCreation } = resolveCaller(event);
   const { sub, userId, email, emailVerified } = caller;
 
   const parsed = parseJsonBody(event.body, AcceptInvitationSchema);
@@ -114,7 +114,7 @@ export async function baseHandler(
   const { existing, accepterOrgId } = await readAccepterStanding({
     invitingOrgId: invitation.orgId,
     userId,
-    newAccount,
+    isPendingAccountCreation,
   });
 
   const verificationFailure = await verifyInvitedAddress({
@@ -128,7 +128,7 @@ export async function baseHandler(
 
   const { items, labels } = existing
     ? { items: [], labels: [] }
-    : joinTransaction({ invitation, userId, verifiedEmail, newAccount });
+    : joinTransaction({ invitation, caller, verifiedEmail, isPendingAccountCreation });
 
   try {
     await commitAudited({
@@ -172,16 +172,18 @@ export async function baseHandler(
   });
 }
 
-/** The signed-in caller, and whether they have an account yet. */
+/**
+ * The signed-in caller, and whether this request is to create their account:
+ * true when they have none yet.
+ */
 function resolveCaller(event: AuthenticatedEvent | NewAccountEvent): {
   caller: UserInfo | NewAccountCaller;
-  newAccount?: NewAccountCaller;
+  isPendingAccountCreation: boolean;
 } {
   if (isNewAccountEvent(event)) {
-    const { newAccount } = event.requestContext;
-    return { caller: newAccount, newAccount };
+    return { caller: event.requestContext.newAccount, isPendingAccountCreation: true };
   }
-  return { caller: getUserInfo(event) };
+  return { caller: getUserInfo(event), isPendingAccountCreation: false };
 }
 
 /**
@@ -192,13 +194,13 @@ function resolveCaller(event: AuthenticatedEvent | NewAccountEvent): {
 async function readAccepterStanding({
   invitingOrgId,
   userId,
-  newAccount,
+  isPendingAccountCreation,
 }: {
   invitingOrgId: string;
   userId: string;
-  newAccount?: NewAccountCaller;
+  isPendingAccountCreation: boolean;
 }): Promise<{ existing?: OrgMembership; accepterOrgId?: string }> {
-  if (newAccount) return {};
+  if (isPendingAccountCreation) return {};
   const [existing, accepterOrgId] = await Promise.all([
     resolveMembership(invitingOrgId, userId),
     accepterOrgFence(userId, invitingOrgId),
@@ -212,25 +214,28 @@ async function readAccepterStanding({
  */
 function joinTransaction({
   invitation,
-  userId,
+  caller,
   verifiedEmail,
-  newAccount,
+  isPendingAccountCreation,
 }: {
   invitation: InvitationRecord;
-  userId: string;
+  caller: UserInfo | NewAccountCaller;
   verifiedEmail: string;
-  newAccount?: NewAccountCaller;
+  isPendingAccountCreation: boolean;
 }): { items: TransactWriteItem[]; labels: string[] } {
-  const join = { items: joinItems(invitation, userId), labels: joinLabels(invitation) };
-  if (!newAccount) return join;
+  const join = {
+    items: joinItems(invitation, caller.userId),
+    labels: joinLabels(invitation),
+  };
+  if (!isPendingAccountCreation) return join;
   return {
     items: [
       ...identityRows({
-        sub: newAccount.sub,
-        userId,
+        sub: caller.sub,
+        userId: caller.userId,
         homeOrgId: invitation.orgId,
         email: verifiedEmail,
-        name: newAccount.name,
+        name: caller.name,
         now: new Date().toISOString(),
       }),
       ...join.items,
