@@ -86,7 +86,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // 4. Resolve promo code against Stripe before we mutate any subscription state.
   let promotionCodeId: string | undefined;
   if (promotionCode) {
-    promotionCodeId = (await findActivePromotionCode(stripe, promotionCode))?.id;
+    promotionCodeId = (await findActivePromotionCode(stripe, promotionCode, stripeCustomerId))?.id;
     if (!promotionCodeId) {
       return new ResponseBuilder()
         .status(400)

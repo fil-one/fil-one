@@ -2,22 +2,49 @@ import type { SubscriptionDiscount } from '@filone/shared';
 import type Stripe from 'stripe';
 
 /**
- * The active promotion code a customer typed, with its coupon expanded, or
- * undefined when Stripe has no active code by that name. Checking a code before
- * the card is submitted and applying it at activation both go through here, so
- * a code the modal accepted is one activation accepts too.
+ * The active promotion code a customer typed that this Stripe customer may
+ * redeem, with its coupon expanded, or undefined when there is none. Checking a
+ * code before the card is submitted and applying it at activation both go
+ * through here, so a code the modal accepted is one activation accepts too.
+ *
+ * Stripe keeps a code's text unique per customer only, so several active codes
+ * can share it, each restricted to a different customer. `customerId` is
+ * undefined for an org that has no Stripe customer yet, which can redeem only
+ * codes restricted to no one.
  */
 export async function findActivePromotionCode(
   stripe: Stripe,
   code: string,
+  customerId: string | undefined,
 ): Promise<Stripe.PromotionCode | undefined> {
   const matches = await stripe.promotionCodes.list({
     code,
     active: true,
-    limit: 1,
+    limit: 100,
     expand: ['data.promotion.coupon'],
   });
-  return matches.data.at(0);
+  const now = Date.now();
+  return matches.data.find(
+    (promotionCode) =>
+      isRedeemableBy(promotionCode, customerId) && !isPastRedemptionLimits(promotionCode, now),
+  );
+}
+
+/** Whether the code is open to every customer or restricted to this one. */
+function isRedeemableBy(promotionCode: Stripe.PromotionCode, customerId: string | undefined) {
+  const { customer } = promotionCode;
+  if (customer === null) return true;
+  return (typeof customer === 'string' ? customer : customer.id) === customerId;
+}
+
+/**
+ * Whether the code has expired or been redeemed as often as it allows. Stripe
+ * checks both only when the code is applied, so an `active` code can fail them.
+ */
+function isPastRedemptionLimits(promotionCode: Stripe.PromotionCode, now: number) {
+  const { expires_at, max_redemptions, times_redeemed } = promotionCode;
+  if (expires_at !== null && expires_at * 1000 <= now) return true;
+  return max_redemptions !== null && times_redeemed >= max_redemptions;
 }
 
 /** What a promotion code would take off, before it is applied to anything. */

@@ -16,16 +16,30 @@ vi.mock('../lib/stripe-client.ts', () => ({
   }),
 }));
 
+const mockGetSubscription = vi.fn();
+
+vi.mock('../lib/subscription-store.ts', () => ({
+  getSubscription: (...args: unknown[]) => mockGetSubscription(...args),
+}));
+
 import { baseHandler } from './check-promotion-code.ts';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
 
-/** A promotion code as Stripe lists it with its coupon expanded. */
-function stripePromotionCode(coupon: Record<string, unknown>) {
+/**
+ * A promotion code as Stripe lists it with its coupon expanded, open to every
+ * customer and within its limits unless `code` says otherwise.
+ */
+function stripePromotionCode(coupon: Record<string, unknown>, code: Record<string, unknown> = {}) {
   return {
     id: 'promo_any',
     object: 'promotion_code',
     code: 'ANY-CODE',
     active: true,
+    customer: null,
+    expires_at: null,
+    max_redemptions: null,
+    times_redeemed: 0,
+    ...code,
     promotion: {
       type: 'coupon',
       coupon: {
@@ -56,6 +70,8 @@ async function checkCode(body: string) {
 describe('check-promotion-code baseHandler', () => {
   beforeEach(() => {
     mockPromotionCodesList.mockReset();
+    mockGetSubscription.mockReset();
+    mockGetSubscription.mockResolvedValue({ stripeCustomerId: 'cus_this_org' });
   });
 
   it('reports what an active code takes off, for how long', async () => {
@@ -88,15 +104,43 @@ describe('check-promotion-code baseHandler', () => {
     expect(mockPromotionCodesList).toHaveBeenCalledWith({
       code: 'ANY-CODE',
       active: true,
-      limit: 1,
+      limit: 100,
       expand: ['data.promotion.coupon'],
     });
+  });
+
+  it("accepts the code restricted to this org's customer among codes sharing its text", async () => {
+    mockPromotionCodesList.mockResolvedValue({
+      data: [
+        stripePromotionCode({ percent_off: 50 }, { customer: 'cus_other_org' }),
+        stripePromotionCode({ percent_off: 20 }, { customer: 'cus_this_org' }),
+      ],
+    });
+
+    expect(await checkCode(JSON.stringify({ promotionCode: 'ANY-CODE' }))).toMatchObject({
+      statusCode: 200,
+      body: { discount: { percentOff: 20 } },
+    });
+    expect(mockGetSubscription).toHaveBeenCalledWith('any-org');
   });
 
   it.each([
     ['Stripe has no active code by that name', []],
     // A coupon with neither a percentage nor an amount has nothing to preview.
     ['the code takes nothing off', [stripePromotionCode({})]],
+    [
+      'the code is restricted to another customer',
+      [stripePromotionCode({ percent_off: 20 }, { customer: 'cus_other_org' })],
+    ],
+    [
+      'the code has expired',
+      // An expiry one second after the epoch is long past.
+      [stripePromotionCode({ percent_off: 20 }, { expires_at: 1 })],
+    ],
+    [
+      'the code has been redeemed as often as it allows',
+      [stripePromotionCode({ percent_off: 20 }, { max_redemptions: 5, times_redeemed: 5 })],
+    ],
   ])('rejects the code as invalid when %s', async (_case, data) => {
     mockPromotionCodesList.mockResolvedValue({ data });
 

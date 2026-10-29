@@ -177,6 +177,20 @@ describe('PaymentForm: checking a promo code before submitting', () => {
     expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
   });
 
+  it('ignores a check that resolves after the code was edited', async () => {
+    let resolveCheck: (value: unknown) => void = () => {};
+    mockCheckPromotionCode.mockReturnValue(new Promise((resolve) => (resolveCheck = resolve)));
+    renderForm();
+    typePromo('ANY-CODE');
+    apply();
+
+    typePromo('OTHER-CODE');
+    resolveCheck({ discount: { promotionCode: 'ANY-CODE', duration: 'once', percentOff: 20 } });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled());
+    expect(screen.queryByTestId('applied-discount')).toBeNull();
+  });
+
   it('clears the code and its discount on Remove', async () => {
     renderForm();
     typePromo('ANY-CODE');

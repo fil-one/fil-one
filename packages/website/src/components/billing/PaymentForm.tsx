@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { CheckCircleIcon, CreditCardIcon, ShieldCheckIcon } from '@phosphor-icons/react/dist/ssr';
 import {
@@ -263,11 +263,16 @@ function PromotionCodeField({
   // What the code in the field takes off, once Stripe has confirmed it. Cleared
   // whenever the field changes, so it never describes a code no longer there.
   const [appliedDiscount, setAppliedDiscount] = useState<SubscriptionDiscount | null>(null);
+  // Counts edits and checks, so a check that resolves after the field changed
+  // knows its answer describes a code no longer there and drops it.
+  const checkGeneration = useRef(0);
 
   function handleChange(next: string) {
+    checkGeneration.current += 1;
     onChange(next);
     setError(null);
     setAppliedDiscount(null);
+    setChecking(false);
   }
 
   async function apply() {
@@ -277,15 +282,18 @@ function PromotionCodeField({
       return;
     }
 
+    const generation = ++checkGeneration.current;
     setChecking(true);
     setError(null);
     try {
       const { discount } = await checkPromotionCode(parsed.data);
-      setAppliedDiscount(discount);
+      if (generation === checkGeneration.current) setAppliedDiscount(discount);
     } catch (err) {
-      setError((err as Error).message || 'Could not check this promo code.');
+      if (generation === checkGeneration.current) {
+        setError((err as Error).message || 'Could not check this promo code.');
+      }
     } finally {
-      setChecking(false);
+      if (generation === checkGeneration.current) setChecking(false);
     }
   }
 

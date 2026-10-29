@@ -5,8 +5,10 @@ import { ApiErrorCode, CheckPromotionCodeRequestSchema } from '@filone/shared';
 import type { CheckPromotionCodeResponse } from '@filone/shared';
 import { describePromotionCode, findActivePromotionCode } from '../lib/promotion-codes.ts';
 import { getStripeClient } from '../lib/stripe-client.ts';
+import { getSubscription } from '../lib/subscription-store.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
@@ -35,7 +37,15 @@ export async function baseHandler(
       .build();
   }
 
-  const promotionCode = await findActivePromotionCode(getStripeClient(), parsed.data.promotionCode);
+  // The org's Stripe customer, so a code restricted to another customer is
+  // refused here rather than accepted and then refused at activation.
+  const { orgId } = getUserInfo(event);
+  const stripeCustomerId = (await getSubscription(orgId))?.stripeCustomerId;
+  const promotionCode = await findActivePromotionCode(
+    getStripeClient(),
+    parsed.data.promotionCode,
+    stripeCustomerId,
+  );
   // A code whose coupon states no percentage or amount has nothing to preview,
   // and the customer is better told so now than surprised by the invoice.
   const discount = promotionCode && describePromotionCode(promotionCode);
