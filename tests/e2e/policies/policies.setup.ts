@@ -4,6 +4,7 @@ import { test as setup, expect } from '@playwright/test';
 import { maybeSkipPasskeyEnrollment } from '../destructive/passkey.util.ts';
 import { ACCOUNT_STATE_TIMEOUT_MS, setAccountState } from '../destructive/account-state.util.ts';
 import { resolvePersonalOrgId, seedMembership } from '../destructive/invite.util.ts';
+import { setOrgName } from '../multi-org/org.util.ts';
 import { STORAGE_STATE, getCredentials, type PolicyUser } from './policy.util.ts';
 
 // Logs in every user, gives the Owner's org an active subscription, and seats
@@ -15,7 +16,12 @@ import { STORAGE_STATE, getCredentials, type PolicyUser } from './policy.util.ts
 
 for (const user of ['owner', 'admin', 'member', 'readonly', 'leaver'] as PolicyUser[]) {
   setup(`authenticate the policy ${user}`, async ({ page }) => {
-    const { email, password } = getCredentials(user);
+    const { email, password, userId } = getCredentials(user);
+    if (user === 'owner') {
+      // The Owner's personal org is their only membership, so while it is
+      // unnamed the console sends them to /create-organization on every page.
+      await setOrgName(await resolvePersonalOrgId(userId), {});
+    }
     await page.goto('/');
     await page.locator('#username').fill(email);
     await page.locator('button[data-action-button-primary="true"]').click();
