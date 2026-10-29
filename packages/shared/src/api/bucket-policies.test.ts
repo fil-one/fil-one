@@ -331,7 +331,7 @@ describe('PutBucketPolicyRequestSchema', () => {
     );
   });
 
-  it('refuses an etag in the body, which travels in the If-Match header', () => {
+  it('refuses an etag in the body', () => {
     expect(
       PutBucketPolicyRequestSchema.safeParse({ policy: grantReadToPrincipalA, etag: '"abc"' }),
     ).toMatchObject({

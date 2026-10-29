@@ -386,8 +386,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/ConcurrentChange'
         '422':
           description: The `principalId` path value is not a valid principal id.
           content:
@@ -428,8 +426,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/ConcurrentChange'
   /tenants/{tenantId}/principals/{principalId}/policies:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -648,15 +644,6 @@ components:
             $ref: '#/components/schemas/Error'
     Internal:
       description: Unexpected server error.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-    ConcurrentChange:
-      description: |
-        The write could not take its lock within the orchestrator's
-        timeout, because another change to the same principal or policy
-        is in flight. Nothing was written; the caller retries.
       content:
         application/json:
           schema:

@@ -25,14 +25,8 @@ vi.mock('../s3-credentials.ts', () => ({
   }),
 }));
 
-import {
-  PolicyConflictError,
-  PolicyPreconditionFailedError,
-  PolicyPublishError,
-  PolicyValidationError,
-} from '../errors.ts';
+import { PolicyPublishError, PolicyValidationError } from '../errors.ts';
 import { FilOneOrchestrator } from './orchestrator.ts';
-import type { PolicyPrecondition } from '../bucket-policy-orchestrator.ts';
 
 const ALICE = '00000000-0000-0000-0000-00000000000a';
 const BOB = '00000000-0000-0000-0000-00000000000b';
@@ -53,13 +47,10 @@ beforeEach(() => {
 });
 
 describe('getBucketPolicy', () => {
-  it('returns the policy and ETag the S3 read returned', async () => {
-    mockGetPolicy.mockResolvedValue({ policy, etag: '"abc"' });
+  it('returns the policy the S3 read returned', async () => {
+    mockGetPolicy.mockResolvedValue(policy);
 
-    await expect(orchestrator.getBucketPolicy(tenantId, 'photos')).resolves.toStrictEqual({
-      policy,
-      etag: '"abc"',
-    });
+    await expect(orchestrator.getBucketPolicy(tenantId, 'photos')).resolves.toStrictEqual(policy);
     expect(mockGetPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos');
   });
 
@@ -70,92 +61,44 @@ describe('getBucketPolicy', () => {
 });
 
 describe('putBucketPolicy', () => {
-  it('replaces under If-Match and reports the new ETag', async () => {
-    mockPutPolicy.mockResolvedValue({ etag: '"v2"' });
+  it('writes the policy with the S3 write', async () => {
+    mockPutPolicy.mockResolvedValue(undefined);
 
-    await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
-    ).resolves.toStrictEqual({ etag: '"v2"' });
-    expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy, {
-      ifMatch: '"v1"',
-    });
+    await expect(orchestrator.putBucketPolicy(tenantId, 'photos', policy)).resolves.toBeUndefined();
+    expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy);
   });
 
-  it('creates under If-None-Match: *', async () => {
-    mockPutPolicy.mockResolvedValue({ etag: '"v1"' });
+  it('retries a failed publish and succeeds on the next attempt', async () => {
+    mockPutPolicy.mockRejectedValueOnce(new PolicyPublishError()).mockResolvedValueOnce(undefined);
 
-    await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifNoneMatch: '*' }),
-    ).resolves.toStrictEqual({ etag: '"v1"' });
-    expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy, {
-      ifNoneMatch: '*',
-    });
-  });
-
-  it('PolicyPrecondition rejects ifMatch and ifNoneMatch together', () => {
-    // @ts-expect-error — a write carries If-Match or If-None-Match, never both.
-    const _p: PolicyPrecondition = { ifMatch: '"e1"', ifNoneMatch: '*' };
-    void _p;
-  });
-
-  it('does not retry when the If-Match precondition fails', async () => {
-    mockPutPolicy.mockRejectedValue(new PolicyPreconditionFailedError('photos'));
-
-    await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"old"' }),
-    ).rejects.toBeInstanceOf(PolicyPreconditionFailedError);
-    expect(mockPutPolicy).toHaveBeenCalledTimes(1);
-  });
-
-  it('retries a lock timeout and succeeds on the next attempt', async () => {
-    mockPutPolicy
-      .mockRejectedValueOnce(new PolicyConflictError())
-      .mockResolvedValueOnce({ etag: '"v2"' });
-
-    await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
-    ).resolves.toStrictEqual({ etag: '"v2"' });
+    await expect(orchestrator.putBucketPolicy(tenantId, 'photos', policy)).resolves.toBeUndefined();
     expect(mockPutPolicy).toHaveBeenCalledTimes(2);
   });
 
   it('retries a failed publish, then throws PolicyPublishError', async () => {
     mockPutPolicy.mockRejectedValue(new PolicyPublishError());
 
-    await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
-    ).rejects.toBeInstanceOf(PolicyPublishError);
+    await expect(orchestrator.putBucketPolicy(tenantId, 'photos', policy)).rejects.toBeInstanceOf(
+      PolicyPublishError,
+    );
     expect(mockPutPolicy).toHaveBeenCalledTimes(3);
   });
 
   it('passes the storage system’s validation message through without retrying', async () => {
     mockPutPolicy.mockRejectedValue(new PolicyValidationError(`unknown principal "${BOB}"`));
 
-    await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
-    ).rejects.toMatchObject({
+    await expect(orchestrator.putBucketPolicy(tenantId, 'photos', policy)).rejects.toMatchObject({
       name: 'PolicyValidationError',
       message: `unknown principal "${BOB}"`,
     });
     expect(mockPutPolicy).toHaveBeenCalledTimes(1);
   });
-
-  it('throws PolicyConflictError when the lock timeout persists through every retry', async () => {
-    mockPutPolicy.mockRejectedValue(new PolicyConflictError());
-    await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
-    ).rejects.toBeInstanceOf(PolicyConflictError);
-    expect(mockPutPolicy).toHaveBeenCalledTimes(3);
-  });
 });
 
 describe('deleteBucketPolicy', () => {
-  it('passes the If-Match precondition to the S3 delete', async () => {
+  it('deletes the policy with the S3 delete', async () => {
     mockDeletePolicy.mockResolvedValue(undefined);
-    await expect(
-      orchestrator.deleteBucketPolicy(tenantId, 'photos', { ifMatch: '"v1"' }),
-    ).resolves.toBeUndefined();
-    expect(mockDeletePolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', {
-      ifMatch: '"v1"',
-    });
+    await expect(orchestrator.deleteBucketPolicy(tenantId, 'photos')).resolves.toBeUndefined();
+    expect(mockDeletePolicy).toHaveBeenCalledWith(expect.any(Object), 'photos');
   });
 });

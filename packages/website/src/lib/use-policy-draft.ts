@@ -7,11 +7,11 @@ interface DraftState {
   statements: PolicyStatement[];
   hasUnsavedEdits: boolean;
   /**
-   * The ETag the draft was seeded from, so a refetch of the same policy is a
-   * no-op. `null` when the bucket has no policy, `undefined` when the policy
+   * The snapshot the draft was seeded from, so a refetch of the same policy is
+   * a no-op. `null` when the bucket has no policy, `undefined` when the policy
    * has not loaded.
    */
-  seededEtag: string | null | undefined;
+  seededFrom: BucketPolicySnapshot | null | undefined;
 }
 
 type DraftAction =
@@ -22,7 +22,7 @@ function createSeededState(snapshot: BucketPolicySnapshot | null | undefined): D
   return {
     statements: snapshot?.policy.Statement ?? [],
     hasUnsavedEdits: false,
-    seededEtag: snapshot === undefined ? undefined : (snapshot?.etag ?? null),
+    seededFrom: snapshot,
   };
 }
 
@@ -38,41 +38,33 @@ function reduceDraft(state: DraftState, action: DraftAction): DraftState {
 /**
  * A local copy of the bucket's policy statements to edit before saving.
  *
- * The policy is one ETag-versioned document, so every edit lands in the draft
- * and one save writes the whole thing. The draft takes a new snapshot only
- * while it has no unsaved edits. It never rebases edits onto a newer policy: a
- * newer ETag arriving over edits makes the draft stale, the caller reports the
- * conflict, and `reset` discards the edits and takes the snapshot.
+ * The policy is one document, so every edit lands in the draft and one save
+ * writes the whole thing; the last save wins. The draft takes a new snapshot
+ * only while it has no unsaved edits. A policy that changes under unsaved
+ * edits leaves them in place, and `reset` discards them and takes the
+ * snapshot.
  */
 export function usePolicyDraft(snapshot: BucketPolicySnapshot | null | undefined) {
   const [state, dispatch] = useReducer(reduceDraft, snapshot, createSeededState);
 
-  // A new ETag is a new policy. Take it when nothing is unsaved; otherwise
-  // the user's edits stand until they save or discard.
-  const etag = snapshot === undefined ? undefined : (snapshot?.etag ?? null);
+  // react-query keeps the previous object when a refetch returns an equal
+  // document, so a new object is a changed policy. Take it when nothing is
+  // unsaved; otherwise the user's edits stand until they save or discard.
   useEffect(() => {
-    if (etag === state.seededEtag || state.hasUnsavedEdits) return;
+    if (snapshot === state.seededFrom || state.hasUnsavedEdits) return;
     dispatch({ type: 'seed', snapshot });
-  }, [etag, snapshot, state.hasUnsavedEdits, state.seededEtag]);
+  }, [snapshot, state.hasUnsavedEdits, state.seededFrom]);
 
   return {
     statements: state.statements,
     hasUnsavedEdits: state.hasUnsavedEdits,
-    /**
-     * The ETag of the document the draft was seeded from, which is what a save
-     * sends: a write against a newer document the user never saw must lose,
-     * even when the query has since refetched it.
-     */
-    etag: state.seededEtag ?? undefined,
-    /** Whether the snapshot has changed since the draft was seeded. */
-    isStale: etag !== state.seededEtag && state.hasUnsavedEdits,
     /** Replace the draft's statements; the caller builds the next array. */
     setStatements: (statements: PolicyStatement[]) => dispatch({ type: 'modify', statements }),
     /** Drop the edits and take the snapshot's statements again. */
     reset: () => dispatch({ type: 'seed', snapshot }),
     /**
      * A save or removal landed: seed from what was written, so the draft is
-     * clean under the new ETag before the refetch confirms it.
+     * clean before the refetch confirms it.
      */
     acceptSaved: (saved: BucketPolicySnapshot | null) =>
       dispatch({ type: 'seed', snapshot: saved }),

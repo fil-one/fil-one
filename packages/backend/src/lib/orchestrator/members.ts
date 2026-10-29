@@ -10,12 +10,7 @@ import {
   putTenantsByTenantIdPrincipalsByPrincipalId,
   type Client,
 } from '@filone/orchestrator-client';
-import {
-  PolicyConflictError,
-  PolicyPublishError,
-  PolicyValidationError,
-  PrincipalNotFoundError,
-} from '../errors.ts';
+import { PolicyPublishError, PolicyValidationError, PrincipalNotFoundError } from '../errors.ts';
 import type { MemberBucketPolicy } from '../member-orchestrator.ts';
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 
@@ -47,8 +42,6 @@ function toPrincipalError(
   switch (result.response?.status) {
     case 404:
       return new PrincipalNotFoundError(principalId, { cause });
-    case 409:
-      return new PolicyConflictError({ cause });
     case 422:
       return new PolicyValidationError(
         extractApiMessage(cause) ?? 'The storage system refused the principal id.',

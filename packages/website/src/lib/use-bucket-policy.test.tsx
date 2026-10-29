@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ApiErrorCode, OrgRole, POLICY_VERSION, S3Region, buildStatement } from '@filone/shared';
+import { OrgRole, POLICY_VERSION, S3Region, buildStatement } from '@filone/shared';
 import type { BucketPolicy } from '@filone/shared';
 
 import { seedPermissions } from './test-permissions.js';
@@ -52,19 +52,10 @@ async function renderLoaded() {
   return rendered;
 }
 
-async function saveIgnoringError(
-  result: { current: ReturnType<typeof useBucketPolicy> },
-  etag: string,
-) {
-  await act(async () => {
-    await result.current.save.mutateAsync({ policy, etag }).catch(() => undefined);
-  });
-}
-
 describe('useBucketPolicy', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGet.mockResolvedValue({ policy, etag: '"v1"' });
+    mockGet.mockResolvedValue({ policy });
   });
 
   it('reads the policy for an Owner on an iam region', async () => {
@@ -75,7 +66,7 @@ describe('useBucketPolicy', () => {
       isAvailable: true,
       isLoading: false,
       hasLoadFailed: false,
-      snapshot: { policy, etag: '"v1"' },
+      snapshot: { policy },
     });
     expect(mockGet).toHaveBeenCalledWith('photos', S3Region.UsEast9);
   });
@@ -122,64 +113,46 @@ describe('useBucketPolicy', () => {
     expect(result.current.snapshot).toBeUndefined();
   });
 
-  it('calls putBucketPolicy with the policy and ETag', async () => {
-    mockPut.mockResolvedValue({ etag: '"v2"' });
+  it('calls putBucketPolicy with the policy', async () => {
+    mockPut.mockResolvedValue(undefined);
     const { result } = await renderLoaded();
 
-    await act(() => result.current.save.mutateAsync({ policy, etag: '"v1"' }));
+    await act(() => result.current.save.mutateAsync(policy));
 
-    expect(mockPut).toHaveBeenCalledWith('photos', S3Region.UsEast9, { policy, etag: '"v1"' });
+    expect(mockPut).toHaveBeenCalledWith('photos', S3Region.UsEast9, policy);
   });
 
-  it('caches the saved policy with the ETag the PUT returned', async () => {
-    mockPut.mockResolvedValue({ etag: '"v2"' });
-    const { result } = await renderLoaded();
+  it('caches the saved policy', async () => {
+    mockPut.mockResolvedValue(undefined);
+    mockGet.mockResolvedValue(null);
+    const { result } = renderUseBucketPolicy();
+    await waitFor(() => expect(result.current.snapshot).toBeNull());
+    mockGet.mockReturnValue(new Promise(() => {}));
 
-    await act(() => result.current.save.mutateAsync({ policy, etag: '"v1"' }));
+    await act(() => result.current.save.mutateAsync(policy));
 
-    await waitFor(() => expect(result.current.snapshot).toStrictEqual({ policy, etag: '"v2"' }));
+    await waitFor(() => expect(result.current.snapshot).toStrictEqual({ policy }));
   });
 
   it('invalidates the bucket’s access keys after a save', async () => {
-    mockPut.mockResolvedValue({ etag: '"v2"' });
+    mockPut.mockResolvedValue(undefined);
     const { client, result } = await renderLoaded();
     const invalidate = vi.spyOn(client, 'invalidateQueries');
 
-    await act(() => result.current.save.mutateAsync({ policy, etag: '"v1"' }));
+    await act(() => result.current.save.mutateAsync(policy));
 
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: queryKeys.bucketAccessKeys('photos', S3Region.UsEast9),
     });
   });
 
-  it('sets hasConflict when a save fails with POLICY_CONFLICT', async () => {
-    mockPut.mockRejectedValue(
-      Object.assign(new Error('changed'), { status: 409, code: ApiErrorCode.POLICY_CONFLICT }),
-    );
-    const { result } = await renderLoaded();
-
-    await saveIgnoringError(result, '"stale"');
-
-    await waitFor(() => expect(result.current.hasConflict).toBe(true));
-  });
-
-  it('leaves hasConflict false for any other error', async () => {
-    mockPut.mockRejectedValue(Object.assign(new Error('Internal error'), { status: 500 }));
-    const { result } = await renderLoaded();
-
-    await saveIgnoringError(result, '"v1"');
-
-    await waitFor(() => expect(result.current.save.isError).toBe(true));
-    expect(result.current.hasConflict).toBe(false);
-  });
-
   it('caches null after the policy is deleted', async () => {
     mockDelete.mockResolvedValue(undefined);
     const { result } = await renderLoaded();
 
-    await act(() => result.current.remove.mutateAsync({ etag: '"v1"' }));
+    await act(() => result.current.remove.mutateAsync());
 
-    expect(mockDelete).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"');
+    expect(mockDelete).toHaveBeenCalledWith('photos', S3Region.UsEast9);
     await waitFor(() => expect(result.current.snapshot).toBeNull());
   });
 });

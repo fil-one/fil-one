@@ -58,8 +58,8 @@ test.afterAll(async () => {
 /** The policy a bucket starts with here: the owner created it. */
 const getStoredStatements = () => [buildCreatorStatement(ownerId)];
 
-async function putPolicyAs(api: ConsoleApi, statements: UnboundStatement[], etag?: string) {
-  const res = await api.putPolicy(bucket, { policy: buildBucketPolicy(bucket, statements), etag });
+async function putPolicyAs(api: ConsoleApi, statements: UnboundStatement[]) {
+  const res = await api.putPolicy(bucket, buildBucketPolicy(bucket, statements));
   // A write that succeeds answers 204 with no body.
   const text = await res.text();
   return {
@@ -90,7 +90,7 @@ test.describe('through the API', { tag: '@api' }, () => {
   ] as const) {
     test(title, async () => {
       const before = await owner.readPolicy(bucket);
-      expect(await putPolicyAs(admin, [...getStoredStatements(), grant], before.etag)).toEqual({
+      expect(await putPolicyAs(admin, [...getStoredStatements(), grant])).toEqual({
         status: 403,
         code: 'RETENTION_GRANT_FORBIDDEN',
       });
@@ -100,13 +100,12 @@ test.describe('through the API', { tag: '@api' }, () => {
 
   test("an admin may save a policy that keeps an owner's s3:* statement", async () => {
     const ownerAll = grantAllToOwner(ownerId);
-    expect(await putPolicyAs(owner, [ownerAll], (await owner.readPolicy(bucket)).etag)).toEqual({
+    expect(await putPolicyAs(owner, [ownerAll])).toEqual({
       status: 204,
       code: undefined,
     });
-    const { etag } = await admin.readPolicy(bucket);
     const statement = [ownerAll, allow([memberId], ['s3:ListBucket'], 'team')];
-    expect(await putPolicyAs(admin, statement, etag)).toEqual({ status: 204, code: undefined });
+    expect(await putPolicyAs(admin, statement)).toEqual({ status: 204, code: undefined });
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
       toCanonicalPolicy(buildBucketPolicy(bucket, statement)),
     );
@@ -114,20 +113,20 @@ test.describe('through the API', { tag: '@api' }, () => {
 
   test('an owner grants the pair, and an admin may keep or drop it', async () => {
     const granted = allow([memberId], ['s3:PutObjectRetention', 's3:PutObjectLegalHold'], 'hold');
-    const { etag } = await owner.readPolicy(bucket);
-    expect(await putPolicyAs(owner, [...getStoredStatements(), granted], etag)).toEqual({
+    expect(await putPolicyAs(owner, [...getStoredStatements(), granted])).toEqual({
       status: 204,
       code: undefined,
     });
 
     const kept = [...getStoredStatements(), granted, allow([memberId], ['s3:ListBucket'], 'team')];
-    expect(await putPolicyAs(admin, kept, (await admin.readPolicy(bucket)).etag)).toEqual({
+    expect(await putPolicyAs(admin, kept)).toEqual({
       status: 204,
       code: undefined,
     });
-    expect(
-      await putPolicyAs(admin, getStoredStatements(), (await admin.readPolicy(bucket)).etag),
-    ).toEqual({ status: 204, code: undefined });
+    expect(await putPolicyAs(admin, getStoredStatements())).toEqual({
+      status: 204,
+      code: undefined,
+    });
     expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
       toCanonicalPolicy(buildBucketPolicy(bucket, getStoredStatements())),
     );
@@ -138,15 +137,14 @@ test.describe('through the API', { tag: '@api' }, () => {
       ...getStoredStatements(),
       deny('*', ['s3:PutObjectRetention', 's3:PutObjectLegalHold'], 'no-holds'),
     ];
-    expect(await putPolicyAs(admin, statement, (await admin.readPolicy(bucket)).etag)).toEqual({
+    expect(await putPolicyAs(admin, statement)).toEqual({
       status: 204,
       code: undefined,
     });
   });
 
   test('an admin writing a first policy may not grant s3:*, even to the owner', async () => {
-    const { etag } = await owner.readPolicy(bucket);
-    expect((await owner.deletePolicy(bucket, etag)).status()).toBe(204);
+    expect((await owner.deletePolicy(bucket)).status()).toBe(204);
 
     expect(await putPolicyAs(admin, [grantAllToOwner(ownerId)])).toEqual({
       status: 403,
@@ -157,31 +155,14 @@ test.describe('through the API', { tag: '@api' }, () => {
   });
 
   test('an admin may not name a retention write, even for the owner', async () => {
-    const { etag } = await admin.readPolicy(bucket);
     const named = [
       ...getStoredStatements(),
       allow([ownerId], ['s3:PutObjectRetention'], 'owner-hold'),
     ];
-    expect(await putPolicyAs(admin, named, etag)).toEqual({
+    expect(await putPolicyAs(admin, named)).toEqual({
       status: 403,
       code: 'RETENTION_GRANT_FORBIDDEN',
     });
-  });
-
-  test('an admin writing without a precondition meets the same cap', async () => {
-    const before = await owner.readPolicy(bucket);
-    const res = await admin.putPolicy(bucket, {
-      policy: buildBucketPolicy(bucket, [
-        ...getStoredStatements(),
-        allow([memberId], ['s3:PutObjectRetention']),
-      ]),
-      unconditional: true,
-    });
-    expect({ status: res.status(), code: (await res.json()).code }).toEqual({
-      status: 403,
-      code: 'RETENTION_GRANT_FORBIDDEN',
-    });
-    expect(await owner.readPolicy(bucket)).toEqual(before);
   });
 });
 
@@ -208,9 +189,10 @@ test.describe('in the editor', () => {
     });
 
     test("the admin's edit keeps the owner's s3:* statement", async ({ page }) => {
-      expect(
-        await putPolicyAs(owner, [grantAllToOwner(ownerId)], (await owner.readPolicy(bucket)).etag),
-      ).toEqual({ status: 204, code: undefined });
+      expect(await putPolicyAs(owner, [grantAllToOwner(ownerId)])).toEqual({
+        status: 204,
+        code: undefined,
+      });
       const before = toCanonicalPolicy((await owner.readPolicy(bucket)).policy);
       await openPolicyTab(page);
       await chooseStatementMenuAction(page, 'owner-all', 'edit');

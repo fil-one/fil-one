@@ -35,7 +35,6 @@ export class ResponseBuilder {
   private _statusCode = 200;
   private _body: object | null = {};
   private _cookies: string[] = [];
-  private _headers: Record<string, string> = {};
 
   status(code: number): this {
     this._statusCode = code;
@@ -53,11 +52,6 @@ export class ResponseBuilder {
     return this;
   }
 
-  header(name: string, value: string): this {
-    this._headers[name] = value;
-    return this;
-  }
-
   addCookie(cookie: string): this {
     this._cookies.push(cookie);
     return this;
@@ -71,7 +65,6 @@ export class ResponseBuilder {
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'strict-origin-when-cross-origin',
         'Strict-Transport-Security': 'max-age=2592000; includeSubDomains',
-        ...this._headers,
       },
       body: this._body === null ? '' : JSON.stringify(this._body),
       ...(this._cookies.length > 0 && { cookies: this._cookies }),

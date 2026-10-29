@@ -269,7 +269,7 @@ test('all actions covers every action and saves as s3:*', async ({ page }) => {
 });
 
 test('a cancelled statement writes nothing', async ({ page }) => {
-  const { etag } = await owner.readPolicy(bucket);
+  const before = toCanonicalPolicy((await owner.readPolicy(bucket)).policy);
   await openPolicyTab(page);
   await openAddStatement(page);
   await memberBox(page, memberId).click();
@@ -277,11 +277,11 @@ test('a cancelled statement writes nothing', async ({ page }) => {
   await modal(page).locator('#policy-statement-cancel-button').click();
   await expect(cards(page)).toHaveCount(1);
   await expect(saveBar(page)).toBeHidden();
-  expect((await owner.readPolicy(bucket)).etag).toBe(etag);
+  expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(before);
 });
 
 test('a discarded edit writes nothing', async ({ page }) => {
-  const { etag } = await owner.readPolicy(bucket);
+  const before = toCanonicalPolicy((await owner.readPolicy(bucket)).policy);
   await openPolicyTab(page);
   await openAddStatement(page);
   await memberBox(page, memberId).click();
@@ -291,31 +291,7 @@ test('a discarded edit writes nothing', async ({ page }) => {
   await page.locator('#policy-discard-button').click();
   await expect(cards(page)).toHaveCount(1);
   await expect(saveBar(page)).toBeHidden();
-  expect((await owner.readPolicy(bucket)).etag).toBe(etag);
-});
-
-test("a save after another writer's change shows the conflict, and reload shows their policy", async ({
-  page,
-}) => {
-  await openPolicyTab(page);
-  await expect(cards(page)).toHaveCount(1);
-  const theirs = [grantAllToOwner(ownerId), allow([memberId], ['s3:ListBucket'], 'theirs')];
-  await owner.replaceStatements(bucket, theirs);
-
-  await openAddStatement(page);
-  await memberBox(page, memberId).click();
-  await pickActions(page, ['s3:GetObject']);
-  await submitStatement(page);
-  await page.locator('#policy-save-button').click();
-  await expect(page.getByTestId('policy-conflict')).toBeVisible();
-  expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(
-    toCanonicalPolicy(buildBucketPolicy(bucket, theirs)),
-  );
-
-  await page.locator('#policy-reload-button').click();
-  await expect(page.getByTestId('policy-conflict')).toBeHidden();
-  await expect(cards(page)).toHaveCount(2);
-  await expect(card(page, 'theirs')).toBeVisible();
+  expect(toCanonicalPolicy((await owner.readPolicy(bucket)).policy)).toEqual(before);
 });
 
 test('removing the policy leaves the empty state', async ({ page }) => {
@@ -329,8 +305,7 @@ test('removing the policy leaves the empty state', async ({ page }) => {
 });
 
 test('the first statement on a bucket with no policy creates one', async ({ page }) => {
-  const { etag } = await owner.readPolicy(bucket);
-  expect((await owner.deletePolicy(bucket, etag)).status()).toBe(204);
+  expect((await owner.deletePolicy(bucket)).status()).toBe(204);
   await openPolicyTab(page);
   await expect(emptyState(page)).toHaveAttribute('data-empty-state', 'no-policy');
 

@@ -22,12 +22,7 @@ export type {
   BucketSummary,
   CreateBucketArgs,
 } from './bucket-orchestrator.ts';
-export type {
-  BucketPolicyOrchestrator,
-  IfMatchPrecondition,
-  PolicyPrecondition,
-  StoredBucketPolicy,
-} from './bucket-policy-orchestrator.ts';
+export type { BucketPolicyOrchestrator } from './bucket-policy-orchestrator.ts';
 export type { MemberBucketPolicy, MemberOrchestrator } from './member-orchestrator.ts';
 export type { TenantOrchestrator, TenantStatusProbe } from './tenant-orchestrator.ts';
 export type {

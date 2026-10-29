@@ -846,13 +846,6 @@ export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
    * Resource not found.
    */
   404: Error;
-  /**
-   * The write could not take its lock within the orchestrator's
-   * timeout, because another change to the same principal or policy
-   * is in flight. Nothing was written; the caller retries.
-   *
-   */
-  409: Error;
 };
 
 export type DeleteTenantsByTenantIdPrincipalsByPrincipalIdError =
@@ -921,13 +914,6 @@ export type PutTenantsByTenantIdPrincipalsByPrincipalIdErrors = {
    * Resource not found.
    */
   404: Error;
-  /**
-   * The write could not take its lock within the orchestrator's
-   * timeout, because another change to the same principal or policy
-   * is in flight. Nothing was written; the caller retries.
-   *
-   */
-  409: Error;
   /**
    * The `principalId` path value is not a valid principal id.
    */

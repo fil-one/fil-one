@@ -123,52 +123,26 @@ export class ConsoleApi {
     return this.get(`/buckets/${bucket}/policy?region=${REGION}`);
   }
 
-  /** The policy with the ETag its response header carried. */
-  async readPolicy(bucket: string): Promise<GetBucketPolicyResponse & { etag: string }> {
+  /** The stored policy. */
+  async readPolicy(bucket: string): Promise<GetBucketPolicyResponse> {
     const res = await this.fetchPolicyResponse(bucket);
     expect(res.status(), await res.text()).toBe(200);
-    const { policy } = (await res.json()) as GetBucketPolicyResponse;
-    return { policy, etag: res.headers().etag! };
+    return (await res.json()) as GetBucketPolicyResponse;
   }
 
-  /**
-   * `etag` goes out as `If-Match`; without one the write creates the first
-   * policy (`If-None-Match: *`) unless `unconditional`.
-   */
-  putPolicy(
-    bucket: string,
-    { policy, etag, unconditional }: { policy: unknown; etag?: string; unconditional?: boolean },
-  ): Promise<APIResponse> {
-    const precondition: Record<string, string> = etag
-      ? { 'If-Match': etag }
-      : unconditional
-        ? {}
-        : { 'If-None-Match': '*' };
-    return this.send('PUT', `/buckets/${bucket}/policy?region=${REGION}`, { policy }, precondition);
+  /** Create or replace the policy; as on S3, the last write wins. */
+  putPolicy(bucket: string, policy: unknown): Promise<APIResponse> {
+    return this.send('PUT', `/buckets/${bucket}/policy?region=${REGION}`, { policy });
   }
 
-  /** Under `If-Match` when `etag` is given, unconditional otherwise. */
-  deletePolicy(bucket: string, etag?: string): Promise<APIResponse> {
-    return this.send(
-      'DELETE',
-      `/buckets/${bucket}/policy?region=${REGION}`,
-      undefined,
-      etag ? { 'If-Match': etag } : {},
-    );
+  deletePolicy(bucket: string): Promise<APIResponse> {
+    return this.send('DELETE', `/buckets/${bucket}/policy?region=${REGION}`);
   }
 
-  /** Replace the policy with `statements`, reading the ETag first. Returns the new ETag. */
-  async replaceStatements(
-    bucket: string,
-    statements: readonly UnboundStatement[],
-  ): Promise<string> {
-    const { etag } = await this.readPolicy(bucket);
-    const res = await this.putPolicy(bucket, {
-      policy: buildBucketPolicy(bucket, statements),
-      etag,
-    });
+  /** Replace the policy with `statements`. */
+  async replaceStatements(bucket: string, statements: readonly UnboundStatement[]): Promise<void> {
+    const res = await this.putPolicy(bucket, buildBucketPolicy(bucket, statements));
     expect(res.status(), await res.text()).toBe(204);
-    return res.headers().etag!;
   }
 
   // ── Buckets and keys ─────────────────────────────────────────────
@@ -352,9 +326,7 @@ export async function emptyAndDeleteBucket(
   ) {
     return; // Already gone.
   }
-  const policy = buildBucketPolicy(bucket, [grantAllToOwner(ownerId)]);
-  const etag = current.ok() ? current.headers().etag : undefined;
-  const put = await owner.putPolicy(bucket, { policy, etag });
+  const put = await owner.putPolicy(bucket, buildBucketPolicy(bucket, [grantAllToOwner(ownerId)]));
   expect(put.status(), await put.text()).toBe(204);
 
   const key = await owner.createAccessKey();

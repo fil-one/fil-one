@@ -45,14 +45,14 @@ const parseResponseBody = (result: { body?: string }) => JSON.parse(result.body 
 describe('get-bucket-policy baseHandler', () => {
   beforeEach(resetFixture);
 
-  it('answers the stored document with the ETag the next write must carry as a header', async () => {
-    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
+  it('answers the stored document with no ETag header', async () => {
+    iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
 
     const result = await baseHandler(buildGetEvent());
 
     expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
       statusCode: 200,
-      headers: { ETag: etag },
+      headers: expect.not.objectContaining({ ETag: expect.anything() }),
       body: { policy: grantGetObjectToUser },
     });
   });

@@ -22,7 +22,6 @@ import { ToastProvider } from '../components/Toast/ToastProvider.js';
 // ---------------------------------------------------------------------------
 
 const mockApiRequest = vi.fn();
-const mockSendApiRequest = vi.fn();
 
 /** The single object the listing returns; hoisted so a mock factory can name it. */
 const { OBJECT_KEY } = vi.hoisted(() => ({ OBJECT_KEY: 'README.md' }));
@@ -35,9 +34,6 @@ vi.mock('../lib/api.js', async () => ({
   getBilling: () => mockGetBilling(),
   // Permissions come seeded; only the test about loading them leaves /me to this.
   getMe: () => mockGetMe(),
-  // The policy client reads the ETag header, so it sends through sendApiRequest
-  // and gets a Response back.
-  sendApiRequest: (...a: unknown[]) => mockSendApiRequest(...a),
 }));
 
 const mockGetBilling = vi.fn(() => new Promise(() => {}));
@@ -171,10 +167,6 @@ beforeEach(() => {
   mockParseListObjects.mockReturnValue(ONE_OBJECT_LISTING);
   mockBucketKeys.mockReturnValue([ACCESS_KEY]);
   mockApiRequest.mockImplementation((path: string) => respond(path));
-  mockSendApiRequest.mockImplementation(
-    async (path: string) =>
-      new Response(JSON.stringify(await respond(path)), { headers: { ETag: '"v1"' } }),
-  );
 });
 
 describe('BucketDetailPage — the policy tab', () => {

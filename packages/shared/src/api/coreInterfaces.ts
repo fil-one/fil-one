@@ -81,12 +81,6 @@ export const ApiErrorCode = {
    */
   POLICY_NOT_FOUND: 'POLICY_NOT_FOUND',
   /**
-   * The policy changed since the caller read it, or the write named a
-   * precondition the stored state contradicts. Nothing was written; the console
-   * re-reads and applies the edit again.
-   */
-  POLICY_CONFLICT: 'POLICY_CONFLICT',
-  /**
    * The statement grants a retention or legal-hold write and the caller is not
    * an Owner. The two actions are the console's privileged pair, and only
    * `privileged.grant` may put them in a statement.

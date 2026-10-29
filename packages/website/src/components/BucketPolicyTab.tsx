@@ -4,7 +4,6 @@ import { PlusIcon, ShieldCheckIcon } from '@phosphor-icons/react/dist/ssr';
 import { POLICY_VERSION } from '@filone/shared';
 import type { PolicyStatement, S3Region } from '@filone/shared';
 
-import { isPolicyConflict } from '../lib/bucket-policy-api.js';
 import { listMembers } from '../lib/members-api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { useBucketPolicy } from '../lib/use-bucket-policy.js';
@@ -33,11 +32,9 @@ type StatementEditTarget = { kind: 'new' } | { kind: 'existing'; index: number }
  * The bucket's policy on an `iam` region: its statements as cards, an editor
  * for one statement at a time, and one save for the whole document.
  *
- * The policy is one ETag-versioned document held at the storage system, so
- * every edit lands in a local draft and "Save policy" writes it once under the
- * ETag it was read at. A save that lost to another writer is shown in place
- * with the draft intact, so the user can reload and apply their edit to what
- * is there now.
+ * The policy is one document held at the storage system, so every edit lands
+ * in a local draft and "Save policy" writes it once. The write is
+ * unconditional: the last save wins, as on S3.
  */
 export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
   const editor = useBucketPolicyEditor(bucketName, region);
@@ -75,7 +72,6 @@ export function BucketPolicyTab({ bucketName, region }: BucketPolicyTabProps) {
                 id="policy-remove-button"
                 variant="tertiary"
                 size="sm"
-                disabled={draft.isStale}
                 onClick={() => setIsRemoveDialogOpen(true)}
               >
                 Remove policy
@@ -148,18 +144,12 @@ function useBucketPolicyEditor(bucketName: string, region: S3Region) {
     try {
       await performWrite();
     } catch (err) {
-      // A conflict renders in place; anything else is a failed request.
-      if (!isPolicyConflict(err)) {
-        toast.error(err instanceof Error ? err.message : fallbackErrorMessage);
-      }
+      toast.error(err instanceof Error ? err.message : fallbackErrorMessage);
     }
   }
 
   async function deleteStoredPolicy() {
-    // Unreachable from the UI, which offers the removal only over a stored
-    // policy; a thrown error reaches the toast rather than failing silently.
-    if (!draft.etag) throw new Error('The policy has no ETag to remove it under');
-    await policy.remove.mutateAsync({ etag: draft.etag });
+    await policy.remove.mutateAsync();
     draft.acceptSaved(null);
     toast.success('Policy removed');
   }
@@ -172,43 +162,29 @@ function useBucketPolicyEditor(bucketName: string, region: S3Region) {
       // stores no empty document.
       if (draft.statements.length === 0) return deleteStoredPolicy();
       const nextPolicy = { Version: POLICY_VERSION, Statement: draft.statements };
-      const saveResult = await policy.save.mutateAsync({ policy: nextPolicy, etag: draft.etag });
-      draft.acceptSaved({ policy: nextPolicy, etag: saveResult.etag });
+      await policy.save.mutateAsync(nextPolicy);
+      draft.acceptSaved({ policy: nextPolicy });
       toast.success('Policy saved');
     }, 'Failed to save the policy');
 
-  // A reload that fails keeps the draft and the conflict, so nothing is lost
-  // to a network error.
-  async function reloadPolicy() {
-    const result = await policy.refetch();
-    if (result.isError) {
-      toast.error('Could not reload the policy. Try again.');
-      return;
-    }
-    policy.save.reset();
-    policy.remove.reset();
-    draft.reset();
-  }
-
-  return { policy, draft, savePolicy, removePolicy, reloadPolicy };
+  return { policy, draft, savePolicy, removePolicy };
 }
 
 type BucketPolicyEditor = ReturnType<typeof useBucketPolicyEditor>;
 
 /** The slice of the editor the loaded view reads, so a story can stub it. */
 export type LoadedPolicyEditor = {
-  policy: Pick<BucketPolicyEditor['policy'], 'snapshot' | 'hasConflict' | 'isWriting'>;
+  policy: Pick<BucketPolicyEditor['policy'], 'snapshot' | 'isWriting'>;
   draft: Pick<
     BucketPolicyEditor['draft'],
-    'statements' | 'hasUnsavedEdits' | 'isStale' | 'reset' | 'setStatements'
+    'statements' | 'hasUnsavedEdits' | 'reset' | 'setStatements'
   >;
   savePolicy: () => Promise<void>;
-  reloadPolicy: () => Promise<void>;
 };
 
 /** Everything shown once the policy has loaded. */
 export function LoadedPolicyView({
-  editor: { policy, draft, savePolicy, reloadPolicy },
+  editor: { policy, draft, savePolicy },
   getMemberName,
   onAdd,
   onEdit,
@@ -221,26 +197,6 @@ export function LoadedPolicyView({
   const hasPolicy = Boolean(policy.snapshot);
   return (
     <>
-      {(policy.hasConflict || draft.isStale) && (
-        <div data-testid="policy-conflict">
-          <Alert
-            variant="amber"
-            title="This policy changed elsewhere"
-            description="Someone else saved a new version. Reload the policy, then apply your changes again."
-            action={
-              <Button
-                id="policy-reload-button"
-                variant="ghost"
-                size="sm"
-                onClick={() => void reloadPolicy()}
-              >
-                Reload policy
-              </Button>
-            }
-          />
-        </div>
-      )}
-
       {draft.statements.length === 0 ? (
         <div
           data-testid="policy-empty"
@@ -312,9 +268,7 @@ export function LoadedPolicyView({
                 variant="primary"
                 size="sm"
                 onClick={() => void savePolicy()}
-                disabled={
-                  policy.isWriting || draft.isStale || (draft.statements.length === 0 && !hasPolicy)
-                }
+                disabled={policy.isWriting || (draft.statements.length === 0 && !hasPolicy)}
               >
                 {policy.isWriting ? 'Saving...' : 'Save policy'}
               </Button>

@@ -2,12 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BucketPolicy, S3Region } from '@filone/shared';
 
 import { supportsIamMethods } from './access-model.js';
-import {
-  deleteBucketPolicy,
-  getBucketPolicy,
-  isPolicyConflict,
-  putBucketPolicy,
-} from './bucket-policy-api.js';
+import { deleteBucketPolicy, getBucketPolicy, putBucketPolicy } from './bucket-policy-api.js';
 import type { BucketPolicySnapshot } from './bucket-policy-api.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from './query-client.js';
 import { useHasPermission } from './use-permissions.js';
@@ -46,13 +41,12 @@ export function useBucketPolicy(bucketName: string, region: S3Region) {
   }
 
   const save = useMutation({
-    mutationFn: ({ policy, etag }: { policy: BucketPolicy; etag?: string }) =>
-      putBucketPolicy(bucketName, region, { policy, etag }),
-    onSuccess: (written, { policy }) => cacheWrittenPolicy({ policy, etag: written.etag }),
+    mutationFn: (policy: BucketPolicy) => putBucketPolicy(bucketName, region, policy),
+    onSuccess: (_written, policy) => cacheWrittenPolicy({ policy }),
   });
 
   const remove = useMutation({
-    mutationFn: ({ etag }: { etag: string }) => deleteBucketPolicy(bucketName, region, etag),
+    mutationFn: () => deleteBucketPolicy(bucketName, region),
     onSuccess: () => cacheWrittenPolicy(null),
   });
 
@@ -71,7 +65,5 @@ export function useBucketPolicy(bucketName: string, region: S3Region) {
     save,
     remove,
     isWriting: save.isPending || remove.isPending,
-    /** The last save or delete lost to another writer. Clears on the next attempt. */
-    hasConflict: isPolicyConflict(save.error) || isPolicyConflict(remove.error),
   };
 }

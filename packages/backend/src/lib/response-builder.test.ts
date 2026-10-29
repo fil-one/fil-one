@@ -84,18 +84,6 @@ describe('ResponseBuilder', () => {
     expect(result.statusCode).toBe(200);
   });
 
-  it('adds a header beside the security headers', () => {
-    const result = new ResponseBuilder().header('ETag', '"v1"').build();
-
-    expect(result.headers).toStrictEqual({
-      'Content-Type': 'application/json',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'strict-origin-when-cross-origin',
-      'Strict-Transport-Security': 'max-age=2592000; includeSubDomains',
-      ETag: '"v1"',
-    });
-  });
-
   it('builds a 204 with an empty body, no Content-Type and the security headers', () => {
     const result = new ResponseBuilder().status(204).emptyBody().build();
 

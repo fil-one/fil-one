@@ -317,8 +317,8 @@ export interface SentOrg {
  *
  * Cookies, the CSRF token, the org header, and the whole error ladder live here
  * so a caller that wants something other than a JSON body, such as the audit
- * CSV or a bucket policy's `ETag` header, gets the same 401 step-up, 403, and
- * 410 handling rather than a second copy of it.
+ * CSV, gets the same 401 step-up, 403, and 410 handling rather than a second
+ * copy of it.
  */
 // eslint-disable-next-line complexity/complexity
 export async function sendApiRequest(

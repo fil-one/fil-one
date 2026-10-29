@@ -1,17 +1,7 @@
 import { getEffectiveActions, getPrincipalIds, toPolicyPrincipal } from '@filone/shared';
 import type { BucketPolicy, MemberBucketAccess, PolicyStatement } from '@filone/shared';
-import {
-  BucketNotFoundError,
-  PolicyNotFoundError,
-  PolicyPreconditionFailedError,
-  PolicyValidationError,
-} from '../lib/errors.ts';
-import type {
-  BucketPolicyOrchestrator,
-  IfMatchPrecondition,
-  PolicyPrecondition,
-  StoredBucketPolicy,
-} from '../lib/bucket-policy-orchestrator.ts';
+import { BucketNotFoundError, PolicyNotFoundError, PolicyValidationError } from '../lib/errors.ts';
+import type { BucketPolicyOrchestrator } from '../lib/bucket-policy-orchestrator.ts';
 import type { MemberBucketPolicy, MemberOrchestrator } from '../lib/member-orchestrator.ts';
 import type { OrchestratorRequestOptions } from '../lib/service-orchestrator.ts';
 
@@ -22,8 +12,8 @@ function removePrincipalFromStatement(s: PolicyStatement, userId: string): Polic
 }
 
 /**
- * An in-memory bucket-policy and member orchestrator with the storage system's semantics: real ETags and
- * preconditions, principals that must exist before a key binds to them, and
+ * An in-memory bucket-policy and member orchestrator with the storage system's semantics: unconditional
+ * writes where the last one wins, principals that must exist before a key binds to them, and
  * effective actions computed by the same shared function the console previews
  * with. Handler tests drive it where a real Hilt would be.
  *
@@ -35,12 +25,11 @@ type FakedMethods = BucketPolicyOrchestrator & MemberOrchestrator;
 
 export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrchestrator {
   readonly principals = new Map<string, Set<string>>();
-  readonly policies = new Map<string, Map<string, StoredBucketPolicy>>();
+  readonly policies = new Map<string, Map<string, BucketPolicy>>();
   readonly buckets = new Map<string, Set<string>>();
   /** Every call in order, for tests that assert what ran before what. */
   readonly calls: Array<{ method: keyof FakedMethods; tenantId: string; target: string }> = [];
 
-  private etagCounter = 0;
   private readonly failures = new Map<keyof FakedMethods, Error>();
 
   seedBucket(tenantId: string, bucketName: string): void {
@@ -51,10 +40,8 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
     this.getOrCreatePrincipals(tenantId).add(userId);
   }
 
-  seedPolicy(tenantId: string, bucketName: string, policy: BucketPolicy): string {
-    const stored = { policy, etag: this.createEtag() };
-    this.getOrCreatePolicies(tenantId).set(bucketName, stored);
-    return stored.etag;
+  seedPolicy(tenantId: string, bucketName: string, policy: BucketPolicy): void {
+    this.getOrCreatePolicies(tenantId).set(bucketName, policy);
   }
 
   /** The next call to `method` throws `error`, once. */
@@ -72,39 +59,32 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
     this.recordCall('removeMember', tenantId, userId);
     this.throwInjectedFailure('removeMember');
     this.getOrCreatePrincipals(tenantId).delete(userId);
-    for (const [bucketName, stored] of this.getOrCreatePolicies(tenantId)) {
+    for (const [bucketName, policy] of this.getOrCreatePolicies(tenantId)) {
       const appliesToUser = (s: PolicyStatement) => getPrincipalIds(s.Principal).includes(userId);
-      if (!stored.policy.Statement.some(appliesToUser)) continue;
-      const remainingStatements = stored.policy.Statement.map((s) =>
+      if (!policy.Statement.some(appliesToUser)) continue;
+      const remainingStatements = policy.Statement.map((s) =>
         removePrincipalFromStatement(s, userId),
       ).filter((s) => s.Principal === '*' || s.Principal.AWS.length > 0);
       if (remainingStatements.length === 0) this.getOrCreatePolicies(tenantId).delete(bucketName);
       else
         this.getOrCreatePolicies(tenantId).set(bucketName, {
-          policy: { ...stored.policy, Statement: remainingStatements },
-          etag: this.createEtag(),
+          ...policy,
+          Statement: remainingStatements,
         });
     }
   }
 
-  async getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null> {
+  async getBucketPolicy(tenantId: string, bucketName: string): Promise<BucketPolicy | null> {
     this.recordCall('getBucketPolicy', tenantId, bucketName);
     this.throwInjectedFailure('getBucketPolicy');
     this.assertBucketExists(tenantId, bucketName);
     return this.getOrCreatePolicies(tenantId).get(bucketName) ?? null;
   }
 
-  async putBucketPolicy(
-    tenantId: string,
-    bucketName: string,
-    policy: BucketPolicy,
-    precondition?: PolicyPrecondition,
-  ): Promise<{ etag: string }> {
+  async putBucketPolicy(tenantId: string, bucketName: string, policy: BucketPolicy): Promise<void> {
     this.recordCall('putBucketPolicy', tenantId, bucketName);
     this.throwInjectedFailure('putBucketPolicy');
     this.assertBucketExists(tenantId, bucketName);
-    const current = this.getOrCreatePolicies(tenantId).get(bucketName);
-    this.assertPreconditionHolds(bucketName, current, precondition);
     for (const statement of policy.Statement) {
       for (const principal of getPrincipalIds(statement.Principal)) {
         if (!this.getOrCreatePrincipals(tenantId).has(principal)) {
@@ -114,22 +94,16 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
         }
       }
     }
-    const stored = { policy, etag: this.createEtag() };
-    this.getOrCreatePolicies(tenantId).set(bucketName, stored);
-    return { etag: stored.etag };
+    this.getOrCreatePolicies(tenantId).set(bucketName, policy);
   }
 
-  async deleteBucketPolicy(
-    tenantId: string,
-    bucketName: string,
-    precondition?: IfMatchPrecondition,
-  ): Promise<void> {
+  async deleteBucketPolicy(tenantId: string, bucketName: string): Promise<void> {
     this.recordCall('deleteBucketPolicy', tenantId, bucketName);
     this.throwInjectedFailure('deleteBucketPolicy');
     this.assertBucketExists(tenantId, bucketName);
-    const current = this.getOrCreatePolicies(tenantId).get(bucketName);
-    if (!current) throw new PolicyNotFoundError(bucketName);
-    this.assertPreconditionHolds(bucketName, current, precondition);
+    if (!this.getOrCreatePolicies(tenantId).has(bucketName)) {
+      throw new PolicyNotFoundError(bucketName);
+    }
     this.getOrCreatePolicies(tenantId).delete(bucketName);
   }
 
@@ -142,12 +116,12 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
     // A principal Hilt does not know is named in no policy.
     if (!this.getOrCreatePrincipals(tenantId).has(userId)) return [];
     return [...this.getOrCreatePolicies(tenantId)]
-      .filter(([, stored]) =>
-        stored.policy.Statement.some(
+      .filter(([, policy]) =>
+        policy.Statement.some(
           (s) => s.Principal === '*' || getPrincipalIds(s.Principal).includes(userId),
         ),
       )
-      .map(([bucketName, { policy }]) => ({ bucketName, policy }));
+      .map(([bucketName, policy]) => ({ bucketName, policy }));
   }
 
   async resolveMemberAccess(
@@ -160,9 +134,9 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
     // A principal Hilt does not know reaches no bucket.
     if (!this.getOrCreatePrincipals(tenantId).has(userId)) return [];
     return [...this.getOrCreatePolicies(tenantId)]
-      .map(([bucketName, stored]) => ({
+      .map(([bucketName, policy]) => ({
         bucketName,
-        actions: getEffectiveActions(stored.policy, userId),
+        actions: getEffectiveActions(policy, userId),
       }))
       .filter((access) => access.actions.length > 0);
   }
@@ -184,32 +158,13 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
     if (known && !known.has(bucketName)) throw new BucketNotFoundError(bucketName);
   }
 
-  private assertPreconditionHolds(
-    bucketName: string,
-    current: StoredBucketPolicy | undefined,
-    precondition: PolicyPrecondition | undefined,
-  ): void {
-    if (!precondition) return;
-    if ('ifNoneMatch' in precondition) {
-      if (current) throw new PolicyPreconditionFailedError(bucketName);
-      return;
-    }
-    if (!current || current.etag !== precondition.ifMatch) {
-      throw new PolicyPreconditionFailedError(bucketName);
-    }
-  }
-
-  private createEtag(): string {
-    return `"etag-${++this.etagCounter}"`;
-  }
-
   private getOrCreatePrincipals(tenantId: string): Set<string> {
     let set = this.principals.get(tenantId);
     if (!set) this.principals.set(tenantId, (set = new Set()));
     return set;
   }
 
-  private getOrCreatePolicies(tenantId: string): Map<string, StoredBucketPolicy> {
+  private getOrCreatePolicies(tenantId: string): Map<string, BucketPolicy> {
     let map = this.policies.get(tenantId);
     if (!map) this.policies.set(tenantId, (map = new Map()));
     return map;

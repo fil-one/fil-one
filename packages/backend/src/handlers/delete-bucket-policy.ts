@@ -3,12 +3,11 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import {
-  parsePreconditionHeaders,
   toPolicyErrorResponse,
   resolveIamWriteTarget,
   resolvePolicyRouteTarget,
 } from '../lib/bucket-policy-route.ts';
-import { badRequestResponse, ResponseBuilder } from '../lib/response-builder.ts';
+import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -20,8 +19,7 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 /**
  * DELETE /api/buckets/{name}/policy?region= — remove the bucket's policy.
  *
- * As on S3, `If-Match` removes only the version the caller read, and a stale
- * one is a 412 with nothing removed; without it the delete is unconditional.
+ * As on S3, the delete is unconditional.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -29,13 +27,6 @@ export async function baseHandler(
   const routeTarget = resolvePolicyRouteTarget(event);
   if ('response' in routeTarget) return routeTarget.response;
   const { bucketName, region } = routeTarget.target;
-
-  const preconditionResult = parsePreconditionHeaders(event);
-  if ('response' in preconditionResult) return preconditionResult.response;
-  const { precondition } = preconditionResult;
-  if (precondition && 'ifNoneMatch' in precondition) {
-    return badRequestResponse('A delete cannot carry If-None-Match');
-  }
 
   const { orgId, userId } = getUserInfo(event);
   const target = await resolveIamWriteTarget(orgId, region);
@@ -52,7 +43,7 @@ export async function baseHandler(
   });
 
   try {
-    await orchestrator.deleteBucketPolicy(tenantId, bucketName, precondition);
+    await orchestrator.deleteBucketPolicy(tenantId, bucketName);
     await audit.complete({ outcome: 'succeeded' });
     return new ResponseBuilder().status(204).emptyBody().build();
   } catch (err) {

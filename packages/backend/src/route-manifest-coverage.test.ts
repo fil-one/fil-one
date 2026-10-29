@@ -11,15 +11,12 @@ import {
   GRANULAR_PERMISSION_REQUIREMENT,
   OrgRole,
   PresignOpSchema,
-  RETENTION_WRITE_ACTIONS,
   ROUTE_MANIFEST,
   S3Region,
   roleHasPermission,
   SubscriptionStatus,
 } from '@filone/shared';
 import type { Permission, RouteManifestEntry } from '@filone/shared';
-import type { PolicyAction } from '@filone/shared';
-import { policyOf, statement } from './test/policy-statements.ts';
 import type { OrgMembership } from './lib/org-membership.ts';
 import { sstResourceMock } from './test/sst-resource-mock.ts';
 import { authPartialMock } from './test/auth-partial-mock.ts';
@@ -749,70 +746,7 @@ describe('the caps routes apply on top of their declared permission', () => {
   );
 
   /**
-   * Writing a bucket policy needs `buckets.policy_manage` to reach the handler,
-   * and `privileged.grant` for a statement that grants a retention write. On a
-   * first policy (`If-None-Match: *`) that check runs before the region is
-   * read, so it answers even in a region without bucket policies: a caller who
-   * may grant reaches the region check (501), and anyone else gets the 403.
-   */
-  describe('granting a retention write through a policy needs privileged.grant', () => {
-    const buildPolicyGrantRequest = (action: string): RouteRequest => ({
-      body: JSON.stringify({
-        policy: policyOf(statement('photos', 'Allow', [USER_ID], [action as PolicyAction])),
-      }),
-      headers: { 'if-none-match': '*' },
-      pathParameters: { name: 'photos' },
-      // A service-keys region, which serves no bucket policies.
-      queryStringParameters: { region: S3Region.EuWest1 },
-    });
-    const editors = Object.values(OrgRole).filter((role) =>
-      roleHasPermission(role, 'buckets.policy_manage'),
-    );
-    const retentionGrantActions = [...RETENTION_WRITE_ACTIONS, 's3:*'];
-    const pairWithRetentionActions = (roles: OrgRole[]) =>
-      roles.flatMap((role) => retentionGrantActions.map((action) => [role, action] as const));
-    const granters = editors.filter((role) => roleHasPermission(role, 'privileged.grant'));
-    const nonGranters = editors.filter((role) => !granters.includes(role));
-
-    it.each(editors)('%s may grant s3:GetObject', async (role) => {
-      const result = await invokeRoute(routeFor('put-bucket-policy'), {
-        membership: membershipFor(ORG_ID, USER_ID, role),
-        request: buildPolicyGrantRequest('s3:GetObject'),
-      });
-
-      expect({ ...result, body: errorBody(result) }).toMatchObject({
-        statusCode: 501,
-        body: { message: 'Bucket policies are not available in this region' },
-      });
-    });
-
-    it.each(pairWithRetentionActions(granters))('%s may grant %s', async (role, action) => {
-      const result = await invokeRoute(routeFor('put-bucket-policy'), {
-        membership: membershipFor(ORG_ID, USER_ID, role),
-        request: buildPolicyGrantRequest(action),
-      });
-
-      expect({ ...result, body: errorBody(result) }).toMatchObject({
-        statusCode: 501,
-        body: { message: 'Bucket policies are not available in this region' },
-      });
-    });
-
-    it.each(pairWithRetentionActions(nonGranters))('%s may not grant %s', async (role, action) => {
-      const result = await invokeRoute(routeFor('put-bucket-policy'), {
-        membership: membershipFor(ORG_ID, USER_ID, role),
-        request: buildPolicyGrantRequest(action),
-      });
-
-      expect({ ...result, body: errorBody(result) }).toMatchObject({
-        statusCode: 403,
-        body: { code: ApiErrorCode.RETENTION_GRANT_FORBIDDEN },
-      });
-    });
-  });
-
-  /**
-   * The other cap in this stack is a ceiling on who the caller may reach.
+   * A cap on who the caller may reach.
    * `members.manage` opens the member and invitation routes; reaching an Owner
    * takes `owners.manage` on top, which an Admin does not hold. Inviting is the
    * one of those routes that names the target's role in the body, so it is the
