@@ -20,7 +20,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
 import { IconButton } from '../components/IconButton';
 import { ShareObjectModal } from '../components/ShareObjectModal';
-import { Spinner } from '../components/Spinner';
+import { Skeleton } from '../components/Skeleton';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
 import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
 
@@ -180,55 +180,10 @@ export function ObjectDetailPage({
     },
   });
 
-  if (isPending) {
-    return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading object details" size={32} />
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div className="p-10">
-        <Breadcrumb
-          items={[
-            { label: 'Buckets', href: '/buckets' },
-            { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
-            { label: objectKey },
-          ]}
-        />
-        <Alert variant="red" description={error?.message ?? 'Failed to load object metadata'} />
-      </div>
-    );
-  }
-
-  // Parse tags from metadata
-  let tags: string[] = [];
-  if (metadata?.metadata.tags) {
-    try {
-      const parsed: unknown = JSON.parse(metadata.metadata.tags);
-      if (Array.isArray(parsed)) {
-        tags = parsed.filter((t): t is string => typeof t === 'string');
-      }
-    } catch {
-      // ignore invalid JSON
-    }
-  }
-
-  // Strip surrounding quotes from ETag (S3 returns it wrapped in double-quotes).
-  const etag = metadata?.etag?.replace(/^"|"$/g, '');
-
-  const s3Path = `s3://${bucketName}/${objectKey}`;
-
-  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
-
-  const apiExample = `# Retrieve via S3 API
-aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
-  --endpoint-url ${s3Endpoint}`;
-
-  return (
-    <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
+  // Everything in the header is known from the URL, so it stays on screen while
+  // the metadata loads and only the cards below wait for it.
+  const header = (
+    <>
       {/* Breadcrumb */}
       <Breadcrumb
         items={[
@@ -288,6 +243,60 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
           )}
         </div>
       </div>
+    </>
+  );
+
+  if (isPending) {
+    return (
+      <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
+        {header}
+        <ObjectDetailSkeleton />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="p-10">
+        <Breadcrumb
+          items={[
+            { label: 'Buckets', href: '/buckets' },
+            { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
+            { label: objectKey },
+          ]}
+        />
+        <Alert variant="red" description={error?.message ?? 'Failed to load object metadata'} />
+      </div>
+    );
+  }
+
+  // Parse tags from metadata
+  let tags: string[] = [];
+  if (metadata?.metadata.tags) {
+    try {
+      const parsed: unknown = JSON.parse(metadata.metadata.tags);
+      if (Array.isArray(parsed)) {
+        tags = parsed.filter((t): t is string => typeof t === 'string');
+      }
+    } catch {
+      // ignore invalid JSON
+    }
+  }
+
+  // Strip surrounding quotes from ETag (S3 returns it wrapped in double-quotes).
+  const etag = metadata?.etag?.replace(/^"|"$/g, '');
+
+  const s3Path = `s3://${bucketName}/${objectKey}`;
+
+  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
+
+  const apiExample = `# Retrieve via S3 API
+aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
+  --endpoint-url ${s3Endpoint}`;
+
+  return (
+    <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
+      {header}
 
       {/* Object details card */}
       <Card>
@@ -387,6 +396,26 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         description="This object will be permanently deleted. This action cannot be undone."
         confirmLabel="Delete object"
       />
+    </div>
+  );
+}
+
+const SKELETON_CARDS = [
+  { card: 'details', height: 'h-[350px]' },
+  { card: 'api-example', height: 'h-[204px]' },
+];
+
+/**
+ * One block per card, at the height of the real ones and with their spacing.
+ * Version history is left out: it only shows for an object with more than one
+ * version, so a placeholder for it would vanish on most objects.
+ */
+function ObjectDetailSkeleton() {
+  return (
+    <div role="status" aria-label="Loading object details" className="flex flex-col gap-6">
+      {SKELETON_CARDS.map(({ card, height }) => (
+        <Skeleton key={card} className={`rounded-xl ${height}`} />
+      ))}
     </div>
   );
 }

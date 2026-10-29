@@ -14,10 +14,10 @@ import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 import { Heading } from '../components/Heading/Heading';
-import { InvitationsTable } from '../components/InvitationsTable';
+import { INVITATION_COLUMNS, InvitationsTable } from '../components/InvitationsTable';
 import { InviteMemberForm } from '../components/InviteMemberForm';
 import { Modal, ModalHeader } from '../components/Modal';
-import { Spinner } from '../components/Spinner';
+import { TableSkeleton } from '../components/Table/TableSkeleton';
 import { useToast } from '../components/Toast';
 import { errorCodeOf, errorMessageOf } from '../lib/api.js';
 import { createInvitation, listInvitations, revokeInvitation } from '../lib/members-api.js';
@@ -444,11 +444,7 @@ function InvitationsPanel({
   pendingInviteIds: ReadonlySet<string>;
 }) {
   if (isPending) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <Spinner ariaLabel="Loading invitations" size={24} />
-      </div>
-    );
+    return <TableSkeleton columns={INVITATION_COLUMNS} rows={3} aria-label="Loading invitations" />;
   }
 
   if (isError && !hasData) {

@@ -169,6 +169,34 @@ function rowMenuFor(member: string): HTMLElement | null {
 // Tests
 // ---------------------------------------------------------------------------
 
+describe('MembersPage — while the roster loads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListInvitations.mockResolvedValue({ invitations: [] });
+  });
+
+  it('shows the roster column headers above placeholder rows while the roster loads', async () => {
+    // Never settles, so the roster stays loading.
+    mockListMembers.mockReturnValue(new Promise(() => {}));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner);
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <MembersRoster />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    const loading = await screen.findByRole('status', { name: 'Loading members' });
+    expect(
+      within(loading)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent),
+    ).toStrictEqual(['Member', 'Role', 'Joined']);
+  });
+});
+
 describe('MembersPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
