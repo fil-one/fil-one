@@ -654,6 +654,22 @@ describe('get-activity baseHandler (request deadline)', () => {
     }
   });
 
+  // A call that ignores the deadline holds the handler until the Lambda timeout;
+  // the deadline log then names it among the steps still in flight.
+  it("names a region's listBuckets as in flight while it hangs after every other call has answered", async () => {
+    fth.listBuckets.mockReturnValue(new Promise(() => {}));
+    const event = buildEvent({ userInfo: USER_INFO });
+
+    void baseHandler(event);
+
+    await vi.waitFor(() =>
+      expect([...(event.requestContext.deadlineStepsInFlight?.values() ?? [])]).toStrictEqual([
+        'fetchBucketActivities',
+        'listBuckets:us-east-1',
+      ]),
+    );
+  });
+
   it('logs the region that hit the deadline so the hang is not silent', async () => {
     fth.listBuckets.mockRejectedValue(
       new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
