@@ -39,9 +39,9 @@ describe('submitSupportForm', () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
     await submitSupportForm({
-      firstName: 'Jane',
-      lastName: 'Doe',
-      company: 'Acme Inc',
+      name: 'Jane Doe',
+      organization: 'Acme Inc',
+      orgId: 'any-org-id',
       email: 'jane@acme.com',
       categories: ['PRODUCT_ISSUE'],
       message: 'Help needed',
@@ -55,10 +55,11 @@ describe('submitSupportForm', () => {
         fields: [
           { objectTypeId: '0-1', name: 'firstname', value: 'Jane' },
           { objectTypeId: '0-1', name: 'lastname', value: 'Doe' },
-          { objectTypeId: '0-1', name: 'company', value: 'Acme Inc' },
           { objectTypeId: '0-1', name: 'email', value: 'jane@acme.com' },
           { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'PRODUCT_ISSUE' },
           { objectTypeId: '0-5', name: 'content', value: 'Help needed' },
+          { objectTypeId: '0-5', name: 'filone_org_name', value: 'Acme Inc' },
+          { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
         ],
         context: {
           pageUri: 'https://app.fil.one/support',
@@ -68,13 +69,74 @@ describe('submitSupportForm', () => {
     });
   });
 
+  it('puts everything after the first word of the name into the last name', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      name: 'any first multi-part last',
+      organization: 'any-org',
+      orgId: 'any-org-id',
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toEqual(
+      expect.arrayContaining([
+        { objectTypeId: '0-1', name: 'firstname', value: 'any' },
+        { objectTypeId: '0-1', name: 'lastname', value: 'first multi-part last' },
+      ]),
+    );
+  });
+
+  it('leaves out the name fields when the user has no name', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      organization: 'any-org',
+      orgId: 'any-org-id',
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toStrictEqual([
+      { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
+      { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
+      { objectTypeId: '0-5', name: 'content', value: 'any message' },
+      { objectTypeId: '0-5', name: 'filone_org_name', value: 'any-org' },
+      { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
+    ]);
+  });
+
+  it('leaves out the name fields when the name is an email address', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      name: 'any@example.com',
+      organization: 'any-org',
+      orgId: 'any-org-id',
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toStrictEqual([
+      { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
+      { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
+      { objectTypeId: '0-5', name: 'content', value: 'any message' },
+      { objectTypeId: '0-5', name: 'filone_org_name', value: 'any-org' },
+      { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
+    ]);
+  });
+
   it('joins multiple categories with semicolons', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
     await submitSupportForm({
-      firstName: 'John',
-      lastName: 'Smith',
-      company: 'Test Corp',
+      name: 'John Smith',
+      organization: 'Test Corp',
+      orgId: 'any-org-id',
       email: 'john@test.com',
       categories: ['PRODUCT_ISSUE', 'BILLING_ISSUE', 'FEATURE_REQUEST'],
       message: 'Multiple issues',
@@ -93,9 +155,9 @@ describe('submitSupportForm', () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
     await submitSupportForm({
-      firstName: 'Test',
-      lastName: 'User',
-      company: 'Company',
+      name: 'Test User',
+      organization: 'Company',
+      orgId: 'any-org-id',
       email: 'test@example.com',
       categories: [],
       message: 'No category',
@@ -115,9 +177,9 @@ describe('submitSupportForm', () => {
 
     await expect(
       submitSupportForm({
-        firstName: 'Jane',
-        lastName: 'Doe',
-        company: 'Acme',
+        name: 'Jane Doe',
+        organization: 'Acme',
+        orgId: 'any-org-id',
         email: 'jane@acme.com',
         categories: ['GENERAL_INQUIRY'],
         message: 'Test',
@@ -130,9 +192,9 @@ describe('submitSupportForm', () => {
 
     await expect(
       submitSupportForm({
-        firstName: 'Jane',
-        lastName: 'Doe',
-        company: 'Acme',
+        name: 'Jane Doe',
+        organization: 'Acme',
+        orgId: 'any-org-id',
         email: 'jane@acme.com',
         categories: ['PRODUCT_ISSUE'],
         message: 'Test',
