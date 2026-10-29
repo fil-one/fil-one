@@ -53,7 +53,9 @@ let admin: ConsoleApi;
 let member: ConsoleApi;
 let ownerS3: S3Client;
 const buckets: string[] = [];
-const createdKeys: { api: ConsoleApi; id: string }[] = [];
+/** The key behind `ownerS3`, which seeds every test's bucket. */
+const ownerKeys: { api: ConsoleApi; id: string }[] = [];
+const testKeys: { api: ConsoleApi; id: string }[] = [];
 
 /** A bucket holding SEEDED_KEY whose policy is the owners plus `statements`. */
 async function createBucketWithStatements(
@@ -78,7 +80,15 @@ test.beforeAll(async () => {
   owner = await ConsoleApi.open('owner', orgId);
   admin = await ConsoleApi.open('admin', orgId);
   member = await ConsoleApi.open('member', orgId);
-  ownerS3 = await createS3ClientWithNewKey(owner, createdKeys);
+  ownerS3 = await createS3ClientWithNewKey(owner, ownerKeys);
+});
+
+// A policy write revokes the grants of every live key its principals hold, so
+// the keys a test creates go when it ends.
+test.afterEach(async () => {
+  await runCleanup(
+    testKeys.splice(0).map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
+  );
 });
 
 test.afterAll(async () => {
@@ -89,14 +99,14 @@ test.afterAll(async () => {
       label: `bucket ${bucket}`,
       run: () => emptyAndDeleteBucket(owner, ownerId, bucket),
     })),
-    ...createdKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
+    ...ownerKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
   ]);
   await Promise.all([owner.dispose(), admin.dispose(), member.dispose()]);
 });
 
 test('a write grant does not carry deletion', { tag: '@api' }, async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:PutObject'])]);
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   expect([
     await getS3Outcome(putObject(s3, bucket, 'member.txt')),
     await getS3Outcome(deleteObject(s3, bucket, SEEDED_KEY)),
@@ -105,7 +115,7 @@ test('a write grant does not carry deletion', { tag: '@api' }, async () => {
 
 test('a list grant does not carry reading', { tag: '@api' }, async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:ListBucket'])]);
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   expect([
     await getS3Outcome(listObjects(s3, bucket)),
     await getS3Outcome(getSeededObject(s3, bucket)),
@@ -117,7 +127,7 @@ test('a deny carves one action out of s3:*', { tag: '@api' }, async () => {
     allow([memberId], ['s3:*']),
     deny([memberId], ['s3:DeleteObject']),
   ]);
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   expect([
     await getS3Outcome(putObject(s3, bucket, 'member.txt')),
     await getS3Outcome(getSeededObject(s3, bucket)),
@@ -133,8 +143,8 @@ test(
       allow('*', ['s3:ListBucket', 's3:GetObject']),
       deny([memberId], ['s3:ListBucket']),
     ]);
-    const memberS3 = await createS3ClientWithNewKey(member, createdKeys);
-    const adminS3 = await createS3ClientWithNewKey(admin, createdKeys);
+    const memberS3 = await createS3ClientWithNewKey(member, testKeys);
+    const adminS3 = await createS3ClientWithNewKey(admin, testKeys);
     expect([
       await getS3Outcome(listObjects(memberS3, bucket)),
       await getS3Outcome(getSeededObject(memberS3, bucket)),
@@ -148,7 +158,7 @@ test('actions granted across statements add up', { tag: '@api' }, async () => {
     allow([memberId], ['s3:ListBucket'], 'list'),
     allow([memberId], ['s3:GetObject'], 'read'),
   ]);
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   expect([
     await getS3Outcome(listObjects(s3, bucket)),
     await getS3Outcome(getSeededObject(s3, bucket)),
@@ -158,7 +168,7 @@ test('actions granted across statements add up', { tag: '@api' }, async () => {
 
 test('a widened grant applies to a key the gateway has cached', { tag: '@api' }, async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:ListBucket'])]);
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   expect(await getS3Outcome(listObjects(s3, bucket))).toBe('ok');
   expect(await getS3Outcome(putObject(s3, bucket, 'member.txt'))).toBe('403 AccessDenied');
 
@@ -183,7 +193,7 @@ test('a copy needs a read on its source bucket', { tag: '@api' }, async () => {
         CopySource: `${source}/${SEEDED_KEY}`,
       }),
     );
-  expect(await getS3Outcome(copy(await createS3ClientWithNewKey(member, createdKeys)))).toBe(
+  expect(await getS3Outcome(copy(await createS3ClientWithNewKey(member, testKeys)))).toBe(
     '404 NoSuchBucket',
   );
 
@@ -191,12 +201,12 @@ test('a copy needs a read on its source bucket', { tag: '@api' }, async () => {
     grantAllToOwner(ownerId),
     allow([memberId], ['s3:GetObject']),
   ]);
-  expect(await getS3Outcome(copy(await createS3ClientWithNewKey(member, createdKeys)))).toBe('ok');
+  expect(await getS3Outcome(copy(await createS3ClientWithNewKey(member, testKeys)))).toBe('ok');
 });
 
 test('multipart parts listing and abort are granted on their own', { tag: '@api' }, async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:PutObject'])]);
-  const writeOnly = await createS3ClientWithNewKey(member, createdKeys);
+  const writeOnly = await createS3ClientWithNewKey(member, testKeys);
   const { UploadId } = await writeOnly.send(
     new CreateMultipartUploadCommand({ Bucket: bucket, Key: 'multi.bin' }),
   );
@@ -213,7 +223,7 @@ test('multipart parts listing and abort are granted on their own', { tag: '@api'
     grantAllToOwner(ownerId),
     allow([memberId], ['s3:PutObject', 's3:ListMultipartUploadParts', 's3:AbortMultipartUpload']),
   ]);
-  const full = await createS3ClientWithNewKey(member, createdKeys);
+  const full = await createS3ClientWithNewKey(member, testKeys);
   expect([
     await getS3Outcome(full.send(new ListPartsCommand(part))),
     await getS3Outcome(full.send(new AbortMultipartUploadCommand(part))),
@@ -228,7 +238,7 @@ test('versions are read and deleted under their own actions', { tag: '@api' }, a
   const { VersionId } = await ownerS3.send(
     new PutObjectCommand({ Bucket: bucket, Key: SEEDED_KEY, Body: PAYLOAD }),
   );
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   expect([
     await getS3Outcome(getSeededObject(s3, bucket)),
     await getS3Outcome(getSeededObject(s3, bucket, VersionId)),
@@ -243,7 +253,7 @@ test('GetBucketVersioning is refused without s3:ListBucket', { tag: '@api' }, as
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:GetObject'])]);
   expect(
     await getS3Outcome(
-      (await createS3ClientWithNewKey(member, createdKeys)).send(
+      (await createS3ClientWithNewKey(member, testKeys)).send(
         new GetBucketVersioningCommand({ Bucket: bucket }),
       ),
     ),
@@ -257,7 +267,7 @@ test('a write or read grant does not carry retention or legal holds', { tag: '@a
       lock: true,
     },
   );
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   const object = { Bucket: bucket, Key: SEEDED_KEY };
   try {
     expect([
@@ -286,7 +296,7 @@ test('listing versions is granted on its own', { tag: '@api' }, async () => {
   const bucket = await createBucketWithStatements([allow([memberId], ['s3:ListBucket'])], {
     versioning: true,
   });
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   expect([
     await getS3Outcome(listObjects(s3, bucket)),
     await getS3Outcome(s3.send(new ListObjectVersionsCommand({ Bucket: bucket }))),
