@@ -1044,17 +1044,27 @@ describe('POST /api/invitations/accept handler', () => {
       expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
     });
 
-    it('answers 409 when another request created the account first', async () => {
+    // A second tab of the same new sign-in created the account first.
+    it('joins as the account another request created first', async () => {
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolvesOnce({})
+        .resolves({ Item: { userId: { S: 'any-winning-user' }, orgId: { S: PERSONAL_ORG_ID } } });
       // Deletion fence, then the identity Put at index 1, the profile, the
       // membership, its inverse, the inviter check, invitation, token, event.
-      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 9));
+      ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(1, 9)).resolves({});
 
       const result = await handler(newAccountAcceptEvent(), buildContext());
 
-      expect(result).toMatchObject({ statusCode: 409 });
-      expect(body(result).message).toBe(
-        'Your account was just set up in another window. Reload this page.',
-      );
+      expect(result).toMatchObject({ statusCode: 200 });
+      const retry = ddbMock.commandCalls(TransactWriteItemsCommand)[1].args[0].input.TransactItems!;
+      expect(retry.some((item) => item.Put?.Item?.pk?.S === `SUB#${MOCK_SUB}`)).toBe(false);
+      expect(
+        retry.find((item) => item.Put?.Item?.sk?.S === OrgKeys.memberSk('any-winning-user')),
+      ).toMatchObject({ Put: { Item: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) } } } });
     });
   });
 });

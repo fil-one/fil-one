@@ -37,7 +37,7 @@ import type {
   UserInfo,
 } from '../lib/user-context.ts';
 import { getUserInfo, isNewAccountEvent } from '../lib/user-context.ts';
-import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
+import { readIdentityUserId, readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
@@ -110,14 +110,6 @@ export async function baseHandler(
     return emailMismatchResponse();
   }
 
-  // A new account belongs to no org and has no home org to fence.
-  const [existing, accepterOrgId] = isPendingAccountCreation
-    ? []
-    : await Promise.all([
-        resolveMembership(invitation.orgId, userId),
-        accepterOrgFence(userId, invitation.orgId),
-      ]);
-
   const verificationFailure = await verifyInvitedAddress({
     sub,
     userId,
@@ -125,7 +117,46 @@ export async function baseHandler(
     emailNorm: invitation.emailNorm,
   });
   if (verificationFailure) return verificationFailure;
-  const verifiedEmail = email;
+
+  return await joinInvitingOrg({
+    invitation,
+    caller,
+    verifiedEmail: email,
+    isPendingAccountCreation,
+  });
+}
+
+interface JoinRequest {
+  invitation: InvitationRecord;
+  caller: UserInfo | NewAccountCaller;
+  verifiedEmail: string;
+  isPendingAccountCreation: boolean;
+}
+
+/**
+ * Join the inviting org as `caller`, writing their account first when it does
+ * not exist yet.
+ *
+ * A pending account creation can lose a race: another request from the same
+ * new sign-in, a second tab say, creates the account between the middleware's
+ * read and this transaction. Nothing here was written, and the invitation is
+ * still pending, so the join runs again once as the account that won.
+ */
+async function joinInvitingOrg({
+  invitation,
+  caller,
+  verifiedEmail,
+  isPendingAccountCreation,
+}: JoinRequest): Promise<APIGatewayProxyStructuredResultV2> {
+  const { userId } = caller;
+
+  // A new account belongs to no org and has no home org to fence.
+  const [existing, accepterOrgId] = isPendingAccountCreation
+    ? []
+    : await Promise.all([
+        resolveMembership(invitation.orgId, userId),
+        accepterOrgFence(userId, invitation.orgId),
+      ]);
 
   const { items, labels } = existing
     ? { items: [], labels: [] }
@@ -151,11 +182,22 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return await acceptFailureResponse(
-      err,
-      ['org', ...(accepterOrgId ? ['accepterOrg'] : []), ...labels, 'invitation', 'token'],
-      { invitation, userId, verifiedEmail, accepterOrgId },
-    );
+    const allLabels = [
+      'org',
+      ...(accepterOrgId ? ['accepterOrg'] : []),
+      ...labels,
+      'invitation',
+      'token',
+    ];
+    if (isPendingAccountCreation && cancelledLabels(err, allLabels).includes('identity')) {
+      return await joinAsCreatedAccount({ invitation, caller, verifiedEmail }, err);
+    }
+    return await acceptFailureResponse(err, allLabels, {
+      invitation,
+      userId,
+      verifiedEmail,
+      accepterOrgId,
+    });
   }
 
   // The member is in the org before they become a principal on each region
@@ -170,6 +212,25 @@ export async function baseHandler(
     invitation,
     role: existing?.role ?? invitation.role,
     alreadyMember: Boolean(existing),
+  });
+}
+
+/**
+ * Join again as the account another request just created for this sign-in.
+ * The re-read is consistent, so it sees that request's write; finding nothing
+ * would mean the identity condition failed for another reason, and the
+ * original error stands.
+ */
+async function joinAsCreatedAccount(
+  request: Omit<JoinRequest, 'isPendingAccountCreation'>,
+  raceError: unknown,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const userId = await readIdentityUserId(request.caller.sub);
+  if (!userId) throw raceError;
+  return await joinInvitingOrg({
+    ...request,
+    caller: { ...request.caller, userId },
+    isPendingAccountCreation: false,
   });
 }
 
@@ -352,9 +413,6 @@ async function acceptFailureResponse(
   const failed = cancelledLabels(err, labels);
   if (failed.length === 0) throw err;
 
-  // Another request created this account first, with the same sign-in.
-  if (failed.includes('identity')) return accountRaceResponse();
-
   // The accepter's own org is going away, so the answer is about their account
   // rather than about the invitation: the same one their next request would get
   // once the session fence's read catches up.
@@ -507,19 +565,6 @@ function emailMismatchResponse(): APIGatewayProxyStructuredResultV2 {
       message:
         'This invitation was sent to a different email address than the one you signed in with.',
       code: ApiErrorCode.INVITE_EMAIL_MISMATCH,
-    })
-    .build();
-}
-
-/**
- * Two first requests from one new sign-in raced, and the other one created the
- * account. Nothing was written here, and reloading reads the account it made.
- */
-function accountRaceResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(409)
-    .body<ErrorResponse>({
-      message: 'Your account was just set up in another window. Reload this page.',
     })
     .build();
 }
