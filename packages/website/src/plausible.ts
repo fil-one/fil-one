@@ -7,7 +7,7 @@ const enabled = FILONE_STAGE === Stage.Production;
 
 if (enabled) {
   init({
-    domain: 'filone.com',
+    domain: 'fil.one',
     captureOnLocalhost: false,
     autoCapturePageviews: true,
     // The invitation accept link carries a single-use token in its fragment,
