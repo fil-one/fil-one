@@ -409,6 +409,21 @@ describe('create-bucket baseHandler', () => {
       expect(findAuditEvent('completion')).toBeUndefined();
     });
 
+    it('leaves the policy write open when the policy write itself times out', async () => {
+      mockCreateBucket.mockRejectedValue(
+        policyWriteFailure(Object.assign(new Error('any timeout'), { name: 'TimeoutError' })),
+      );
+
+      await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(findAuditEvent('completion')).toBeUndefined();
+      expect(
+        getAuditEvents().find((e) => e.type === 'bucket.created' && e.phase === 'completion'),
+      ).toMatchObject({ outcome: 'succeeded' });
+    });
+
     it('records the policy write as failed when it cannot be published', async () => {
       mockCreateBucket.mockRejectedValue(policyWriteFailure(new PolicyPublishError()));
 

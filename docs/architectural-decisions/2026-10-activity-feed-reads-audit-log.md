@@ -22,10 +22,12 @@ entry, nothing ever reads "deleted", and its bucket entries came from a
 1. **Bucket lifecycle is audited.** `bucket.created` and `bucket.deleted` are
    two-phase events, intent before the storage call and completion after it,
    best-effort like the bucket policy events. A create that fails after the
-   storage system made the bucket records the bucket as created. A storage call
-   that times out, or outlives the request deadline, writes no completion: the
-   storage system may still have done the work, and an intent with no completion
-   is how the log records an ending it never saw.
+   storage system made the bucket records the bucket as created. A storage call,
+   bucket or policy, that times out, is cut off by the request deadline, or loses
+   its connection after sending writes no completion: the storage system may
+   still have done the work, and an intent with no completion is how the log
+   records an ending it never saw. A refusal that merely arrives after the
+   deadline still records `failed`.
 2. **The feed is a filtered view of the audit log.** It returns completions that
    succeeded for bucket events and S3 key events (`key.created`, `key.rotated`,
    `key.deleted`), newest first, within the 90-day retention window. The

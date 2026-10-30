@@ -194,9 +194,12 @@ async function completeFailedCreateAudit({
   await bucketAudit.complete({ outcome: bucketOutcome });
   // The orchestrator writes the policy before the configuration calls, so a
   // configuration failure means that write succeeded.
-  if (unwrapPolicyWriteError(thrown) instanceof BucketConfigurationError) {
+  const err = unwrapPolicyWriteError(thrown);
+  if (err instanceof BucketConfigurationError) {
     await policyAudit?.complete({ outcome: 'succeeded', details: completionDetails });
-  } else {
+  } else if (!isOutcomeUnknown(err)) {
+    // A policy write that timed out may have stored the policy, so its intent
+    // stays open even though the bucket is known to exist.
     await policyAudit?.complete({ outcome: 'failed' });
   }
 }

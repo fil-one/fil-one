@@ -225,19 +225,34 @@ describe('delete-bucket baseHandler', () => {
       });
     });
 
-    it('leaves the bucket.deleted open when the request deadline fires', async () => {
+    /** A delete event whose request deadline has already fired. */
+    function eventPastDeadline() {
       const deadline = new AbortController();
-      deadline.abort();
+      deadline.abort(new Error('any deadline'));
       const event = buildEvent({
         userInfo: USER_INFO,
         requestContext: { deadline: deadline.signal },
       });
       event.pathParameters = { name: 'my-bucket' };
-      mockOrchestratorDeleteBucket.mockRejectedValue(new Error('any error after the deadline'));
+      return { event, reason: deadline.signal.reason as Error };
+    }
+
+    it('leaves the bucket.deleted open when the request deadline cuts the delete off', async () => {
+      const { event, reason } = eventPastDeadline();
+      mockOrchestratorDeleteBucket.mockRejectedValue(new Error('any abort', { cause: reason }));
 
       await baseHandler(event).catch(() => undefined);
 
       expect(getAuditEvents().filter((e) => e.phase === 'completion')).toStrictEqual([]);
+    });
+
+    it('completes the bucket.deleted as failed for a refusal that arrives after the deadline', async () => {
+      const { event } = eventPastDeadline();
+      mockOrchestratorDeleteBucket.mockRejectedValue(new BucketNotEmptyError('my-bucket'));
+
+      await baseHandler(event).catch(() => undefined);
+
+      expect(getAuditEvents()[1]).toMatchObject({ phase: 'completion', outcome: 'failed' });
     });
 
     it('leaves the bucket.deleted open when the storage call times out', async () => {
