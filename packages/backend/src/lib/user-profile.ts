@@ -115,6 +115,23 @@ export async function readHomeOrgPointers(userId: string): Promise<{
 }
 
 /**
+ * The user id an Auth0 subject's account carries, or undefined when it has no
+ * account. Strongly consistent, because its one caller reads it straight after
+ * losing a race to the request that created the account.
+ */
+export async function readIdentityUserId(sub: string): Promise<string | undefined> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
+      ProjectionExpression: 'userId',
+      ConsistentRead: true,
+    }),
+  );
+  return Item?.userId?.S;
+}
+
+/**
  * Record the address a session proved it holds.
  *
  * Removal sweeps the invitations addressed TO the member it removes, and it

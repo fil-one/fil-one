@@ -5,6 +5,7 @@ import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { AcceptInvitationSchema, ApiErrorCode, OrgRole } from '@filone/shared';
 import type { AcceptInvitationResponse, ErrorResponse } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
+import { identityRows } from '../lib/account-creation.ts';
 import { getAuth0UserEmail, markAuth0EmailVerified } from '../lib/auth0-management.ts';
 import {
   isInvitationUsable,
@@ -29,9 +30,14 @@ import {
 } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
-import type { AuthenticatedEvent } from '../lib/user-context.ts';
-import { getUserInfo } from '../lib/user-context.ts';
-import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
+import type {
+  AuthenticatedEvent,
+  NewAccountCaller,
+  NewAccountEvent,
+  UserInfo,
+} from '../lib/user-context.ts';
+import { getUserInfo, isNewAccountEvent } from '../lib/user-context.ts';
+import { readIdentityUserId, readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
@@ -73,15 +79,23 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  *   invitation, so an invitation cannot outlive its issuer's authority,
  * - and the audit event.
  *
+ * A caller signing in for the first time has no account yet: the middleware
+ * defers creating one here, and the transaction writes the identity and user
+ * profile beside the membership, with the inviting org as the account's home.
+ * So an invited account never gets an org of its own it did not ask for. When
+ * the invitation is refused nothing is written, and the account is created the
+ * ordinary way, with its own org, by the next request.
+ *
  * After it lands, the accepter's now-verified address is stamped on their
  * `USER#{userId}/PROFILE` row. That is the row a removal reads to find the
  * invitations addressed TO the member it is removing, and acceptance is one of
  * only two moments the control plane learns a verified address.
  */
 export async function baseHandler(
-  event: AuthenticatedEvent,
+  event: AuthenticatedEvent | NewAccountEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { sub, userId, email, emailVerified } = getUserInfo(event);
+  const { caller, isPendingAccountCreation } = resolveCaller(event);
+  const { sub, userId, email, emailVerified } = caller;
 
   const parsed = parseJsonBody(event.body, AcceptInvitationSchema);
   if ('error' in parsed) return parsed.error;
@@ -96,11 +110,6 @@ export async function baseHandler(
     return emailMismatchResponse();
   }
 
-  const [existing, accepterOrgId] = await Promise.all([
-    resolveMembership(invitation.orgId, userId),
-    accepterOrgFence(userId, invitation.orgId),
-  ]);
-
   const verificationFailure = await verifyInvitedAddress({
     sub,
     userId,
@@ -108,10 +117,50 @@ export async function baseHandler(
     emailNorm: invitation.emailNorm,
   });
   if (verificationFailure) return verificationFailure;
-  const verifiedEmail = email;
 
-  const items = existing ? [] : joinItems(invitation, userId);
-  const labels = existing ? [] : joinLabels(invitation);
+  return await joinInvitingOrg({
+    invitation,
+    caller,
+    verifiedEmail: email,
+    isPendingAccountCreation,
+  });
+}
+
+interface JoinRequest {
+  invitation: InvitationRecord;
+  caller: UserInfo | NewAccountCaller;
+  verifiedEmail: string;
+  isPendingAccountCreation: boolean;
+}
+
+/**
+ * Join the inviting org as `caller`, writing their account first when it does
+ * not exist yet.
+ *
+ * A pending account creation can lose a race: another request from the same
+ * new sign-in, a second tab say, creates the account between the middleware's
+ * read and this transaction. Nothing here was written, and the invitation is
+ * still pending, so the join runs again once as the account that won.
+ */
+async function joinInvitingOrg({
+  invitation,
+  caller,
+  verifiedEmail,
+  isPendingAccountCreation,
+}: JoinRequest): Promise<APIGatewayProxyStructuredResultV2> {
+  const { userId } = caller;
+
+  // A new account belongs to no org and has no home org to fence.
+  const [existing, accepterOrgId] = isPendingAccountCreation
+    ? []
+    : await Promise.all([
+        resolveMembership(invitation.orgId, userId),
+        accepterOrgFence(userId, invitation.orgId),
+      ]);
+
+  const { items, labels } = existing
+    ? { items: [], labels: [] }
+    : joinTransaction({ invitation, caller, verifiedEmail, isPendingAccountCreation });
 
   try {
     await commitAudited({
@@ -133,11 +182,22 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return await acceptFailureResponse(
-      err,
-      ['org', ...(accepterOrgId ? ['accepterOrg'] : []), ...labels, 'invitation', 'token'],
-      { invitation, userId, verifiedEmail, accepterOrgId },
-    );
+    const allLabels = [
+      'org',
+      ...(accepterOrgId ? ['accepterOrg'] : []),
+      ...labels,
+      'invitation',
+      'token',
+    ];
+    if (isPendingAccountCreation && cancelledLabels(err, allLabels).includes('identity')) {
+      return await joinAsCreatedAccount({ invitation, caller, verifiedEmail }, err);
+    }
+    return await acceptFailureResponse(err, allLabels, {
+      invitation,
+      userId,
+      verifiedEmail,
+      accepterOrgId,
+    });
   }
 
   // The member is in the org before they become a principal on each region
@@ -153,6 +213,75 @@ export async function baseHandler(
     role: existing?.role ?? invitation.role,
     alreadyMember: Boolean(existing),
   });
+}
+
+/**
+ * Join again as the account another request just created for this sign-in.
+ * The re-read is consistent, so it sees that request's write; finding nothing
+ * would mean the identity condition failed for another reason, and the
+ * original error stands.
+ */
+async function joinAsCreatedAccount(
+  request: Omit<JoinRequest, 'isPendingAccountCreation'>,
+  raceError: unknown,
+): Promise<APIGatewayProxyStructuredResultV2> {
+  const userId = await readIdentityUserId(request.caller.sub);
+  if (!userId) throw raceError;
+  return await joinInvitingOrg({
+    ...request,
+    caller: { ...request.caller, userId },
+    isPendingAccountCreation: false,
+  });
+}
+
+/**
+ * The signed-in caller, and whether this request is to create their account:
+ * true when they have none yet.
+ */
+function resolveCaller(event: AuthenticatedEvent | NewAccountEvent): {
+  caller: UserInfo | NewAccountCaller;
+  isPendingAccountCreation: boolean;
+} {
+  if (isNewAccountEvent(event)) {
+    return { caller: event.requestContext.newAccount, isPendingAccountCreation: true };
+  }
+  return { caller: getUserInfo(event), isPendingAccountCreation: false };
+}
+
+/**
+ * The rows joining costs, with their labels in the same order. A new account
+ * adds its own identity and profile ahead of them, homed in the inviting org.
+ */
+function joinTransaction({
+  invitation,
+  caller,
+  verifiedEmail,
+  isPendingAccountCreation,
+}: {
+  invitation: InvitationRecord;
+  caller: UserInfo | NewAccountCaller;
+  verifiedEmail: string;
+  isPendingAccountCreation: boolean;
+}): { items: TransactWriteItem[]; labels: string[] } {
+  const join = {
+    items: joinItems(invitation, caller.userId),
+    labels: joinLabels(invitation),
+  };
+  if (!isPendingAccountCreation) return join;
+  return {
+    items: [
+      ...identityRows({
+        sub: caller.sub,
+        userId: caller.userId,
+        homeOrgId: invitation.orgId,
+        email: verifiedEmail,
+        name: caller.name,
+        now: new Date().toISOString(),
+      }),
+      ...join.items,
+    ],
+    labels: ['identity', 'profile', ...join.labels],
+  };
 }
 
 /**
@@ -472,6 +601,6 @@ function ownerCountUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   // The handler verifies the address itself, from the invitation reaching it.
-  .use(authMiddleware({ requireVerifiedEmail: false }))
+  .use(authMiddleware({ requireVerifiedEmail: false, deferAccountCreation: true }))
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

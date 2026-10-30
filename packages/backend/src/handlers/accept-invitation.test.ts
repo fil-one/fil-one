@@ -56,6 +56,7 @@ import { IamRegionRefusedError } from '../lib/errors.ts';
 import { OrgKeys } from '../lib/org-membership.ts';
 import { hashInviteToken, inviteExpiresAt } from '../lib/invitations.ts';
 import { buildEvent, buildContext, NO_MEMBERSHIP } from '../test/lambda-test-utilities.ts';
+import type { NewAccountEvent } from '../lib/user-context.ts';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -282,6 +283,7 @@ describe('POST /api/invitations/accept handler', () => {
     vi.clearAllMocks();
     mockMarkAuth0EmailVerified.mockReset();
     mockGetAuth0UserEmail.mockReset();
+    mockRegisterMemberPrincipal.mockReset();
     ddbMock.reset();
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -974,5 +976,95 @@ describe('POST /api/invitations/accept handler', () => {
     await handler(acceptEvent(), buildContext());
 
     expect(mockRegisterMemberPrincipal).not.toHaveBeenCalled();
+  });
+
+  describe('for a caller signing in for the first time', () => {
+    /** The first request of a sign-in with no account behind it yet. */
+    function newAccountAcceptEvent() {
+      const event = buildEvent({
+        cookies: [
+          `hs_access_token=valid-token`,
+          `hs_id_token=id-token`,
+          `hs_csrf_token=${MOCK_CSRF_TOKEN}`,
+        ],
+        body: JSON.stringify({ token: TOKEN }),
+        method: 'POST',
+        rawPath: '/api/invitations/accept',
+      });
+      event.headers['x-csrf-token'] = MOCK_CSRF_TOKEN;
+      // Typed as what the handler receives: the middleware adds `newAccount`.
+      return event as NewAccountEvent & typeof event;
+    }
+
+    beforeEach(() => {
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolves({});
+    });
+
+    it('creates the account homed in the inviting org', async () => {
+      const result = await handler(newAccountAcceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      const puts = transactItems().flatMap((item) => (item.Put ? [item.Put] : []));
+      const identity = puts.find((put) => put.Item?.pk?.S === `SUB#${MOCK_SUB}`);
+      expect(identity).toMatchObject({
+        TableName: 'UserInfoTable',
+        Item: { sk: { S: 'IDENTITY' }, orgId: { S: INVITING_ORG_ID } },
+        ConditionExpression: 'attribute_not_exists(pk)',
+      });
+      const userId = identity?.Item?.userId?.S;
+      expect(puts.find((put) => put.Item?.pk?.S === `USER#${userId}`)).toMatchObject({
+        Item: { sk: { S: 'PROFILE' }, orgId: { S: INVITING_ORG_ID }, email: { S: EMAIL } },
+      });
+      expect(puts.find((put) => put.Item?.sk?.S === OrgKeys.memberSk(userId!))).toMatchObject({
+        Item: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) }, source: { S: 'invitation' } },
+      });
+    });
+
+    it('creates no org for the account', async () => {
+      await handler(newAccountAcceptEvent(), buildContext());
+
+      // Only the one transaction: the login path would have committed its own.
+      const orgProfiles = transactItems().filter(
+        (item) => item.Put?.Item?.pk?.S?.startsWith('ORG#') && item.Put.Item.sk?.S === 'PROFILE',
+      );
+      expect(orgProfiles).toStrictEqual([]);
+    });
+
+    it('writes nothing when the invitation is no longer valid', async () => {
+      stubUnknownToken();
+
+      const result = await handler(newAccountAcceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 404 });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+    });
+
+    // A second tab of the same new sign-in created the account first.
+    it('joins as the account another request created first', async () => {
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolvesOnce({})
+        .resolves({ Item: { userId: { S: 'any-winning-user' }, orgId: { S: PERSONAL_ORG_ID } } });
+      // Deletion fence, then the identity Put at index 1, the profile, the
+      // membership, its inverse, the inviter check, invitation, token, event.
+      ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(1, 9)).resolves({});
+
+      const result = await handler(newAccountAcceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      const retry = ddbMock.commandCalls(TransactWriteItemsCommand)[1].args[0].input.TransactItems!;
+      expect(retry.some((item) => item.Put?.Item?.pk?.S === `SUB#${MOCK_SUB}`)).toBe(false);
+      expect(
+        retry.find((item) => item.Put?.Item?.sk?.S === OrgKeys.memberSk('any-winning-user')),
+      ).toMatchObject({ Put: { Item: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) } } } });
+    });
   });
 });

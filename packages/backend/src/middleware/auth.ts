@@ -8,7 +8,7 @@ import type {
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
-import type { AuthenticatedEvent, UserInfo } from '../lib/user-context.ts';
+import type { AuthenticatedEvent, NewAccountEvent, UserInfo } from '../lib/user-context.ts';
 import { ApiErrorCode } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import {
@@ -279,6 +279,7 @@ async function attachIdentity({
   emailVerified,
   name,
   picture,
+  deferAccountCreation,
 }: {
   event: APIGatewayProxyEventV2;
   sub: string;
@@ -286,8 +287,25 @@ async function attachIdentity({
   emailVerified: boolean;
   name: string | null;
   picture: string | null;
+  deferAccountCreation: boolean;
 }): Promise<void> {
-  const resolved = await resolveUserAndOrg(sub, email, emailVerified, name);
+  const resolved = await resolveUserAndOrg({
+    sub,
+    email,
+    emailVerified,
+    name,
+    createAccount: !deferAccountCreation,
+  });
+  if (!resolved) {
+    (event.requestContext as NewAccountEvent['requestContext']).newAccount = {
+      sub,
+      userId: crypto.randomUUID(),
+      email: email ?? undefined,
+      emailVerified,
+      name: name ?? undefined,
+    };
+    return;
+  }
   (
     event.requestContext as APIGatewayProxyEventV2['requestContext'] & { userInfo: UserInfo }
   ).userInfo = {
@@ -374,12 +392,23 @@ interface ResolvedIdentity {
   membership?: OrgMembership;
 }
 
-async function resolveUserAndOrg(
-  sub: string,
-  email: string | null,
-  emailVerified: boolean,
-  name: string | null,
-): Promise<ResolvedIdentity> {
+/**
+ * Undefined only when the account does not exist and `createAccount` is false:
+ * the route creates it itself.
+ */
+async function resolveUserAndOrg({
+  sub,
+  email,
+  emailVerified,
+  name,
+  createAccount,
+}: {
+  sub: string;
+  email: string | null;
+  emailVerified: boolean;
+  name: string | null;
+  createAccount: boolean;
+}): Promise<ResolvedIdentity | undefined> {
   const tableName = Resource.UserInfoTable.name;
 
   // Look up existing mapping
@@ -426,6 +455,8 @@ async function resolveUserAndOrg(
     return { userId, orgId, email };
   }
 
+  if (!createAccount) return undefined;
+
   // New user — create user, org, and membership records atomically.
   const userId = crypto.randomUUID();
   const orgId = crypto.randomUUID();
@@ -471,6 +502,7 @@ async function tryValidateAccessToken({
   issuer,
   clientId,
   failureLabel,
+  deferAccountCreation,
 }: {
   request: AuthMiddlewareRequest;
   accessToken: string;
@@ -480,6 +512,7 @@ async function tryValidateAccessToken({
   issuer: string;
   clientId: string;
   failureLabel: string;
+  deferAccountCreation: boolean;
 }): Promise<boolean> {
   try {
     const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
@@ -493,6 +526,7 @@ async function tryValidateAccessToken({
       emailVerified: idClaims.emailVerified,
       name: idClaims.name,
       picture: idClaims.picture,
+      deferAccountCreation,
     });
     return true;
   } catch (err) {
@@ -517,6 +551,7 @@ async function tryRefreshTokens({
   jwks,
   issuer,
   clientId,
+  deferAccountCreation,
 }: {
   request: AuthMiddlewareRequest;
   refreshToken: string | undefined;
@@ -525,6 +560,7 @@ async function tryRefreshTokens({
   jwks: ReturnType<typeof createRemoteJWKSet>;
   issuer: string;
   clientId: string;
+  deferAccountCreation: boolean;
 }): Promise<boolean> {
   if (!refreshToken) {
     if (forceRefresh) {
@@ -563,6 +599,7 @@ async function tryRefreshTokens({
     emailVerified: refreshedClaims.emailVerified,
     name: refreshedClaims.name,
     picture: refreshedClaims.picture,
+    deferAccountCreation,
   });
   return true;
 }
@@ -584,6 +621,14 @@ export interface AuthMiddlewareOptions {
    * be able to refuse the request whose answer is what clears the stash.
    */
   orgHeaderFallback?: boolean;
+  /**
+   * Leave a caller with no account uncreated, setting `newAccount` instead of
+   * `userInfo` and skipping the org steps, so the route can create the account
+   * itself. Accepting an invitation alone sets this: an invited account's home
+   * is the org it joins, and creating one at login would give it an org it
+   * never asked for.
+   */
+  deferAccountCreation?: boolean;
 }
 
 /**
@@ -681,6 +726,8 @@ async function completeAuthentication(
   const gated = verifiedEmailGate(requireVerifiedEmail, request);
   if (gated) return withRefreshedCookies(request, gated);
 
+  // No account means no org to resolve or stand in.
+  if ('newAccount' in request.event.requestContext) return undefined;
   const event = request.event as AuthenticatedEvent;
   const claims = request.internal.idTokenClaims ?? EMPTY_ID_CLAIMS;
 
@@ -749,6 +796,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
       audience,
       issuer,
       clientId: secrets.AUTH0_CLIENT_ID,
+      deferAccountCreation: options.deferAccountCreation ?? false,
     };
 
     // Step 1: Validate existing access token (skip if forceRefresh — we need fresh claims)
@@ -771,6 +819,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
       jwks,
       issuer,
       clientId: secrets.AUTH0_CLIENT_ID,
+      deferAccountCreation: options.deferAccountCreation ?? false,
     });
     if (refreshed) return completeAuthentication(request, options);
 

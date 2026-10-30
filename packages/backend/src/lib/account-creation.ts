@@ -1,7 +1,7 @@
 import { UpdateItemCommand, type TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole } from '@filone/shared';
-import type { AuditEvent } from '@filone/shared';
+import type { CommittableAuditEvent } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from './audit.ts';
 import { getDynamoClient } from './ddb-client.ts';
 import { OrgKeys } from './org-membership.ts';
@@ -132,17 +132,18 @@ export interface FloorOrgPreparation {
    */
   items: TransactWriteItem[];
   /**
-   * The `org.created` event, for the caller to append via {@link auditPut}
-   * alongside its own event — `commitAudited` takes only one.
+   * The `org.created` event. A caller with an event of its own appends this one
+   * via {@link auditPut}, since `commitAudited` takes only one; a caller with
+   * none commits it through `commitAudited`.
    */
-  event: AuditEvent;
+  event: CommittableAuditEvent;
 }
 
 /**
  * Set a home-org pointer to `orgId`, provided it still names `expected`, or
  * still names nothing when `expected` is undefined.
  */
-function repointHomeOrg(
+export function repointHomeOrg(
   key: { pk: string; sk: string },
   orgId: string,
   expected: string | undefined,
@@ -330,10 +331,6 @@ export async function stampVerifiedEmail({
  * The six rows an account is: identity, both profiles, the owner count, the
  * membership, and its inverse item. Spans two tables, and travels as one
  * transaction so no half of an account can exist without the other.
- *
- * `email` is stamped on the user profile only when Auth0 has verified it, and
- * `name` carries no such gate. The identity row records what the profile was
- * last stamped from.
  */
 function accountRows({
   sub,
@@ -352,6 +349,42 @@ function accountRows({
   name?: string;
   now: string;
 }): TransactWriteItem[] {
+  return [
+    ...identityRows({ sub, userId, homeOrgId: orgId, email, name, now }),
+    // The name here is derived, not chosen. False sends the account through
+    // the naming step; `PATCH /api/org` flips it.
+    ...orgRows({ orgId, orgName, userId, now, source: 'signup', nameConfirmed: false }),
+  ];
+}
+
+/**
+ * The account's own rows, the identity and the user profile, both naming
+ * `homeOrgId` as the org a request without an org header is about.
+ *
+ * Signup writes them beside the org it creates. Accepting an invitation on a
+ * fresh account writes them beside the membership instead, with the inviting
+ * org as home, so an invited account never gets an org it did not ask for.
+ *
+ * `email` is stamped on the user profile only when Auth0 has verified it, and
+ * `name` carries no such gate. The identity row records what the profile was
+ * last stamped from. The identity Put is create-only, so two requests creating
+ * the same account cannot both land.
+ */
+export function identityRows({
+  sub,
+  userId,
+  homeOrgId,
+  email,
+  name,
+  now,
+}: {
+  sub: string;
+  userId: string;
+  homeOrgId: string;
+  email?: string;
+  name?: string;
+  now: string;
+}): TransactWriteItem[] {
   const tableName = Resource.UserInfoTable.name;
 
   return [
@@ -362,7 +395,7 @@ function accountRows({
           pk: { S: `SUB#${sub}` },
           sk: { S: 'IDENTITY' },
           userId: { S: userId },
-          orgId: { S: orgId },
+          orgId: { S: homeOrgId },
           createdAt: { S: now },
           // What the profile's address and name were last stamped from. This
           // row is read on every authenticated request; the profile is not, so
@@ -380,16 +413,13 @@ function accountRows({
           pk: { S: `USER#${userId}` },
           sk: { S: 'PROFILE' },
           sub: { S: sub },
-          orgId: { S: orgId },
+          orgId: { S: homeOrgId },
           createdAt: { S: now },
           ...(email ? { email: { S: email } } : {}),
           ...(name ? { name: { S: name } } : {}),
         },
       },
     },
-    // The name here is derived, not chosen. False sends the account through
-    // the naming step; `PATCH /api/org` flips it.
-    ...orgRows({ orgId, orgName, userId, now, source: 'signup', nameConfirmed: false }),
   ];
 }
 
