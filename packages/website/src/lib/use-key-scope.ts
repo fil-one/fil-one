@@ -21,6 +21,11 @@ interface KeyWithCreator {
 export function useKeyActionScope(): {
   /** Whether the list request will be answered rather than refused. */
   mayList: boolean;
+  /**
+   * Whether the server narrows the list to the caller's own keys, so an empty
+   * list says nothing about the keys anyone else in the org holds.
+   */
+  listsOwnKeysOnly: boolean;
   /** Whether the caller may revoke this particular key. */
   mayRevoke: (key: KeyWithCreator) => boolean;
   /** Whether any key in a list is revocable — for a column header. */
@@ -39,6 +44,7 @@ export function useKeyActionScope(): {
 
   return {
     mayList: manageOwn,
+    listsOwnKeysOnly: manageOwn && !manageAll,
     mayRevoke,
     mayRevokeAny: (keys) => keys.some(mayRevoke),
   };

@@ -49,8 +49,11 @@ export function CheckboxRow({
   );
 
   if (!tooltip) return row;
+  // `self-start` keeps the trigger as wide as the row's content, so the tooltip
+  // opens beside the label rather than past the end of the whole list. Beside
+  // rather than above, so it does not cover the row or heading over it.
   return (
-    <Tooltip content={tooltip} side="top">
+    <Tooltip content={tooltip} side="right" className="self-start">
       {row}
     </Tooltip>
   );
