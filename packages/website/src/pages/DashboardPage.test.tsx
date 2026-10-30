@@ -295,4 +295,23 @@ describe('DashboardPage — recent activity', () => {
       expect(screen.queryByRole('link', { name: 'Create bucket' })).not.toBeInTheDocument();
     },
   );
+
+  it('shows a loading feed rather than an empty one while the activity loads', async () => {
+    // Never settles, so the feed stays loading.
+    mockGetActivity.mockReturnValue(new Promise(() => {}));
+    renderPage();
+
+    expect(
+      await screen.findByRole('status', { name: 'Loading recent activity' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('No recent activity')).not.toBeInTheDocument();
+  });
+
+  it('says the activity failed to load rather than that there is none', async () => {
+    mockGetActivity.mockRejectedValue(new Error('any activity error'));
+    renderPage();
+
+    expect(await screen.findByText('Failed to load recent activity')).toBeInTheDocument();
+    expect(screen.queryByText('No recent activity')).not.toBeInTheDocument();
+  });
 });

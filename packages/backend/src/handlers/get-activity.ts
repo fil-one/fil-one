@@ -13,7 +13,11 @@ import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
-import { requestDeadlineMiddleware, trackRequestStep } from '../middleware/request-deadline.ts';
+import {
+  getRequestDeadline,
+  requestDeadlineMiddleware,
+  trackRequestStep,
+} from '../middleware/request-deadline.ts';
 
 /**
  * GET /api/activity — the dashboard's activity feed.
@@ -39,7 +43,7 @@ export async function baseHandler(
   // The whole retention window up to now: the feed takes no dates.
   const { from, to } = resolveWindow({ to: new Date().toISOString() });
   const start = performance.now();
-  // A named step, so a read still draining when the deadline fires is logged.
+  // A named step, so a read cut off by the deadline is logged by name.
   const { events, cost } = await trackRequestStep(event, 'queryActivityEvents', () =>
     queryActivityEvents({
       orgId,
@@ -48,6 +52,7 @@ export async function baseHandler(
       from,
       to,
       limit,
+      signal: getRequestDeadline(event),
     }),
   );
 

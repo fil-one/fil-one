@@ -168,6 +168,16 @@ describe('get-activity baseHandler', () => {
     });
   });
 
+  it('cancels the read with the request deadline', async () => {
+    const deadline = new AbortController().signal;
+
+    await baseHandler(buildEvent({ userInfo: USER_INFO, requestContext: { deadline } }));
+
+    expect(mockQueryActivityEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: deadline }),
+    );
+  });
+
   it('reports the read under the activity route', async () => {
     resolveEvents(auditEvent('bucket.created', { region: 'any-region', bucketName: 'any-bucket' }));
 

@@ -220,6 +220,37 @@ export type ActivityScope = { sees: 'all' } | { sees: 'own'; actorId: string } |
 export type ActivityBucketScope = Exclude<ActivityScope, { sees: 'none' }>;
 
 /**
+ * Rows one feed read examines per round trip. About two rows per action, since
+ * a two-phase action writes an intent and a completion, so a page holds the
+ * feed's largest limit even when every other row is an intent.
+ */
+const ACTIVITY_ROWS_PER_PAGE = 100;
+
+/**
+ * Round trips one event type may take before the feed stops reading it. With
+ * {@link ACTIVITY_ROWS_PER_PAGE} this caps the rows a feed request examines,
+ * whatever the size of the org's history.
+ */
+const ACTIVITY_MAX_PAGES_PER_TYPE = 3;
+
+/** An event the feed matched, beside the index sort key that orders it. */
+interface ActivityMatch {
+  sortKey: string;
+  event: AuditEvent;
+}
+
+/** What one event type's read found, and where it stopped if it stopped early. */
+interface ActivityTypeRead {
+  matches: ActivityMatch[];
+  cost: AuditQueryCost;
+  /**
+   * The sort key of the last row examined, when rows older than it were left
+   * unread. Absent when the read reached the start of the window.
+   */
+  unreadBelow?: string;
+}
+
+/**
  * The newest bucket and key events that succeeded, for the dashboard's
  * activity feed.
  *
@@ -229,10 +260,18 @@ export type ActivityBucketScope = Exclude<ActivityScope, { sees: 'none' }>;
  * page but not activity. Key events are S3 keys only, the ones the API keys
  * page lists.
  *
- * Reads the base table newest first over `from` (inclusive) to `to`
- * (exclusive) and filters, draining until `limit` events match or the window
- * ends, for the reason {@link queryAuditEvents} drains. There is no cursor: the
- * feed has no next page.
+ * The feed runs on the dashboard, for every role, so its cost must not grow
+ * with the org's history. Each event type it shows is read on the `byType`
+ * index, in parallel, newest first, for at most
+ * {@link ACTIVITY_MAX_PAGES_PER_TYPE} pages; reading the org partition instead
+ * would examine every membership and policy row too, and for a reader whose
+ * filter matches little, the whole window. Events written before the index
+ * existed are absent from it, the gap the module comment describes.
+ *
+ * A type whose read stopped early may hold unread events newer than another
+ * type's matches. The merge therefore drops every match older than the newest
+ * point any read stopped at, so the feed may come back short but never out of
+ * order. There is no cursor: the feed has no next page.
  */
 export async function queryActivityEvents({
   orgId,
@@ -241,6 +280,7 @@ export async function queryActivityEvents({
   from,
   to,
   limit,
+  signal,
 }: {
   orgId: string;
   bucketEvents: ActivityBucketScope;
@@ -248,118 +288,151 @@ export async function queryActivityEvents({
   from: string;
   to: string;
   limit: number;
+  /** Cancels the reads in flight, so none outlives the request. */
+  signal?: AbortSignal;
 }): Promise<{ events: AuditEvent[]; cost: AuditQueryCost }> {
+  const window = { orgId, from, to, limit, signal };
+  const reads = await Promise.all([
+    ...ACTIVITY_BUCKET_EVENT_TYPES.map((type) =>
+      readActivityType({ ...window, type, actorId: actorIdOf(bucketEvents) }),
+    ),
+    ...(keyEvents.sees === 'none'
+      ? []
+      : ACTIVITY_KEY_EVENT_TYPES.map((type) =>
+          readActivityType({ ...window, type, actorId: actorIdOf(keyEvents) }),
+        )),
+  ]);
+
   const cost: AuditQueryCost = { pages: 0, rows: 0 };
-  const events: AuditEvent[] = [];
+  for (const read of reads) {
+    cost.pages += read.cost.pages;
+    cost.rows += read.cost.rows;
+  }
+
+  // Sort keys are `{createdAt}#{eventId}`, so comparing them as strings orders
+  // events by time.
+  const cutoff = reads
+    .map((read) => read.unreadBelow)
+    .filter((sortKey) => sortKey !== undefined)
+    .reduce<string | undefined>(
+      (max, sortKey) => (max && max > sortKey ? max : sortKey),
+      undefined,
+    );
+  const events = reads
+    .flatMap((read) => read.matches)
+    .filter((match) => cutoff === undefined || match.sortKey >= cutoff)
+    .sort((a, b) => (a.sortKey < b.sortKey ? 1 : -1))
+    .slice(0, limit)
+    .map((match) => match.event);
+
+  return { events, cost };
+}
+
+/** The actor a scope narrows to, or undefined when it shows the whole org. */
+function actorIdOf(scope: ActivityBucketScope | Exclude<ActivityScope, { sees: 'none' }>) {
+  return scope.sees === 'own' ? scope.actorId : undefined;
+}
+
+/**
+ * One event type's newest succeeded events, read until `limit` match, the
+ * window ends, or the page budget runs out.
+ */
+async function readActivityType({
+  orgId,
+  type,
+  actorId,
+  from,
+  to,
+  limit,
+  signal,
+}: {
+  orgId: string;
+  type: AuditEventType;
+  actorId: string | undefined;
+  from: string;
+  to: string;
+  limit: number;
+  signal: AbortSignal | undefined;
+}): Promise<ActivityTypeRead> {
+  const cost: AuditQueryCost = { pages: 0, rows: 0 };
+  const matches: ActivityMatch[] = [];
   let startKey: DynamoCursor;
 
   do {
     const page = await getDynamoClient().send(
-      new QueryCommand(
-        buildActivityQueryInput({ orgId, bucketEvents, keyEvents, from, to, startKey }),
-      ),
+      new QueryCommand(buildActivityQueryInput({ orgId, type, actorId, from, to, startKey })),
+      { abortSignal: signal },
     );
     cost.pages += 1;
     cost.rows += page.Items?.length ?? 0;
-    events.push(...(page.Items ?? []).map(unmarshallAuditEvent));
+    // Every row and `LastEvaluatedKey` read from the index carries its string
+    // sort key: DynamoDB indexes only items that have the index's key attributes.
+    for (const item of page.Items ?? []) {
+      matches.push({ sortKey: item.gsi1sk!.S!, event: unmarshallAuditEvent(item) });
+    }
     startKey = page.LastEvaluatedKey;
-  } while (startKey && events.length < limit);
+  } while (startKey && matches.length < limit && cost.pages < ACTIVITY_MAX_PAGES_PER_TYPE);
 
-  return { events: events.slice(0, limit), cost };
+  if (!startKey) return { matches, cost };
+  return { matches, cost, unreadBelow: startKey.gsi1sk!.S! };
 }
 
 function buildActivityQueryInput({
   orgId,
-  bucketEvents,
-  keyEvents,
+  type,
+  actorId,
   from,
   to,
   startKey,
 }: {
   orgId: string;
-  bucketEvents: ActivityBucketScope;
-  keyEvents: ActivityScope;
+  type: AuditEventType;
+  actorId: string | undefined;
   from: string;
   to: string;
   startKey: DynamoCursor;
 }) {
   const values: Record<string, unknown> = {
-    ':pk': AuditKeys.orgPk(orgId),
+    ':pk': AuditKeys.typePk(orgId, type),
     ':from': from,
     // Exclusive, as `queryInput` explains for the same bound.
     ':to': to,
     ':now': Math.floor(Date.now() / 1000),
     ':succeeded': 'succeeded',
   };
-  const names: Record<string, string> = { '#ttl': 'ttl', '#type': 'type', '#outcome': 'outcome' };
+  // The TTL clause is the one `queryInput` explains: DynamoDB serves expired
+  // rows until it gets round to deleting them.
+  const filterParts = ['#ttl > :now', '#outcome = :succeeded'];
 
-  const bucketFilter = buildBucketFilter(bucketEvents, values);
-  const keyFilter = buildKeyFilter(keyEvents, values);
-  const typeFilter = keyFilter ? `((${bucketFilter}) OR (${keyFilter}))` : `(${bucketFilter})`;
+  if (ACTIVITY_KEY_EVENT_TYPES.includes(type)) {
+    filterParts.push('details.keyKind = :s3');
+    values[':s3'] = 's3';
+  }
+  if (type === 'key.deleted') {
+    // A rotation writes its own `key.rotated` and then revokes the old
+    // credential under a `key.deleted` with reason `rotation`. The feed shows
+    // the rotation and leaves that delete out: the key it names is still live
+    // under its new credential.
+    filterParts.push('NOT details.reason = :rotation');
+    values[':rotation'] = 'rotation';
+  }
+  if (actorId) {
+    filterParts.push('actor.id = :actorId');
+    values[':actorId'] = actorId;
+  }
 
   return {
     TableName: auditTableName(),
-    KeyConditionExpression: 'pk = :pk AND sk BETWEEN :from AND :to',
-    // The TTL clause is the one `queryInput` explains: DynamoDB serves expired
-    // rows until it gets round to deleting them.
-    FilterExpression: `#ttl > :now AND #outcome = :succeeded AND ${typeFilter}`,
-    ExpressionAttributeNames: names,
+    IndexName: EVENT_TYPE_INDEX,
+    KeyConditionExpression: 'gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to',
+    FilterExpression: filterParts.join(' AND '),
+    ExpressionAttributeNames: { '#ttl': 'ttl', '#outcome': 'outcome' },
     ExpressionAttributeValues: marshall(values),
+    Limit: ACTIVITY_ROWS_PER_PAGE,
     // Newest first.
     ScanIndexForward: false,
     ...(startKey ? { ExclusiveStartKey: startKey } : {}),
   };
-}
-
-/** The clause selecting the bucket events a reader may see. */
-function buildBucketFilter(scope: ActivityBucketScope, values: Record<string, unknown>): string {
-  const clauses = [`#type IN (${bindTypeList('bucket', ACTIVITY_BUCKET_EVENT_TYPES, values)})`];
-  if (scope.sees === 'own') {
-    clauses.push('actor.id = :bucketActorId');
-    values[':bucketActorId'] = scope.actorId;
-  }
-  return clauses.join(' AND ');
-}
-
-/**
- * The clause selecting the S3 key events a reader may see, or undefined when
- * they see none.
- *
- * A rotation writes its own `key.rotated` and then revokes the old credential
- * under a `key.deleted` with reason `rotation`. The feed shows the rotation and
- * leaves that delete out: the key it names is still live under its new
- * credential. Only `key.deleted` carries a reason, so the clause touches no
- * other type.
- */
-function buildKeyFilter(scope: ActivityScope, values: Record<string, unknown>): string | undefined {
-  if (scope.sees === 'none') return undefined;
-  const clauses = [
-    `#type IN (${bindTypeList('key', ACTIVITY_KEY_EVENT_TYPES, values)})`,
-    'details.keyKind = :s3',
-    'NOT details.reason = :rotation',
-  ];
-  values[':s3'] = 's3';
-  values[':rotation'] = 'rotation';
-  if (scope.sees === 'own') {
-    clauses.push('actor.id = :keyActorId');
-    values[':keyActorId'] = scope.actorId;
-  }
-  return clauses.join(' AND ');
-}
-
-/** Binds each type to its own placeholder and returns the placeholders, for an `IN`. */
-function bindTypeList(
-  prefix: string,
-  types: AuditEventType[],
-  values: Record<string, unknown>,
-): string {
-  return types
-    .map((type, index) => {
-      const placeholder = `:${prefix}Type${index}`;
-      values[placeholder] = type;
-      return placeholder;
-    })
-    .join(', ');
 }
 
 /** The Query for whichever path the filters select. */

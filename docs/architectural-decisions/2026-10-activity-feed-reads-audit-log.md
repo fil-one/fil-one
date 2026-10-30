@@ -33,6 +33,11 @@ entry, nothing ever reads "deleted", and its bucket entries came from a
    wider than what their Buckets and API keys pages list.
 4. **"View all" opens the audit page** where that page exists for the reader:
    Owner and Admin in orgs on the organizations beta.
+5. **The feed's read is bounded.** It runs on the dashboard for every role, so it
+   reads each event type it shows on the `byType` index, in parallel, at most three
+   pages of 100 rows per type, under the request deadline. Reading the org
+   partition would examine every membership and policy row too, and for a reader
+   whose filter matches little, the whole 90 days on each dashboard load.
 
 ## Consequences
 
@@ -45,6 +50,12 @@ entry, nothing ever reads "deleted", and its bucket entries came from a
   Buckets page but not in the feed or on the audit page.
 - Below Admin, a bucket another member created and shared with the reader does not
   appear, and neither does a revocation another member made to the reader's key.
+- Key events written before the `byType` index existed are not in the feed, the gap
+  [the audit log ADR](2026-08-audit-log-v1-m2.md#what-the-index-cannot-reach)
+  describes. It closes as the TTL removes those events.
+- A reader whose matches are spread thin may see fewer than five rows: once a type's
+  page budget runs out, the feed leaves out older events it cannot order against
+  that type's unread ones.
 - `get-activity` reports `AuditQueryDuration` under `route=activity`. The
   `GetActivityDuration`, `GetActivityPhaseDuration` and per-region
   `ListBucketsDuration` metrics are no longer emitted.

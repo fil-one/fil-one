@@ -10,6 +10,7 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import { Link } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
+import type { UseQueryResult } from '@tanstack/react-query';
 import { Link as AppLink } from '../components/Link';
 
 const UsageTrends = lazy(() => import('./UsageTrends'));
@@ -18,9 +19,11 @@ import { PageLayout } from '../components/PageLayout.js';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Badge, type BadgeColor } from '../components/Badge';
+import { Alert } from '../components/Alert';
 import { Card } from '../components/Card';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 import { IconBox } from '../components/IconBox';
+import { Skeleton } from '../components/Skeleton';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
 
@@ -31,7 +34,7 @@ import {
   SubscriptionStatus,
   getUsageLimits,
 } from '@filone/shared';
-import type { RecentActivity } from '@filone/shared';
+import type { RecentActivityResponse } from '@filone/shared';
 
 import { getUsage, getBilling, getActivity } from '../lib/api.js';
 import { daysUntil, formatDateTime, timeAgo } from '../lib/time.js';
@@ -87,6 +90,100 @@ function DashboardSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
+// Recent activity
+// ---------------------------------------------------------------------------
+
+/** How many events the dashboard's feed shows. */
+const ACTIVITY_LIMIT = 5;
+
+/**
+ * The body of the Recent Activity card: a skeleton while the feed loads, an
+ * error when it fails, and otherwise the feed or its empty state. A failed or
+ * loading feed must not read as "No recent activity", which would state as fact
+ * that nothing happened.
+ */
+function RecentActivityFeed({
+  activityQuery,
+  hasResources,
+}: {
+  activityQuery: UseQueryResult<RecentActivityResponse>;
+  hasResources: boolean;
+}) {
+  if (activityQuery.isPending) {
+    return (
+      <div role="status" aria-label="Loading recent activity" className="flex flex-col gap-2">
+        {Array.from({ length: ACTIVITY_LIMIT }, (_, index) => (
+          <Skeleton key={index} className="h-10" />
+        ))}
+      </div>
+    );
+  }
+
+  if (activityQuery.isError) {
+    return <Alert variant="red" description="Failed to load recent activity" />;
+  }
+
+  const { activities } = activityQuery.data;
+  return (
+    <>
+      {activities.length === 0 && hasResources ? (
+        // The feed holds the audit log's retention window, so an org whose
+        // buckets and keys are all older than it has resources and no activity.
+        <EmptyStateCard
+          icon={ClockCounterClockwiseIcon}
+          iconColor="grey"
+          title="No recent activity"
+          description={`Bucket and key changes from the last ${AUDIT_RETENTION_DAYS} days appear here`}
+          bordered={false}
+        />
+      ) : activities.length === 0 ? (
+        <EmptyStateCard
+          icon={ClockCounterClockwiseIcon}
+          iconColor="grey"
+          title="No activity yet"
+          description="Create a bucket to start storing objects"
+          bordered={false}
+        >
+          <RequirePermission permission="buckets.create">
+            <Button
+              id="dashboard-create-bucket-button"
+              variant="primary"
+              icon={PlusIcon}
+              href="/buckets/create"
+            >
+              Create bucket
+            </Button>
+          </RequirePermission>
+        </EmptyStateCard>
+      ) : (
+        <div className="divide-y divide-zinc-100/50">
+          {activities.map((activity) => (
+            <div key={activity.id} className="flex items-center gap-4 rounded-lg px-2 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-ui font-medium text-zinc-900">
+                    {activity.resourceName}
+                  </span>
+                  <Badge color={activity.resourceType === 'bucket' ? 'grey' : 'blue'} size="sm">
+                    {activity.resourceType}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 text-meta text-zinc-500">
+                  {getActivityActionLabel(activity.action)}
+                </p>
+              </div>
+              <span className="w-14 shrink-0 text-right text-meta text-zinc-500">
+                {timeAgo(activity.timestamp)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -134,12 +231,12 @@ export function DashboardPage() {
   // demotion. Reading it here makes every derived value go absent at once.
   const billing = mayReadBilling ? billingData : undefined;
 
-  // Activity is optional — silently ignored if it fails
-  const { data: activityData } = useQuery({
-    queryKey: queryKeys.activityRecent(5),
-    queryFn: () => getActivity({ limit: 5 }),
+  // The feed loads and fails on its own: the rest of the dashboard does not
+  // wait for it, and a failure shows in the card rather than as an empty feed.
+  const activityQuery = useQuery({
+    queryKey: queryKeys.activityRecent(ACTIVITY_LIMIT),
+    queryFn: () => getActivity({ limit: ACTIVITY_LIMIT }),
   });
-  const activities: RecentActivity[] = activityData?.activities ?? [];
 
   // Usage alone decides whether there is a page: every counter and the quick
   // setup read it, and it is `buckets.read`, which every role holds.
@@ -483,59 +580,10 @@ export function DashboardPage() {
           )}
         </div>
 
-        {activities.length === 0 && (usage.buckets.count > 0 || usage.accessKeys.count > 0) ? (
-          // The feed holds the audit log's retention window, so an org whose
-          // buckets and keys are all older than it has resources and no activity.
-          <EmptyStateCard
-            icon={ClockCounterClockwiseIcon}
-            iconColor="grey"
-            title="No recent activity"
-            description={`Bucket and key changes from the last ${AUDIT_RETENTION_DAYS} days appear here`}
-            bordered={false}
-          />
-        ) : activities.length === 0 ? (
-          <EmptyStateCard
-            icon={ClockCounterClockwiseIcon}
-            iconColor="grey"
-            title="No activity yet"
-            description="Create a bucket to start storing objects"
-            bordered={false}
-          >
-            <RequirePermission permission="buckets.create">
-              <Button
-                id="dashboard-create-bucket-button"
-                variant="primary"
-                icon={PlusIcon}
-                href="/buckets/create"
-              >
-                Create bucket
-              </Button>
-            </RequirePermission>
-          </EmptyStateCard>
-        ) : (
-          <div className="divide-y divide-zinc-100/50">
-            {activities.map((activity) => (
-              <div key={activity.id} className="flex items-center gap-4 rounded-lg px-2 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-ui font-medium text-zinc-900">
-                      {activity.resourceName}
-                    </span>
-                    <Badge color={activity.resourceType === 'bucket' ? 'grey' : 'blue'} size="sm">
-                      {activity.resourceType}
-                    </Badge>
-                  </div>
-                  <p className="mt-0.5 text-meta text-zinc-500">
-                    {getActivityActionLabel(activity.action)}
-                  </p>
-                </div>
-                <span className="w-14 shrink-0 text-right text-meta text-zinc-500">
-                  {timeAgo(activity.timestamp)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        <RecentActivityFeed
+          activityQuery={activityQuery}
+          hasResources={usage.buckets.count > 0 || usage.accessKeys.count > 0}
+        />
       </Card>
     </PageLayout>
   );
