@@ -427,7 +427,7 @@ describe('queryActivityEvents', () => {
     ddbMock.on(QueryCommand).callsFake((input) => pages[typeOf(input)]?.shift() ?? { Items: [] });
   }
 
-  /** The `n`th read of one type, with its unread rows ending at `sortKey`. */
+  /** A page whose last examined row is `sortKey`, with older rows left unread. */
   function stoppedAt(sortKey: string) {
     return { LastEvaluatedKey: marshall({ gsi1sk: sortKey }) };
   }
@@ -603,6 +603,30 @@ describe('queryActivityEvents', () => {
     });
 
     expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-newer']);
+  });
+
+  it('keeps the event a read stopped on, since that row was read', async () => {
+    // The page budget ran out on a row that matched, so nothing at or above it
+    // is unread.
+    pagesByType({
+      'key.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        {
+          Items: [storedEvent('2026-08-11T00:00:00.000Z', 'evt-edge', 'key.created')],
+          ...stoppedAt('2026-08-11T00:00:00.000Z#evt-edge'),
+        },
+      ],
+    });
+
+    const result = await queryActivityEvents({
+      orgId: ORG_ID,
+      ...OWNER_SCOPES,
+      ...ACTIVITY_WINDOW,
+      limit: 5,
+    });
+
+    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-edge']);
   });
 
   it('cancels every read with the signal it is given', async () => {
