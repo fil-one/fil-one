@@ -113,34 +113,23 @@ describe('OrgSwitcherMenu', () => {
     }
   });
 
-  it('leaves out Members, Audit log and Create organization outside the organizations beta', () => {
-    renderMenu({ orgsBeta: false });
+  it('offers the org pages and Create organization to a sole membership', () => {
+    renderMenu({ memberships: [{ orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner }] });
 
     fireEvent.click(screen.getByTestId('org-switcher-button'));
 
-    // Each switcher row reads as its avatar's monogram, then the name.
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       'Edit organization',
+      'Members',
       'Billing',
-      'AAcme',
-      'GGlobex',
+      'Audit log',
+      'Create organization',
     ]);
-  });
-
-  it('draws no divider under Billing when nothing sits below it', () => {
-    renderMenu({
-      orgsBeta: false,
-      memberships: [{ orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner }],
-    });
-
-    fireEvent.click(screen.getByTestId('org-switcher-button'));
-
-    expect(screen.getByText('Billing')).toBeInTheDocument();
-    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+    expect(screen.getByRole('separator')).toBeInTheDocument();
   });
 
   it('divides the org pages from the switcher', () => {
-    renderMenu({ orgsBeta: false });
+    renderMenu();
 
     fireEvent.click(screen.getByTestId('org-switcher-button'));
 

@@ -30,7 +30,7 @@
 // once. Every other stage allows every region the script knows.
 //
 // Credentials: table names come from `sst state export`, and every AWS call
-// uses your ambient credentials, as in orgs-beta.ts and rag-access.ts, so
+// uses your ambient credentials, as in rag-access.ts, so
 // confirm they target the right account first. Applying needs a role that can
 // write UserInfoTable and RagIndexerTable, delete SSM parameters, and call
 // s3vectors:GetVectorBucket and s3vectors:DeleteIndex.
@@ -146,7 +146,7 @@ await runRegionReset(
  * The command line, or usage and exit 1.
  *
  * Strict parsing stops the run on an unrecognized `--` argument, the way
- * bin/lib/args.ts and bin/orgs-beta.ts stop on one: a misspelled `--dry-run`
+ * bin/lib/args.ts stops on one: a misspelled `--dry-run`
  * that is silently ignored is the worst possible place to be quiet.
  */
 function parseCommandLine() {

@@ -16,12 +16,11 @@ import {
 // on staging; the plus tag keeps it deliverable to a mailbox we own, and nothing
 // here reads mail.
 //
-// The refusals — the beta gate and the pending cap — are covered by unit tests
-// and are not re-driven here.
+// The pending cap's refusal is covered by unit tests and is not re-driven here.
 
 const ROLE = 'paid';
 
-test.describe('paid user (organizations beta)', () => {
+test.describe('paid user', () => {
   test.use({ storageState: STORAGE_STATE[ROLE] });
   test.describe.configure({ mode: 'serial' });
 

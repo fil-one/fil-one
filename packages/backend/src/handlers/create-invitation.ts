@@ -35,7 +35,6 @@ import {
   orgNotDeletingCheck,
   resolveOrgName,
 } from '../lib/org-profile.ts';
-import { hasOrgsBetaAccess } from '../lib/orgs-beta.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder, beyondCeilingResponse } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
@@ -48,7 +47,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 /**
  * POST /api/org/invitations — invite an email address to the organization.
  *
- * Three checks stand between a caller and a stored invitation, and they are
+ * Two checks stand between a caller and a stored invitation, and they are
  * different kinds of thing:
  *
  * - The **ceiling**: `members.manage` gets the caller here, and the role they
@@ -56,9 +55,6 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  *   Admin, Owners can invite Owners. The registry answers it
  *   (`canManageTargetRole`), so "who may invite an Owner" stays a matrix
  *   question rather than a rank comparison.
- * - The **beta flag**, on creation only: an allowlist row for the caller or one
- *   for the org (`lib/orgs-beta.ts`). Accepting is never flagged — an invitee's
- *   experience must not depend on somebody else's allowlist status.
  * - The **cap** on live invitations, which counts addresses rather than
  *   attempts. Revoking or accepting frees a slot, and re-inviting an address
  *   that already has one takes no new slot at all.
@@ -100,8 +96,6 @@ export async function baseHandler(
   if (!canManageTargetRole(callerRole, role)) {
     return beyondCeilingResponse(`invite someone as ${role}`);
   }
-
-  if (!(await hasOrgsBetaAccess({ verifiedEmail: inviterEmail, orgId }))) return betaOnlyResponse();
 
   const emailNorm = normalizeInviteEmail(email);
   // The claim is read beside the cap's list because both are inputs to the same
@@ -267,26 +261,6 @@ function acceptUrl({ token, signUp }: { token: string; signUp: boolean }): strin
   const fragment = new URLSearchParams({ token });
   if (signUp) fragment.set('signup', '1');
   return `${process.env.WEBSITE_URL}/invite/accept#${fragment}`;
-}
-
-/**
- * The beta gate's refusal, under its own code.
- *
- * The two role codes describe what a caller's role permits; this says the
- * feature is not on for them yet, and the console renders it as a state of the
- * form rather than a failed attempt. It needs a code of its own to be told from
- * the other code-less 403s this route can send — an expired CSRF cookie is the
- * routine one — which would otherwise be reported as the beta gate and take the
- * form off the page.
- */
-function betaOnlyResponse(): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({
-      message: 'Inviting teammates is not enabled for this organization yet.',
-      code: ApiErrorCode.INVITES_NOT_ENABLED,
-    })
-    .build();
 }
 
 function capReachedResponse(): APIGatewayProxyStructuredResultV2 {

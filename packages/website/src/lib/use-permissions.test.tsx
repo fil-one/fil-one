@@ -25,7 +25,6 @@ function meWith(role: OrgRole | undefined): MeResponse {
     emailVerified: true,
     mfaEnrollments: [],
     ragAccess: false,
-    orgsBeta: false,
     billingActive: true,
     userId: 'user-1',
     ...(role ? { role } : {}),
@@ -69,17 +68,6 @@ describe('usePermissions', () => {
     expect(result.current.has('buckets.read')).toBe(false);
     // An unreadable /me is not the same claim as "you were removed".
     expect(result.current.isNotAMember).toBe(false);
-  });
-
-  it('reports the organizations beta, false until /me says otherwise', async () => {
-    mockGetMe.mockResolvedValue({ ...meWith(OrgRole.Owner), orgsBeta: true });
-    const { result } = renderHook(() => usePermissions(), { wrapper: wrapperFor(freshClient()) });
-
-    // Fail-closed like the permission list: the invite form is gated on this,
-    // and a flag that briefly defaulted to on would offer a form the server
-    // refuses.
-    expect(result.current.orgsBeta).toBe(false);
-    await waitFor(() => expect(result.current.orgsBeta).toBe(true));
   });
 
   it('names the caller with no membership row', async () => {

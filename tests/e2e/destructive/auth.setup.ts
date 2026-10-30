@@ -3,7 +3,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { STORAGE_STATE, type Role } from './roles.util.ts';
 import { ACCOUNT_STATE_TIMEOUT_MS, setAccountState } from './account-state.util.ts';
-import { grantEmailBeta } from './invite.util.ts';
 import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
 const REQUIRED_CREDENTIAL_VARS = [
@@ -69,7 +68,6 @@ for (const role of roles) {
     // safe to reuse.
     setup.setTimeout(ACCOUNT_STATE_TIMEOUT_MS);
     await setAccountState(role.userId, role.name);
-    await grantEmailBeta(role.email);
 
     await page.goto('/');
     await page.locator('#username').fill(role.email);

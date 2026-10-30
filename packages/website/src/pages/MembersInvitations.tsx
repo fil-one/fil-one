@@ -60,25 +60,16 @@ function dropInvitation(client: QueryClient, inviteId: string): void {
 }
 
 /**
- * The two refusals the invite form keeps on screen instead of toasting.
- *
- * Both are matched on their own code. `INVITES_NOT_ENABLED` says the feature is
- * not switched on for this org, and the console renders that sentence in place
- * of the form. `INVITE_LIMIT_REACHED` needs an action taken on the list right
- * beside the form. A toast for either would be gone before the operator had
- * finished reading the form it was about.
- *
- * Nothing here reads the absence of a code as a refusal. An expired CSRF cookie
- * answers 403 with no code at all, and taking that for the beta gate took the
- * form off the page for a caller whose next click would have worked.
+ * The refusals the invite form keeps on screen instead of toasting, matched on
+ * their own code. `INVITE_LIMIT_REACHED` needs an action taken on the list right
+ * beside the form, and a toast would be gone before the operator had finished
+ * reading the form it was about.
  */
 function useInviteRefusals() {
-  const [notEnabled, setNotEnabled] = useState<string | null>(null);
   const [capReached, setCapReached] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   return {
-    notEnabled,
     // Kept in the dialog rather than toasted: a toast raised while a modal is
     // open competes with it for attention and is gone in four seconds, while
     // the controls the refusal is about are still on screen.
@@ -89,8 +80,6 @@ function useInviteRefusals() {
     /**
      * Drop the cap refusal. It names a slot somebody has since freed, and it is
      * cleared on the two things that free one: another attempt, and a revoke.
-     * The beta state is not cleared with it — the feature is either on for this
-     * org or it is not, and nothing on this page turns it on.
      */
     clear: () => {
       setCapReached(false);
@@ -99,12 +88,6 @@ function useInviteRefusals() {
     /** @returns whether the refusal was rendered here rather than left to a toast. */
     capture: (err: unknown): boolean => {
       const code = errorCodeOf(err);
-      if (code === ApiErrorCode.INVITES_NOT_ENABLED) {
-        setNotEnabled(
-          errorMessageOf(err, 'Inviting teammates is not enabled for this organization yet.'),
-        );
-        return true;
-      }
       if (code === ApiErrorCode.INVITE_LIMIT_REACHED) {
         setCapReached(true);
         return true;
@@ -229,9 +212,9 @@ function useRevokeInvitation(
  * Opens the invite dialog when the Organization page's own Invite member button
  * asked for it.
  *
- * The request is cleared whether or not anything opened: a caller the beta gate
- * refuses is told so by the section itself, and a request left standing would
- * spring the dialog open on the next visit to this tab, which nobody asked for.
+ * The request is cleared whether or not anything opened: a request left standing
+ * would spring the dialog open on the next visit to this tab, which nobody asked
+ * for.
  */
 function useRequestedInvite({
   inviteRequested,
@@ -280,23 +263,23 @@ export function MembersInvitations({
 
   const invitations = pending.data?.invitations ?? [];
   const atCap = refusals.capReached || invitations.length >= MAX_PENDING_INVITATIONS_PER_ORG;
-  /**
-   * Whether this caller can send one at all. Issuing needs the beta flag as well
-   * as the permission; withdrawing needs only the permission, so an org dropped
-   * from the beta keeps a list it can still revoke from.
-   */
-  const mayIssue = scope.mayInvite && !refusals.notEnabled;
   const openInvite = () => setInviteOpen(true);
 
-  useRequestedInvite({ inviteRequested, onInviteRequestHandled, mayIssue, atCap, openInvite });
+  useRequestedInvite({
+    inviteRequested,
+    onInviteRequestHandled,
+    mayIssue: scope.mayInvite,
+    atCap,
+    openInvite,
+  });
 
-  // Both refusals leave the dialog with nothing it could do, so it goes and the
-  // page states why. Closed once here rather than derived into `open`: a derived
-  // condition springs the dialog back open the moment a revoke clears the cap,
-  // over a caller who never asked for it again.
+  // The cap refusal leaves the dialog with nothing it could do, so it goes and
+  // the page states why. Closed once here rather than derived into `open`: a
+  // derived condition springs the dialog back open the moment a revoke clears
+  // the cap, over a caller who never asked for it again.
   useEffect(() => {
-    if (refusals.notEnabled || refusals.capReached) setInviteOpen(false);
-  }, [refusals.notEnabled, refusals.capReached]);
+    if (refusals.capReached) setInviteOpen(false);
+  }, [refusals.capReached]);
 
   return (
     <section className="flex flex-col gap-4" data-testid="invitations-section">
@@ -319,16 +302,6 @@ export function MembersInvitations({
 
       {scope.mayInvite && (
         <>
-          {refusals.notEnabled && (
-            <div data-testid="invite-not-enabled">
-              <Alert
-                variant="grey"
-                title="Invitations are not enabled yet"
-                description={refusals.notEnabled}
-              />
-            </div>
-          )}
-
           {/* The cap gates the trigger rather than the fields inside it: a dialog
             that opens only to refuse everything typed into it is worse than a
             button that says why it cannot be pressed. */}
@@ -402,7 +375,7 @@ export function MembersInvitations({
         hasData={pending.data !== undefined}
         errorMessage={pending.error?.message}
         mayManageTarget={scope.mayManageTarget}
-        onInvite={mayIssue ? openInvite : undefined}
+        onInvite={scope.mayInvite ? openInvite : undefined}
         onRevoke={(invitation) => revoke.mutate(invitation)}
         onResend={(invitation) => create.mutate({ email: invitation.email, role: invitation.role })}
         pendingInviteIds={revoking.ids}

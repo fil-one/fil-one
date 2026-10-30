@@ -77,7 +77,7 @@ export async function resetToHomeOrg(userId: string): Promise<void> {
   }
 }
 
-/** Every row an org owns: its partition, its members' inverse rows, its profile, beta and billing. */
+/** Every row an org owns: its partition, its members' inverse rows, its profile and billing. */
 export async function deleteOrg(orgId: string): Promise<void> {
   for (const row of await query('OrgTable', `ORG#${orgId}`)) {
     const sk = row.sk!.S!;
@@ -90,7 +90,6 @@ export async function deleteOrg(orgId: string): Promise<void> {
     await deleteItem('BillingTable', `ORG#${orgId}`, row.sk!.S!);
   }
   await deleteItem('UserInfoTable', `ORG#${orgId}`, 'PROFILE');
-  await deleteItem('UserInfoTable', `ORG#${orgId}`, 'ORGS_BETA');
 }
 
 /** Clear the org's hourly logo-upload allowance. */
