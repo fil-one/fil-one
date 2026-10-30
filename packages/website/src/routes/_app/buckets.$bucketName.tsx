@@ -19,19 +19,34 @@ const bucketSearchSchema = z.object({
 });
 
 /** What the buckets listing says about a name, when it cannot settle on one region. */
-export interface BucketRegionLookup {
+export interface BucketRegionsListed {
   /** Regions holding a bucket by this name. */
   regions: S3Region[];
   /** Regions whose listing failed, so they may hold one too. */
   unavailableRegions: S3Region[];
 }
 
+/** The buckets listing failed as a whole, so it says nothing about the name. */
+export interface BucketListingFailed {
+  error: Error;
+}
+
+export type BucketRegionLookup = BucketRegionsListed | BucketListingFailed;
+
 async function findBucketRegions(bucketName: string): Promise<BucketRegionLookup> {
-  const { buckets, unavailableRegions = [] } = await queryClient.fetchQuery({
-    queryKey: queryKeys.buckets,
-    queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
-    staleTime: LIST_STALE_TIME,
-  });
+  let listing: ListBucketsResponse;
+  try {
+    listing = await queryClient.fetchQuery({
+      queryKey: queryKeys.buckets,
+      queryFn: () => apiRequest<ListBucketsResponse>('/buckets'),
+      staleTime: LIST_STALE_TIME,
+    });
+  } catch (err) {
+    // Kept for the page to show in the bucket's own error state; thrown out of
+    // `beforeLoad`, it would end on the router's generic error page.
+    return { error: err instanceof Error ? err : new Error('Cannot list buckets.') };
+  }
+  const { buckets, unavailableRegions = [] } = listing;
   // The listing types a region as any string; only one this console knows can
   // go in the URL.
   const regions = buckets
@@ -51,7 +66,13 @@ function BucketDetailRoute() {
     return <BucketDetailPage bucketName={bucketName} prefix={prefix} region={region} />;
   }
   // `beforeLoad` sets the lookup whenever the URL has no region.
-  const { regions, unavailableRegions } = regionLookup ?? { regions: [], unavailableRegions: [] };
+  const lookup = regionLookup ?? { regions: [], unavailableRegions: [] };
+  if ('error' in lookup) {
+    return (
+      <BucketErrorState bucketName={bucketName} error={lookup.error} fallback="Bucket not found" />
+    );
+  }
+  const { regions, unavailableRegions } = lookup;
   if (regions.length === 0) {
     const fallback =
       unavailableRegions.length > 0
@@ -62,6 +83,7 @@ function BucketDetailRoute() {
   return (
     <BucketRegionChooser
       bucketName={bucketName}
+      prefix={prefix}
       regions={regions}
       unavailableRegions={unavailableRegions}
     />
@@ -74,15 +96,18 @@ export const Route = createRoute({
   beforeLoad: async ({ params, search }) => {
     if (search.region) return { regionLookup: undefined };
     const regionLookup = await findBucketRegions(params.bucketName);
-    const { regions, unavailableRegions } = regionLookup;
     // Open the bucket only when the listing proves it is the one by that name:
     // a second match, or a region that did not answer, leaves the choice to
     // the user.
-    if (regions.length === 1 && unavailableRegions.length === 0) {
+    if (
+      !('error' in regionLookup) &&
+      regionLookup.regions.length === 1 &&
+      regionLookup.unavailableRegions.length === 0
+    ) {
       throw redirect({
         to: '/buckets/$bucketName',
         params,
-        search: { ...search, region: regions[0] },
+        search: { ...search, region: regionLookup.regions[0] },
         replace: true,
       });
     }

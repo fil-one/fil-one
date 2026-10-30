@@ -15,10 +15,13 @@ import { RegionFlag } from './RegionFlag';
  */
 export function BucketRegionChooser({
   bucketName,
+  prefix,
   regions,
   unavailableRegions,
 }: {
   bucketName: string;
+  /** The folder the link pointed into, kept on whichever region is chosen. */
+  prefix?: string;
   regions: S3Region[];
   unavailableRegions: S3Region[];
 }) {
@@ -44,12 +47,12 @@ export function BucketRegionChooser({
           </div>
           <ul className="divide-y divide-zinc-200" data-testid="bucket-region-choices">
             {regions.map((region) => (
-              <li key={region}>
+              <li key={region} className="group">
                 <Link
                   to="/buckets/$bucketName"
                   params={{ bucketName }}
-                  search={{ region }}
-                  className="flex items-center gap-2.5 px-5 py-3 text-xs transition-colors duration-150 last:rounded-b-xl hover:bg-zinc-50 focus-visible:brand-outline focus-visible:-outline-offset-2"
+                  search={{ prefix, region }}
+                  className="flex items-center gap-2.5 px-5 py-3 transition-colors duration-150 group-last:rounded-b-xl hover:bg-zinc-50 focus-visible:brand-outline focus-visible:-outline-offset-2"
                 >
                   <RegionFlag region={region} />
                   <span className="flex-1">
