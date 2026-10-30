@@ -300,33 +300,24 @@ test.describe('C. policy writes', () => {
   });
 
   test(
-    'of two writes under one If-Match, exactly one succeeds and the other gets 412',
+    'two concurrent writes both succeed and the stored policy is one of the two documents',
     { tag: '@api' },
     async () => {
-      const { etag } = await owner.readPolicy(bucket);
-      const write = (sid: string) =>
-        owner.putPolicy(bucket, {
-          policy: buildBucketPolicy(bucket, [
-            grantAllToOwner(ownerId),
-            allow([memberId], ['s3:ListBucket'], sid),
-          ]),
-          etag,
-        });
-      const statuses = (await Promise.all([write('first'), write('second')])).map((r) =>
-        r.status(),
+      const buildWrite = (sid: string) =>
+        buildBucketPolicy(bucket, [
+          grantAllToOwner(ownerId),
+          allow([memberId], ['s3:ListBucket'], sid),
+        ]);
+      const [first, second] = [buildWrite('first'), buildWrite('second')];
+      const statuses = (
+        await Promise.all([owner.putPolicy(bucket, first), owner.putPolicy(bucket, second)])
+      ).map((r) => r.status());
+      expect(statuses).toEqual([204, 204]);
+      expect([toCanonicalPolicy(first), toCanonicalPolicy(second)]).toContainEqual(
+        toCanonicalPolicy((await owner.readPolicy(bucket)).policy),
       );
-      expect(statuses.sort((a, b) => a - b)).toEqual([204, 412]);
     },
   );
-
-  test('a delete under a stale If-Match is refused', { tag: '@api' }, async () => {
-    const { etag: stale } = await owner.readPolicy(bucket);
-    await owner.replaceStatements(bucket, [grantAllToOwner(ownerId)]);
-    const before = await owner.readPolicy(bucket);
-    const res = await owner.deletePolicy(bucket, stale);
-    expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
-    expect(await owner.readPolicy(bucket)).toEqual(before);
-  });
 
   for (const [title, statement] of [
     [
@@ -344,11 +335,10 @@ test.describe('C. policy writes', () => {
     ['a principal id that is not a UUID is refused', allow(['not-a-uuid'], ['s3:GetObject'])],
   ] as const) {
     test(title, { tag: '@api' }, async () => {
-      const { etag } = await owner.readPolicy(bucket);
-      const res = await owner.putPolicy(bucket, {
-        policy: buildBucketPolicy(bucket, [grantAllToOwner(ownerId), statement]),
-        etag,
-      });
+      const res = await owner.putPolicy(
+        bucket,
+        buildBucketPolicy(bucket, [grantAllToOwner(ownerId), statement]),
+      );
       const body = await res.text();
       // A validation refusal carries a message and no code.
       expect({ status: res.status(), code: JSON.parse(body).code }, body).toEqual({

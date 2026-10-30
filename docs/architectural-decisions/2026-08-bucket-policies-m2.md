@@ -211,11 +211,13 @@ page, beside Objects and API Keys, and absent for a role that cannot read it.
 The member detail page carries a read-only list of the buckets a member reaches,
 so an admin can answer "what does this person have" from the person's page.
 
-**Concurrent edits take a compare-and-set.** With no policy id there is no
-version to bump, so the storage system supplies one instead. A read returns a
-strong ETag over the stored document, a write carries it back, and a write whose
-ETag no longer matches is refused with nothing written. Creating a bucket's
-first policy is the same check against no policy existing.
+**Concurrent edits: the last write wins.** Policy writes are unconditional, as
+on AWS: a read returns the document with no ETag, and a write or delete carries
+no precondition. Two admins saving one bucket's policy at once both succeed, and
+the stored document is whichever committed last. The storage system takes no
+locks around policy writes. See
+[Bucket policy writes without locks](https://github.com/fil-one/RFC/blob/main/rfcs/2026-10-bucket-policy-writes-without-locks.md),
+which replaces the compare-and-set this ADR first described.
 
 ## Architectural changes
 
@@ -431,8 +433,8 @@ is the one existing path for pushing a change to a warm key.
    all-buckets flag, so there is nothing on it to keep in step with the console.
 3. **Bucket policies** addressed by bucket, read and written over S3 with the
    service key (`GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`): a
-   statement list carrying effect, principals, and actions; an ETag the caller
-   passes back to make an edit conditional; and a management-API query by
+   statement list carrying effect, principals, and actions, written
+   unconditionally with the last write winning; and a management-API query by
    principal. A policy write carries no member identity, since who may edit a
    policy is the console's decision.
 4. **Keys bound to a principal**, issued with a name and expiry only, names

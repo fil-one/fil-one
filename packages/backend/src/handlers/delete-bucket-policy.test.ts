@@ -32,13 +32,13 @@ import {
   resetFixture,
 } from '../test/bucket-policy-fixture.ts';
 
-function buildDeleteEvent(headers: Record<string, string>, region: string = IAM_REGION) {
+function buildDeleteEvent(region: string = IAM_REGION) {
   const event = buildEvent({
     method: 'DELETE',
     userInfo: { userId: USER_ID, orgId: ORG_ID },
     queryStringParameters: { region },
   });
-  event.headers = headers;
+  event.headers = {};
   event.pathParameters = { name: BUCKET_NAME };
   return event;
 }
@@ -48,10 +48,10 @@ const parseResponseBody = (result: { body?: string }) => JSON.parse(result.body 
 describe('delete-bucket-policy baseHandler', () => {
   beforeEach(resetFixture);
 
-  it('removes the policy matching If-Match', async () => {
-    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
+  it('removes the stored policy', async () => {
+    iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
 
-    const result = await baseHandler(buildDeleteEvent({ 'if-match': etag }));
+    const result = await baseHandler(buildDeleteEvent());
 
     expect(result).toMatchObject({
       statusCode: 204,
@@ -66,9 +66,9 @@ describe('delete-bucket-policy baseHandler', () => {
   });
 
   it('records a deleted intent and a succeeded completion', async () => {
-    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
+    iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
 
-    await baseHandler(buildDeleteEvent({ 'if-match': etag }));
+    await baseHandler(buildDeleteEvent());
 
     const [intent, completion] = getAuditEvents();
     expect(intent).toMatchObject({
@@ -84,39 +84,8 @@ describe('delete-bucket-policy baseHandler', () => {
     });
   });
 
-  it('removes the policy unconditionally without If-Match, as on S3', async () => {
-    iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
-
-    const result = await baseHandler(buildDeleteEvent({}));
-
-    expect(result.statusCode).toBe(204);
-    expect(iam.policies.get(TENANT_ID)?.has(BUCKET_NAME)).toBe(false);
-  });
-
-  it('refuses If-None-Match, since a delete creates nothing', async () => {
-    iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
-
-    const result = await baseHandler(buildDeleteEvent({ 'if-none-match': '*' }));
-
-    expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
-      statusCode: 400,
-      body: { message: 'A delete cannot carry If-None-Match' },
-    });
-    expect(iam.calls).toHaveLength(0);
-  });
-
-  it('refuses a stale If-Match with the policy still in place', async () => {
-    iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
-
-    const result = await baseHandler(buildDeleteEvent({ 'if-match': '"stale"' }));
-
-    expect(result.statusCode).toBe(412);
-    expect(parseResponseBody(result).code).toBe(ApiErrorCode.POLICY_CONFLICT);
-    expect(iam.policies.get(TENANT_ID)?.has(BUCKET_NAME)).toBe(true);
-  });
-
   it('answers 404 with the policy code for a bucket that has none', async () => {
-    const result = await baseHandler(buildDeleteEvent({ 'if-match': '"any"' }));
+    const result = await baseHandler(buildDeleteEvent());
 
     expect(result.statusCode).toBe(404);
     expect(parseResponseBody(result).code).toBe(ApiErrorCode.POLICY_NOT_FOUND);
@@ -125,7 +94,7 @@ describe('delete-bucket-policy baseHandler', () => {
   it('answers 503 without provisioning a tenant when the org has none in the region', async () => {
     orchestrator.isTenantReady.mockReturnValueOnce(null);
 
-    const result = await baseHandler(buildDeleteEvent({ 'if-match': '"v1"' }));
+    const result = await baseHandler(buildDeleteEvent());
 
     expect(result.statusCode).toBe(503);
     expect(iam.calls).toHaveLength(0);
@@ -133,9 +102,7 @@ describe('delete-bucket-policy baseHandler', () => {
   });
 
   it('answers 501 in a region whose network does not serve the iam access model', async () => {
-    const result = await baseHandler(
-      buildDeleteEvent({ 'if-match': '"any"' }, SERVICE_KEYS_REGION),
-    );
+    const result = await baseHandler(buildDeleteEvent(SERVICE_KEYS_REGION));
 
     expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
       statusCode: 501,

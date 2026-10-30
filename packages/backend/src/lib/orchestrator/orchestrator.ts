@@ -29,11 +29,6 @@ import {
   BucketConfigurationError,
   PrincipalNotFoundError,
 } from '../errors.ts';
-import type {
-  IfMatchPrecondition,
-  PolicyPrecondition,
-  StoredBucketPolicy,
-} from '../bucket-policy-orchestrator.ts';
 import type { MemberBucketPolicy } from '../member-orchestrator.ts';
 import type {
   BucketDetails,
@@ -275,12 +270,9 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
       requestOptions,
     );
     // TODO: move this write to a durable job if bucket creation starts timing out.
-    // The first policy is refused if one is already stored (fil-one/RFC#30, "Bucket creation").
     if (args.policy) {
       const policy = args.policy;
-      await withWriteRetry(() =>
-        s3PutBucketPolicy(s3, args.bucketName, policy, { ifNoneMatch: '*' }),
-      );
+      await withWriteRetry(() => s3PutBucketPolicy(s3, args.bucketName, policy));
     }
 
     // The signal on the retry options stops retrying once the deadline has
@@ -583,28 +575,19 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     });
   }
 
-  async getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null> {
+  async getBucketPolicy(tenantId: string, bucketName: string): Promise<BucketPolicy | null> {
     // The S3 document matches `BucketPolicy` in `@filone/shared`.
     return s3GetBucketPolicy(await this.getTenantS3Client(tenantId), bucketName);
   }
 
-  async putBucketPolicy(
-    tenantId: string,
-    bucketName: string,
-    policy: BucketPolicy,
-    precondition?: PolicyPrecondition,
-  ): Promise<{ etag: string }> {
+  async putBucketPolicy(tenantId: string, bucketName: string, policy: BucketPolicy): Promise<void> {
     const s3 = await this.getTenantS3Client(tenantId);
-    return withWriteRetry(() => s3PutBucketPolicy(s3, bucketName, policy, precondition));
+    await withWriteRetry(() => s3PutBucketPolicy(s3, bucketName, policy));
   }
 
-  async deleteBucketPolicy(
-    tenantId: string,
-    bucketName: string,
-    precondition?: IfMatchPrecondition,
-  ): Promise<void> {
+  async deleteBucketPolicy(tenantId: string, bucketName: string): Promise<void> {
     const s3 = await this.getTenantS3Client(tenantId);
-    await withWriteRetry(() => s3DeleteBucketPolicy(s3, bucketName, precondition));
+    await withWriteRetry(() => s3DeleteBucketPolicy(s3, bucketName));
   }
 
   /** An S3 client signing as the tenant's console key on this region. */

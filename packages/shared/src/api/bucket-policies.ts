@@ -19,8 +19,7 @@ import { z } from 'zod';
  * ```
  *
  * The console keeps no copy; it reads the document from the orchestrator,
- * edits it, and writes it back under the ETag it read, which travels in the
- * `ETag` and `If-Match` headers. A principal is a console user id, named by
+ * edits it, and writes it back, and the last write wins. A principal is a console user id, named by
  * its user ARN with an empty account field since the bucket already fixes the
  * tenant; `*` names every member. The helpers here convert at that boundary,
  * so the console's own code and UI handle bare user ids. `Resource` names the
@@ -495,18 +494,14 @@ export function getCreatorBucketPolicy({
 
 // ── Console API shapes ────────────────────────────────────────────────
 
-/**
- * `GET /api/buckets/{name}/policy?region=`. The `ETag` response header carries
- * the version a write sends back in `If-Match`.
- */
+/** `GET /api/buckets/{name}/policy?region=`. */
 export interface GetBucketPolicyResponse {
   policy: BucketPolicy;
 }
 
 /**
- * `PUT /api/buckets/{name}/policy?region=`, answered 204 with the new `ETag`.
- * As on S3, `If-Match` replaces only that version, `If-None-Match: *` creates
- * only the first, and neither overwrites.
+ * `PUT /api/buckets/{name}/policy?region=`, answered 204. As on S3, the write
+ * replaces whatever is stored, or creates the first policy.
  */
 export const PutBucketPolicyRequestSchema = z.object({ policy: BucketPolicySchema }).strict();
 

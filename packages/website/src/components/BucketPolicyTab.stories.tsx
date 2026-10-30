@@ -34,7 +34,7 @@ const storedPolicy: BucketPolicy = {
   Version: POLICY_VERSION,
   Statement: [teamReads, everyoneReads, nobodyDeletes],
 };
-const storedSnapshot: BucketPolicySnapshot = { policy: storedPolicy, etag: '"v1"' };
+const storedSnapshot: BucketPolicySnapshot = { policy: storedPolicy };
 
 /** Seeds the stored policy the tab reads. */
 function withPolicy(snapshot: BucketPolicySnapshot | null) {
@@ -75,7 +75,6 @@ export const DenyEveryone: Story = {
           }),
         ],
       },
-      etag: '"v1"',
     }),
   ],
 };
@@ -90,18 +89,15 @@ function stubEditor(
   return {
     policy: {
       snapshot: storedSnapshot,
-      hasConflict: overrides.hasConflict ?? false,
       isWriting: overrides.isWriting ?? false,
     },
     draft: {
       statements: overrides.statements ?? storedPolicy.Statement,
       hasUnsavedEdits: overrides.hasUnsavedEdits ?? false,
-      isStale: overrides.isStale ?? false,
       reset: () => {},
       setStatements: () => {},
     },
     savePolicy: async () => {},
-    reloadPolicy: async () => {},
   };
 }
 
@@ -125,11 +121,4 @@ export const UnsavedChanges: Story = {
 
 export const Saving: Story = {
   render: () => <LoadedView editor={stubEditor({ hasUnsavedEdits: true, isWriting: true })} />,
-};
-
-/** A save lost to another writer: the draft stays, Save is disabled until a reload. */
-export const Conflict: Story = {
-  render: () => (
-    <LoadedView editor={stubEditor({ hasUnsavedEdits: true, isStale: true, hasConflict: true })} />
-  ),
 };

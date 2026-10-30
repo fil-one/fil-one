@@ -58,9 +58,8 @@ vi.mock('./metrics.ts', () => ({
   instrumentClient: vi.fn(),
 }));
 
-// putBucketPolicy adds If-None-Match through command middleware, which the S3
-// client mock never runs, so the header can only be checked in the arguments
-// putBucketPolicy is called with.
+// putBucketPolicy is mocked at the S3 operations module, so these tests check
+// the arguments it is called with and drive its failures directly.
 const { mockPutBucketPolicy } = vi.hoisted(() => ({ mockPutBucketPolicy: vi.fn() }));
 vi.mock('../s3-bucket-operations.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../s3-bucket-operations.ts')>()),
@@ -79,7 +78,6 @@ import {
   BucketConfigurationError,
   BucketNotEmptyError,
   BucketNotFoundError,
-  PolicyConflictError,
   PolicyValidationError,
   PrincipalNotFoundError,
 } from '../errors.ts';
@@ -410,7 +408,6 @@ describe('createBucket', () => {
     s3Mock.on(PutBucketVersioningCommand).callsFake(() => callOrder.push('versioning'));
     mockPutBucketPolicy.mockImplementation(async () => {
       callOrder.push('policy');
-      return { etag: '"e1"' };
     });
 
     await orchestrator.createBucket(tenantId, {
@@ -422,9 +419,9 @@ describe('createBucket', () => {
     expect(callOrder).toStrictEqual(['create', 'policy', 'versioning']);
   });
 
-  it('writes the first policy with If-None-Match *', async () => {
+  it('writes the first policy unconditionally', async () => {
     s3Mock.on(CreateBucketCommand).resolves({});
-    mockPutBucketPolicy.mockResolvedValue({ etag: '"e1"' });
+    mockPutBucketPolicy.mockResolvedValue(undefined);
 
     await orchestrator.createBucket(tenantId, {
       bucketName: 'my-bucket',
@@ -432,15 +429,15 @@ describe('createBucket', () => {
     });
 
     expect(mockPutBucketPolicy.mock.calls).toStrictEqual([
-      [expect.any(S3Client), 'my-bucket', grantGetObjectToUser, { ifNoneMatch: '*' }],
+      [expect.any(S3Client), 'my-bucket', grantGetObjectToUser],
     ]);
   });
 
-  it('retries the first policy write after a PolicyConflictError', async () => {
+  it('retries the first policy write after a PolicyPublishError', async () => {
     s3Mock.on(CreateBucketCommand).resolves({});
     mockPutBucketPolicy
-      .mockRejectedValueOnce(new PolicyConflictError())
-      .mockResolvedValue({ etag: '"e1"' });
+      .mockRejectedValueOnce(new PolicyPublishError())
+      .mockResolvedValue(undefined);
 
     await orchestrator.createBucket(tenantId, {
       bucketName: 'my-bucket',

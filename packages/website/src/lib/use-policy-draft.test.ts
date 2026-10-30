@@ -18,18 +18,15 @@ const grantPutObjectToPrincipalB = buildStatement({
 });
 const readOnlySnapshot: BucketPolicySnapshot = {
   policy: { Version: POLICY_VERSION, Statement: [grantGetObjectToPrincipalA] },
-  etag: '"v1"',
 };
 const readWriteSnapshot: BucketPolicySnapshot = {
   policy: {
     Version: POLICY_VERSION,
     Statement: [grantGetObjectToPrincipalA, grantPutObjectToPrincipalB],
   },
-  etag: '"v2"',
 };
 const emptySnapshot: BucketPolicySnapshot = {
   policy: { Version: POLICY_VERSION, Statement: [] },
-  etag: '"v3"',
 };
 
 function renderWithSnapshot(snapshot: BucketPolicySnapshot | null) {
@@ -104,7 +101,7 @@ describe('usePolicyDraft', () => {
     });
   });
 
-  it('replaces the statements when a new ETag arrives and there are no edits', () => {
+  it('replaces the statements when a changed policy arrives and there are no edits', () => {
     const { result, rerender } = renderWithSnapshot(readOnlySnapshot);
 
     rerender({ snapshot: readWriteSnapshot });
@@ -112,11 +109,10 @@ describe('usePolicyDraft', () => {
     expect(result.current).toMatchObject({
       statements: [grantGetObjectToPrincipalA, grantPutObjectToPrincipalB],
       hasUnsavedEdits: false,
-      isStale: false,
     });
   });
 
-  it('keeps the edits and sets isStale when a new ETag arrives with edits', () => {
+  it('keeps the edits when a changed policy arrives with edits', () => {
     const { result, rerender } = renderWithSnapshot(readWriteSnapshot);
     act(() => result.current.setStatements([grantGetObjectToPrincipalA]));
 
@@ -125,13 +121,10 @@ describe('usePolicyDraft', () => {
     expect(result.current).toMatchObject({
       statements: [grantGetObjectToPrincipalA],
       hasUnsavedEdits: true,
-      isStale: true,
-      // A save sends the ETag the edits were made against, so the server refuses it.
-      etag: readWriteSnapshot.etag,
     });
   });
 
-  it('reset after isStale takes the latest snapshot', () => {
+  it('reset after a changed policy arrived takes the latest snapshot', () => {
     const { result, rerender } = renderWithSnapshot(readWriteSnapshot);
     act(() => result.current.setStatements([grantGetObjectToPrincipalA]));
     rerender({ snapshot: emptySnapshot });
@@ -141,7 +134,6 @@ describe('usePolicyDraft', () => {
     expect(result.current).toMatchObject({
       statements: [],
       hasUnsavedEdits: false,
-      isStale: false,
     });
   });
 

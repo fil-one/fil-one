@@ -15,17 +15,12 @@ import type { BucketPolicy, ErrorResponse, PolicyAction } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import {
   countNamedPrincipals,
-  parsePreconditionHeaders,
   resolveIamWriteTarget,
   syncNamedMembers,
   resolvePolicyRouteTarget,
   toPolicyErrorResponse,
 } from '../lib/bucket-policy-route.ts';
-import type {
-  BucketPolicyOrchestrator,
-  PolicyPrecondition,
-  StoredBucketPolicy,
-} from '../lib/bucket-policy-orchestrator.ts';
+import type { BucketPolicyOrchestrator } from '../lib/bucket-policy-orchestrator.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
@@ -51,10 +46,8 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
  * statement without knowing that these actions are privileged, so this route
  * has to apply the rule.
  *
- * As on S3, `If-Match` replaces only the version the caller read and
- * `If-None-Match: *` creates only the first; either way a stale edit is a 412
- * with nothing written, and the console re-reads. Without either the write is
- * unconditional. It answers 204 with the new version in the `ETag` header.
+ * As on S3, the write is unconditional and the last write wins. It answers
+ * 204.
  *
  * Two-phase audit around the vendor call, as for a key: the document lives at
  * the storage system and nothing local records it, so a crash between the two
@@ -67,47 +60,28 @@ export async function baseHandler(
   if ('response' in routeTarget) return routeTarget.response;
   const { bucketName, region } = routeTarget.target;
 
-  const preconditionResult = parsePreconditionHeaders(event);
-  if ('response' in preconditionResult) return preconditionResult.response;
-  let { precondition } = preconditionResult;
-  const isFirstPolicyWrite = precondition !== undefined && 'ifNoneMatch' in precondition;
-
   const parsed = parseJsonBody(event.body, PutBucketPolicyRequestSchema);
   if ('error' in parsed) return parsed.error;
   const { policy } = parsed.data;
 
   const { orgId, userId, membership } = getUserInfo(event);
   const canGrantRetention = roleHasPermission(membership?.role ?? NO_ROLE, 'privileged.grant');
-  const firstPolicyRefusal = getFirstPolicyRetentionRefusal({
-    policy,
-    isFirstPolicyWrite,
-    canGrantRetention,
-  });
-  if (firstPolicyRefusal) return firstPolicyRefusal;
 
   const writeTarget = await resolveIamWriteTarget(orgId, region);
   if ('response' in writeTarget) return writeTarget.response;
   const { orchestrator, tenantId } = writeTarget;
 
-  if (!isFirstPolicyWrite && !canGrantRetention) {
-    const retentionCheck = await checkNewRetentionGrants(
-      orchestrator,
-      tenantId,
-      bucketName,
-      policy,
-    );
-    if ('response' in retentionCheck) return retentionCheck.response;
-    precondition ??= retentionCheck.pinnedPrecondition;
+  if (!canGrantRetention) {
+    const refusal = await checkNewRetentionGrants(orchestrator, tenantId, bucketName, policy);
+    if (refusal) return refusal;
   }
 
   await syncNamedMembers(orchestrator, tenantId, orgId, policy);
 
-  // The intent names the kind of write the caller asked for, so the two halves
-  // agree whatever the vendor answers.
   const audit = await twoPhaseAudit({
-    // ponytail: an unconditional write that creates is recorded as an update;
+    // ponytail: a write that creates the first policy is recorded as an update;
     // tell them apart by reading first if the log ever needs it.
-    type: isFirstPolicyWrite ? 'bucket_policy.created' : 'bucket_policy.updated',
+    type: 'bucket_policy.updated',
     mode: 'fail-closed',
     actor: userActor({ userId, email: getVerifiedEmail(event) }),
     orgId,
@@ -116,12 +90,12 @@ export async function baseHandler(
   });
 
   try {
-    const written = await orchestrator.putBucketPolicy(tenantId, bucketName, policy, precondition);
+    await orchestrator.putBucketPolicy(tenantId, bucketName, policy);
     await audit.complete({
       outcome: 'succeeded',
       details: { statements: policy.Statement.length, principals: countNamedPrincipals(policy) },
     });
-    return new ResponseBuilder().status(204).header('ETag', written.etag).emptyBody().build();
+    return new ResponseBuilder().status(204).emptyBody().build();
   } catch (err) {
     const response = toPolicyErrorResponse(err);
     if (!response) throw err;
@@ -131,55 +105,35 @@ export async function baseHandler(
 }
 
 /**
- * The retention cap on a first policy (`If-None-Match: *`). There is no stored
- * policy to compare with, so it needs no vendor read and runs before the
- * region is checked. Returns the 403, or undefined when the write is not a
- * first policy or the caller may grant.
- */
-function getFirstPolicyRetentionRefusal({
-  policy,
-  isFirstPolicyWrite,
-  canGrantRetention,
-}: {
-  policy: BucketPolicy;
-  isFirstPolicyWrite: boolean;
-  canGrantRetention: boolean;
-}): APIGatewayProxyStructuredResultV2 | undefined {
-  if (!isFirstPolicyWrite || canGrantRetention) return undefined;
-  return hasNewRetentionGrants(null, policy) ? retentionGrantForbiddenResponse() : undefined;
-}
-
-/**
- * The retention cap on a replacement, for a caller without `privileged.grant`.
- * It reads the stored policy and refuses the write if the new one grants a
+ * The retention cap for a caller without `privileged.grant`. It reads the
+ * stored policy, or none, and refuses the write if the new one grants a
  * retention write the stored one did not, or names one outright that the
  * stored one did not name. If the read fails, the caller gets the same error
- * response the write would have produced.
+ * response the write would have produced. Returns undefined when the write may
+ * go ahead.
  *
- * Otherwise it returns a precondition pinned to the version it checked. An
- * unconditional write takes it, so an Owner's write in between cannot slip a
- * grant past the cap.
+ * The write that follows is unconditional. An Owner's write landing between
+ * this read and that write is overwritten, a retention grant it removed
+ * included: the last write wins, for this check as for the rest of the
+ * document (fil-one/RFC rfcs/2026-10-bucket-policy-writes-without-locks.md).
  */
 async function checkNewRetentionGrants(
   policies: BucketPolicyOrchestrator,
   tenantId: string,
   bucketName: string,
   next: BucketPolicy,
-): Promise<
-  { pinnedPrecondition: PolicyPrecondition } | { response: APIGatewayProxyStructuredResultV2 }
-> {
-  let stored: StoredBucketPolicy | null;
+): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  let current: BucketPolicy | null;
   try {
-    stored = await policies.getBucketPolicy(tenantId, bucketName);
+    current = await policies.getBucketPolicy(tenantId, bucketName);
   } catch (err) {
     const response = toPolicyErrorResponse(err);
     if (!response) throw err;
-    return { response };
+    return response;
   }
-  const current = stored?.policy ?? null;
   return hasNewRetentionGrants(current, next) || hasNewNamedRetentionGrants(current, next)
-    ? { response: retentionGrantForbiddenResponse() }
-    : { pinnedPrecondition: stored ? { ifMatch: stored.etag } : { ifNoneMatch: '*' } };
+    ? retentionGrantForbiddenResponse()
+    : undefined;
 }
 
 /**

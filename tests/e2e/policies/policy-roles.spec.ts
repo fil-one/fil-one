@@ -69,18 +69,13 @@ test.afterAll(async () => {
 
 test('only the owner and the admin may read or write a policy', { tag: '@api' }, async () => {
   const bucket = await createTrackedBucket();
-  const { etag, policy } = await apiByRole.owner.readPolicy(bucket);
+  const { policy } = await apiByRole.owner.readPolicy(bucket);
   const statuses = [];
   for (const role of ROLES) {
     statuses.push([
       role,
       (await apiByRole[role].fetchPolicyResponse(bucket)).status(),
-      (
-        await apiByRole[role].putPolicy(bucket, {
-          policy,
-          etag: (await apiByRole.owner.readPolicy(bucket)).etag,
-        })
-      ).status(),
+      (await apiByRole[role].putPolicy(bucket, policy)).status(),
     ]);
   }
   expect(statuses).toEqual([
@@ -89,7 +84,6 @@ test('only the owner and the admin may read or write a policy', { tag: '@api' },
     ['member', 403, 403],
     ['readonly', 403, 403],
   ]);
-  expect(etag).toEqual(expect.any(String));
 });
 
 test('every role but readonly may create a bucket and mint a key', { tag: '@api' }, async () => {

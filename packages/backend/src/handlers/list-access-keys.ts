@@ -69,11 +69,11 @@ async function filterKeysWithBucketAccess(
   // Uses `isTenantReady`: a list must not create a tenant.
   const tenantId = iam.isTenantReady(await getOrgProfile(orgId));
   // No tenant or no policy on the bucket: no principal-bound key has access.
-  const stored = tenantId ? await iam.getBucketPolicy(tenantId, bucketName) : null;
+  const policy = tenantId ? await iam.getBucketPolicy(tenantId, bucketName) : null;
   return keys.filter(
     (key) =>
       key.type !== 'principal' ||
-      (stored !== null && getEffectiveActions(stored.policy, key.principalId).length > 0),
+      (policy !== null && getEffectiveActions(policy, key.principalId).length > 0),
   );
 }
 

@@ -34,7 +34,7 @@ The Management API contract is defined in [`management-openapi.yaml`](./manageme
 |  | - PutObject / GetObject (pre-signed URLs)        | |
 |  | - ListObjectsV2, HeadObject, DeleteObject        | |
 |  | - CreateBucket, ListBuckets, DeleteBucket        | |
-|  | - Get / Put / DeleteBucketPolicy (ETag, If-Match)| |
+|  | - Get / Put / DeleteBucketPolicy                 | |
 |  +--------------------------------------------------+ |
 |                                                       |
 +-------------------------------------------------------+
@@ -110,7 +110,7 @@ Deleting an access key should revoke the key immediately so that subsequent S3 r
 
 FilOne represents each organization member as a **principal** of the tenant: `PUT /tenants/{tenantId}/principals/{principalId}` registers one (the id is FilOne's user id, a UUID) and `DELETE` removes it together with the keys bound to it. A principal carries no permissions. What it may do on a bucket comes from that bucket's policy, so the Service Orchestrator must answer two reads computed from the stored policies: `GET /tenants/{tenantId}/principals/{principalId}/policies` returns every bucket policy with a statement naming the principal or `*`, and `GET .../access` returns, per bucket, the sorted effective action set (the `Allow` statements naming them minus the `Deny` statements naming them). `s3:ListAllMyBuckets` never appears in that answer; every principal holds it outside the policies.
 
-Policies themselves travel over the S3 Gateway as AWS bucket policy documents: `GetBucketPolicy`, `PutBucketPolicy` and `DeleteBucketPolicy` on the bucket, signed with a service key holding the matching action. A document carries `Version`, `Statement` entries with `Sid`, `Effect`, `Principal` (`arn:aws:iam:::user/<principalId>`, or `*` for every principal of the tenant), `Action` and `Resource` (the bucket ARN for `s3:ListBucket*`, the `/*` ARN for object actions). The action vocabulary is the object-level scope list above plus `s3:*`; the bucket-level scopes are never granted by a policy. `GetBucketPolicy` returns an `ETag`; `PutBucketPolicy` and `DeleteBucketPolicy` accept `If-Match` with that value, or `If-None-Match: *` on the write that creates a bucket's first policy, and answer 412 on a mismatch with nothing written. A bucket with no policy is reachable by service keys only. FilOne writes a bucket's first policy right after `CreateBucket`, naming the member who created it.
+Policies themselves travel over the S3 Gateway as AWS bucket policy documents: `GetBucketPolicy`, `PutBucketPolicy` and `DeleteBucketPolicy` on the bucket, signed with a service key holding the matching action. A document carries `Version`, `Statement` entries with `Sid`, `Effect`, `Principal` (`arn:aws:iam:::user/<principalId>`, or `*` for every principal of the tenant), `Action` and `Resource` (the bucket ARN for `s3:ListBucket*`, the `/*` ARN for object actions). The action vocabulary is the object-level scope list above plus `s3:*`; the bucket-level scopes are never granted by a policy. `PutBucketPolicy` and `DeleteBucketPolicy` are unconditional and the last write wins, as on AWS; no `ETag` is returned and no precondition is honoured ([Bucket policy writes without locks](https://github.com/fil-one/RFC/blob/main/rfcs/2026-10-bucket-policy-writes-without-locks.md)). A bucket with no policy is reachable by service keys only. FilOne writes a bucket's first policy right after `CreateBucket`, naming the member who created it.
 
 The full contract is in [`management-openapi.yaml`](./management-openapi.yaml) and in [fil-one/RFC#30](https://github.com/fil-one/RFC/pull/30) with its amendment [fil-one/RFC#34](https://github.com/fil-one/RFC/pull/34).
 
@@ -151,7 +151,7 @@ The S3 Gateway is a standard S3-compatible endpoint reached at `https://s3.{regi
 - AWS Signature V4 authentication
 - Metadata headers (x-amz-meta-\*)
 - Versioning, Object Lock and Retention
-- Bucket policies (`GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`) as AWS policy documents with ETag compare-and-set, enforced for principal-bound keys
+- Bucket policies (`GetBucketPolicy`, `PutBucketPolicy`, `DeleteBucketPolicy`) as AWS policy documents, written unconditionally (last write wins), enforced for principal-bound keys
 - DNS-level forwarding (`https://s3.{region}.filonecontent.com`)
 
 ### Bucket Creation and Deletion

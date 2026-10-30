@@ -14,20 +14,15 @@ import {
 import type { BucketPolicy, ErrorResponse } from '@filone/shared';
 import {
   BucketNotFoundError,
-  PolicyConflictError,
   PolicyNotFoundError,
-  PolicyPreconditionFailedError,
   PolicyPublishError,
   PolicyValidationError,
   PrincipalNotFoundError,
 } from './errors.ts';
-import type { PolicyPrecondition } from './bucket-policy-orchestrator.ts';
 import { getOrgProfile, isOrgDeleting } from './org-profile.ts';
 import { listMembers } from './org-membership.ts';
-import { getRequestHeader } from './request-headers.ts';
 import {
   accountDeletedResponse,
-  badRequestResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
@@ -65,31 +60,6 @@ export function resolvePolicyRouteTarget(
   }
 
   return { target: { bucketName, region } };
-}
-
-/**
- * The write's precondition from `If-Match` or `If-None-Match: *`, by the rules
- * S3 and the storage system apply: at most one, never empty, and
- * `If-None-Match` only as `*`. Neither means an unconditional write.
- */
-export function parsePreconditionHeaders(
-  event: AuthenticatedEvent,
-):
-  | { precondition: PolicyPrecondition | undefined }
-  | { response: APIGatewayProxyStructuredResultV2 } {
-  const ifMatch = getRequestHeader(event, 'If-Match');
-  const ifNoneMatch = getRequestHeader(event, 'If-None-Match');
-  if (ifMatch === '' || ifNoneMatch === '') {
-    return { response: badRequestResponse('If-Match and If-None-Match cannot be empty') };
-  }
-  if (ifMatch !== undefined && ifNoneMatch !== undefined) {
-    return { response: badRequestResponse('Send If-Match or If-None-Match, not both') };
-  }
-  if (ifNoneMatch !== undefined && ifNoneMatch !== '*') {
-    return { response: badRequestResponse('If-None-Match must be *') };
-  }
-  if (ifMatch !== undefined) return { precondition: { ifMatch } };
-  return { precondition: ifNoneMatch ? { ifNoneMatch: '*' } : undefined };
 }
 
 export const POLICIES_UNAVAILABLE_MESSAGE = 'Bucket policies are not available in this region';
@@ -147,23 +117,6 @@ export function bucketNotFoundResponse(): APIGatewayProxyStructuredResultV2 {
 }
 
 /**
- * The stored policy moved under the caller: a stale `If-Match` or an
- * `If-None-Match: *` that found a policy is a 412, and a lock that could not be
- * taken within the storage system's timeout a 409. Nothing was written either
- * way, and the remedy is to read the policy again and apply the edit to what is
- * there now.
- */
-export function policyConflictResponse(status: 409 | 412): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(status)
-    .body<ErrorResponse>({
-      message: 'This policy changed while you were editing it. Reload it and try again.',
-      code: ApiErrorCode.POLICY_CONFLICT,
-    })
-    .build();
-}
-
-/**
  * The console's answer to each refusal the orchestrator's bucket-policy
  * methods can raise, or undefined for an error that is not one of them, which
  * the caller rethrows into the generic 500.
@@ -175,8 +128,6 @@ export function policyConflictResponse(status: 409 | 412): APIGatewayProxyStruct
 export function toPolicyErrorResponse(err: unknown): APIGatewayProxyStructuredResultV2 | undefined {
   if (err instanceof PolicyNotFoundError) return policyNotFoundResponse();
   if (err instanceof BucketNotFoundError) return bucketNotFoundResponse();
-  if (err instanceof PolicyPreconditionFailedError) return policyConflictResponse(412);
-  if (err instanceof PolicyConflictError) return policyConflictResponse(409);
   if (err instanceof PolicyValidationError) {
     return new ResponseBuilder().status(400).body<ErrorResponse>({ message: err.message }).build();
   }

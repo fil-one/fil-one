@@ -99,28 +99,6 @@ export class PolicyNotFoundError extends Error {
   }
 }
 
-// The ETag the write carried no longer matches the stored policy, or the write
-// asked to create a first policy where one exists. Nothing was written. Never
-// retried here: the caller has to read the current document and decide again.
-export class PolicyPreconditionFailedError extends Error {
-  readonly bucketName: string;
-  constructor(bucketName: string, options?: ErrorOptions) {
-    super(`The policy of bucket "${bucketName}" changed since it was read`, options);
-    this.name = 'PolicyPreconditionFailedError';
-    this.bucketName = bucketName;
-  }
-}
-
-// The storage system could not take its lock within its timeout because another
-// change to the same principal or policy was in flight, or answered
-// ServiceUnavailable. Nothing was written, and the same request may be retried.
-export class PolicyConflictError extends Error {
-  constructor(options?: ErrorOptions) {
-    super('Another change to this policy was in flight', options);
-    this.name = 'PolicyConflictError';
-  }
-}
-
 // The storage system refused the document or the principal id. The message is
 // the upstream one and is safe to show: it names the statement or field at
 // fault and nothing about the tenant.

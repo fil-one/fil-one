@@ -132,14 +132,13 @@ test(
 );
 
 test('a policy naming a removed member is refused', { tag: ['@serial', '@api'] }, async () => {
-  const { etag } = await owner.readPolicy(leaverBucket);
-  const writeNamingRemovedMember = await owner.putPolicy(leaverBucket, {
-    policy: buildBucketPolicy(leaverBucket, [
+  const writeNamingRemovedMember = await owner.putPolicy(
+    leaverBucket,
+    buildBucketPolicy(leaverBucket, [
       grantAllToOwner(ownerId),
       allow([leaverId], ['s3:ListBucket']),
     ]),
-    etag,
-  });
+  );
   const body = await writeNamingRemovedMember.text();
   // A validation refusal carries a message and no code.
   expect({ status: writeNamingRemovedMember.status(), code: JSON.parse(body).code }, body).toEqual({
