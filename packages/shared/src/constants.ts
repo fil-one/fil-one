@@ -15,7 +15,7 @@ export type Stage = (typeof Stage)[keyof typeof Stage];
  */
 export type StageLike = Stage | (string & {});
 
-export const DOCS_URL = 'https://docs.fil.one';
+export const DOCS_URL = 'https://docs.filone.com';
 
 /** Available S3 regions. */
 export const S3Region = {
@@ -193,18 +193,19 @@ export function getAuth0Domain(stage: StageLike): string {
 }
 
 /** Canonical hostname the production console is served on. */
-export const PROD_CONSOLE_HOST = 'app.fil.one';
+export const PROD_CONSOLE_HOST = 'app.filone.com';
 
 /**
  * Alias hostnames the production console is also served on: the unlisted demo alias
- * app.filone.ai, and app.filone.com, the domain the console is moving to.
+ * app.filone.ai, and app.fil.one, the console's previous canonical host, which keeps
+ * serving until it redirects to app.filone.com.
  *
  * These are alternate domain names on the same CloudFront distribution serving the
  * same bundle — not a separate deployment. The CloudFront cert must cover every entry;
  * see environments/prod/filone-com.tf in fil-one/infrastructure, and
  * docs/Auth0OneTimeSetup.md §4a.
  */
-export const PROD_CONSOLE_ALIAS_HOSTS = ['app.filone.ai', 'app.filone.com'] as const;
+export const PROD_CONSOLE_ALIAS_HOSTS = ['app.filone.ai', 'app.fil.one'] as const;
 
 /**
  * Marketing site to send a user to when they leave the console, keyed by the
@@ -217,9 +218,9 @@ export const PROD_CONSOLE_ALIAS_HOSTS = ['app.filone.ai', 'app.filone.com'] as c
  * instead of redirecting.
  */
 export const MARKETING_URL_BY_CONSOLE_ORIGIN: Readonly<Record<string, string | undefined>> = {
-  [`https://${PROD_CONSOLE_HOST}`]: 'https://fil.one',
+  [`https://${PROD_CONSOLE_HOST}`]: 'https://www.filone.com',
+  'https://app.fil.one': 'https://www.filone.com',
   'https://app.filone.ai': 'https://filone.ai',
-  'https://app.filone.com': 'https://www.filone.com',
 };
 
 /**
@@ -249,13 +250,13 @@ export function logoutReturnTo(origin: string): string {
  * — passkeys and sessions do not carry between the two, because the WebAuthn
  * relying-party ID is the Auth0 hostname — are in docs/Auth0OneTimeSetup.md §4a.
  *
- * app.filone.com is the future canonical host, so it signs in through `auth.fil.one`,
- * where existing passkeys keep working, until login itself moves to filone.com.
+ * Both the canonical host and app.fil.one sign in through `auth.fil.one`, where existing
+ * passkeys keep working, until login itself moves to filone.com.
  */
 export const AUTH0_DOMAIN_BY_CONSOLE_ORIGIN: Readonly<Record<string, string | undefined>> = {
   [`https://${PROD_CONSOLE_HOST}`]: 'auth.fil.one',
+  'https://app.fil.one': 'auth.fil.one',
   'https://app.filone.ai': 'fil-one.us.auth0.com',
-  'https://app.filone.com': 'auth.fil.one',
 };
 
 const PRODUCTION_HOSTS: ReadonlySet<string> = new Set([
@@ -266,7 +267,7 @@ const PRODUCTION_HOSTS: ReadonlySet<string> = new Set([
 /**
  * Infer the deployment stage from the hostname a deployment is served on.
  *
- * Production is served from {@link PROD_CONSOLE_HOST} and its demo aliases;
+ * Production is served from {@link PROD_CONSOLE_HOST} and its aliases;
  * staging, per-PR previews and personal dev all share a non-production Auth0
  * tenant and are treated as {@link Stage.Staging} for the purposes of
  * stage-derived config (Auth0 domain, S3 endpoint, etc.).

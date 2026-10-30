@@ -240,7 +240,7 @@ describe('BucketsPage', () => {
     expect(screen.getByText(/Delete its objects and object versions first/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /how to empty a bucket/ })).toHaveAttribute(
       'href',
-      'https://docs.fil.one/storage/objects#deleting-objects',
+      'https://docs.filone.com/storage/objects#deleting-objects',
     );
   });
 

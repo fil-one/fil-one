@@ -29,7 +29,7 @@ describe('resolveAuth0Domain', () => {
   });
 
   it('uses the custom domain for the canonical console host', () => {
-    expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': 'app.fil.one' }))).toBe(
+    expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': 'app.filone.com' }))).toBe(
       'auth.fil.one',
     );
   });
@@ -41,8 +41,8 @@ describe('resolveAuth0Domain', () => {
     );
   });
 
-  it('uses the custom domain for the app.filone.com host', () => {
-    expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': 'app.filone.com' }))).toBe(
+  it('uses the custom domain for the previous canonical host', () => {
+    expect(resolveAuth0Domain(eventWith({ 'x-forwarded-host': 'app.fil.one' }))).toBe(
       'auth.fil.one',
     );
   });
@@ -59,6 +59,7 @@ describe('resolveAuth0Domain', () => {
   it.for([
     ['an unrelated host', 'attacker.example'],
     ['a suffix attack', 'app.fil.one.attacker.example'],
+    ['a suffix attack on the canonical host', 'app.filone.com.attacker.example'],
     ['a prefix attack', 'app.filone.ai.attacker.example'],
     ['comma-joined duplicate headers', 'app.filone.ai,attacker.example'],
     ['an explicit port', 'app.filone.ai:443'],
