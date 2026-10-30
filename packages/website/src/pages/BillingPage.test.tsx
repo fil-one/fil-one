@@ -107,7 +107,7 @@ function contractedBilling(): BillingInfo {
 /**
  * A router around the page, because the help rail links to `/support` and an
  * internal link is the router's `Link`. Same shape as the helper in
- * `QuerySources.test.tsx` and its neighbours.
+ * `LeftLastOrgPage.test.tsx`.
  */
 function renderWithRouter(ui: () => React.JSX.Element) {
   const rootRoute = createRootRoute({ component: ui });

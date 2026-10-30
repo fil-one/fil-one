@@ -38,9 +38,9 @@ const memberships: OrgMembershipSummary[] = [
   { orgId: ORG_B, orgName: 'Globex', role: OrgRole.Member },
 ];
 
-function renderMenu(me: Partial<MeResponse> = {}) {
+function renderMenu(me: Partial<MeResponse> = {}, role: OrgRole = OrgRole.Owner) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, OrgRole.Owner, { orgId: ORG_A, orgName: 'Acme', memberships, ...me });
+  seedPermissions(client, role, { orgId: ORG_A, orgName: 'Acme', memberships, ...me });
   return render(
     <QueryClientProvider client={client}>
       <OrgSwitcherMenu collapsed={false} testId="org-switcher-button" />
@@ -55,7 +55,7 @@ describe('OrgSwitcherMenu', () => {
     // Headless UI's `MenuItems` panel is portalled to `document.body`, so
     // `screen` is what would find it, not a scoped query — and it should not
     // be there before the trigger is clicked.
-    expect(screen.queryByText('Members')).not.toBeInTheDocument();
+    expect(screen.queryByText('Edit organization')).not.toBeInTheDocument();
   });
 
   it('opens the menu on click', () => {
@@ -64,8 +64,6 @@ describe('OrgSwitcherMenu', () => {
     fireEvent.click(screen.getByTestId('org-switcher-button'));
 
     expect(screen.getByText('Edit organization')).toBeInTheDocument();
-    expect(screen.getByText('Members')).toBeInTheDocument();
-    expect(screen.getByText('Billing')).toBeInTheDocument();
   });
 
   it("lists /me's memberships", () => {
@@ -90,44 +88,51 @@ describe('OrgSwitcherMenu', () => {
     });
   });
 
-  it("offers an Owner the org's pages", () => {
+  // Members, Billing and Audit log are the sidebar's Organization group.
+  it('offers Edit organization and none of the pages the sidebar lists', () => {
     renderMenu();
 
     fireEvent.click(screen.getByTestId('org-switcher-button'));
 
-    for (const name of ['Edit organization', 'Members', 'Billing', 'Audit log']) {
-      expect(screen.getByRole('menuitem', { name })).toBeInTheDocument();
-    }
+    // Each switcher row reads as its avatar's monogram, then the name.
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toStrictEqual([
+      'Edit organization',
+      'AAcme',
+      'GGlobex',
+      'Create organization',
+    ]);
   });
 
-  // Behind the billing gate those three would land right back on it; Edit
-  // organization is past the gate, and holds the danger zone.
-  it('leaves out the pages the billing gate stands in for', () => {
+  // Edit organization is past the billing gate, and holds the danger zone.
+  it('keeps Edit organization without an active plan', () => {
     renderMenu({ billingActive: false });
 
     fireEvent.click(screen.getByTestId('org-switcher-button'));
 
-    expect(screen.getByRole('menuitem', { name: 'Edit organization' })).toBeInTheDocument();
-    for (const name of ['Members', 'Billing', 'Audit log']) {
-      expect(screen.queryByRole('menuitem', { name })).not.toBeInTheDocument();
-    }
+    expect(screen.getByRole('menuitem', { name: 'Edit organization' })).toHaveAttribute(
+      'href',
+      '/edit-organization',
+    );
   });
 
-  it('leaves out Members, Audit log and Create organization outside the organizations beta', () => {
+  it('leaves out Edit organization, and the divider under it, for a role that cannot rename', () => {
+    renderMenu({}, OrgRole.Member);
+
+    fireEvent.click(screen.getByTestId('org-switcher-button'));
+
+    expect(screen.queryByRole('menuitem', { name: 'Edit organization' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+  });
+
+  it('leaves out Create organization outside the organizations beta', () => {
     renderMenu({ orgsBeta: false });
 
     fireEvent.click(screen.getByTestId('org-switcher-button'));
 
-    // Each switcher row reads as its avatar's monogram, then the name.
-    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'Edit organization',
-      'Billing',
-      'AAcme',
-      'GGlobex',
-    ]);
+    expect(screen.queryByText('Create organization')).not.toBeInTheDocument();
   });
 
-  it('draws no divider under Billing when nothing sits below it', () => {
+  it('draws no divider under Edit organization when nothing sits below it', () => {
     renderMenu({
       orgsBeta: false,
       memberships: [{ orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner }],
@@ -135,11 +140,11 @@ describe('OrgSwitcherMenu', () => {
 
     fireEvent.click(screen.getByTestId('org-switcher-button'));
 
-    expect(screen.getByText('Billing')).toBeInTheDocument();
+    expect(screen.getByText('Edit organization')).toBeInTheDocument();
     expect(screen.queryByRole('separator')).not.toBeInTheDocument();
   });
 
-  it('divides the org pages from the switcher', () => {
+  it('divides Edit organization from the switcher', () => {
     renderMenu({ orgsBeta: false });
 
     fireEvent.click(screen.getByTestId('org-switcher-button'));

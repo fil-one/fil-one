@@ -1,16 +1,22 @@
 import {
-  SquaresFourIcon,
+  ArrowUpRightIcon,
+  BookOpenIcon,
+  ChatCircleIcon,
+  ClockCounterClockwiseIcon,
+  CreditCardIcon,
   DatabaseIcon,
   KeyIcon,
-  ChatTeardropDotsIcon,
-  RobotIcon,
+  SquaresFourIcon,
+  UsersIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
+import { DOCS_URL } from '@filone/shared';
 import type { Permission } from '@filone/shared';
 import { usePermissions } from '../lib/use-permissions.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
+import { BaseLink } from './BaseLink.js';
 import { OrgSwitcherMenu } from './OrgSwitcherMenu.js';
 import { ReportBugButton } from './ReportBugButton.js';
 import { StatusBanners } from './SidebarStatusBanners.js';
@@ -35,6 +41,8 @@ type NavItem = {
   testId: string;
   /** What the destination needs. Omitted, every member sees the entry. */
   permission?: Permission;
+  /** Part of the organizations beta, so shown only to orgs in it. */
+  beta?: boolean;
 };
 
 type NavGroup = {
@@ -44,13 +52,9 @@ type NavGroup = {
 
 const navGroups: NavGroup[] = [
   {
+    // Unlabelled: with two storage pages, a "Storage" heading only added noise.
     items: [
       { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard', testId: 'nav-dashboard' },
-    ],
-  },
-  {
-    label: 'Storage',
-    items: [
       { path: '/buckets', icon: DatabaseIcon, label: 'Buckets', testId: 'nav-buckets' },
       {
         path: '/api-keys',
@@ -64,19 +68,31 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: 'AI Tools',
+    // The org switcher menu keeps Edit organization; these live only here.
+    label: 'Organization',
     items: [
       {
-        path: '/bucket-intelligence',
-        icon: ChatTeardropDotsIcon,
-        label: 'Bucket Intelligence',
-        testId: 'nav-bucket-intelligence',
+        path: '/members',
+        icon: UsersIcon,
+        label: 'Members',
+        testId: 'nav-members',
+        permission: 'members.read',
+        beta: true,
       },
       {
-        path: '/ai-agent-toolkit',
-        icon: RobotIcon,
-        label: 'AI Agent Toolkit',
-        testId: 'nav-ai-agent-toolkit',
+        path: '/billing',
+        icon: CreditCardIcon,
+        label: 'Billing',
+        testId: 'nav-billing',
+        permission: 'billing.view',
+      },
+      {
+        path: '/audit',
+        icon: ClockCounterClockwiseIcon,
+        label: 'Audit log',
+        testId: 'nav-audit',
+        permission: 'audit.view',
+        beta: true,
       },
     ],
   },
@@ -92,56 +108,128 @@ type NavLinksProps = {
 };
 
 function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
-  const { has } = usePermissions();
+  const { has, orgsBeta } = usePermissions();
+  // A group whose every page the caller cannot open is left out, label and all.
+  const visibleGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter(
+        (item) => (!item.permission || has(item.permission)) && (orgsBeta || !item.beta),
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
   return (
     <div className="flex flex-col p-2">
-      {navGroups.map((group, gi) => (
-        <div key={gi} className={gi > 0 ? 'mt-2' : ''}>
+      {visibleGroups.map((group, gi) => (
+        <div key={gi} className={gi > 0 ? 'mt-4' : ''}>
           {!collapsed && group.label && (
             <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wide text-zinc-500">
               {group.label}
             </p>
           )}
           <div className="flex flex-col gap-0.5">
-            {group.items
-              .filter((item) => !item.permission || has(item.permission))
-              .map(({ path, icon: Icon, label, testId }) => {
-                const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
-                const link = (
-                  <Link
-                    key={path}
-                    to={path}
-                    data-testid={showTestIds ? testId : undefined}
-                    aria-label={label}
-                    onClick={onClose}
-                    className={[
-                      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-                      collapsed ? 'justify-center' : '',
-                      isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                  >
-                    <Icon
-                      size={18}
-                      className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`}
-                    />
-                    {!collapsed && <span className="flex-1">{label}</span>}
-                  </Link>
+            {group.items.map(({ path, icon: Icon, label, testId }) => {
+              const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
+              const link = (
+                <Link
+                  key={path}
+                  to={path}
+                  data-testid={showTestIds ? testId : undefined}
+                  aria-label={label}
+                  onClick={onClose}
+                  className={[
+                    'flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-ui transition-colors',
+                    collapsed ? 'justify-center' : '',
+                    isActive ? 'bg-brand-50 text-brand-700' : 'text-zinc-600 hover:bg-zinc-100',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                >
+                  <Icon size={16} className={`flex-shrink-0 ${isActive ? '' : 'text-zinc-400'}`} />
+                  {!collapsed && <span className="flex-1">{label}</span>}
+                </Link>
+              );
+              if (collapsed) {
+                return (
+                  <Tooltip key={path} content={label} side="right">
+                    {link}
+                  </Tooltip>
                 );
-                if (collapsed) {
-                  return (
-                    <Tooltip key={path} content={label} side="right">
-                      {link}
-                    </Tooltip>
-                  );
-                }
-                return <div key={path}>{link}</div>;
-              })}
+              }
+              return <div key={path}>{link}</div>;
+            })}
           </div>
         </div>
       ))}
     </div>
+  );
+}
+
+const helpLinks = [
+  {
+    href: DOCS_URL,
+    icon: BookOpenIcon,
+    label: 'Documentation',
+    testId: 'sidebar-docs-link',
+    external: true,
+  },
+  {
+    href: '/support',
+    icon: ChatCircleIcon,
+    label: 'Support',
+    testId: 'sidebar-support-link',
+    external: false,
+  },
+];
+
+type HelpLinksProps = Omit<NavLinksProps, 'matchRoute'>;
+
+/**
+ * Documentation and Support, in the footer of both the sidebar and the mobile
+ * drawer, so they are in view without opening a menu. A step quieter than the
+ * page links (smaller grey text, no active state): they are places to get
+ * help, not pages of the org.
+ */
+function HelpLinks({ collapsed, onClose, showTestIds }: HelpLinksProps) {
+  return (
+    <>
+      {helpLinks.map(({ href, icon: Icon, label, testId, external }) => {
+        const link = (
+          <BaseLink
+            href={href}
+            data-testid={showTestIds ? testId : undefined}
+            aria-label={label}
+            onClick={onClose}
+            className={[
+              'flex items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 focus-visible:brand-outline',
+              collapsed ? 'justify-center' : '',
+            ].join(' ')}
+          >
+            <Icon size={16} className="flex-shrink-0 text-zinc-400" aria-hidden="true" />
+            {!collapsed && (
+              <>
+                <span className="flex-1">{label}</span>
+                {external && (
+                  <ArrowUpRightIcon
+                    size={12}
+                    className="flex-shrink-0 text-zinc-400"
+                    aria-hidden="true"
+                  />
+                )}
+              </>
+            )}
+          </BaseLink>
+        );
+        if (collapsed) {
+          return (
+            <Tooltip key={href} content={label} side="right">
+              {link}
+            </Tooltip>
+          );
+        }
+        return <div key={href}>{link}</div>;
+      })}
+    </>
   );
 }
 
@@ -225,11 +313,14 @@ export function SidebarNav({
           />
         )}
 
-        {/* Footer: user identity (also carries Documentation/Support now). Bug
-            report and system status have moved to the content window's bottom
-            bar on desktop; they stay here only in the mobile drawer, which has
-            no such bar. */}
+        {/* Footer: Documentation and Support, then user identity. Bug report
+            and system status sit in the content window's bottom bar on
+            desktop; they appear here only in the mobile drawer, which has no
+            such bar. */}
         <div className="p-2 flex flex-col gap-0.5">
+          <HelpLinks collapsed={collapsed} onClose={onClose} showTestIds={showTestIds} />
+          {/* Sets the help links apart from the account and app controls below. */}
+          <div className="my-1 border-t border-zinc-100" aria-hidden="true" />
           {showUserProfile && (
             <UserMenu
               src={me?.picture}

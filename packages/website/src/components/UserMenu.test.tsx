@@ -57,10 +57,11 @@ describe('UserMenu', () => {
 
     fireEvent.click(screen.getByTestId('user-menu-button'));
 
-    expect(screen.getByText('Settings')).toBeInTheDocument();
-    expect(screen.getByText('Support')).toBeInTheDocument();
-    expect(screen.getByText('Documentation')).toBeInTheDocument();
-    expect(screen.getByText('Log out')).toBeInTheDocument();
+    // Documentation and Support are rows in the sidebar footer instead.
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toStrictEqual([
+      'Settings',
+      'Log out',
+    ]);
   });
 
   it('logs out when Log out is clicked', () => {
