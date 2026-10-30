@@ -17,6 +17,8 @@ import { useBucketTabs } from '../lib/use-bucket-tabs.js';
 import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import { BucketPolicyTab } from '../components/BucketPolicyTab';
+import { ColdStorageMeta, useBucketColdStorage } from '../components/BucketColdStorage';
+import { useColdStorage, useSimulatedAnalytics } from '../lib/cold-storage-prototype.js';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
@@ -137,6 +139,10 @@ function BucketOverview({
   region: S3Region;
   bytesUsed: number | undefined;
 }) {
+  // Cold storage prototype: the 70 TB stand-in shows its faked size, and a
+  // bucket in cold storage says so in this line.
+  const simulated = useSimulatedAnalytics(bucket?.bucketName ?? '', region);
+  const coldState = useColdStorage(bucket?.bucketName ?? '', region);
   if (!bucket) return null;
 
   return (
@@ -144,7 +150,15 @@ function BucketOverview({
       <p className="mb-6 text-sm">
         <span className="text-zinc-700">{region}</span>
         <span className="mx-2 text-zinc-400">&bull;</span>
-        <span className="text-xs text-zinc-500">{formatStorage(bytesUsed)} used</span>
+        <span className="text-xs text-zinc-500">
+          {formatStorage(simulated?.bytesUsed ?? bytesUsed)} used
+        </span>
+        {coldState && (
+          <>
+            <span className="mx-2 text-zinc-400">&bull;</span>
+            <ColdStorageMeta state={coldState} />
+          </>
+        )}
       </p>
       {/* Responsive rather than a fixed three columns: at 375px three columns
           crushed the cards, and with four of them the fourth was orphaned at a
@@ -413,6 +427,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     region,
     onDeleted: invalidateObjectsCache,
   });
+  const cold = useBucketColdStorage(bucketName, region, objectActions.downloadObject);
+  const mayUploadHere = mayUpload && !cold.readOnly;
+  const mayDeleteHere = mayDelete && !cold.readOnly;
 
   const invalidateAccessKeysCache = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
@@ -445,26 +462,31 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     <div className="px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
 
-      <div className="mt-4 mb-2 flex items-center justify-between">
-        <Heading id="bucket-detail-heading" tag="h1" size="xl">
-          {bucketName}
-        </Heading>
-        <BucketHeaderActions
-          bucketName={bucketName}
-          region={region}
-          hasObjects={versions.length > 0}
-          mayDelete={mayDelete}
-          mayUpload={mayUpload}
-          totalObjectCount={analyticsData?.objectCount}
-          onEmptied={refreshAfterBulkDelete}
-          onUpload={() =>
-            void navigate({
-              to: '/buckets/$bucketName/upload',
-              params: { bucketName },
-              search: { region },
-            })
-          }
-        />
+      <div className="mt-4 mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Heading id="bucket-detail-heading" tag="h1" size="xl">
+            {bucketName}
+          </Heading>
+        </div>
+        <div className="flex items-center gap-2">
+          <BucketHeaderActions
+            bucketName={bucketName}
+            region={region}
+            hasObjects={versions.length > 0}
+            mayDelete={mayDeleteHere}
+            mayUpload={mayUploadHere}
+            totalObjectCount={analyticsData?.objectCount}
+            onEmptied={refreshAfterBulkDelete}
+            onUpload={() =>
+              void navigate({
+                to: '/buckets/$bucketName/upload',
+                params: { bucketName },
+                search: { region },
+              })
+            }
+          />
+          {cold.actions}
+        </div>
       </div>
 
       {bucketQuery.isPending ? (
@@ -505,9 +527,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               versioningEnabled={bucket?.versioning ?? false}
               currentPrefix={currentPrefix}
               onPrefixChange={setCurrentPrefix}
-              objectActions={objectActions}
-              mayUpload={mayUpload}
-              mayDelete={mayDelete}
+              objectActions={{ ...objectActions, downloadObject: cold.downloadObject }}
+              mayUpload={mayUploadHere}
+              mayDelete={mayDeleteHere}
               activeAccessKeyCount={accessKeys.filter((key) => key.status !== 'expired').length}
               accessKeysLoading={accessKeysLoading}
               accessKeysFailed={accessKeysQuery.isError}
@@ -516,6 +538,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onAddKeyOpenChange={setAddKeyOpen}
               onShowKeys={tabs.showKeysTab}
               listingTruncated={isTruncated}
+              lockedReason={cold.lockedReason}
               totalObjectCount={analyticsData?.objectCount}
             />
           </TabPanel>
@@ -549,6 +572,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         region={region}
         onKeyAdded={invalidateAccessKeysCache}
       />
+      {cold.overlays}
     </div>
   );
 }

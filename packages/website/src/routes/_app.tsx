@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MeResponse } from '@filone/shared';
 import { Route as rootRoute } from './__root';
 import { AppShell } from '../components/AppShell';
+import { ColdStorageAnnouncement } from '../components/ColdStorageAnnouncement';
 import { BillingRequiredGate } from '../components/BillingRequiredGate.js';
 import { Button } from '../components/Button';
 import { getMe, logout } from '../lib/api.js';
@@ -203,6 +204,8 @@ function AppWithOrgGuard() {
 
   return (
     <AppShell>
+      {/* Cold storage prototype (FIL-1608): shown once, on the first page after launch. */}
+      <ColdStorageAnnouncement />
       {/* In place of the routed page, not a redirect: the sidebar (org
           switcher, log out) stays reachable either way, and so do the pages
           in `PAGES_PAST_THE_BILLING_GATE`, where a blocked org can still be
