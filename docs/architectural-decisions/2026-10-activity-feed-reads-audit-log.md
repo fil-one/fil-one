@@ -22,7 +22,10 @@ entry, nothing ever reads "deleted", and its bucket entries came from a
 1. **Bucket lifecycle is audited.** `bucket.created` and `bucket.deleted` are
    two-phase events, intent before the storage call and completion after it,
    best-effort like the bucket policy events. A create that fails after the
-   storage system made the bucket records the bucket as created.
+   storage system made the bucket records the bucket as created. A storage call
+   that times out, or outlives the request deadline, writes no completion: the
+   storage system may still have done the work, and an intent with no completion
+   is how the log records an ending it never saw.
 2. **The feed is a filtered view of the audit log.** It returns completions that
    succeeded for bucket events and S3 key events (`key.created`, `key.rotated`,
    `key.deleted`), newest first, within the 90-day retention window. The
@@ -50,6 +53,13 @@ entry, nothing ever reads "deleted", and its bucket entries came from a
   Buckets page but not in the feed or on the audit page.
 - Below Admin, a bucket another member created and shared with the reader does not
   appear, and neither does a revocation another member made to the reader's key.
+- "Their own" means the events the reader acted on, whatever their role at the
+  time. An Admin demoted to Member keeps seeing the bucket and key changes they
+  made as Admin, including to other members' keys, because that is their own
+  history. Narrowing it to what the reader can reach today would need a storage
+  call per row.
+- A bucket created or deleted by a request that timed out never appears in the
+  feed, which shows completions only; the audit page shows its intent.
 - Key events written before the `byType` index existed are not in the feed, the gap
   [the audit log ADR](2026-08-audit-log-v1-m2.md#what-the-index-cannot-reach)
   describes. It closes as the TTL removes those events.

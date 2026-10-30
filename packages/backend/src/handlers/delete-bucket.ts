@@ -6,6 +6,7 @@ import type { ErrorResponse } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
+import { isOutcomeUnknown } from '../lib/audit-outcome.ts';
 import { BucketNotEmptyError } from '../lib/errors.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { ResponseBuilder, unsupportedRegionResponse } from '../lib/response-builder.ts';
@@ -62,7 +63,8 @@ export async function baseHandler(
   try {
     await orchestrator.deleteBucket(tenantId, bucketName, { signal });
   } catch (err) {
-    await bucketAudit.complete({ outcome: 'failed' });
+    // A timeout may still have deleted the bucket, so the intent stays open.
+    if (!isOutcomeUnknown(err, signal)) await bucketAudit.complete({ outcome: 'failed' });
     if (err instanceof BucketNotEmptyError) {
       return new ResponseBuilder()
         .status(409)

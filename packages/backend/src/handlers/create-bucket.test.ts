@@ -396,6 +396,19 @@ describe('create-bucket baseHandler', () => {
       ).rejects.toBeInstanceOf(PolicyPublishError);
     });
 
+    it('leaves the policy write open when the create times out', async () => {
+      mockCreateBucket.mockRejectedValue(
+        Object.assign(new Error('any timeout'), { name: 'TimeoutError' }),
+      );
+
+      await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(findAuditEvent('intent')).toMatchObject({ type: 'bucket_policy.created' });
+      expect(findAuditEvent('completion')).toBeUndefined();
+    });
+
     it('records the policy write as failed when it cannot be published', async () => {
       mockCreateBucket.mockRejectedValue(policyWriteFailure(new PolicyPublishError()));
 
@@ -481,6 +494,27 @@ describe('create-bucket baseHandler', () => {
       );
 
       expect(findBucketEvent('completion')).toMatchObject({ outcome: 'failed' });
+    });
+
+    // A timeout may or may not have created the bucket, so neither outcome is
+    // recorded and the intent stays open.
+    it.each([
+      [
+        'the storage call times out',
+        Object.assign(new Error('any timeout'), { name: 'TimeoutError' }),
+      ],
+      [
+        'the storage call is aborted',
+        Object.assign(new Error('any abort'), { name: 'AbortError' }),
+      ],
+    ])('leaves the bucket.created open when %s', async (_case, err) => {
+      mockCreateBucket.mockRejectedValue(err);
+
+      await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(getAuditEvents().filter((e) => e.phase === 'completion')).toStrictEqual([]);
     });
 
     it('creates the bucket even when the audit log cannot be written', async () => {

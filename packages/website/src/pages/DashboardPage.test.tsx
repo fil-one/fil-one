@@ -307,6 +307,29 @@ describe('DashboardPage — recent activity', () => {
     expect(screen.queryByText('No recent activity')).not.toBeInTheDocument();
   });
 
+  it.each([
+    [OrgRole.Owner, 'Bucket and key changes from the last 90 days appear here'],
+    [OrgRole.Admin, 'Bucket and key changes from the last 90 days appear here'],
+    [OrgRole.Member, 'Your bucket and key changes from the last 90 days appear here'],
+    [OrgRole.ReadOnly, 'Your bucket changes from the last 90 days appear here'],
+  ])('describes the empty feed by what a %s sees', async (role, description) => {
+    mockGetUsage.mockResolvedValue({ ...USAGE, buckets: { count: 1 } });
+    renderPage(role);
+
+    expect(await screen.findByText(description)).toBeInTheDocument();
+  });
+
+  it('loads the activity again from "Try again" after a failure', async () => {
+    mockGetActivity.mockRejectedValueOnce(new Error('any activity error'));
+    mockGetUsage.mockResolvedValue({ ...USAGE, buckets: { count: 1 } });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByText('No recent activity')).toBeInTheDocument();
+    expect(mockGetActivity).toHaveBeenCalledTimes(2);
+  });
+
   it('says the activity failed to load rather than that there is none', async () => {
     mockGetActivity.mockRejectedValue(new Error('any activity error'));
     renderPage();

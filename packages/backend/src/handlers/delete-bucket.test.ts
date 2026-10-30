@@ -225,6 +225,31 @@ describe('delete-bucket baseHandler', () => {
       });
     });
 
+    it('leaves the bucket.deleted open when the request deadline fires', async () => {
+      const deadline = new AbortController();
+      deadline.abort();
+      const event = buildEvent({
+        userInfo: USER_INFO,
+        requestContext: { deadline: deadline.signal },
+      });
+      event.pathParameters = { name: 'my-bucket' };
+      mockOrchestratorDeleteBucket.mockRejectedValue(new Error('any error after the deadline'));
+
+      await baseHandler(event).catch(() => undefined);
+
+      expect(getAuditEvents().filter((e) => e.phase === 'completion')).toStrictEqual([]);
+    });
+
+    it('leaves the bucket.deleted open when the storage call times out', async () => {
+      mockOrchestratorDeleteBucket.mockRejectedValue(
+        Object.assign(new Error('any timeout'), { name: 'TimeoutError' }),
+      );
+
+      await baseHandler(deleteEvent()).catch(() => undefined);
+
+      expect(getAuditEvents().filter((e) => e.phase === 'completion')).toStrictEqual([]);
+    });
+
     it('deletes the bucket even when the audit log cannot be written', async () => {
       ddbMock.on(PutItemCommand).rejects(new Error('audit table unavailable'));
       mockOrchestratorDeleteBucket.mockResolvedValue(undefined);
