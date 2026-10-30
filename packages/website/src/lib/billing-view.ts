@@ -9,7 +9,7 @@
 // module says "see your agreement" rather than filling the gap in.
 
 import { PlanId, SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
-import type { BillingInfo, Subscription } from '@filone/shared';
+import type { BillingInfo, Subscription, SubscriptionDiscount } from '@filone/shared';
 
 import { daysUntil, formatDate, formatDaysLeft, formatMonthDay, pluralizeDays } from './time.js';
 
@@ -231,7 +231,7 @@ export function storageCostCents(
  * is being billed yet.
  */
 export type CostDisclosure =
-  | { kind: 'estimate'; cents: number; minimumApplied: boolean }
+  | { kind: 'estimate'; cents: number; minimumApplied: boolean; discounted: boolean }
   | { kind: 'agreement' }
   | { kind: 'none' };
 
@@ -241,15 +241,75 @@ export function costDisclosure(
 ): CostDisclosure {
   if (!isBilling(subscription.status)) return { kind: 'none' };
 
-  const { pricePerTbCents, monthlyMinimumCents = 0 } = subscription;
+  const { pricePerTbCents, monthlyMinimumCents = 0, discounts = [] } = subscription;
   if (!pricePerTbCents) return { kind: 'agreement' };
 
   const usageCents = Math.round((storageBytesUsed / TB_BYTES) * pricePerTbCents);
+  // The minimum is part of the subtotal Stripe discounts, so the floor comes
+  // first and the discounts are taken off what it leaves.
+  const subtotalCents = Math.max(usageCents, monthlyMinimumCents);
   return {
     kind: 'estimate',
-    cents: Math.max(usageCents, monthlyMinimumCents),
+    cents: applyDiscounts(subtotalCents, discounts),
     minimumApplied: monthlyMinimumCents > usageCents,
+    discounted: discounts.length > 0,
   };
+}
+
+/**
+ * A subtotal after each discount, taken in the order Stripe applies them, each
+ * on what the one before it left. Never below zero: a fixed amount larger than
+ * the bill makes it free, not a credit.
+ */
+function applyDiscounts(subtotalCents: number, discounts: SubscriptionDiscount[]): number {
+  return discounts.reduce((cents, discount) => {
+    const off =
+      'percentOff' in discount
+        ? Math.round((cents * discount.percentOff) / 100)
+        : discount.amountOffCents;
+    return Math.max(0, cents - off);
+  }, subtotalCents);
+}
+
+/**
+ * The note beside an estimate the discounts went into: "Including 20%
+ * discount". Only the amount, not how long it lasts: the plan card says that,
+ * and here it would crowd the figure. Several discounts are not added up into
+ * one percentage, which would be wrong, so they are just named as discounts.
+ */
+export function estimateDiscountNote(discounts: SubscriptionDiscount[] = []): string | null {
+  const [only, ...others] = discounts;
+  if (!only) return null;
+  if (others.length > 0) return 'Including discounts';
+  const amount = 'percentOff' in only ? `${only.percentOff}%` : formatCents(only.amountOffCents);
+  return `Including ${amount} discount`;
+}
+
+/**
+ * What a discount takes off and for how long, in one phrase: "20% off for 3
+ * months", "$10.00 off your next invoice".
+ *
+ * A discount already on the subscription carries the date it ends, which is
+ * the more useful fact once it is running. One checked before it is applied
+ * has no start yet, so it can only say how many months it lasts.
+ */
+export function discountLabel(discount: SubscriptionDiscount): string {
+  const amount =
+    'percentOff' in discount ? `${discount.percentOff}%` : formatCents(discount.amountOffCents);
+
+  switch (discount.duration) {
+    case 'once':
+      return `${amount} off your next invoice`;
+    case 'forever':
+      return `${amount} off every invoice`;
+    case 'repeating':
+      if (discount.endsAt) return `${amount} off until ${formatDate(discount.endsAt)}`;
+      if (discount.durationInMonths) {
+        const months = discount.durationInMonths;
+        return `${amount} off for ${months} ${months === 1 ? 'month' : 'months'}`;
+      }
+      return `${amount} off`;
+  }
 }
 
 /** The states where an invoice is being run up, so a cost line means something. */

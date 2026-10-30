@@ -640,6 +640,13 @@ const MANIFEST = [
   },
   {
     method: 'POST',
+    path: '/api/billing/promotion-code',
+    handler: 'check-promotion-code',
+    category: 'authenticated',
+    requires: 'billing.manage',
+  },
+  {
+    method: 'POST',
     path: '/api/billing/portal',
     handler: 'create-portal-session',
     category: 'authenticated',
