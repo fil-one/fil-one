@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import type { Bucket, S3Region } from '@filone/shared';
+import { S3Region } from '@filone/shared';
+import type { Bucket } from '@filone/shared';
 
 vi.mock('../_app', () => ({ Route: {} }));
 vi.mock('../../lib/api.js', () => ({ apiRequest: vi.fn() }));
@@ -134,7 +135,7 @@ describe('the bucket detail route', () => {
   });
 
   it('names the failed regions instead of not found when the name may be in one of them', () => {
-    renderWithoutRegion({ regions: [], unavailableRegions: ['us-east-1' as S3Region] });
+    renderWithoutRegion({ regions: [], unavailableRegions: [S3Region.UsEast1] });
 
     expect(screen.getByTestId('bucket-error').textContent).toBe(
       'Cannot list buckets in the us-east-1 region. Please try again later.',
@@ -149,7 +150,7 @@ describe('the bucket detail route', () => {
 
   it('offers each region holding the name when the lookup found any', () => {
     renderWithoutRegion({
-      regions: ['us-east-1', 'eu-west-1'] as S3Region[],
+      regions: [S3Region.UsEast1, S3Region.EuWest1],
       unavailableRegions: [],
     });
 
@@ -158,7 +159,7 @@ describe('the bucket detail route', () => {
 
   it('passes the folder the link pointed into to the region chooser', () => {
     renderWithoutRegion(
-      { regions: ['us-east-1', 'eu-west-1'] as S3Region[], unavailableRegions: [] },
+      { regions: [S3Region.UsEast1, S3Region.EuWest1], unavailableRegions: [] },
       { prefix: 'any/prefix/' },
     );
 

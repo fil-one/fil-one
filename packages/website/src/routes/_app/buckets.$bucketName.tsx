@@ -33,6 +33,9 @@ export interface BucketListingFailed {
 
 export type BucketRegionLookup = BucketRegionsListed | BucketListingFailed;
 
+/** Shown when the listing failed with an error that is not an `Error`. */
+const LISTING_FAILED_MESSAGE = 'Cannot list buckets.';
+
 async function findBucketRegions(bucketName: string): Promise<BucketRegionLookup> {
   let listing: ListBucketsResponse;
   try {
@@ -44,7 +47,7 @@ async function findBucketRegions(bucketName: string): Promise<BucketRegionLookup
   } catch (err) {
     // Kept for the page to show in the bucket's own error state; thrown out of
     // `beforeLoad`, it would end on the router's generic error page.
-    return { error: err instanceof Error ? err : new Error('Cannot list buckets.') };
+    return { error: err instanceof Error ? err : new Error(LISTING_FAILED_MESSAGE) };
   }
   const { buckets, unavailableRegions = [] } = listing;
   // The listing types a region as any string; only one this console knows can
@@ -69,7 +72,11 @@ function BucketDetailRoute() {
   const lookup = regionLookup ?? { regions: [], unavailableRegions: [] };
   if ('error' in lookup) {
     return (
-      <BucketErrorState bucketName={bucketName} error={lookup.error} fallback="Bucket not found" />
+      <BucketErrorState
+        bucketName={bucketName}
+        error={lookup.error}
+        fallback={LISTING_FAILED_MESSAGE}
+      />
     );
   }
   const { regions, unavailableRegions } = lookup;

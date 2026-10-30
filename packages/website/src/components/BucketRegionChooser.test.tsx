@@ -7,7 +7,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
-import type { S3Region } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 
 import { BucketRegionChooser } from './BucketRegionChooser';
 
@@ -24,7 +24,7 @@ function withRouter(prefix?: string) {
       <BucketRegionChooser
         bucketName="any-bucket"
         prefix={prefix}
-        regions={['us-east-1', 'eu-west-1'] as S3Region[]}
+        regions={[S3Region.UsEast1, S3Region.EuWest1]}
         unavailableRegions={[]}
       />
     ),
