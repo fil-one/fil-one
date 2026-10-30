@@ -25,7 +25,7 @@ import { formatBytes } from '@filone/shared';
 import { PlanId, SubscriptionStatus, getUsageLimits } from '@filone/shared';
 
 import { getUsage, getBilling, getActivity } from '../lib/api.js';
-import { daysUntil, formatDateTime } from '../lib/time.js';
+import { daysUntil, formatDateTime, formatDaysLeft } from '../lib/time.js';
 import { costDisclosure, formatCents, planTitle, pricingLine } from '../lib/billing-view.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { RequirePermission } from '../components/RequirePermission';
@@ -237,7 +237,7 @@ export function DashboardPage() {
         <div className="mb-5 flex flex-col gap-3 rounded-xl bg-brand-50/60 px-5 py-3.5 ring-1 ring-brand-100 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <Badge color="blue" size="sm" strength="strong" description={trialEndsLabel}>
-              {trialDaysLeft !== null ? `${trialDaysLeft} days left` : 'TRIAL'}
+              {trialDaysLeft !== null ? formatDaysLeft(trialDaysLeft) : 'TRIAL'}
             </Badge>
             <p className="text-ui">
               <span className="font-medium text-zinc-900">Free trial:</span>
@@ -323,7 +323,7 @@ export function DashboardPage() {
                 <span data-testid="subscription-status" data-status={billing.subscription.status}>
                   {isTrialing && trialDaysLeft !== null && (
                     <Badge color="blue" size="sm" description={trialEndsLabel}>
-                      {trialDaysLeft} days left
+                      {formatDaysLeft(trialDaysLeft)}
                     </Badge>
                   )}
                   {!isTrialing && (
