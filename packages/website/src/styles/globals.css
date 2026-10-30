@@ -117,6 +117,16 @@
   /* Tinted background marking a table row as selected or current. Kept low
      enough that row text and badges keep their contrast on top of it. */
   --color-row-selected: theme('colors.brand.50 / 40%');
+
+  /* Cool wash marking a table row whose item is in cold storage, with a
+     deeper step for hover so the row still answers the pointer. Stronger than
+     the selected tint so the two never read as the same state. */
+  --color-row-frozen: theme('colors.brand.50 / 70%');
+  --color-row-frozen-hover: theme('colors.brand.100 / 60%');
+  --color-row-frozen-border: theme('colors.brand.100');
+  /* A control's hover inside a frozen row: brand-100, matching the zinc-100
+     that controls hover to on every other row. */
+  --color-row-frozen-control-hover: theme('colors.brand.100');
 }
 
 .dark-section {
@@ -138,4 +148,9 @@
   --color-card-heading-hover: theme('colors.brand.500');
 
   --color-row-selected: theme('colors.brand.950 / 60%');
+
+  --color-row-frozen: theme('colors.brand.950 / 35%');
+  --color-row-frozen-hover: theme('colors.brand.950 / 55%');
+  --color-row-frozen-border: theme('colors.brand.900 / 60%');
+  --color-row-frozen-control-hover: theme('colors.brand.900 / 50%');
 }

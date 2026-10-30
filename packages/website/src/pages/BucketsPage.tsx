@@ -19,8 +19,13 @@ import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { ColdStoragePrototypeControls } from '../components/ColdStoragePrototypeControls';
 import { FreezeBucketDialog, type ColdStorageTarget } from '../components/FreezeBucketDialog';
-import { GetDataBackDialog, type GetDataBackTarget } from '../components/GetDataBackDialog';
-import { trackColdStorage, useEnsureLargeBucket } from '../lib/cold-storage-prototype.js';
+import { GetDataBackDialog } from '../components/GetDataBackDialog';
+import { DeleteFrozenCopyDialog } from '../components/DeleteFrozenCopyDialog';
+import {
+  trackColdStorage,
+  useEnsureLargeBucket,
+  type WarmState,
+} from '../lib/cold-storage-prototype.js';
 
 // Mirrors BucketsTable's columns (labels and breakpoints) so the loading
 // placeholder drops the same columns at the same widths as the real table.
@@ -59,16 +64,21 @@ export function BucketsPage() {
 
   // Cold storage prototype (FIL-1608): the row menu opens these, one bucket at a time.
   const [freezeTarget, setFreezeTarget] = useState<ColdStorageTarget | null>(null);
-  const [getBackTarget, setGetBackTarget] = useState<GetDataBackTarget | null>(null);
+  const [getBackTarget, setGetBackTarget] = useState<ColdStorageTarget | null>(null);
+  const [deleteFrozenTarget, setDeleteFrozenTarget] = useState<
+    (ColdStorageTarget & { state: WarmState }) | null
+  >(null);
   const coldStorage = {
     onFreeze: (bucketName: string, region: S3Region) => {
       trackColdStorage('freeze started');
       setFreezeTarget({ bucketName, region });
     },
-    // The flow leaves this entry unselected. Preselecting warming, the cheaper way, keeps
-    // the confirm button labelled from the start.
     onGetDataBack: (bucketName: string, region: S3Region) =>
-      setGetBackTarget({ bucketName, region, preselect: 'warm' }),
+      setGetBackTarget({ bucketName, region }),
+    onDeleteFrozenCopy: (bucketName: string, region: S3Region, state: WarmState) => {
+      trackColdStorage('delete frozen copy opened');
+      setDeleteFrozenTarget({ bucketName, region, state });
+    },
   };
 
   // Shared across every state so navigating to Buckets never blanks the header
@@ -182,6 +192,12 @@ export function BucketsPage() {
       />
       <FreezeBucketDialog target={freezeTarget} onClose={() => setFreezeTarget(null)} />
       <GetDataBackDialog target={getBackTarget} onClose={() => setGetBackTarget(null)} />
+      <DeleteFrozenCopyDialog
+        state={deleteFrozenTarget?.state ?? null}
+        bucketName={deleteFrozenTarget?.bucketName ?? ''}
+        region={deleteFrozenTarget?.region ?? ''}
+        onClose={() => setDeleteFrozenTarget(null)}
+      />
       <ColdStoragePrototypeControls />
     </PageLayout>
   );

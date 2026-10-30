@@ -6,18 +6,17 @@ import { S3_REGION, type S3Region } from '@filone/shared';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal';
 import { Alert } from './Alert';
 import { Button } from './Button';
-import { PriceComparison, Term, TermList } from './ColdStorageFacts';
+import { RateComparison, Term, TermList } from './ColdStorageFacts';
 import { useToast } from './Toast';
 import {
   COLD_PRICE_PER_TB_MONTH,
   MIN_TERM_DAYS,
+  WARM_MIN_DAYS,
+  WARM_PRICE_PER_TB_MONTH,
   bytesToTb,
-  formatUsd,
+  formatRate,
   formatTb,
   freezeBucket,
-  getMonthlyCost,
-  getStandardMonthlyCost,
-  getWarmPeriodPricePerTb,
   useBucketBytes,
   trackColdStorage,
 } from '../lib/cold-storage-prototype.js';
@@ -31,7 +30,7 @@ type FreezeBucketDialogProps = {
 };
 
 /**
- * The review before freezing: what the bucket costs now and frozen, the terms
+ * The review before freezing: the per-TB rate now and frozen, the terms
  * that come with the lower price, and what stops working. The warning sits
  * before the button because backup tools failing overnight is the surprise most
  * likely to make someone regret freezing.
@@ -45,9 +44,6 @@ export function FreezeBucketDialog({ target, onClose }: FreezeBucketDialogProps)
   const bytes = useBucketBytes(bucketName, region) ?? 0;
   const { toast } = useToast();
 
-  const today = getStandardMonthlyCost(bytes);
-  const frozen = getMonthlyCost(bytes, COLD_PRICE_PER_TB_MONTH);
-
   function handleFreeze() {
     freezeBucket(bucketName, region, bytes);
     trackColdStorage('freeze confirmed', { sizeTb: String(Math.round(bytesToTb(bytes))) });
@@ -57,28 +53,27 @@ export function FreezeBucketDialog({ target, onClose }: FreezeBucketDialogProps)
 
   return (
     <Modal open={target !== null} onClose={onClose} size="md" testId="freeze-bucket-dialog">
-      <ModalHeader
-        onClose={onClose}
-        description={`${formatTb(bytes)}, billed at ${formatUsd(COLD_PRICE_PER_TB_MONTH)}/TB-month while frozen.`}
-      >
+      <ModalHeader onClose={onClose} description={`${formatTb(bytes)} moves to cold storage.`}>
         Freeze {bucketName}
       </ModalHeader>
       <ModalBody>
         <div className="flex flex-col gap-5">
-          <PriceComparison
+          <RateComparison
             cells={[
-              { label: 'Today', amount: today, unit: '/mo' },
-              { label: 'Frozen', amount: frozen, unit: '/mo' },
+              { label: 'Today', pricePerTbMonth: WARM_PRICE_PER_TB_MONTH },
+              { label: 'Frozen', pricePerTbMonth: COLD_PRICE_PER_TB_MONTH },
             ]}
-            footer={{ label: 'You save', value: `${formatUsd(today - frozen)}/mo`, positive: true }}
           />
           <TermList>
             <Term icon={CalendarBlankIcon} title={`Frozen for at least ${MIN_TERM_DAYS} days`}>
-              Unfreezing or deleting the bucket earlier charges the rest of the term.
+              Deleting the frozen copy or the bucket sooner still bills the rest of the term at{' '}
+              {formatRate(COLD_PRICE_PER_TB_MONTH)}.
             </Term>
             <Term icon={ClockIcon} title="Restoring takes 1 hour or more">
-              Restoring costs {formatUsd(getWarmPeriodPricePerTb())}/TB for 2 weeks, the shortest
-              restore.
+              Restoring is free to start. The restored copy bills at{' '}
+              {formatRate(WARM_PRICE_PER_TB_MONTH)} for at least {WARM_MIN_DAYS / 7} weeks, even if
+              deleted sooner, and the frozen copy keeps billing at{' '}
+              {formatRate(COLD_PRICE_PER_TB_MONTH)}.
             </Term>
           </TermList>
           <Alert

@@ -1,5 +1,6 @@
 // Prototype of cold storage (FIL-1608): freezing a bucket at $1.99/TB-month,
-// warming it for two weeks, and unfreezing it permanently.
+// restoring a copy of it for two weeks, and deleting the frozen copy once the
+// restored one should stay.
 //
 // Nothing here talks to the backend. The demand test fakes the feature while the
 // data stays on disk, and this prototype goes one step further: each bucket's
@@ -20,8 +21,6 @@ export const COLD_PRICE_PER_TB_MONTH = 1.99;
 export const MIN_TERM_DAYS = 90;
 export const WARM_MIN_DAYS = 14;
 export const MIN_FREEZE_BYTES = 1e12;
-/** Prices are per TB-month, so prorating counts a month as 30 days. */
-const DAYS_PER_MONTH = 30;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 /**
  * Most staging buckets hold a few MB, so the controls can make one of them Sam's
@@ -34,7 +33,7 @@ const STORAGE_KEY = 'filone:coldStoragePrototype';
 interface ColdStateBase {
   frozenAt: number;
   termEndsAt: number;
-  /** The bucket's size when it was frozen; every price for the frozen bucket uses it. */
+  /** The bucket's size when it was frozen. */
   bytes: number;
 }
 
@@ -53,12 +52,7 @@ export interface WarmState extends ColdStateBase {
   extensions: number;
 }
 
-export interface UnfreezingState extends ColdStateBase {
-  status: 'unfreezing';
-  readyAt: number;
-}
-
-export type ColdStorageState = FrozenState | WarmingState | WarmState | UnfreezingState;
+export type ColdStorageState = FrozenState | WarmingState | WarmState;
 
 export interface PrototypeSettings {
   simulateLargeBucket: boolean;
@@ -92,12 +86,14 @@ function readStore(): Store {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_STORE;
     const parsed = JSON.parse(raw) as Partial<Store>;
-    // States saved before sizes were recorded price at the 1 TB minimum.
+    // States saved before sizes were recorded take the 1 TB minimum. A bucket
+    // saved mid-way through the retired permanent restore lands back in
+    // standard storage, where that restore was taking it; the stored status is
+    // a plain string the current union no longer lists.
     const buckets = Object.fromEntries(
-      Object.entries(parsed.buckets ?? {}).map(([id, state]) => [
-        id,
-        { ...state, bytes: state.bytes ?? MIN_FREEZE_BYTES },
-      ]),
+      Object.entries(parsed.buckets ?? {})
+        .filter(([, state]) => (state.status as string) !== 'unfreezing')
+        .map(([id, state]) => [id, { ...state, bytes: state.bytes ?? MIN_FREEZE_BYTES }]),
     );
     return {
       ...DEFAULT_STORE,
@@ -146,17 +142,17 @@ function warmPeriodMs(settings: PrototypeSettings) {
   return settings.shortWaits ? 60_000 : WARM_MIN_DAYS * DAY_MS;
 }
 
-/**
- * Applies the transitions that happen on their own: a finished wait, and the
- * end of a warm period, which returns the bucket to frozen. Returns `null` once
- * an unfreeze completes, because the bucket is then ordinary storage again.
- */
 /** What a bucket carries through every state change: when it froze and how big it was. */
 function frozenFacts({ frozenAt, termEndsAt, bytes }: ColdStorageState): ColdStateBase {
   return { frozenAt, termEndsAt, bytes };
 }
 
-function resolveState(state: ColdStorageState, now: number): ColdStorageState | null {
+/**
+ * Applies the transitions that happen on their own: a finished restore, and
+ * the end of a warm period, which deletes the restored copy and leaves the
+ * bucket frozen.
+ */
+function resolveState(state: ColdStorageState, now: number): ColdStorageState {
   if (state.status === 'warming' && now >= state.readyAt) {
     return {
       ...frozenFacts(state),
@@ -168,7 +164,6 @@ function resolveState(state: ColdStorageState, now: number): ColdStorageState | 
   if (state.status === 'warm' && now >= state.warmUntil) {
     return { ...frozenFacts(state), status: 'frozen' };
   }
-  if (state.status === 'unfreezing' && now >= state.readyAt) return null;
   return state;
 }
 
@@ -229,12 +224,13 @@ export function extendWarm(bucketName: string, region: string, state: WarmState)
   });
 }
 
-export function unfreezeBucket(bucketName: string, region: string, state: ColdStorageState) {
-  setBucket(bucketName, region, {
-    ...frozenFacts(state),
-    status: 'unfreezing',
-    readyAt: Date.now() + waitMs(store.settings),
-  });
+/**
+ * Keeps the restored copy as standard storage and deletes the frozen one, so
+ * the bucket leaves cold storage. Restoring first and deleting second means
+ * the data is never out of reach while the bucket changes tier.
+ */
+export function deleteFrozenCopy(bucketName: string, region: string) {
+  setBucket(bucketName, region, null);
 }
 
 /** Deleting a frozen bucket ends its cold storage; the dialog shows what that costs first. */
@@ -295,7 +291,7 @@ export function trackColdStorage(event: string, props: Record<string, string> = 
 }
 
 // ---------------------------------------------------------------------------
-// Size, eligibility and pricing
+// Size and eligibility
 // ---------------------------------------------------------------------------
 
 /**
@@ -355,51 +351,6 @@ export function bytesToTb(bytes: number): number {
   return bytes / 1e12;
 }
 
-export function getMonthlyCost(bytes: number, pricePerTbMonth: number): number {
-  return bytesToTb(bytes) * pricePerTbMonth;
-}
-
-/** Two weeks warm: half a month of standard storage, with its monthly minimum. */
-export function getWarmPeriodCost(bytes: number): number {
-  return floorToCents(getStandardMonthlyCost(bytes) * WARM_PERIOD_MONTHS);
-}
-
-/** Standard storage keeps its $5.99 monthly minimum, whatever the size. */
-export const STANDARD_MONTHLY_MINIMUM = 5.99;
-
-/** The 2-week warm minimum bills as half a month of standard storage. */
-const WARM_PERIOD_MONTHS = 0.5;
-
-/** What 2 weeks warm costs per TB, the figure the copy quotes: half of $5.99/TB-month. */
-export function getWarmPeriodPricePerTb(): number {
-  return floorToCents(WARM_PRICE_PER_TB_MONTH * WARM_PERIOD_MONTHS);
-}
-
-export function getStandardMonthlyCost(bytes: number): number {
-  return Math.max(getMonthlyCost(bytes, WARM_PRICE_PER_TB_MONTH), STANDARD_MONTHLY_MINIMUM);
-}
-
-/** A frozen bucket bills at least the 1 TB it needed to freeze. */
-export function getBillableBytes(bytes: number): number {
-  return Math.max(bytes, MIN_FREEZE_BYTES);
-}
-
-/** Prorated amounts round down to the cent, so half of $5.99 is $2.99. */
-function floorToCents(amount: number): number {
-  return Math.floor(Math.round(amount * 1000) / 10) / 100;
-}
-
-/** What leaving cold storage before the minimum term ends costs: the cold rate for the days left. */
-export function getRemainingTermCost(bytes: number, termEndsAt: number, now = Date.now()): number {
-  return (
-    getMonthlyCost(bytes, COLD_PRICE_PER_TB_MONTH) * (getDaysLeft(termEndsAt, now) / DAYS_PER_MONTH)
-  );
-}
-
-export function getDaysLeft(termEndsAt: number, now = Date.now()): number {
-  return Math.max(0, Math.ceil((termEndsAt - now) / DAY_MS));
-}
-
 /** Whole terabytes, the way the prices are quoted. */
 export function formatTb(bytes: number): string {
   return `${Math.round(bytesToTb(bytes)).toLocaleString()} TB`;
@@ -413,6 +364,14 @@ const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' 
 
 export function formatUsd(amount: number): string {
   return usd.format(amount);
+}
+
+/**
+ * "$1.99/TB-month". The console quotes only the per-TB rate, never a bucket's
+ * total or what it saves, so every price in the flow goes through this.
+ */
+export function formatRate(pricePerTbMonth: number): string {
+  return `${formatUsd(pricePerTbMonth)}/TB-month`;
 }
 
 /** A date for long spans; a time when the moment falls today, which short waits make common. */

@@ -1,5 +1,6 @@
 import { SnowflakeIcon, ThermometerIcon } from '@phosphor-icons/react/dist/ssr';
 
+import { Badge, type BadgeColor, type BadgeStrength } from './Badge';
 import { Spinner } from './Spinner';
 import {
   formatMoment,
@@ -45,17 +46,70 @@ function describe(state: ColdStorageState): { icon: React.ReactNode; text: strin
         icon: <ThermometerIcon size={13} className="text-amber-600" aria-hidden="true" />,
         text: `Restored until ${formatMoment(state.warmUntil)}`,
       };
-    case 'unfreezing':
-      return {
-        icon: (
-          <Spinner ariaLabel="Restoring permanently" size={11} colorClassName="text-zinc-400" />
-        ),
-        text: `Restoring permanently, ready in ${formatWaitLeft(state.readyAt)}`,
-      };
   }
 }
 
 /** The state's icon alone, for places that word the state their own way. */
 export function ColdStorageIcon({ state }: { state: ColdStorageState }) {
   return describe(state).icon;
+}
+
+/**
+ * The bucket's cold storage state as a pill beside its name in the Buckets
+ * table: the tint marks a frozen row, the pill says what it is. Frozen is the
+ * strong blue, since the subtle one is the row's own wash and would vanish on
+ * it; the timing of a restore sits in the tooltip.
+ */
+export function ColdStorageBadge({ state }: { state: ColdStorageState }) {
+  const { color, strength, icon, text, detail } = describeBadge(state);
+  return (
+    <Badge
+      color={color}
+      strength={strength}
+      size="xs"
+      description={detail}
+      // The pill is 20px tall and the name line 17.5px; pulling it out of the
+      // line's height keeps cold rows the same height as their neighbours.
+      className="-my-0.5 shrink-0"
+      data-testid="cold-storage-badge"
+    >
+      {icon}
+      {text}
+    </Badge>
+  );
+}
+
+function describeBadge(state: ColdStorageState): {
+  color: BadgeColor;
+  strength: BadgeStrength;
+  icon: React.ReactNode;
+  text: string;
+  detail: string;
+} {
+  switch (state.status) {
+    case 'frozen':
+      return {
+        color: 'blue',
+        strength: 'strong',
+        icon: <SnowflakeIcon size={11} className="text-brand-600" aria-hidden="true" />,
+        text: 'Frozen',
+        detail: 'Objects are listed but can’t be downloaded until you restore the bucket.',
+      };
+    case 'warming':
+      return {
+        color: 'amber',
+        strength: 'subtle',
+        icon: <Spinner ariaLabel="Restoring" size={9} colorClassName="text-amber-600" />,
+        text: 'Restoring',
+        detail: `Downloads work in ${formatWaitLeft(state.readyAt)}.`,
+      };
+    case 'warm':
+      return {
+        color: 'amber',
+        strength: 'subtle',
+        icon: <ThermometerIcon size={11} className="text-amber-600" aria-hidden="true" />,
+        text: 'Restored',
+        detail: `Downloads work until ${formatMoment(state.warmUntil)}.`,
+      };
+  }
 }

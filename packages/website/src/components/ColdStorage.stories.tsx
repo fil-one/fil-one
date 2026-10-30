@@ -8,7 +8,8 @@ import { ColdStorageStatus } from './ColdStorageStatus';
 import { FreezeBucketDialog } from './FreezeBucketDialog';
 import { GetDataBackDialog } from './GetDataBackDialog';
 import { ExtendRestoreDialog } from './ExtendRestoreDialog';
-import { freezeBucket, setLargeBucket, warmBucket } from '../lib/cold-storage-prototype.js';
+import { DeleteFrozenCopyDialog } from './DeleteFrozenCopyDialog';
+import { freezeBucket, setLargeBucket } from '../lib/cold-storage-prototype.js';
 
 /**
  * The cold storage prototype (FIL-1608), one story per screen and state. The
@@ -56,26 +57,11 @@ function FrozenFirst({ children }: { children: React.ReactNode }) {
   return children;
 }
 
-/** Opened from a file click: warming is preselected. */
-export const GetDataBackWarm: Story = {
+/** Restoring a frozen bucket: one way back, a copy for 2 weeks. */
+export const Restore: Story = {
   render: () => (
     <FrozenFirst>
-      <GetDataBackDialog
-        target={{ bucketName: BUCKET, region: REGION, preselect: 'warm' }}
-        onClose={() => {}}
-      />
-    </FrozenFirst>
-  ),
-};
-
-/** Unfreezing inside the minimum term: the charge for the rest of it, and the nudge to warm instead. */
-export const GetDataBackUnfreezeEarly: Story = {
-  render: () => (
-    <FrozenFirst>
-      <GetDataBackDialog
-        target={{ bucketName: BUCKET, region: REGION, preselect: 'unfreeze' }}
-        onClose={() => {}}
-      />
+      <GetDataBackDialog target={{ bucketName: BUCKET, region: REGION }} onClose={() => {}} />
     </FrozenFirst>
   ),
 };
@@ -113,7 +99,6 @@ export const StorageStatus: Story = {
       <ColdStorageStatus
         state={{ status: 'warm', ...term, warmUntil: now + 13 * DAY, extensions: 0 }}
       />
-      <ColdStorageStatus state={{ status: 'unfreezing', ...term, readyAt: now + 40 * 60 * 1000 }} />
     </div>
   ),
 };
@@ -130,26 +115,14 @@ export const ExtendRestore: Story = {
   ),
 };
 
-const RESTORED = 'client-deliveries';
-
-/** Restoring an already-restored bucket permanently: the one way left, without a radio. */
-export const RestorePermanentlyOnly: Story = {
-  render: function Render() {
-    useState(() => {
-      setLargeBucket(RESTORED, REGION);
-      freezeBucket(RESTORED, REGION, 70e12);
-      warmBucket(RESTORED, REGION, {
-        status: 'frozen',
-        frozenAt: now,
-        termEndsAt: now + 90 * DAY,
-        bytes: 70e12,
-      });
-    });
-    return (
-      <GetDataBackDialog
-        target={{ bucketName: RESTORED, region: REGION, preselect: 'unfreeze' }}
-        onClose={() => {}}
-      />
-    );
-  },
+/** Deleting the frozen copy of a restored bucket, inside the minimum term. */
+export const DeleteFrozenCopy: Story = {
+  render: () => (
+    <DeleteFrozenCopyDialog
+      state={{ status: 'warm', ...term, warmUntil: now + 13 * DAY, extensions: 0 }}
+      bucketName={BUCKET}
+      region={REGION}
+      onClose={() => {}}
+    />
+  ),
 };

@@ -21,6 +21,12 @@ import {
   type BucketFilters,
   type BucketSort,
 } from '../lib/bucket-table.js';
+import {
+  freezeBucket,
+  resetPrototype,
+  setLargeBucket,
+  warmBucket,
+} from '../lib/cold-storage-prototype.js';
 
 function withRouter(Story: () => React.JSX.Element) {
   const rootRoute = createRootRoute({ component: Story });
@@ -100,7 +106,7 @@ function InteractiveBucketsTable({ buckets }: { buckets: Bucket[] }) {
       regions={regions}
       matchCount={visible.length}
       totalCount={buckets.length}
-      coldStorage={{ onFreeze: () => {}, onGetDataBack: () => {} }}
+      coldStorage={{ onFreeze: () => {}, onGetDataBack: () => {}, onDeleteFrozenCopy: () => {} }}
     />
   );
 }
@@ -136,4 +142,28 @@ export const WithControls: Story = {
 /** Same long list confined to one region, so the region filter stays hidden. */
 export const SingleRegion: Story = {
   args: { buckets: MANY.map((b) => ({ ...b, region: S3Region.EuWest1 })) },
+};
+
+/**
+ * Cold storage prototype (FIL-1608): one bucket frozen, one restoring, the
+ * rest standard, so the frozen treatment reads against its neighbours.
+ */
+export const WithColdStorage: Story = {
+  args: { buckets: FEW },
+  render: function Render(args) {
+    useState(() => {
+      resetPrototype();
+      const [frozen, restoring] = [FEW[2], FEW[1]];
+      setLargeBucket(frozen.bucketName, S3Region.EuWest1);
+      freezeBucket(frozen.bucketName, S3Region.EuWest1, 70e12);
+      freezeBucket(restoring.bucketName, S3Region.EuWest1, 70e12);
+      warmBucket(restoring.bucketName, S3Region.EuWest1, {
+        status: 'frozen',
+        frozenAt: Date.now(),
+        termEndsAt: Date.now(),
+        bytes: 70e12,
+      });
+    });
+    return <InteractiveBucketsTable {...args} />;
+  },
 };

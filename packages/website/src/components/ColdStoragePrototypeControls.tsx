@@ -63,7 +63,7 @@ export function ColdStoragePrototypeControls() {
             size="sm"
             onClick={resetPrototype}
           >
-            Unfreeze all and show the announcement again
+            Reset all buckets and show the announcement again
           </Button>
         </div>
       )}

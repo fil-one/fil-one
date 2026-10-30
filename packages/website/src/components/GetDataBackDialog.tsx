@@ -1,223 +1,94 @@
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 
 import { S3_REGION } from '@filone/shared';
 
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal';
 import { Alert } from './Alert';
 import { Button } from './Button';
-import { Radio } from './Radio';
 import { useToast } from './Toast';
 import type { ColdStorageTarget } from './FreezeBucketDialog';
-import { CostColumnsHeader, CostRowAmounts, CostRowText, type RowCosts } from './ColdStorageFacts';
+import { RateColumnHeader, RateRowAmount, RateRowText, type RowRate } from './ColdStorageFacts';
 import {
   COLD_PRICE_PER_TB_MONTH,
   DAY_MS,
-  MIN_TERM_DAYS,
+  WARM_MIN_DAYS,
+  WARM_PRICE_PER_TB_MONTH,
+  formatRate,
   formatShortDate,
-  formatUsd,
-  getBillableBytes,
-  getMonthlyCost,
-  getStandardMonthlyCost,
-  getRemainingTermCost,
-  getWarmPeriodCost,
-  isInMinimumTerm,
-  unfreezeBucket,
   useColdStorage,
   warmBucket,
   trackColdStorage,
 } from '../lib/cold-storage-prototype.js';
 
-export type GetDataBackChoice = 'warm' | 'unfreeze';
-
-export type GetDataBackTarget = ColdStorageTarget & { preselect: GetDataBackChoice };
-
 type GetDataBackDialogProps = {
-  /** The bucket to bring back; `null` closes the dialog. */
-  target: GetDataBackTarget | null;
+  /** The frozen bucket to restore; `null` closes the dialog. */
+  target: ColdStorageTarget | null;
   onClose: () => void;
 };
 
 /**
- * One place to get data out of cold storage: both ways in one table, with what
- * each costs now and every month after in columns that mean the same thing for
- * both rows, so choosing "for a while" or "for good" is a straight comparison.
- * A file click preselects the 2-week restore, the usual need.
+ * Confirms a restore: a downloadable copy for 2 weeks, beside the frozen copy
+ * that stays. There is one way back. Keeping the data in standard storage for
+ * good is a restore followed by deleting the frozen copy, so the data is never
+ * out of reach while the bucket changes tier.
  */
 export function GetDataBackDialog({ target, onClose }: GetDataBackDialogProps) {
-  const shown = useRef<GetDataBackTarget>({ bucketName: '', region: S3_REGION, preselect: 'warm' });
-  const opened = useRef<GetDataBackTarget | null>(null);
-  const [choice, setChoice] = useState<GetDataBackChoice>('warm');
-  // Each opening starts from its own preselection, not the last one's.
-  if (target && opened.current !== target) {
-    opened.current = target;
-    shown.current = target;
-    setChoice(target.preselect);
-  }
-  if (!target) opened.current = null;
-
+  // Keeps the copy in place while the panel fades out after `target` goes null.
+  const shown = useRef<ColdStorageTarget>({ bucketName: '', region: S3_REGION });
+  if (target) shown.current = target;
   const { bucketName, region } = shown.current;
   const state = useColdStorage(bucketName, region);
   const { toast } = useToast();
 
-  if (!state) return null;
-  // Already warm: the only way left to go is permanent.
-  const canWarm = state.status === 'frozen';
-  const selected = canWarm ? choice : 'unfreeze';
-  // Priced at the size it was frozen at, not today's analytics.
-  const bytes = getBillableBytes(state.bytes);
-  const earlyCharge = isInMinimumTerm(state) ? getRemainingTermCost(bytes, state.termEndsAt) : 0;
-  const warmCost = getWarmPeriodCost(bytes);
-  const standardMonthly = getStandardMonthlyCost(bytes);
-  const frozenMonthly = getMonthlyCost(bytes, COLD_PRICE_PER_TB_MONTH);
-  const permanentCosts: RowCosts = {
-    now: formatUsd(earlyCharge),
-    monthly: formatUsd(standardMonthly),
-    monthlyNote: `was ${formatUsd(frozenMonthly)}`,
+  if (state?.status !== 'frozen') return null;
+
+  const rate: RowRate = {
+    rate: formatRate(WARM_PRICE_PER_TB_MONTH),
+    rateNote: `${WARM_MIN_DAYS / 7}-week minimum`,
   };
-  const termNote =
-    earlyCharge > 0
-      ? `The one-off charge covers the rest of your ${MIN_TERM_DAYS}-day freeze.`
-      : `No one-off charge: your ${MIN_TERM_DAYS}-day minimum has passed.`;
 
   function handleConfirm() {
-    if (!state) return;
-    trackColdStorage('data back chosen', {
-      choice: selected,
-      changedPreselection: String(selected !== shown.current.preselect),
-    });
-    if (selected === 'warm') {
-      warmBucket(bucketName, region, state);
-      toast.success('Restoring started. We’ll email you when downloads work.');
-    } else {
-      unfreezeBucket(bucketName, region, state);
-      toast.success('Restoring permanently started. We’ll email you when it’s done.');
-    }
+    if (state?.status !== 'frozen') return;
+    trackColdStorage('restore confirmed');
+    warmBucket(bucketName, region, state);
+    toast.success('Restoring started. We’ll email you when downloads work.');
     onClose();
-  }
-
-  // Number keys pick an option and Enter confirms, unless focus is on a button,
-  // where Enter already means that button.
-  function handleKeyDown(event: React.KeyboardEvent) {
-    if (event.key === '1' && canWarm) setChoice('warm');
-    else if (event.key === '2') setChoice('unfreeze');
-    else if (event.key === 'Enter' && !(event.target instanceof HTMLButtonElement)) {
-      event.preventDefault();
-      handleConfirm();
-    }
   }
 
   return (
     <Modal open={target !== null} onClose={onClose} size="md" testId="get-data-back-dialog">
-      <div onKeyDown={handleKeyDown}>
-        <ModalHeader
-          onClose={onClose}
-          description={
-            canWarm
-              ? 'Choose how long to restore the data.'
-              : 'Move it back to standard storage for good.'
-          }
-        >
-          {canWarm ? `Restore ${bucketName}` : `Restore ${bucketName} permanently`}
-        </ModalHeader>
-        <ModalBody>
-          <CostColumnsHeader />
-          {canWarm ? (
-            <div
-              className="divide-y divide-zinc-200 overflow-hidden rounded-lg border border-zinc-200 text-ui"
-              role="radiogroup"
-              aria-label="How to restore"
-            >
-              <OptionRow
-                value="warm"
-                checked={selected === 'warm'}
-                onChange={() => setChoice('warm')}
-                title="Restore for 2 weeks"
-                description={`Downloadable until ${formatShortDate(Date.now() + 14 * DAY_MS)}, then the restored copy is deleted. Your frozen copy stays untouched.`}
-                now={formatUsd(warmCost)}
-                monthly={formatUsd(frozenMonthly)}
-                monthlyNote="no change"
-              />
-              <OptionRow
-                value="unfreeze"
-                checked={selected === 'unfreeze'}
-                onChange={() => setChoice('unfreeze')}
-                title="Restore permanently"
-                description={`Back to standard storage. ${termNote}`}
-                {...permanentCosts}
-              />
-            </div>
-          ) : (
-            // Already restored, so permanent is the only way left: a plain row,
-            // since a lone radio button offers a choice that isn't there.
-            <div className="flex items-start gap-3 rounded-lg border border-zinc-200 px-4 py-3 text-ui">
-              <span className="flex-1">
-                <CostRowText
-                  title="Standard storage"
-                  description={termNote}
-                  costs={permanentCosts}
-                />
-              </span>
-              <CostRowAmounts costs={permanentCosts} />
-            </div>
-          )}
-          {/* After the choice, where it applies to whichever option was picked. */}
-          <div className="mt-3">
-            <Alert
-              variant="grey"
-              showIcon={false}
-              assertive={false}
-              description="Allow at least an hour before your data is available. We’ll email you when it’s ready."
+      <ModalHeader onClose={onClose} description="Free to start. Downloads work in about an hour.">
+        Restore {bucketName}
+      </ModalHeader>
+      <ModalBody>
+        <RateColumnHeader />
+        <div className="flex items-start gap-3 rounded-lg border border-zinc-200 px-4 py-3 text-ui">
+          <span className="flex-1">
+            <RateRowText
+              title="Restored copy for 2 weeks"
+              description={`Downloadable until ${formatShortDate(Date.now() + WARM_MIN_DAYS * DAY_MS)}, then deleted. Billed for the full 2 weeks, even if you delete it sooner.`}
+              rate={rate}
             />
-          </div>
-        </ModalBody>
-        <ModalFooter fullWidth>
-          <Button id="get-data-back-cancel-button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button id="get-data-back-confirm-button" variant="primary" onClick={handleConfirm}>
-            {selected === 'warm' ? 'Restore for 2 weeks' : 'Restore permanently'}
-          </Button>
-        </ModalFooter>
-      </div>
+          </span>
+          <RateRowAmount rate={rate} />
+        </div>
+        <div className="mt-3">
+          <Alert
+            variant="grey"
+            showIcon={false}
+            assertive={false}
+            description={`Your frozen copy stays and keeps billing at ${formatRate(COLD_PRICE_PER_TB_MONTH)}. To keep the data in standard storage, delete the frozen copy once the restore is ready.`}
+          />
+        </div>
+      </ModalBody>
+      <ModalFooter fullWidth>
+        <Button id="get-data-back-cancel-button" variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button id="get-data-back-confirm-button" variant="primary" onClick={handleConfirm}>
+          Restore for 2 weeks
+        </Button>
+      </ModalFooter>
     </Modal>
-  );
-}
-
-// Fixed widths, so each amount lines up under its heading across the rows.
-/** One option in the table: a radio, what it does, and its Now and Monthly amounts. */
-function OptionRow({
-  value,
-  checked,
-  onChange,
-  title,
-  description,
-  now,
-  monthly,
-  monthlyNote,
-}: {
-  value: GetDataBackChoice;
-  checked: boolean;
-  onChange: () => void;
-  title: string;
-  description: string;
-} & RowCosts) {
-  const costs = { now, monthly, monthlyNote };
-  return (
-    <label
-      className="flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors duration-150 hover:bg-zinc-50 has-[:checked]:bg-brand-50"
-      data-testid={`get-data-back-${value}`}
-    >
-      <span className="flex flex-1 items-start gap-2.5">
-        <Radio
-          name="get-data-back"
-          value={value}
-          checked={checked}
-          onChange={onChange}
-          className="mt-0.5"
-        />
-        <CostRowText title={title} description={description} costs={costs} />
-      </span>
-      <CostRowAmounts costs={costs} />
-    </label>
   );
 }

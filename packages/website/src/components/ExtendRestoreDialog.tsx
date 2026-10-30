@@ -2,16 +2,14 @@ import { useRef } from 'react';
 
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal';
 import { Button } from './Button';
-import { CostColumnsHeader, CostRowAmounts, CostRowText } from './ColdStorageFacts';
+import { RateColumnHeader, RateRowAmount, RateRowText } from './ColdStorageFacts';
 import {
   COLD_PRICE_PER_TB_MONTH,
   DAY_MS,
   WARM_MIN_DAYS,
+  WARM_PRICE_PER_TB_MONTH,
+  formatRate,
   formatShortDate,
-  formatUsd,
-  getBillableBytes,
-  getMonthlyCost,
-  getWarmPeriodCost,
   type WarmState,
 } from '../lib/cold-storage-prototype.js';
 
@@ -24,9 +22,9 @@ type ExtendRestoreDialogProps = {
 };
 
 /**
- * Confirms an extension before charging for it, in the same Now and Monthly
- * table the restore dialog uses, so the two read as one decision. An extension
- * is a purchase, so it never happens on a single click.
+ * Confirms an extension before billing for it, in the same Rate table the
+ * restore dialog uses, so the two read as one decision. An extension is a
+ * purchase, so it never happens on a single click.
  */
 export function ExtendRestoreDialog({
   state,
@@ -40,13 +38,7 @@ export function ExtendRestoreDialog({
   const current = shown.current;
   if (!current) return null;
 
-  const bytes = getBillableBytes(current.bytes);
-  const cost = getWarmPeriodCost(bytes);
-  const costs = {
-    now: formatUsd(cost),
-    monthly: formatUsd(getMonthlyCost(bytes, COLD_PRICE_PER_TB_MONTH)),
-    monthlyNote: 'no change',
-  };
+  const rate = { rate: formatRate(WARM_PRICE_PER_TB_MONTH), rateNote: 'no change' };
   const newEnd = formatShortDate(current.warmUntil + WARM_MIN_DAYS * DAY_MS);
 
   return (
@@ -55,16 +47,16 @@ export function ExtendRestoreDialog({
         Extend {bucketName}
       </ModalHeader>
       <ModalBody>
-        <CostColumnsHeader />
+        <RateColumnHeader />
         <div className="flex items-start gap-3 rounded-lg border border-zinc-200 px-4 py-3 text-ui">
           <span className="flex-1">
-            <CostRowText
+            <RateRowText
               title="2 more weeks"
-              description={`Downloadable until ${newEnd}, then the restored copy is deleted. Your frozen copy stays untouched.`}
-              costs={costs}
+              description={`Downloadable until ${newEnd}, then the restored copy is deleted. Your frozen copy keeps billing at ${formatRate(COLD_PRICE_PER_TB_MONTH)}.`}
+              rate={rate}
             />
           </span>
-          <CostRowAmounts costs={costs} />
+          <RateRowAmount rate={rate} />
         </div>
       </ModalBody>
       <ModalFooter fullWidth>
@@ -79,7 +71,7 @@ export function ExtendRestoreDialog({
             onClose();
           }}
         >
-          Extend for {formatUsd(cost)}
+          Extend 2 weeks
         </Button>
       </ModalFooter>
     </Modal>

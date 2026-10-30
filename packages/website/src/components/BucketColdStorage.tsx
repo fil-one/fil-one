@@ -1,25 +1,18 @@
 import { useState } from 'react';
-import {
-  ArrowCounterClockwiseIcon,
-  SnowflakeIcon,
-  ThermometerIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { SnowflakeIcon, ThermometerIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { S3Region } from '@filone/shared';
 
 import { BucketActionMenu } from './BucketActionMenu';
 import { Button } from './Button';
+import { DeleteFrozenCopyDialog } from './DeleteFrozenCopyDialog';
 import { ExtendRestoreDialog } from './ExtendRestoreDialog';
 import { Tooltip } from './Tooltip';
 import { useToast } from './Toast';
 import { ColdStorageIcon } from './ColdStorageStatus';
 import { ColdStoragePrototypeControls } from './ColdStoragePrototypeControls';
 import { FreezeBucketDialog, type ColdStorageTarget } from './FreezeBucketDialog';
-import {
-  GetDataBackDialog,
-  type GetDataBackChoice,
-  type GetDataBackTarget,
-} from './GetDataBackDialog';
+import { GetDataBackDialog } from './GetDataBackDialog';
 import {
   extendWarm,
   formatMoment,
@@ -47,19 +40,19 @@ export function useBucketColdStorage(
   const state = useColdStorage(bucketName, region);
   const freezeBlock = useFreezeBlock(useBucketBytes(bucketName, region));
   const [freezeTarget, setFreezeTarget] = useState<ColdStorageTarget | null>(null);
-  const [getBackTarget, setGetBackTarget] = useState<GetDataBackTarget | null>(null);
+  const [getBackTarget, setGetBackTarget] = useState<ColdStorageTarget | null>(null);
   const [extendTarget, setExtendTarget] = useState<WarmState | null>(null);
+  const [deleteFrozenTarget, setDeleteFrozenTarget] = useState<WarmState | null>(null);
 
-  const openGetDataBack = (preselect: GetDataBackChoice) =>
-    setGetBackTarget({ bucketName, region, preselect });
+  const openGetDataBack = () => setGetBackTarget({ bucketName, region });
 
-  // Downloads work only while warm. Anywhere else a download click is the
-  // moment someone needs the data, so it opens Get data back with warming chosen.
+  // Downloads work only while warm. On a frozen bucket a download click is the
+  // moment someone needs the data, so it opens the restore.
   const downloadsBlocked = state !== null && state.status !== 'warm';
   const guardedDownload: DownloadObject = downloadsBlocked
     ? () => {
         trackColdStorage('frozen file clicked');
-        if (state.status === 'frozen') openGetDataBack('warm');
+        if (state.status === 'frozen') openGetDataBack();
         return Promise.resolve();
       }
     : downloadObject;
@@ -69,6 +62,9 @@ export function useBucketColdStorage(
     <HeaderActions
       state={state}
       canFreeze={freezeBlock === null}
+      // Deleting the frozen copy ends the freeze term early, so it takes the
+      // role freezing does.
+      canDeleteFrozenCopy={freezeBlock !== 'role'}
       onFreeze={() => {
         trackColdStorage('freeze started');
         setFreezeTarget({ bucketName, region });
@@ -77,6 +73,10 @@ export function useBucketColdStorage(
       onExtend={(warm) => {
         trackColdStorage('extend opened');
         setExtendTarget(warm);
+      }}
+      onDeleteFrozenCopy={(warm) => {
+        trackColdStorage('delete frozen copy opened');
+        setDeleteFrozenTarget(warm);
       }}
     />
   );
@@ -103,6 +103,12 @@ export function useBucketColdStorage(
             toast.success('Restored for 2 more weeks');
           }}
         />
+        <DeleteFrozenCopyDialog
+          state={deleteFrozenTarget}
+          bucketName={bucketName}
+          region={region}
+          onClose={() => setDeleteFrozenTarget(null)}
+        />
         <ColdStoragePrototypeControls />
       </>
     ),
@@ -112,22 +118,27 @@ export function useBucketColdStorage(
 /**
  * The cold storage controls beside the bucket heading. The action the bucket's
  * state calls for is a visible button (Restore while frozen, Extend while
- * restored); the rarer way out sits in the overflow menu. A bucket waiting on
+ * restored); deleting the frozen copy, the rarer and final step, sits in the
+ * overflow menu. A bucket waiting on
  * a restore has nothing to do, and one that can't be frozen gets no menu,
  * since a menu holding only a disabled item is a dead end.
  */
 function HeaderActions({
   state,
   canFreeze,
+  canDeleteFrozenCopy,
   onFreeze,
   onGetDataBack,
   onExtend,
+  onDeleteFrozenCopy,
 }: {
   state: ColdStorageState | null;
   canFreeze: boolean;
+  canDeleteFrozenCopy: boolean;
   onFreeze: () => void;
-  onGetDataBack: (preselect: GetDataBackChoice) => void;
+  onGetDataBack: () => void;
   onExtend: (state: WarmState) => void;
+  onDeleteFrozenCopy: (state: WarmState) => void;
 }) {
   if (state === null) {
     return canFreeze ? (
@@ -143,7 +154,7 @@ function HeaderActions({
         variant="ghost"
         size="sm"
         icon={ThermometerIcon}
-        onClick={() => onGetDataBack('warm')}
+        onClick={onGetDataBack}
       >
         Restore
       </Button>
@@ -160,22 +171,24 @@ function HeaderActions({
         >
           Extend 2 weeks
         </Button>
-        <BucketActionMenu
-          actions={[
-            {
-              label: 'Restore permanently',
-              icon: ArrowCounterClockwiseIcon,
-              onSelect: () => onGetDataBack('unfreeze'),
-            },
-          ]}
-        />
+        {canDeleteFrozenCopy && (
+          <BucketActionMenu
+            actions={[
+              {
+                label: 'Delete frozen copy',
+                icon: TrashIcon,
+                onSelect: () => onDeleteFrozenCopy(state),
+              },
+            ]}
+          />
+        )}
       </>
     );
   }
   return null;
 }
 
-/** After this many extensions in a row, staying restored costs more than restoring permanently. */
+/** After this many extensions in a row, the data is likely needed for good. */
 const EXTENSIONS_BEFORE_NUDGE = 2;
 
 /**
@@ -212,13 +225,12 @@ function describeMeta(state: ColdStorageState): { text: string; detail: string }
       text: `Restored until ${until}`,
       detail:
         state.extensions >= EXTENSIONS_BEFORE_NUDGE
-          ? `${base} You’ve extended twice, so restoring permanently would now cost less.`
+          ? `${base} To keep it in standard storage, delete the frozen copy.`
           : base,
     };
   }
-  const waiting = state.status === 'warming' ? 'Restoring' : 'Restoring permanently';
   return {
-    text: `${waiting}, ready in ${formatWaitLeft(state.readyAt)}`,
+    text: `Restoring, ready in ${formatWaitLeft(state.readyAt)}`,
     detail: 'You can’t download yet. We’ll email you when it’s ready.',
   };
 }

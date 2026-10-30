@@ -13,7 +13,9 @@ import { Modal } from './Modal';
 import {
   COLD_PRICE_PER_TB_MONTH,
   MIN_TERM_DAYS,
+  WARM_MIN_DAYS,
   WARM_PRICE_PER_TB_MONTH,
+  formatRate,
   formatUsd,
   markAnnouncementSeen,
   useAnnouncementSeen,
@@ -55,17 +57,17 @@ type Step = { title: string; body: string; visual: React.ReactNode };
 const STEPS: Step[] = [
   {
     title: 'Cold storage is here',
-    body: `Keep the archives you rarely open for ${formatUsd(COLD_PRICE_PER_TB_MONTH)}/TB-month, a third of standard storage. No retrieval or egress fees.`,
+    body: `Keep the archives you rarely open at ${formatRate(COLD_PRICE_PER_TB_MONTH)}. No retrieval or egress fees.`,
     visual: <PriceVisual />,
   },
   {
-    title: 'Freeze a bucket in a click',
-    body: `Choose Freeze bucket from the menu of any bucket of 1 TB or more. Its objects stay listed, and it stays frozen for at least ${MIN_TERM_DAYS} days.`,
+    title: 'Upload, then freeze',
+    body: `Upload to a standard bucket at ${formatRate(WARM_PRICE_PER_TB_MONTH)}. Once the upload is done, choose Freeze bucket from its menu. Buckets of 1 TB or more can be frozen, for at least ${MIN_TERM_DAYS} days.`,
     visual: <BucketsVisual />,
   },
   {
     title: 'Restore it when you need it',
-    body: 'Restore a bucket for 2 weeks and keep your frozen price, or restore it permanently. Either way, your data is ready in about an hour.',
+    body: `Restore a bucket for ${WARM_MIN_DAYS / 7} weeks at ${formatRate(WARM_PRICE_PER_TB_MONTH)} while the frozen copy stays at ${formatRate(COLD_PRICE_PER_TB_MONTH)}. Your data is ready in about an hour. To keep it in standard storage, delete the frozen copy.`,
     visual: <GetBackVisual />,
   },
 ];
@@ -216,8 +218,8 @@ function BucketsVisual() {
 
 function GetBackVisual() {
   const options = [
-    { icon: ThermometerIcon, title: 'Restore for 2 weeks', note: 'Frozen price stays' },
-    { icon: ArrowCounterClockwiseIcon, title: 'Restore permanently', note: 'Back to standard' },
+    { icon: ThermometerIcon, title: 'Restore for 2 weeks', note: 'Frozen copy stays' },
+    { icon: ArrowCounterClockwiseIcon, title: 'Keep it for good', note: 'Delete the frozen copy' },
   ];
   return (
     <div className="grid w-full max-w-80 grid-cols-2 gap-3">
