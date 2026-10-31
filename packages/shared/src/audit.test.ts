@@ -22,7 +22,8 @@ import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
  *
  * The first ten are M1's write path. `audit.exported` is the audit log v1 ADR's
  * addition and the only one written on a read path. `key.rotated` is the key
- * rotation of FIL-1018, named in that ADR's section 9.
+ * rotation of FIL-1018, named in that ADR's section 9. The bucket policy and
+ * bucket types are FIL-1017's, named in the same ADR's list of what it adds.
  */
 const ADR_EVENT_TYPES = [
   'org.created',
@@ -41,6 +42,8 @@ const ADR_EVENT_TYPES = [
   'bucket_policy.created',
   'bucket_policy.updated',
   'bucket_policy.deleted',
+  'bucket.created',
+  'bucket.deleted',
 ];
 
 describe('the event-type registry', () => {
@@ -72,8 +75,9 @@ describe('the event-type registry', () => {
   });
 
   it('marks the flows that reach a vendor before they write as two-phase', () => {
-    // The key flows always, and the three membership flows because a narrowing
-    // revokes keys at the vendor before it writes the role.
+    // The key flows always, the three membership flows because a narrowing
+    // revokes keys at the vendor before it writes the role, and the bucket and
+    // bucket policy flows because both live only at the storage system.
     expect([...TWO_PHASE_AUDIT_EVENT_TYPES]).toStrictEqual([
       'key.created',
       'key.deleted',
@@ -84,6 +88,8 @@ describe('the event-type registry', () => {
       'bucket_policy.created',
       'bucket_policy.updated',
       'bucket_policy.deleted',
+      'bucket.created',
+      'bucket.deleted',
     ]);
     for (const type of TWO_PHASE_AUDIT_EVENT_TYPES) {
       expect(AUDIT_EVENT_TYPES).toContain(type);

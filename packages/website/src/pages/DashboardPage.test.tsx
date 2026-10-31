@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole, PlanId, SubscriptionStatus } from '@filone/shared';
-import type { BillingInfo, UsageResponse } from '@filone/shared';
+import type { BillingInfo, MeResponse, UsageResponse } from '@filone/shared';
 
 import { seedPermissions } from '../lib/test-permissions.js';
 import { queryKeys } from '../lib/query-client.js';
@@ -69,9 +69,9 @@ function contractedBilling(): BillingInfo {
   };
 }
 
-function renderPage(role: OrgRole = OrgRole.Owner) {
+function renderPage(role: OrgRole = OrgRole.Owner, me: Partial<MeResponse> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, role);
+  seedPermissions(client, role, me);
   const view = render(
     <QueryClientProvider client={client}>
       <DashboardPage />
@@ -245,13 +245,96 @@ describe('DashboardPage — trial banner', () => {
 });
 
 describe('DashboardPage — bucket buttons', () => {
-  // The default activity mock is empty, so the empty activity card renders its button too.
+  // The default activity mock is empty, so for an org with no buckets and no
+  // keys the empty activity card renders its button too.
   it.each(['New bucket', 'Create bucket'])(
     'opens the create bucket page from the "%s" button',
     async (name) => {
+      mockGetUsage.mockResolvedValue({ ...USAGE, buckets: { count: 0 }, accessKeys: { count: 0 } });
       renderPage();
 
       expect(await screen.findByRole('link', { name })).toHaveAttribute('href', '/buckets/create');
     },
   );
+});
+
+describe('DashboardPage — recent activity', () => {
+  it('opens the audit log from "View all" for a role that may read it', async () => {
+    renderPage(OrgRole.Admin);
+
+    await screen.findByText('Recent Activity');
+    const hrefs = screen
+      .getAllByRole('link', { name: 'View all' })
+      .map((link) => link.getAttribute('href'));
+    expect(hrefs).toContain('/audit');
+  });
+
+  it.each([
+    ['a Member, who cannot read the audit log', OrgRole.Member, {}],
+    ['an org outside the organizations beta', OrgRole.Owner, { orgsBeta: false }],
+  ])('offers no link to the audit log to %s', async (_case, role, me) => {
+    renderPage(role, me);
+
+    await screen.findByText('Recent Activity');
+    const hrefs = screen
+      .queryAllByRole('link', { name: 'View all' })
+      .map((link) => link.getAttribute('href'));
+    expect(hrefs).not.toContain('/audit');
+  });
+
+  it.each([
+    ['buckets', { buckets: { count: 2 }, accessKeys: { count: 0 } }],
+    ['only access keys', { buckets: { count: 0 }, accessKeys: { count: 1 } }],
+  ])(
+    'says there is no recent activity, without a create button, for an org that has %s',
+    async (_case, counts) => {
+      mockGetUsage.mockResolvedValue({ ...USAGE, ...counts });
+      renderPage();
+
+      expect(await screen.findByText('No recent activity')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Create bucket' })).not.toBeInTheDocument();
+    },
+  );
+
+  it('shows a loading feed rather than an empty one while the activity loads', async () => {
+    // Never settles, so the feed stays loading.
+    mockGetActivity.mockReturnValue(new Promise(() => {}));
+    renderPage();
+
+    expect(
+      await screen.findByRole('status', { name: 'Loading recent activity' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('No recent activity')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [OrgRole.Owner, 'Bucket and key changes from the last 90 days appear here'],
+    [OrgRole.Admin, 'Bucket and key changes from the last 90 days appear here'],
+    [OrgRole.Member, 'Your bucket and key changes from the last 90 days appear here'],
+    [OrgRole.ReadOnly, 'Your bucket changes from the last 90 days appear here'],
+  ])('describes the empty feed by what a %s sees', async (role, description) => {
+    mockGetUsage.mockResolvedValue({ ...USAGE, buckets: { count: 1 } });
+    renderPage(role);
+
+    expect(await screen.findByText(description)).toBeInTheDocument();
+  });
+
+  it('loads the activity again from "Try again" after a failure', async () => {
+    mockGetActivity.mockRejectedValueOnce(new Error('any activity error'));
+    mockGetUsage.mockResolvedValue({ ...USAGE, buckets: { count: 1 } });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByText('No recent activity')).toBeInTheDocument();
+    expect(mockGetActivity).toHaveBeenCalledTimes(2);
+  });
+
+  it('says the activity failed to load rather than that there is none', async () => {
+    mockGetActivity.mockRejectedValue(new Error('any activity error'));
+    renderPage();
+
+    expect(await screen.findByText('Failed to load recent activity')).toBeInTheDocument();
+    expect(screen.queryByText('No recent activity')).not.toBeInTheDocument();
+  });
 });

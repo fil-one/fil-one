@@ -1496,10 +1496,8 @@ export default $config({
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
       'get-activity': {
-        extraEnv: orchestratorEnv,
-        permissions: bucketReadPermissions,
+        // Reads the audit log only, so it needs no orchestrator config.
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
-        memory: '1024 MB',
       },
 
       // ── Billing ────────────────────────────────────────────────────
