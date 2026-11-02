@@ -5,7 +5,13 @@ import { maybeSkipPasskeyEnrollment } from '../destructive/passkey.util.ts';
 import { ACCOUNT_STATE_TIMEOUT_MS, setAccountState } from '../destructive/account-state.util.ts';
 import { resolvePersonalOrgId, seedMembership } from '../destructive/invite.util.ts';
 import { setOrgName } from '../multi-org/org.util.ts';
-import { STORAGE_STATE, getCredentials, type PolicyUser } from './policy.util.ts';
+import {
+  ConsoleApi,
+  STORAGE_STATE,
+  emptyAndDeleteBucket,
+  getCredentials,
+  type PolicyUser,
+} from './policy.util.ts';
 
 // Logs in every user, gives the Owner's org an active subscription, and seats
 // the rest in it. The Leaver is a second Member that only the removal case
@@ -60,3 +66,80 @@ setup('seat everyone in the owner org', async () => {
     });
   }
 });
+
+// Every case deletes its buckets and keys afterwards, but a run that ends at
+// the global timeout or crashes never gets there, and what it leaves stays in
+// the Owner's org. Each key a principal holds makes every later policy write
+// for it slower, so the leftovers are cleared here, before any case runs: the
+// keys first, because emptying a bucket writes a policy, which is cheap only
+// once the keys are gone. CI's runs of the suite never overlap (e2e-suites.yaml),
+// so everything in the org is a leftover. A local run against the same stage
+// must use accounts of its own, or this deletes a CI run's keys and buckets. A deletion that fails is logged and
+// left for the next run rather than failing the setup, which would skip the
+// suite; the sweep stops starting deletions at SWEEP_BUDGET_MS so a large
+// backlog drains over several runs instead of eating the suite's time.
+const SWEEP_BUDGET_MS = 10 * 60_000;
+
+setup('clear what earlier runs left in the owner org', async () => {
+  setup.setTimeout(SWEEP_BUDGET_MS + 5 * 60_000);
+  const { userId: ownerId } = getCredentials('owner');
+  const owner = await ConsoleApi.open('owner', await resolvePersonalOrgId(ownerId));
+  const deadline = Date.now() + SWEEP_BUDGET_MS;
+  try {
+    const keys = await listOrNothing('keys', () => owner.listKeyIds());
+    const keyReport = await sweep(keys, 8, deadline, (id) => owner.deleteKey(id));
+    console.log(`policies-setup: keys left by earlier runs: ${keys.length}; ${keyReport}`);
+
+    const buckets = await listOrNothing('buckets', () => owner.listBucketNames());
+    const bucketReport = await sweep(buckets, 4, deadline, (bucket) =>
+      emptyAndDeleteBucket(owner, ownerId, bucket),
+    );
+    console.log(`policies-setup: buckets left by earlier runs: ${buckets.length}; ${bucketReport}`);
+  } finally {
+    await owner.dispose();
+  }
+});
+
+/** The listing, or nothing when it fails: a broken listing costs the sweep, not the suite. */
+async function listOrNothing(what: string, list: () => Promise<string[]>): Promise<string[]> {
+  try {
+    return await list();
+  } catch (error) {
+    console.warn(`policies-setup: could not list ${what} to clear: ${firstLine(error)}`);
+    return [];
+  }
+}
+
+const firstLine = (error: unknown) =>
+  error instanceof Error ? error.message.split('\n')[0] : String(error);
+
+/**
+ * Runs remove over items, `width` at a time, starting none after deadline, and
+ * reports how many it removed, how many failed (logging each) and how many it
+ * left for the next run.
+ */
+async function sweep<T>(
+  items: readonly T[],
+  width: number,
+  deadline: number,
+  remove: (item: T) => Promise<void>,
+): Promise<string> {
+  let next = 0;
+  let removed = 0;
+  let failed = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(width, items.length) }, async () => {
+      while (next < items.length && Date.now() < deadline) {
+        const item = items[next++];
+        try {
+          await remove(item);
+          removed++;
+        } catch (error) {
+          failed++;
+          console.warn(`policies-setup: could not remove ${String(item)}: ${firstLine(error)}`);
+        }
+      }
+    }),
+  );
+  return `removed ${removed}, failed ${failed}, left ${items.length - next}`;
+}
