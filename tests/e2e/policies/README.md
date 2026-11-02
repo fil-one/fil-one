@@ -34,12 +34,12 @@ SST_STAGE=staging pnpm test:e2e:policies
 
 `E2E_POLICY_REGION` and `E2E_POLICY_S3_ENDPOINT` override the region and the S3 endpoint; by default a remote stage uses `eu-central-3` and the endpoint `getS3Endpoint` derives for it. The staging Forge network has to run Hilt and Ingot with the policy operations. In CI, `e2e-staging.yaml` (nightly) and `test-staging.yaml` (after each staging deploy, before production) run it through `e2e-suites.yaml`, in its own job beside the destructive and multi-org suites.
 
-`policies-setup` logs all five accounts in and claims and activates the Owner's subscription. It then seats the other four in the Owner's organization: the Admin, the Member, the ReadOnly user, and the Leaver as a Member. Last, it deletes every access key and bucket still in the Owner's organization, which earlier runs left behind (see Determinism).
+`policies-setup` logs all five accounts in and claims and activates the Owner's subscription. It then seats the other four in the Owner's organization: the Admin, the Member, the ReadOnly user, and the Leaver as a Member. Last, it deletes every bucket and access key still in the Owner's organization, which earlier runs left behind (see Determinism).
 
 A local run against staging must use accounts of its own (`E2E_POLICY_EMAIL_PREFIX`), not the ones CI uses: that setup step deletes everything in the Owner's organization, including what a CI run in progress is using.
 
 ## Determinism
 
-Every case creates its own buckets and keys and deletes them afterwards. A run that stops early, at the global timeout or when cancelled, leaves its buckets and keys behind, so `policies-setup` clears the Owner's organization before any case runs: keys first, because emptying a bucket writes a policy and each key the principal holds makes that write slower, then buckets. A deletion that fails is logged and left for the next run, and the sweep starts none after ten minutes. Uploads use a fixed in-memory payload.
+Every case creates its own buckets and keys and deletes them afterwards. A run that stops early, at the global timeout or when cancelled, leaves its buckets and keys behind, so `policies-setup` clears the Owner's organization before any case runs: buckets first, then keys. A principal-bound key holds grants over every bucket its principal reaches, and deleting the key revokes all of them in one request, so key deletions are cheap only once the buckets are gone. A deletion that fails is logged and left for the next run, and the sweep starts none after ten minutes. Uploads use a fixed in-memory payload.
 
 A narrowed policy applies to a key Ingot has cached only once the revocation arrives. So every check after a narrowing uses a key created after the write, which Ingot evaluates fresh. Only the cached-key tests poll, each for at most 30 seconds, because a key Ingot has cached is what they check.
