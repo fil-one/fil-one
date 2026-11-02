@@ -337,15 +337,13 @@ export function deny(
 
 /**
  * Empty and delete a bucket the suite created, whatever state a test left its
- * policy in: the owner's grant goes back first, so an owner key can list and
- * delete what is left. The key is a fresh one, deleted afterwards, unless the
- * caller passes one of the owner's keys to use and keep.
+ * policy in: the owner's grant goes back first, so a fresh owner key can list
+ * and delete what is left.
  */
 export async function emptyAndDeleteBucket(
   owner: ConsoleApi,
   ownerId: string,
   bucket: string,
-  ownerKey?: CreateAccessKeyResponse,
 ): Promise<void> {
   const current = await owner.fetchPolicyResponse(bucket);
   if (
@@ -359,31 +357,38 @@ export async function emptyAndDeleteBucket(
   const put = await owner.putPolicy(bucket, { policy, etag });
   expect(put.status(), await put.text()).toBe(204);
 
-  const key = ownerKey ?? (await owner.createAccessKey());
+  const key = await owner.createAccessKey();
   try {
-    const s3 = createS3Client(key);
-    // Every version and delete marker, so a versioned bucket empties too, and
-    // any upload a test left open.
-    const { Versions = [], DeleteMarkers = [] } = await s3.send(
-      new ListObjectVersionsCommand({ Bucket: bucket }),
-    );
-    // An unversioned bucket lists its objects under the literal version "null",
-    // which a gateway may refuse as a version-scoped delete; only a suspended
-    // bucket needs it kept (as packages/backend/src/lib/s3-bulk-delete.ts does).
-    const { Status } = await s3.send(new GetBucketVersioningCommand({ Bucket: bucket }));
-    for (const { Key, VersionId } of [...Versions, ...DeleteMarkers]) {
-      const scoped = VersionId !== 'null' || Status === 'Suspended';
-      await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key, ...(scoped && { VersionId }) }));
-    }
-    const { Uploads = [] } = await s3.send(new ListMultipartUploadsCommand({ Bucket: bucket }));
-    for (const { Key, UploadId } of Uploads) {
-      await s3.send(new AbortMultipartUploadCommand({ Bucket: bucket, Key, UploadId }));
-    }
+    await emptyBucket(createS3Client(key), bucket);
   } finally {
-    if (!ownerKey) await owner.deleteKey(key.id);
+    await owner.deleteKey(key.id);
   }
   const res = await owner.deleteBucket(bucket);
   expect([200, 204], await res.text()).toContain(res.status());
+}
+
+/**
+ * Delete every object version, delete marker and open multipart upload in the
+ * bucket, with a client whose key can list, read and delete there.
+ */
+export async function emptyBucket(s3: S3Client, bucket: string): Promise<void> {
+  // Every version and delete marker, so a versioned bucket empties too, and
+  // any upload a test left open.
+  const { Versions = [], DeleteMarkers = [] } = await s3.send(
+    new ListObjectVersionsCommand({ Bucket: bucket }),
+  );
+  // An unversioned bucket lists its objects under the literal version "null",
+  // which a gateway may refuse as a version-scoped delete; only a suspended
+  // bucket needs it kept (as packages/backend/src/lib/s3-bulk-delete.ts does).
+  const { Status } = await s3.send(new GetBucketVersioningCommand({ Bucket: bucket }));
+  for (const { Key, VersionId } of [...Versions, ...DeleteMarkers]) {
+    const scoped = VersionId !== 'null' || Status === 'Suspended';
+    await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key, ...(scoped && { VersionId }) }));
+  }
+  const { Uploads = [] } = await s3.send(new ListMultipartUploadsCommand({ Bucket: bucket }));
+  for (const { Key, UploadId } of Uploads) {
+    await s3.send(new AbortMultipartUploadCommand({ Bucket: bucket, Key, UploadId }));
+  }
 }
 
 /**
