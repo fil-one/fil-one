@@ -337,13 +337,15 @@ export function deny(
 
 /**
  * Empty and delete a bucket the suite created, whatever state a test left its
- * policy in: the owner's grant goes back first, so a fresh owner key can list
- * and delete what is left.
+ * policy in: the owner's grant goes back first, so an owner key can list and
+ * delete what is left. The key is a fresh one, deleted afterwards, unless the
+ * caller passes one of the owner's keys to use and keep.
  */
 export async function emptyAndDeleteBucket(
   owner: ConsoleApi,
   ownerId: string,
   bucket: string,
+  ownerKey?: CreateAccessKeyResponse,
 ): Promise<void> {
   const current = await owner.fetchPolicyResponse(bucket);
   if (
@@ -357,7 +359,7 @@ export async function emptyAndDeleteBucket(
   const put = await owner.putPolicy(bucket, { policy, etag });
   expect(put.status(), await put.text()).toBe(204);
 
-  const key = await owner.createAccessKey();
+  const key = ownerKey ?? (await owner.createAccessKey());
   try {
     const s3 = createS3Client(key);
     // Every version and delete marker, so a versioned bucket empties too, and
@@ -378,7 +380,7 @@ export async function emptyAndDeleteBucket(
       await s3.send(new AbortMultipartUploadCommand({ Bucket: bucket, Key, UploadId }));
     }
   } finally {
-    await owner.deleteKey(key.id);
+    if (!ownerKey) await owner.deleteKey(key.id);
   }
   const res = await owner.deleteBucket(bucket);
   expect([200, 204], await res.text()).toContain(res.status());
