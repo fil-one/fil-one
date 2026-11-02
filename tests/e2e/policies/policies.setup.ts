@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { test as setup, expect } from '@playwright/test';
@@ -8,8 +9,10 @@ import { resolvePersonalOrgId, seedMembership } from '../destructive/invite.util
 import { setOrgName } from '../multi-org/org.util.ts';
 import {
   ConsoleApi,
+  REGION,
   STORAGE_STATE,
-  emptyAndDeleteBucket,
+  createS3Client,
+  emptyBucket,
   getCredentials,
   type PolicyUser,
 } from './policy.util.ts';
@@ -78,10 +81,10 @@ setup('seat everyone in the owner org', async () => {
 // - The buckets go first, because deleting a key revokes its grants over every
 //   bucket in one request, which is cheap only once the buckets, and their
 //   grants with them, are gone.
-// - Emptying a bucket needs an Owner key, and a new one would be issued grants
-//   over every bucket still left. So the sweep creates one key per run, not
-//   one per bucket, empties every bucket with it, and deletes it last. It then
-//   holds nothing, unless buckets are left over for the next run.
+// - Each bucket is emptied with a service key scoped to it alone. A service
+//   key carries its own permissions and isn't evaluated against the bucket
+//   policy (policy-service-keys.spec.ts), so no policy write is needed, and
+//   its grants cover only that bucket, so creating and deleting it is cheap.
 // - The keys get the last KEY_SWEEP_RESERVE_MS of the budget, so a run that
 //   can't clear every bucket still clears the keys.
 //
@@ -102,19 +105,10 @@ setup('clear what earlier runs left in the owner org', async () => {
   const deadline = Date.now() + SWEEP_BUDGET_MS;
   try {
     const buckets = await listOrNothing('buckets', () => owner.listBucketNames());
-    const sweepKey = buckets.length > 0 ? await createSweepKey(owner) : undefined;
-    const bucketReport = sweepKey
-      ? await sweep(buckets, 4, deadline - KEY_SWEEP_RESERVE_MS, (bucket) =>
-          emptyAndDeleteBucket(owner, ownerId, bucket, sweepKey),
-        )
-      : `removed 0, failed 0, left ${buckets.length}`;
+    const bucketReport = await sweep(buckets, 4, deadline - KEY_SWEEP_RESERVE_MS, (bucket) =>
+      clearBucket(owner, bucket),
+    );
     console.log(`policies-setup: buckets left by earlier runs: ${buckets.length}; ${bucketReport}`);
-    if (sweepKey) {
-      // If this fails, the key sweep below or the next run removes it.
-      await owner.deleteKey(sweepKey.id).catch((error: unknown) => {
-        console.warn(`policies-setup: could not remove the sweep key: ${firstLine(error)}`);
-      });
-    }
 
     const keys = await listOrNothing('keys', () => owner.listKeyIds());
     const keyReport = await sweep(keys, 8, deadline, (id) => owner.deleteKey(id));
@@ -124,16 +118,33 @@ setup('clear what earlier runs left in the owner org', async () => {
   }
 });
 
-/** An Owner key to empty the leftover buckets with, or none when it can't be created. */
-async function createSweepKey(owner: ConsoleApi): Promise<CreateAccessKeyResponse | undefined> {
+/**
+ * Empty and delete a leftover bucket with a service key scoped to it, which
+ * reaches the bucket whatever its policy says, then delete the key.
+ */
+async function clearBucket(owner: ConsoleApi, bucket: string): Promise<void> {
+  const res = await owner.send('POST', '/access-keys', {
+    keyName: `policy-e2e-sweep-${randomUUID().slice(0, 8)}`,
+    region: REGION,
+    permissions: ['list', 'write', 'delete', 'GetBucketVersioning'],
+    granularPermissions: ['ListBucketVersions', 'DeleteObjectVersion'],
+    bucketScope: 'specific',
+    buckets: [bucket],
+    expiresAt: null,
+  });
+  expect(res.status(), await res.text()).toBe(201);
+  const key = (await res.json()) as CreateAccessKeyResponse;
   try {
-    return await owner.createAccessKey();
-  } catch (error) {
-    console.warn(
-      `policies-setup: could not create a key to empty buckets with: ${firstLine(error)}`,
-    );
-    return undefined;
+    await emptyBucket(createS3Client(key), bucket);
+  } finally {
+    // Logged rather than thrown, so an emptying error isn't replaced; the
+    // key sweep below picks up a key left behind.
+    await owner.deleteKey(key.id).catch((error: unknown) => {
+      console.warn(`policies-setup: could not remove the key for ${bucket}: ${firstLine(error)}`);
+    });
   }
+  const deleted = await owner.deleteBucket(bucket);
+  expect([200, 204], await deleted.text()).toContain(deleted.status());
 }
 
 /** The listing, or nothing when it fails: a broken listing costs the sweep, not the suite. */
