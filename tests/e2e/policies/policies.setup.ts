@@ -79,8 +79,9 @@ setup('seat everyone in the owner org', async () => {
 //   bucket in one request, which is cheap only once the buckets, and their
 //   grants with them, are gone.
 // - Emptying a bucket needs an Owner key, and a new one would be issued grants
-//   over every bucket still left. So the sweep creates one key, empties every
-//   bucket with it, and deletes it last, when it holds nothing.
+//   over every bucket still left. So the sweep creates one key per run, not
+//   one per bucket, empties every bucket with it, and deletes it last. It then
+//   holds nothing, unless buckets are left over for the next run.
 // - The keys get the last KEY_SWEEP_RESERVE_MS of the budget, so a run that
 //   can't clear every bucket still clears the keys.
 //
@@ -101,20 +102,18 @@ setup('clear what earlier runs left in the owner org', async () => {
   const deadline = Date.now() + SWEEP_BUDGET_MS;
   try {
     const buckets = await listOrNothing('buckets', () => owner.listBucketNames());
-    if (buckets.length > 0) {
-      const sweepKey = await createSweepKey(owner);
-      if (sweepKey) {
-        const bucketReport = await sweep(buckets, 4, deadline - KEY_SWEEP_RESERVE_MS, (bucket) =>
+    const sweepKey = buckets.length > 0 ? await createSweepKey(owner) : undefined;
+    const bucketReport = sweepKey
+      ? await sweep(buckets, 4, deadline - KEY_SWEEP_RESERVE_MS, (bucket) =>
           emptyAndDeleteBucket(owner, ownerId, bucket, sweepKey),
-        );
-        console.log(
-          `policies-setup: buckets left by earlier runs: ${buckets.length}; ${bucketReport}`,
-        );
-        // If this fails, the key sweep below or the next run removes it.
-        await owner.deleteKey(sweepKey.id).catch((error: unknown) => {
-          console.warn(`policies-setup: could not remove the sweep key: ${firstLine(error)}`);
-        });
-      }
+        )
+      : `removed 0, failed 0, left ${buckets.length}`;
+    console.log(`policies-setup: buckets left by earlier runs: ${buckets.length}; ${bucketReport}`);
+    if (sweepKey) {
+      // If this fails, the key sweep below or the next run removes it.
+      await owner.deleteKey(sweepKey.id).catch((error: unknown) => {
+        console.warn(`policies-setup: could not remove the sweep key: ${firstLine(error)}`);
+      });
     }
 
     const keys = await listOrNothing('keys', () => owner.listKeyIds());
