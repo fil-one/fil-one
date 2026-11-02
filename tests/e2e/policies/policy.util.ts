@@ -369,7 +369,8 @@ export async function emptyAndDeleteBucket(
 
 /**
  * Delete every object version, delete marker and open multipart upload in the
- * bucket, with a client whose key can list, read and delete there.
+ * bucket, with a client whose key can list the bucket's versions and uploads,
+ * read its versioning, delete object versions and abort uploads there.
  */
 export async function emptyBucket(s3: S3Client, bucket: string): Promise<void> {
   // Every version and delete marker, so a versioned bucket empties too, and

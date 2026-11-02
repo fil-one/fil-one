@@ -126,7 +126,7 @@ async function clearBucket(owner: ConsoleApi, bucket: string): Promise<void> {
   const res = await owner.send('POST', '/access-keys', {
     keyName: `policy-e2e-sweep-${randomUUID().slice(0, 8)}`,
     region: REGION,
-    permissions: ['read', 'list', 'write', 'delete', 'GetBucketVersioning'],
+    permissions: ['list', 'write', 'delete', 'GetBucketVersioning'],
     granularPermissions: ['ListBucketVersions', 'DeleteObjectVersion'],
     bucketScope: 'specific',
     buckets: [bucket],
@@ -137,10 +137,14 @@ async function clearBucket(owner: ConsoleApi, bucket: string): Promise<void> {
   try {
     await emptyBucket(createS3Client(key), bucket);
   } finally {
-    await owner.deleteKey(key.id);
+    // Logged rather than thrown, so an emptying error isn't replaced; the
+    // key sweep below picks up a key left behind.
+    await owner.deleteKey(key.id).catch((error: unknown) => {
+      console.warn(`policies-setup: could not remove the key for ${bucket}: ${firstLine(error)}`);
+    });
   }
   const deleted = await owner.deleteBucket(bucket);
-  expect([200, 204, 404], await deleted.text()).toContain(deleted.status());
+  expect([200, 204], await deleted.text()).toContain(deleted.status());
 }
 
 /** The listing, or nothing when it fails: a broken listing costs the sweep, not the suite. */
