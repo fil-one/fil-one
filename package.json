@@ -46,7 +46,7 @@
     "aws-cdk-lib": "^2.245.0",
     "constructs": "^10.6.0",
     "husky": "^9.1.7",
-    "lint-staged": "^16.4.0",
+    "lint-staged": "^17.6.0",
     "oxfmt": "^0.45.0",
     "oxlint": "^1.89.0",
     "oxlint-plugin-complexity": "^4.0.0",
