@@ -129,7 +129,10 @@ test('the creator statement can be renamed like any other', async ({ page }) => 
   );
 });
 
-test('an allow added in the tab grants the member', async ({ page }) => {
+// Quarantined: on staging, this test's teardown writes under a freshly read
+// ETag and is refused with 412 (FIL-1646). Restore with `test` once that's
+// resolved.
+test.fixme('an allow added in the tab grants the member', async ({ page }) => {
   await openPolicyTab(page);
   await openAddStatement(page);
   await nameInput(page).fill('member-read');
