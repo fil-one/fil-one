@@ -72,8 +72,9 @@ setup('seat everyone in the owner org', async () => {
 // the Owner's org. Each key a principal holds makes every later policy write
 // for it slower, so the leftovers are cleared here, before any case runs: the
 // keys first, because emptying a bucket writes a policy, which is cheap only
-// once the keys are gone. Runs of the suite never overlap (e2e-suites.yaml),
-// so everything in the org is a leftover. A deletion that fails is logged and
+// once the keys are gone. CI's runs of the suite never overlap (e2e-suites.yaml),
+// so everything in the org is a leftover. A local run against the same stage
+// must use accounts of its own, or this deletes a CI run's keys and buckets. A deletion that fails is logged and
 // left for the next run rather than failing the setup, which would skip the
 // suite; the sweep stops starting deletions at SWEEP_BUDGET_MS so a large
 // backlog drains over several runs instead of eating the suite's time.
@@ -85,11 +86,11 @@ setup('clear what earlier runs left in the owner org', async () => {
   const owner = await ConsoleApi.open('owner', await resolvePersonalOrgId(ownerId));
   const deadline = Date.now() + SWEEP_BUDGET_MS;
   try {
-    const keys = await owner.listKeyIds();
+    const keys = await listOrNothing('keys', () => owner.listKeyIds());
     const keyReport = await sweep(keys, 8, deadline, (id) => owner.deleteKey(id));
     console.log(`policies-setup: keys left by earlier runs: ${keys.length}; ${keyReport}`);
 
-    const buckets = await owner.listBucketNames();
+    const buckets = await listOrNothing('buckets', () => owner.listBucketNames());
     const bucketReport = await sweep(buckets, 4, deadline, (bucket) =>
       emptyAndDeleteBucket(owner, ownerId, bucket),
     );
@@ -98,6 +99,19 @@ setup('clear what earlier runs left in the owner org', async () => {
     await owner.dispose();
   }
 });
+
+/** The listing, or nothing when it fails: a broken listing costs the sweep, not the suite. */
+async function listOrNothing(what: string, list: () => Promise<string[]>): Promise<string[]> {
+  try {
+    return await list();
+  } catch (error) {
+    console.warn(`policies-setup: could not list ${what} to clear: ${firstLine(error)}`);
+    return [];
+  }
+}
+
+const firstLine = (error: unknown) =>
+  error instanceof Error ? error.message.split('\n')[0] : String(error);
 
 /**
  * Runs remove over items, `width` at a time, starting none after deadline, and
@@ -122,8 +136,7 @@ async function sweep<T>(
           removed++;
         } catch (error) {
           failed++;
-          const reason = error instanceof Error ? error.message.split('\n')[0] : String(error);
-          console.warn(`policies-setup: could not remove ${String(item)}: ${reason}`);
+          console.warn(`policies-setup: could not remove ${String(item)}: ${firstLine(error)}`);
         }
       }
     }),
