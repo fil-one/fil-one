@@ -268,8 +268,8 @@ describe('SettingsPage — the danger zone', () => {
     renderSettings(OrgRole.Admin);
 
     expect(await screen.findByText('Danger zone')).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: 'support@fil.one' });
-    expect(link).toHaveAttribute('href', 'mailto:support@fil.one');
+    const link = screen.getByRole('link', { name: 'support@filone.com' });
+    expect(link).toHaveAttribute('href', 'mailto:support@filone.com');
   });
 });
 
