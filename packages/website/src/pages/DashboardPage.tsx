@@ -173,7 +173,7 @@ export function DashboardPage() {
         </RequirePermission>
       }
     >
-      {/* 2. Trial banner */}
+      {/* Trial banner */}
       {isTrialing && trialBannerVisible && (
         <div className="mb-5 flex flex-col gap-3 rounded-xl bg-brand-50/60 px-5 py-3.5 ring-1 ring-brand-100 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
@@ -203,7 +203,7 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* 3. Top row: Plan · Storage · Egress. The plan card is absent, not
+      {/* Top row: Plan · Storage · Egress. The plan card is absent, not
              skeletal, for a role that cannot read billing — the counters beside
              it are `buckets.read` and stand on their own. */}
       <div
@@ -310,7 +310,7 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      {/* 4. Buckets · Objects · API Keys — single card with vertical dividers */}
+      {/* Buckets · Objects · API Keys — single card with vertical dividers */}
       <Card
         padding="none"
         className="mb-5 grid grid-cols-1 divide-y divide-zinc-200 lg:grid-cols-3 lg:divide-x lg:divide-y-0"
@@ -354,16 +354,16 @@ export function DashboardPage() {
         </div>
       </Card>
 
-      {/* 5. Filecoin Sealing Status — hidden until event system is ready.
+      {/* Filecoin Sealing Status — hidden until event system is ready.
              Re-enable with <SealingStatus /> from ../components/SealingStatus.
              https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard */}
 
-      {/* 6. Usage Trends */}
+      {/* Usage Trends */}
       <Suspense fallback={<div className="mb-6" style={{ height: 200 }} />}>
         <UsageTrends />
       </Suspense>
 
-      {/* 7. Recent Activity */}
+      {/* Recent Activity */}
       <Card>
         <div className="mb-3">
           <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
