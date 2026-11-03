@@ -145,7 +145,7 @@ export interface FloorOrgPreparation {
  * Set a home-org pointer to `orgId`, provided it still names `expected`, or
  * still names nothing when `expected` is undefined.
  */
-function repointHomeOrg(
+export function repointHomeOrg(
   key: { pk: string; sk: string },
   orgId: string,
   expected: string | undefined,
