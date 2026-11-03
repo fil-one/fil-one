@@ -38,7 +38,7 @@
     "@storybook/addon-a11y": "^10.6.1",
     "@storybook/addon-docs": "^10.6.2",
     "@storybook/addon-vitest": "^10.6.3",
-    "@storybook/react-vite": "^10.6.3",
+    "@storybook/react-vite": "^10.6.5",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^6.9.1",
@@ -53,7 +53,7 @@
     "playwright": "^1.60.0",
     "storybook": "^10.6.2",
     "tailwindcss": "^4.3.3",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
   }
