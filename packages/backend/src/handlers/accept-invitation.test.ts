@@ -873,11 +873,7 @@ describe('POST /api/invitations/accept handler', () => {
     expect(unmarshall(auditItemIn(retry)).details).toMatchObject({ alreadyMember: true });
   });
 
-  it('answers the member success even when that retirement cannot land', async () => {
-    // A revoke that won the race cancels the second transaction too. The caller
-    // is a member of the org, which is what they asked for; the bookkeeping
-    // failure is logged rather than answered.
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 7));
+  function stubMembershipAppearedMeanwhile() {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'OrgTable',
@@ -892,11 +888,38 @@ describe('POST /api/invitations/accept handler', () => {
           joinedAt: { S: CREATED_AT },
         },
       });
+  }
+
+  it('answers the member success even when that retirement cannot land', async () => {
+    // A revoke that won the race cancels the second transaction too. The caller
+    // is a member of the org, which is what they asked for; the invitation is no
+    // longer pending, so there is nothing left to retire.
+    stubMembershipAppearedMeanwhile();
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 7));
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
 
     const result = await handler(acceptEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200 });
-    expect(console.error).toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining('no longer pending'),
+      expect.objectContaining({ inviteId: expect.any(String) }),
+    );
+  });
+
+  it('logs an error when the retirement fails for a reason that may leave the invitation pending', async () => {
+    stubMembershipAppearedMeanwhile();
+    ddbMock
+      .on(TransactWriteItemsCommand)
+      .rejectsOnce(cancelledAt(1, 7))
+      .rejectsOnce(new Error('any-throttle'));
+
+    await handler(acceptEvent(), buildContext());
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('invitation stayed pending'),
+      expect.anything(),
+    );
   });
 
   it('refuses when the inviter no longer holds the authority they invited with', async () => {
@@ -1080,30 +1103,49 @@ describe('POST /api/invitations/accept handler', () => {
 
     // Two tabs open on the same link: the other one created the account and
     // spent the invitation, so reopening the link would only say it is invalid.
-    it('answers success when the account another tab created joined the inviting org', async () => {
-      stubAccountCreatedMeanwhile();
+    function stubMemberOfInvitingOrg(userId: string) {
       ddbMock
         .on(GetItemCommand, {
           TableName: 'OrgTable',
-          Key: {
-            pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) },
-            sk: { S: OrgKeys.memberSk(OTHER_TAB_USER_ID) },
-          },
+          Key: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) }, sk: { S: OrgKeys.memberSk(userId) } },
         })
         .resolves({
           Item: {
             pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) },
-            sk: { S: OrgKeys.memberSk(OTHER_TAB_USER_ID) },
+            sk: { S: OrgKeys.memberSk(userId) },
             role: { S: OrgRole.Member },
             joinedAt: { S: CREATED_AT },
             source: { S: 'invitation' },
           },
         });
+    }
+
+    it('answers success when the account another tab created joined the inviting org', async () => {
+      stubAccountCreatedMeanwhile();
+      stubMemberOfInvitingOrg(OTHER_TAB_USER_ID);
 
       const result = await handler(acceptEvent(), buildContext());
 
       expect(result).toMatchObject({ statusCode: 200 });
       expect(body(result)).toMatchObject({ alreadyMember: true, role: OrgRole.Member });
+    });
+
+    it('logs no error when the tab that won had already spent the invitation', async () => {
+      stubAccountCreatedMeanwhile();
+      stubMemberOfInvitingOrg(OTHER_TAB_USER_ID);
+      // The accept that lost, then the retirement after it: item 0 is the
+      // invitation's status, no longer pending.
+      ddbMock
+        .on(TransactWriteItemsCommand)
+        .rejectsOnce(cancelledAt(1, 9))
+        .rejectsOnce(cancelledAt(0, 3));
+
+      await handler(acceptEvent(), buildContext());
+
+      expect(console.error).not.toHaveBeenCalledWith(
+        expect.stringContaining('invitation stayed pending'),
+        expect.anything(),
+      );
     });
 
     it('creates no account when the invitation is no longer valid', async () => {

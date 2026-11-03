@@ -4,6 +4,7 @@ import {
   ConditionalCheckFailedException,
   DeleteItemCommand,
   DynamoDBClient,
+  GetItemCommand,
   QueryCommand,
   ScanCommand,
   TransactionCanceledException,
@@ -495,6 +496,32 @@ describe('scrubOrgRecords', () => {
         { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, needsFloorOrg: true },
       ];
 
+      /** The org each of the member's two home rows names when the scrub reads them. */
+      function stubHome({ profile, identity }: { profile?: string; identity?: string }) {
+        ddbMock
+          .on(GetItemCommand, {
+            TableName: 'UserInfoTable',
+            Key: { pk: { S: 'USER#user-1' }, sk: { S: 'PROFILE' } },
+          })
+          .resolves({
+            Item: { sub: { S: 'auth0|one' }, ...(profile ? { orgId: { S: profile } } : {}) },
+          });
+        ddbMock
+          .on(GetItemCommand, {
+            TableName: 'UserInfoTable',
+            Key: { pk: { S: 'SUB#auth0|one' }, sk: { S: 'IDENTITY' } },
+          })
+          .resolves({ Item: identity ? { orgId: { S: identity } } : {} });
+      }
+
+      function repointCancelled() {
+        return new TransactionCanceledException({
+          message: 'cancelled',
+          $metadata: {},
+          CancellationReasons: [{ Code: 'None' }, { Code: 'ConditionalCheckFailed' }],
+        });
+      }
+
       function floorOrgItems() {
         const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
         expect(calls).toHaveLength(1);
@@ -502,6 +529,8 @@ describe('scrubOrgRecords', () => {
       }
 
       it('moves them onto a floor org of their own, while their home still names the deleting org', async () => {
+        stubHome({ profile: ORG, identity: ORG });
+
         await scrubOrgRecords(ORG, STRANDED);
 
         const items = floorOrgItems();
@@ -521,19 +550,39 @@ describe('scrubOrgRecords', () => {
         });
       });
 
+      it('moves a profile that names another org along with the identity', async () => {
+        stubHome({ profile: 'any-stale-org', identity: ORG });
+
+        await scrubOrgRecords(ORG, STRANDED);
+
+        expect(
+          floorOrgItems().find((item) => item.Update?.Key?.pk?.S === 'USER#user-1')?.Update,
+        ).toMatchObject({ ExpressionAttributeValues: { ':expected': { S: 'any-stale-org' } } });
+      });
+
       // A re-drive, or an overlapping pass that moved them first.
-      it('finishes the scrub when their home has moved already', async () => {
-        ddbMock.on(TransactWriteItemsCommand).rejects(
-          new TransactionCanceledException({
-            message: 'cancelled',
-            $metadata: {},
-            CancellationReasons: [{ Code: 'None' }, { Code: 'ConditionalCheckFailed' }],
-          }),
-        );
+      it('finishes the scrub quietly when their home has moved already', async () => {
+        stubHome({ profile: ORG, identity: 'any-floor-org' });
+        ddbMock.on(TransactWriteItemsCommand).rejects(repointCancelled());
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 
         await scrubOrgRecords(ORG, STRANDED);
 
         expect(scrubbedKeys()).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
+        expect(error).not.toHaveBeenCalled();
+      });
+
+      it('logs an error when the move failed and their home still names the deleting org', async () => {
+        stubHome({ profile: ORG, identity: ORG });
+        ddbMock.on(TransactWriteItemsCommand).rejects(repointCancelled());
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        await scrubOrgRecords(ORG, STRANDED);
+
+        expect(error).toHaveBeenCalledWith(
+          expect.stringContaining('Floor org not written'),
+          expect.objectContaining({ orgId: ORG, userId: 'user-1' }),
+        );
       });
 
       it('fails the pass, to be retried, when the floor org cannot be written', async () => {

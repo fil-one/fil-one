@@ -465,6 +465,10 @@ async function accepterOrgFence(
  * why the failure is logged rather than raised: the caller IS a member of the
  * org, which is what they asked for, and refusing them over the bookkeeping
  * would answer failure for a request that succeeded.
+ *
+ * A failed condition is expected, not an error: the request that won the race
+ * usually spent this same invitation, or a revoke did, so it is no longer
+ * pending. Only a failure that may leave it pending is logged as one.
  */
 async function retireAfterRace({
   invitation,
@@ -477,6 +481,13 @@ async function retireAfterRace({
       event: acceptedEvent({ invitation, userId, verifiedEmail, alreadyMember: true }),
     });
   } catch (err) {
+    if (cancelledLabels(err, []).length > 0) {
+      console.info('[accept-invitation] Invitation no longer pending, nothing to retire', {
+        orgId: invitation.orgId,
+        inviteId: invitation.inviteId,
+      });
+      return;
+    }
     console.error('[accept-invitation] Membership landed but the invitation stayed pending', {
       orgId: invitation.orgId,
       inviteId: invitation.inviteId,

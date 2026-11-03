@@ -23,7 +23,7 @@ import { RAGKeys } from './dynamo-records.ts';
 import { cancelledLabels } from './membership-changes.ts';
 import { OrgKeys } from './org-membership.ts';
 import type { DeletionMember } from './deletion-record.ts';
-import { readUserProfile } from './user-profile.ts';
+import { readHomeOrgPointers, readUserProfile } from './user-profile.ts';
 import { RagApiKeyKeys } from './rag-api-keys.ts';
 import { SubscriptionKeys } from './subscription-store.ts';
 
@@ -306,18 +306,20 @@ async function repointRow(
  * fenced out on every request by an org that no longer exists. Their next
  * request lands on `/left-organization`, which offers to create an org.
  *
- * The org and both repoints commit together, the repoints conditioned on still
- * naming the deleting org. A pass that finds them moved already (a re-drive
- * after this one, or an overlapping pass that got there first) writes nothing.
- * A re-drive also reads the floor org as another membership, so the census
- * sends it to {@link repointHomeOrg} rather than here.
+ * The org and both repoints commit together. The identity's repoint is
+ * conditioned on still naming the deleting org: a pass that finds it moved
+ * already (a re-drive after this one, or an overlapping pass that got there
+ * first) writes nothing. A re-drive also reads the floor org as another
+ * membership, so the census sends it to {@link repointHomeOrg} rather than here.
+ * The profile's is conditioned on the org it was read naming, whichever that
+ * is, so a profile that disagrees with the identity does not block the move.
  */
 async function moveToFloorOrg(orgId: string, member: DeletionMember): Promise<void> {
   const profile = await readUserProfile(member.userId, { consistentRead: true });
   const floorOrg = await prepareFloorOrg({
     userId: member.userId,
     sub: member.sub,
-    homeOrgIds: { profile: orgId, identity: orgId },
+    homeOrgIds: { profile: profile?.orgId, identity: orgId },
     name: profile?.name,
     email: profile?.email,
   });
@@ -325,9 +327,25 @@ async function moveToFloorOrg(orgId: string, member: DeletionMember): Promise<vo
     await commitAudited({ items: floorOrg.items, event: floorOrg.event });
   } catch (err) {
     // The org rows are create-only under a fresh id, so a failed condition is
-    // a repoint: the home has moved already. Anything else is retried.
+    // a repoint. Anything else is retried.
     if (cancelledLabels(err, []).length === 0) throw err;
+    await reportUnmovedHome(orgId, member);
   }
+}
+
+/**
+ * A repoint that failed for any reason but a move that already happened leaves
+ * the member fenced out with no org, and no later pass changes that. Logged
+ * loudly rather than thrown: a pass that can never succeed would hold the whole
+ * deletion open.
+ */
+async function reportUnmovedHome(orgId: string, member: DeletionMember): Promise<void> {
+  const { identityOrgId } = await readHomeOrgPointers(member.userId);
+  if (identityOrgId !== orgId) return;
+  console.error('[deletion-scrub] Floor org not written; the member still names the deleting org', {
+    orgId,
+    userId: member.userId,
+  });
 }
 
 /**
