@@ -246,11 +246,39 @@ export function ObjectDetailPage({
     </>
   );
 
+  // The header's Share and Delete work while the metadata loads, so their
+  // dialogs render in every state: one opened during loading stays open
+  // whether the query succeeds or fails.
+  const dialogs = (
+    <>
+      {/* Share dialog */}
+      <ShareObjectModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        bucketName={bucketName}
+        region={region}
+        objectKey={objectKey}
+        versionId={versionId}
+      />
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onClose={() => setConfirmDeleteOpen(false)}
+        onConfirm={() => objectActions.deleteObject(objectKey, versionId)}
+        title="Delete object"
+        description="This object will be permanently deleted. This action cannot be undone."
+        confirmLabel="Delete object"
+      />
+    </>
+  );
+
   if (isPending) {
     return (
       <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
         {header}
         <ObjectDetailSkeleton />
+        {dialogs}
       </div>
     );
   }
@@ -266,6 +294,7 @@ export function ObjectDetailPage({
           ]}
         />
         <Alert variant="red" description={error?.message ?? 'Failed to load object metadata'} />
+        {dialogs}
       </div>
     );
   }
@@ -377,25 +406,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         <CodeBlock code={apiExample} language="bash" />
       </Card>
 
-      {/* Share dialog */}
-      <ShareObjectModal
-        open={shareOpen}
-        onClose={() => setShareOpen(false)}
-        bucketName={bucketName}
-        region={region}
-        objectKey={objectKey}
-        versionId={versionId}
-      />
-
-      {/* Delete confirmation */}
-      <ConfirmDialog
-        open={confirmDeleteOpen}
-        onClose={() => setConfirmDeleteOpen(false)}
-        onConfirm={() => objectActions.deleteObject(objectKey, versionId)}
-        title="Delete object"
-        description="This object will be permanently deleted. This action cannot be undone."
-        confirmLabel="Delete object"
-      />
+      {dialogs}
     </div>
   );
 }
