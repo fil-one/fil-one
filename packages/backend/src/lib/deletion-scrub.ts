@@ -222,11 +222,21 @@ async function destroyOrgCredentials(orgRows: Item[]): Promise<void> {
  * `deletedAt` on their identity row would say otherwise. That member's rows are
  * re-pointed instead. The legacy membership row is stamped either way: it
  * belongs to this org.
+ *
+ * The identity row is stamped only while it still names the member's userId.
+ * Once a pass marks the deletion done, accepting an invitation replaces the row
+ * with a new account under the same sub and a new userId. A second pass that
+ * was already running, with the members it read before, must leave that
+ * account alone.
  */
 async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<void> {
   for (const member of members) {
     if (member.deleteIdentity) {
-      await scrubRow({ key: { pk: `SUB#${member.sub}`, sk: 'IDENTITY' } });
+      await scrubRow({
+        key: { pk: `SUB#${member.sub}`, sk: 'IDENTITY' },
+        condition: 'userId = :userId',
+        values: { ':userId': member.userId },
+      });
       await scrubRow({ key: { pk: `USER#${member.userId}`, sk: 'PROFILE' } });
       await deleteRow(Resource.UserInfoTable.name, {
         pk: `USER#${member.userId}`,
@@ -427,10 +437,13 @@ async function scrubOrgProfile(orgId: string): Promise<void> {
  * One stamped update. `if_not_exists` keeps the first pass's time across re-runs,
  * and `attribute_exists(pk)` stops a re-run recreating a row someone else removed
  * — a bare `UpdateItem` would upsert one holding nothing but a stamp.
+ * `condition` replaces that check for a row that must also still be the one the
+ * pass read; any comparison it makes fails on a missing row too.
  */
 async function scrubRow(params: {
   tableName?: string;
   key: Record<string, string>;
+  condition?: string;
   set?: string;
   remove?: string;
   values?: Record<string, unknown>;
@@ -443,7 +456,7 @@ async function scrubRow(params: {
         TableName: params.tableName ?? Resource.UserInfoTable.name,
         Key: marshall(params.key),
         UpdateExpression: `SET ${set}${params.remove ? ` REMOVE ${params.remove}` : ''}`,
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: params.condition ?? 'attribute_exists(pk)',
         ExpressionAttributeValues: marshall({
           ':now': new Date().toISOString(),
           ...params.values,

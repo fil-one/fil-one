@@ -199,6 +199,18 @@ describe('scrubOrgRecords', () => {
     );
   });
 
+  // An overlapping pass finishes and marks the deletion done; an invitation then
+  // replaces the identity with a new userId under the same sub. This pass's
+  // stamp must not land on that new account.
+  it('stamps the identity row only while it still names the deleted userId', async () => {
+    await scrubOrgRecords(ORG, MEMBERS);
+
+    expect(scrubOf('UserInfoTable:SUB#auth0|one/IDENTITY')).toMatchObject({
+      ConditionExpression: 'userId = :userId',
+      ExpressionAttributeValues: { ':userId': { S: 'user-1' } },
+    });
+  });
+
   it('stamps every row that survives, and deletes only the avatar rate limit rows', async () => {
     await scrubOrgRecords(ORG, [
       { userId: 'user-1', sub: 'auth0|one', deleteIdentity: true },
