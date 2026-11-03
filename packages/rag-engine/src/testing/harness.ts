@@ -33,9 +33,12 @@ export class FakeEmbedder implements Embedder {
   calls = 0;
   /** Delay per call, to keep a sync running while a test looks at it. */
   delayMs = 0;
+  /** When set, the call with this number (1-based) fails. */
+  failOnCall: number | undefined;
 
   async embed(texts: string[]): Promise<number[][]> {
     this.calls += 1;
+    if (this.calls === this.failOnCall) throw new Error('embedding service unavailable');
     if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
     return texts.map((text) => FakeEmbedder.vector(text));
   }
@@ -56,9 +59,12 @@ export class FakeEmbedder implements Embedder {
 export class FakeAnswerProvider implements AnswerProvider {
   readonly model = 'fake-answer';
   readonly questions: { question: string; passages: AnswerPassage[] }[] = [];
+  /** When set, `answer` rejects with this error. */
+  failWith: Error | undefined;
 
   answer(question: string, passages: AnswerPassage[]): Promise<string> {
     this.questions.push({ question, passages });
+    if (this.failWith) return Promise.reject(this.failWith);
     return Promise.resolve(`Answer citing [1] from ${passages[0]?.objectKey ?? 'nothing'}`);
   }
 }
@@ -94,7 +100,11 @@ export interface HarnessOptions {
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rag-engine-'));
-  const s3 = await startTestS3Server({ root, accessKeyId: 'AKTEST', ...options.s3 });
+  const s3 = await startTestS3Server({
+    root,
+    accessKeyId: 'AKTEST',
+    ...options.s3,
+  });
   fs.mkdirSync(path.join(root, SOURCE_BUCKET));
 
   const embedder = new FakeEmbedder();
@@ -103,12 +113,17 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     config: {
       port: 0,
       token: TOKEN,
-      embedding: { baseUrl: 'http://unused', model: embedder.model, batchSize: 32 },
+      embedding: {
+        baseUrl: 'http://unused',
+        model: embedder.model,
+        batchSize: 32,
+      },
       answer: { provider: 'none' },
       vectorIndexMinRows: 1_000_000,
       flushRows: 1500,
       maxObjectBytes: 1024 * 1024,
       ...options.config,
+      s3EndpointOverrides: options.config?.s3EndpointOverrides ?? {},
     },
     embedder,
     answer,
@@ -125,13 +140,21 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     orgId: 'org-1',
     region: 'us-east-9',
     bucketName: SOURCE_BUCKET,
-    s3: { endpointUrl: s3.url, region: 'us-east-9', accessKeyId: 'AKTEST', secretAccessKey: 'SK' },
+    s3: {
+      endpointUrl: s3.url,
+      region: 'us-east-9',
+      accessKeyId: 'AKTEST',
+      secretAccessKey: 'SK',
+    },
   };
 
   const call = async <T>(route: string, body: unknown, token = TOKEN) => {
     const response = await fetch(`${url}${route}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     });
     return { status: response.status, body: (await response.json()) as T };

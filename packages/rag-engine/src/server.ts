@@ -10,7 +10,7 @@ import {
 import type { z } from 'zod';
 
 import type { EngineContext } from './engine-context.ts';
-import { EngineError, type EngineErrorBody } from './errors.ts';
+import { EngineError, summarizeError, type EngineErrorBody } from './errors.ts';
 import { dropTable } from './lance-store.ts';
 import { runQuery } from './query.ts';
 import { buildStatus, listVersions } from './status.ts';
@@ -63,7 +63,7 @@ function targetOf(body: unknown): RagEngineTarget {
 async function drop(ctx: EngineContext, syncs: SyncManager, target: RagEngineTarget) {
   const companion = companionBucketName(target.orgId, target.region, target.bucketName);
   await syncs.cancel(companion);
-  const storage = storageFor(target, ctx.config.s3EndpointOverride);
+  const storage = storageFor(target, ctx.config.s3EndpointOverrides);
   const dropped = await dropTable(storage, companion);
   const s3 = createS3Client(storage);
   try {
@@ -97,7 +97,10 @@ function routes(ctx: EngineContext, syncs: SyncManager): Record<string, RouteHan
       status: 200,
       body: await runQuery(ctx, parse(RagEngineQueryRequestSchema, body)),
     }),
-    '/v1/drop': async (body) => ({ status: 200, body: await drop(ctx, syncs, targetOf(body)) }),
+    '/v1/drop': async (body) => ({
+      status: 200,
+      body: await drop(ctx, syncs, targetOf(body)),
+    }),
   };
 }
 
@@ -127,14 +130,19 @@ function send(res: http.ServerResponse, reply: Reply): void {
 
 function errorReply(ctx: EngineContext, error: unknown, path: string): Reply {
   if (error instanceof EngineError) {
-    const body: EngineErrorBody = { error: { code: error.code, message: error.message } };
+    const body: EngineErrorBody = {
+      error: { code: error.code, message: error.message },
+    };
     const issues = (error as EngineError & { issues?: unknown }).issues;
     if (issues) body.error.issues = issues;
     return { status: error.status, body };
   }
   const message = error instanceof Error ? error.message : String(error);
+  // The full error stays in the log; the caller gets a short summary.
   ctx.log('error', 'request_failed', { path, error: message });
-  const body: EngineErrorBody = { error: { code: 'INTERNAL', message } };
+  const body: EngineErrorBody = {
+    error: { code: 'INTERNAL', message: summarizeError(error) },
+  };
   return { status: 500, body };
 }
 
@@ -144,27 +152,48 @@ function targetFields(body: unknown): Record<string, unknown> {
   return target ? { orgId: target.orgId, region: target.region, bucket: target.bucketName } : {};
 }
 
+/**
+ * The path of a request target, without parsing it as a URL: an absolute-form
+ * target with a bad port or host must not throw before authentication.
+ */
+export function requestPath(url: string | undefined): string {
+  const target = url ?? '/';
+  const path = target.startsWith('/')
+    ? target
+    : target.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '');
+  return path.split(/[?#]/)[0] || '/';
+}
+
 async function handle(
   ctx: EngineContext,
   table: Record<string, RouteHandler>,
   req: http.IncomingMessage,
 ): Promise<{ reply: Reply; body?: unknown }> {
-  const path = new URL(req.url ?? '/', 'http://engine').pathname;
+  const path = requestPath(req.url);
   if (req.method === 'GET' && path === '/healthz')
     return { reply: { status: 200, body: { ok: true } } };
   const route = table[path];
   if (!route)
     return {
-      reply: { status: 404, body: { error: { code: 'NOT_FOUND', message: 'No such route' } } },
+      reply: {
+        status: 404,
+        body: { error: { code: 'NOT_FOUND', message: 'No such route' } },
+      },
     };
   if (req.method !== 'POST') {
     return {
-      reply: { status: 405, body: { error: { code: 'METHOD_NOT_ALLOWED', message: 'Use POST' } } },
+      reply: {
+        status: 405,
+        body: { error: { code: 'METHOD_NOT_ALLOWED', message: 'Use POST' } },
+      },
     };
   }
   if (!isAuthorized(req.headers.authorization, ctx.config.token)) {
     return {
-      reply: { status: 401, body: { error: { code: 'UNAUTHORIZED', message: 'Bad token' } } },
+      reply: {
+        status: 401,
+        body: { error: { code: 'UNAUTHORIZED', message: 'Bad token' } },
+      },
     };
   }
   let body: unknown;
@@ -180,17 +209,32 @@ export function createEngineServer(ctx: EngineContext, syncs: SyncManager): http
   const table = routes(ctx, syncs);
   return http.createServer((req, res) => {
     const started = performance.now();
-    void handle(ctx, table, req).then(({ reply, body }) => {
-      send(res, reply);
-      if (req.url !== '/healthz') {
-        ctx.log('info', 'request', {
-          method: req.method,
-          path: req.url,
-          status: reply.status,
-          ms: Math.round(performance.now() - started),
-          ...targetFields(body),
+    handle(ctx, table, req)
+      .then(({ reply, body }) => {
+        send(res, reply);
+        if (req.url !== '/healthz') {
+          ctx.log('info', 'request', {
+            method: req.method,
+            path: requestPath(req.url),
+            status: reply.status,
+            ms: Math.round(performance.now() - started),
+            ...targetFields(body),
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        // Nothing a request does may take the process down.
+        ctx.log('error', 'request_crashed', {
+          error: error instanceof Error ? error.message : String(error),
         });
-      }
-    });
+        if (!res.headersSent) {
+          send(res, {
+            status: 500,
+            body: { error: { code: 'INTERNAL', message: 'Internal error' } },
+          });
+        } else {
+          res.destroy();
+        }
+      });
   });
 }

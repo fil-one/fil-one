@@ -5,9 +5,16 @@
  * are never logged.
  */
 
+import type { EndpointOverrides } from './storage.ts';
+
 export type AnswerConfig =
   | { provider: 'anthropic'; apiKey: string; model: string }
-  | { provider: 'openai-compatible'; baseUrl: string; model: string; apiKey?: string }
+  | {
+      provider: 'openai-compatible';
+      baseUrl: string;
+      model: string;
+      apiKey?: string;
+    }
   | { provider: 'none' };
 
 export interface EmbeddingConfig {
@@ -24,11 +31,12 @@ export interface EngineConfig {
   /** Bearer token every `/v1/*` request must carry. */
   token: string;
   /**
-   * Replaces the endpoint the console passes in `target.s3`, e.g. with the
-   * appliance's loopback address for Ingot. SigV4 signs the host actually
-   * contacted, so the tenant key still verifies.
+   * Per-region replacements for the endpoint the console passes in
+   * `target.s3`, e.g. the appliance's loopback address for its own Ingot.
+   * SigV4 signs the host actually contacted, so the tenant key still
+   * verifies. Regions not listed use the console's endpoint.
    */
-  s3EndpointOverride?: string;
+  s3EndpointOverrides: EndpointOverrides;
   embedding: EmbeddingConfig;
   answer: AnswerConfig;
   /** Rows at which a sync builds the ANN vector index; below it, search is a flat scan. */
@@ -76,13 +84,44 @@ function answerConfig(env: Env): AnswerConfig {
       if (!baseUrl || !model) {
         throw new Error('ANSWER_PROVIDER=openai-compatible needs ANSWER_BASE_URL and ANSWER_MODEL');
       }
-      return { provider, baseUrl, model, apiKey: optional(env, 'ANSWER_API_KEY') };
+      return {
+        provider,
+        baseUrl,
+        model,
+        apiKey: optional(env, 'ANSWER_API_KEY'),
+      };
     }
     case 'none':
       return { provider };
     default:
       throw new Error(`Unknown ANSWER_PROVIDER "${provider}"`);
   }
+}
+
+/**
+ * Parse `ENGINE_S3_ENDPOINT_OVERRIDE`: comma-separated `region=url` pairs,
+ * e.g. `eu-central-3=http://127.0.0.1:15200`. `*=url` overrides every region
+ * and suits a local engine that talks to a single Ingot. A bare URL is
+ * refused: on a stage with several Forge regions it would send all of them to
+ * one gateway.
+ */
+export function parseEndpointOverrides(raw: string | undefined): EndpointOverrides {
+  const out: Record<string, string> = {};
+  if (!raw) return out;
+  for (const entry of raw.split(',')) {
+    const pair = entry.trim();
+    if (!pair) continue;
+    const eq = pair.indexOf('=');
+    const region = eq > 0 ? pair.slice(0, eq).trim() : '';
+    const url = eq > 0 ? pair.slice(eq + 1).trim() : '';
+    if (!region || !/^https?:\/\//.test(url)) {
+      throw new Error(
+        `ENGINE_S3_ENDPOINT_OVERRIDE entries must be region=http(s)://host:port, got "${pair}"`,
+      );
+    }
+    out[region] = url;
+  }
+  return out;
 }
 
 export function loadConfig(env: Env = process.env): EngineConfig {
@@ -94,7 +133,7 @@ export function loadConfig(env: Env = process.env): EngineConfig {
   return {
     port: intFrom(env, 'ENGINE_PORT', 8080),
     token,
-    s3EndpointOverride: optional(env, 'ENGINE_S3_ENDPOINT_OVERRIDE'),
+    s3EndpointOverrides: parseEndpointOverrides(optional(env, 'ENGINE_S3_ENDPOINT_OVERRIDE')),
     embedding: {
       baseUrl: embeddingBaseUrl,
       model: optional(env, 'EMBEDDING_MODEL') ?? DEFAULT_EMBEDDING_MODEL,

@@ -8,11 +8,13 @@ import {
   SYSTEM_PROMPT,
   buildUserMessage,
 } from './answer.ts';
-import { loadConfig } from './config.ts';
+import { loadConfig, parseEndpointOverrides } from './config.ts';
 import { OpenAICompatibleEmbedder } from './embeddings.ts';
 import { sumPlanMetric } from './query.ts';
-import { isAuthorized } from './server.ts';
-import { companionBucketName, lanceStorageOptions } from './storage.ts';
+import { EngineError, MAX_ERROR_MESSAGE, summarizeError } from './errors.ts';
+import { syncTagName } from './lance-store.ts';
+import { isAuthorized, requestPath } from './server.ts';
+import { companionBucketName, ensureBucket, lanceStorageOptions, storageFor } from './storage.ts';
 import { planSync } from './sync.ts';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -35,8 +37,15 @@ describe('companionBucketName', () => {
 
 describe('lanceStorageOptions', () => {
   it('uses path-style, blocks env session tokens, and allows http only for http endpoints', () => {
-    const base = { region: 'us-east-9', accessKeyId: 'AK', secretAccessKey: 'SK' };
-    const http = lanceStorageOptions({ ...base, endpointUrl: 'http://127.0.0.1:15130' });
+    const base = {
+      region: 'us-east-9',
+      accessKeyId: 'AK',
+      secretAccessKey: 'SK',
+    };
+    const http = lanceStorageOptions({
+      ...base,
+      endpointUrl: 'http://127.0.0.1:15130',
+    });
     expect(http).toEqual({
       aws_endpoint: 'http://127.0.0.1:15130',
       aws_region: 'us-east-9',
@@ -46,7 +55,10 @@ describe('lanceStorageOptions', () => {
       aws_virtual_hosted_style_request: 'false',
       allow_http: 'true',
     });
-    const https = lanceStorageOptions({ ...base, endpointUrl: 'https://s3.example' });
+    const https = lanceStorageOptions({
+      ...base,
+      endpointUrl: 'https://s3.example',
+    });
     expect(https.allow_http).toBeUndefined();
   });
 });
@@ -90,7 +102,9 @@ describe('planSync', () => {
 describe('OpenAICompatibleEmbedder', () => {
   it('batches inputs and orders vectors by index', async () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const { input } = JSON.parse(init?.body as string) as { input: string[] };
+      const { input } = JSON.parse(init?.body as string) as {
+        input: string[];
+      };
       const data = input
         .map((text, index) => ({ index, embedding: [text.length, index] }))
         .reverse();
@@ -155,6 +169,8 @@ describe('answer prompt', () => {
         output_config: { effort: 'low' },
         system: SYSTEM_PROMPT,
       }),
+      // One abort budget across the SDK's retry.
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -175,7 +191,9 @@ describe('answer prompt', () => {
     expect(await provider.answer('q', [{ n: 1, objectKey: 'k', text: 't' }])).toBe('Answer [1]');
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('http://llm/v1/chat/completions');
-    const body = JSON.parse(init.body as string) as { messages: { role: string }[] };
+    const body = JSON.parse(init.body as string) as {
+      messages: { role: string }[];
+    };
     expect(body.messages.map((m) => m.role)).toEqual(['system', 'user']);
   });
 });
@@ -215,5 +233,106 @@ describe('helpers', () => {
       'LanceRead: bytes_read=1.81 K, iops=4, requests=4\n  LanceRead: bytes_read=1.02 K, requests=4';
     expect(sumPlanMetric(plan, 'bytes_read')).toBe(2830);
     expect(sumPlanMetric(plan, 'requests')).toBe(8);
+  });
+});
+
+describe('endpoint overrides', () => {
+  const target = (region: string) => ({
+    orgId: 'o',
+    region,
+    bucketName: 'b',
+    s3: {
+      endpointUrl: `https://s3.${region}.example`,
+      region,
+      accessKeyId: 'AK',
+      secretAccessKey: 'SK',
+    },
+  });
+
+  it('replaces the endpoint only for the region it names', () => {
+    const overrides = parseEndpointOverrides('eu-central-3=http://127.0.0.1:15200');
+    expect(storageFor(target('eu-central-3'), overrides).endpointUrl).toBe(
+      'http://127.0.0.1:15200',
+    );
+    expect(storageFor(target('us-east-9'), overrides).endpointUrl).toBe(
+      'https://s3.us-east-9.example',
+    );
+    expect(storageFor(target('us-east-9')).endpointUrl).toBe('https://s3.us-east-9.example');
+  });
+
+  it('accepts several regions and a wildcard, and refuses a bare URL', () => {
+    expect(parseEndpointOverrides('a=http://x:1, b=https://y')).toEqual({
+      a: 'http://x:1',
+      b: 'https://y',
+    });
+    const all = parseEndpointOverrides('*=http://ingot:15130');
+    expect(storageFor(target('us-east-9'), all).endpointUrl).toBe('http://ingot:15130');
+    expect(() => parseEndpointOverrides('http://127.0.0.1:15200')).toThrow(/region=/);
+    expect(() => parseEndpointOverrides('a=ftp://x')).toThrow(/region=/);
+    expect(parseEndpointOverrides(undefined)).toEqual({});
+    const config = loadConfig({
+      ENGINE_TOKEN: 't',
+      EMBEDDING_BASE_URL: 'http://tei/v1',
+      ENGINE_S3_ENDPOINT_OVERRIDE: 'eu-central-3=http://127.0.0.1:15200',
+    });
+    expect(config.s3EndpointOverrides).toEqual({
+      'eu-central-3': 'http://127.0.0.1:15200',
+    });
+  });
+});
+
+describe('ensureBucket', () => {
+  const failing = (name: string) => ({
+    send: vi.fn(async () => {
+      throw Object.assign(new Error(name), { name });
+    }),
+  });
+
+  it('accepts a bucket the tenant already owns', async () => {
+    await expect(
+      ensureBucket(failing('BucketAlreadyOwnedByYou') as never, 'b'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('refuses a bucket name another account holds', async () => {
+    const error = await ensureBucket(failing('BucketAlreadyExists') as never, 'b').catch((e) => e);
+    expect(error).toBeInstanceOf(EngineError);
+    expect((error as EngineError).code).toBe('COMPANION_BUCKET_TAKEN');
+  });
+});
+
+describe('summarizeError', () => {
+  it('maps common causes to stable codes', () => {
+    expect(summarizeError(new Error('lance error: ... NotImplemented ... 501'))).toMatch(
+      /^CONDITIONAL_WRITE_REFUSED: /,
+    );
+    expect(summarizeError(new Error('AccessDenied: no'))).toMatch(/^ACCESS_DENIED: /);
+    expect(summarizeError(new Error('NoSuchBucket'))).toMatch(/^BUCKET_NOT_FOUND: /);
+    expect(summarizeError(new EngineError(409, 'X', 'msg'))).toBe('X: msg');
+  });
+
+  it('keeps the first line, drops Rust source paths, and caps the length', () => {
+    const raw =
+      'lance error: boom at s3://bucket/x, /Users/runner/.cargo/registry/src/index.crates.io-1/lance-io/src/local.rs:273:40\nsecond line';
+    expect(summarizeError(new Error(raw))).toBe('lance error: boom at s3://bucket/x');
+    expect(summarizeError(new Error('y'.repeat(2000))).length).toBe(MAX_ERROR_MESSAGE);
+  });
+});
+
+describe('requestPath', () => {
+  it('derives the path without throwing on odd request targets', () => {
+    expect(requestPath('/v1/status?x=1')).toBe('/v1/status');
+    expect(requestPath('http://x:99999/v1/status')).toBe('/v1/status');
+    expect(requestPath('http://x')).toBe('/');
+    expect(requestPath('*')).toBe('*');
+    expect(requestPath(undefined)).toBe('/');
+  });
+});
+
+describe('syncTagName', () => {
+  it('uses only characters Lance allows in tags', () => {
+    const name = syncTagName(new Date('2026-11-05T10:00:00.123Z'));
+    expect(name).toBe('sync-20261105T100000.123Z');
+    expect(name).toMatch(/^[A-Za-z0-9._-]+$/);
   });
 });

@@ -16,6 +16,11 @@ export interface AnswerProvider {
 }
 
 export const MAX_ANSWER_TOKENS = 4000;
+/**
+ * Longest wait for an answer. The console's API route gives up at about 29 s,
+ * so a longer wait only holds engine resources for a reply nobody reads.
+ */
+export const ANSWER_TIMEOUT_MS = 25_000;
 
 export const SYSTEM_PROMPT = [
   'You answer questions about the documents stored in a storage bucket.',
@@ -38,7 +43,10 @@ export function buildUserMessage(question: string, passages: AnswerPassage[]): s
   const body = passages
     .map(
       (p) =>
-        `<passage n="${p.n}" source="${neutralize(p.objectKey).replace(/"/g, '&quot;')}">\n${neutralize(p.text)}\n</passage>`,
+        `<passage n="${p.n}" source="${neutralize(p.objectKey).replace(
+          /"/g,
+          '&quot;',
+        )}">\n${neutralize(p.text)}\n</passage>`,
     )
     .join('\n');
   return `<passages>\n${body}\n</passages>\n\n<question>\n${neutralize(question)}\n</question>`;
@@ -50,18 +58,22 @@ export class AnthropicAnswerProvider implements AnswerProvider {
 
   constructor(apiKey: string, model: string, client?: Anthropic) {
     this.model = model;
-    this.#client = client ?? new Anthropic({ apiKey });
+    this.#client = client ?? new Anthropic({ apiKey, timeout: ANSWER_TIMEOUT_MS, maxRetries: 1 });
   }
 
   async answer(question: string, passages: AnswerPassage[]): Promise<string> {
-    const response = await this.#client.messages.create({
-      model: this.model,
-      max_tokens: MAX_ANSWER_TOKENS,
-      thinking: { type: 'adaptive' },
-      output_config: { effort: 'low' },
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: buildUserMessage(question, passages) }],
-    });
+    const response = await this.#client.messages.create(
+      {
+        model: this.model,
+        max_tokens: MAX_ANSWER_TOKENS,
+        thinking: { type: 'adaptive' },
+        output_config: { effort: 'low' },
+        system: SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: buildUserMessage(question, passages) }],
+      },
+      // One budget across the SDK's retry.
+      { signal: AbortSignal.timeout(ANSWER_TIMEOUT_MS) },
+    );
     if (response.stop_reason === 'refusal') return REFUSAL_ANSWER;
     // `max_tokens` keeps whatever text was produced; the citations still stand.
     return response.content
@@ -93,7 +105,9 @@ export class OpenAICompatibleAnswerProvider implements AnswerProvider {
   }
 
   async answer(question: string, passages: AnswerPassage[]): Promise<string> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
     if (this.#apiKey) headers.Authorization = `Bearer ${this.#apiKey}`;
     const response = await this.#fetch(`${this.#baseUrl}/chat/completions`, {
       method: 'POST',
@@ -106,7 +120,7 @@ export class OpenAICompatibleAnswerProvider implements AnswerProvider {
           { role: 'user', content: buildUserMessage(question, passages) },
         ],
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(ANSWER_TIMEOUT_MS),
     });
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 300);

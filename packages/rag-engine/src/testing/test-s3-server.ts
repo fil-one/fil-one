@@ -20,6 +20,8 @@ export interface S3Request {
   ranged?: boolean;
   conditional?: string;
   status?: number;
+  /** The `x-amz-security-token` header, when the request carried one (even empty). */
+  securityToken?: string;
 }
 
 export interface S3ServerStats {
@@ -35,6 +37,8 @@ export interface S3ServerStats {
 export interface TestS3Server {
   url: string;
   stats: S3ServerStats;
+  /** The live options; tests may change them between requests. */
+  options: TestS3ServerOptions;
   reset(): void;
   close(): Promise<void>;
 }
@@ -82,7 +86,12 @@ function s3Error(ctx: RequestContext, status: number, code: string): void {
 }
 
 function record(ctx: RequestContext, entry: Omit<S3Request, 'bucket'>): void {
-  ctx.stats.requests.push({ bucket: ctx.bucket, ...entry });
+  const token = ctx.req.headers['x-amz-security-token'];
+  ctx.stats.requests.push({
+    bucket: ctx.bucket,
+    ...entry,
+    ...(typeof token === 'string' ? { securityToken: token } : {}),
+  });
 }
 
 function walk(dir: string, base = ''): string[] {
@@ -106,7 +115,9 @@ function createMultipartUpload(ctx: RequestContext): void {
   xml(
     ctx,
     200,
-    `<InitiateMultipartUploadResult><Bucket>${ctx.bucket}</Bucket><Key>${xmlEscape(ctx.key)}</Key><UploadId>${crypto.randomUUID()}</UploadId></InitiateMultipartUploadResult>`,
+    `<InitiateMultipartUploadResult><Bucket>${ctx.bucket}</Bucket><Key>${xmlEscape(
+      ctx.key,
+    )}</Key><UploadId>${crypto.randomUUID()}</UploadId></InitiateMultipartUploadResult>`,
   );
 }
 
@@ -138,7 +149,11 @@ function completeMultipartUpload(ctx: RequestContext): void {
   xml(
     ctx,
     200,
-    `<CompleteMultipartUploadResult><Bucket>${ctx.bucket}</Bucket><Key>${xmlEscape(ctx.key)}</Key><ETag>${etagOf(merged)}</ETag></CompleteMultipartUploadResult>`,
+    `<CompleteMultipartUploadResult><Bucket>${
+      ctx.bucket
+    }</Bucket><Key>${xmlEscape(ctx.key)}</Key><ETag>${etagOf(
+      merged,
+    )}</ETag></CompleteMultipartUploadResult>`,
   );
 }
 
@@ -151,7 +166,9 @@ function deleteObjects(ctx: RequestContext): void {
   xml(
     ctx,
     200,
-    `<DeleteResult>${keys.map((k) => `<Deleted><Key>${xmlEscape(k)}</Key></Deleted>`).join('')}</DeleteResult>`,
+    `<DeleteResult>${keys
+      .map((k) => `<Deleted><Key>${xmlEscape(k)}</Key></Deleted>`)
+      .join('')}</DeleteResult>`,
   );
 }
 
@@ -159,7 +176,11 @@ function listEntry(ctx: RequestContext, key: string): string {
   const full = path.join(ctx.bucketDir, key);
   const stat = fs.statSync(full);
   const etag = etagOf(fs.readFileSync(full));
-  return `<Contents><Key>${xmlEscape(key)}</Key><LastModified>${stat.mtime.toISOString()}</LastModified><ETag>${xmlEscape(etag)}</ETag><Size>${stat.size}</Size><StorageClass>STANDARD</StorageClass></Contents>`;
+  return `<Contents><Key>${xmlEscape(
+    key,
+  )}</Key><LastModified>${stat.mtime.toISOString()}</LastModified><ETag>${xmlEscape(
+    etag,
+  )}</ETag><Size>${stat.size}</Size><StorageClass>STANDARD</StorageClass></Contents>`;
 }
 
 /** ListObjectsV2 with prefix, delimiter, max-keys and continuation tokens. */
@@ -190,7 +211,11 @@ function listObjectsV2(ctx: RequestContext): void {
   xml(
     ctx,
     200,
-    `<ListBucketResult><Name>${ctx.bucket}</Name><Prefix>${xmlEscape(prefix)}</Prefix><KeyCount>${page.length}</KeyCount><MaxKeys>${maxKeys}</MaxKeys><IsTruncated>${truncated}</IsTruncated>${next}${page.map((k) => listEntry(ctx, k)).join('')}${prefixes}</ListBucketResult>`,
+    `<ListBucketResult><Name>${ctx.bucket}</Name><Prefix>${xmlEscape(prefix)}</Prefix><KeyCount>${
+      page.length
+    }</KeyCount><MaxKeys>${maxKeys}</MaxKeys><IsTruncated>${truncated}</IsTruncated>${next}${page
+      .map((k) => listEntry(ctx, k))
+      .join('')}${prefixes}</ListBucketResult>`,
   );
 }
 
@@ -212,7 +237,12 @@ function getObject(ctx: RequestContext): void {
     const start = Number(match[1]);
     const end = Math.min(match[2] ? Number(match[2]) : buf.length - 1, buf.length - 1);
     const slice = buf.subarray(start, end + 1);
-    record(ctx, { op: method, key: ctx.key, ranged: true, bytes: slice.length });
+    record(ctx, {
+      op: method,
+      key: ctx.key,
+      ranged: true,
+      bytes: slice.length,
+    });
     if (method === 'GET') ctx.stats.bytesOut += slice.length;
     ctx.res.writeHead(206, {
       ...headers,
@@ -344,7 +374,12 @@ export async function startTestS3Server(options: TestS3ServerOptions): Promise<T
   const { root } = options;
   fs.mkdirSync(root, { recursive: true });
 
-  const stats: S3ServerStats = { requests: [], bytesOut: 0, bytesIn: 0, refused: [] };
+  const stats: S3ServerStats = {
+    requests: [],
+    bytesOut: 0,
+    bytesIn: 0,
+    refused: [],
+  };
 
   const server = http.createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -380,6 +415,7 @@ export async function startTestS3Server(options: TestS3ServerOptions): Promise<T
   return {
     url: `http://127.0.0.1:${address.port}`,
     stats,
+    options,
     reset() {
       stats.requests.length = 0;
       stats.bytesOut = 0;

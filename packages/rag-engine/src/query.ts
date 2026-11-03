@@ -9,7 +9,7 @@ import type {
 
 import type { EngineContext } from './engine-context.ts';
 import { EngineError } from './errors.ts';
-import { TEXT_COLUMN, VECTOR_COLUMN, openTable } from './lance-store.ts';
+import { TEXT_COLUMN, VECTOR_COLUMN, VersionNotFoundError, openTable } from './lance-store.ts';
 import { TABLE_NAME, companionBucketName, datasetUri, storageFor } from './storage.ts';
 
 const RESULT_COLUMNS = ['objectKey', 'chunkIndex', 'text'];
@@ -63,7 +63,13 @@ function buildSearch(
 
 /** Sum a metric such as `bytes_read=1.81 K` over every node of an analyzed plan. */
 export function sumPlanMetric(plan: string, metric: string): number {
-  const units: Record<string, number> = { '': 1, K: 1e3, M: 1e6, G: 1e9, T: 1e12 };
+  const units: Record<string, number> = {
+    '': 1,
+    K: 1e3,
+    M: 1e6,
+    G: 1e9,
+    T: 1e12,
+  };
   let total = 0;
   for (const match of plan.matchAll(new RegExp(`\\b${metric}=([\\d.]+)\\s?([KMGT]?)\\b`, 'g'))) {
     total += Number(match[1]) * (units[match[2] ?? ''] ?? 1);
@@ -73,8 +79,10 @@ export function sumPlanMetric(plan: string, metric: string): number {
 
 /**
  * Bytes and requests the search reads from storage, from Lance's analyzed
- * plan (which runs the search once more). Hybrid search runs two plans and a
- * reranker, so it reports none.
+ * plan. Lance cannot return rows and metrics from one execution, so this runs
+ * the search a second time, after the timed one: the figures reflect a warm
+ * cache and count only what that run fetched. Hybrid search runs two plans
+ * and a reranker, so it reports none.
  */
 async function measureIo(
   search: lancedb.VectorQuery | lancedb.Query,
@@ -109,13 +117,13 @@ async function openForQuery(
   request: RagEngineQueryRequest,
   companion: string,
 ): Promise<lancedb.Table> {
-  const storage = storageFor(request.target, ctx.config.s3EndpointOverride);
+  const storage = storageFor(request.target, ctx.config.s3EndpointOverrides);
   let table: lancedb.Table | undefined;
   try {
     table = await openTable(storage, companion, request.version);
   } catch (error) {
-    if (request.version !== undefined) {
-      throw new EngineError(404, 'VERSION_NOT_FOUND', `Version ${request.version} does not exist`);
+    if (error instanceof VersionNotFoundError) {
+      throw new EngineError(404, 'VERSION_NOT_FOUND', error.message);
     }
     throw error;
   }
@@ -153,6 +161,26 @@ function toCitations(rows: ResultRow[], mode: RagSearchMode): RagCitation[] {
   }));
 }
 
+/**
+ * The model's answer, or '' when the provider fails: the retrieved citations
+ * are still worth returning, as they are when no provider is configured.
+ */
+async function answerOrEmpty(
+  ctx: EngineContext,
+  question: string,
+  citations: RagCitation[],
+): Promise<string> {
+  try {
+    return await ctx.answer!.answer(question, citations);
+  } catch (error) {
+    ctx.log('warn', 'answer_failed', {
+      model: ctx.answer?.model,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return '';
+  }
+}
+
 export async function runQuery(
   ctx: EngineContext,
   request: RagEngineQueryRequest,
@@ -178,9 +206,11 @@ export async function runQuery(
   const answerStart = performance.now();
   const answer =
     request.answer && ctx.answer && citations.length > 0
-      ? await ctx.answer.answer(request.query, citations)
+      ? await answerOrEmpty(ctx, request.query, citations)
       : '';
   const answerMs = request.answer && ctx.answer ? performance.now() - answerStart : 0;
+  // Timings stop here: the I/O measurement below runs the search a second time.
+  const totalMs = performance.now() - started;
 
   const [version, rowCount, indexType, io] = await Promise.all([
     table.version(),
@@ -198,7 +228,7 @@ export async function runQuery(
       embedMs: Math.round(embedMs),
       searchMs: Math.round(searchMs),
       answerMs: Math.round(answerMs),
-      totalMs: Math.round(performance.now() - started),
+      totalMs: Math.round(totalMs),
     },
     ...(io ? { io } : {}),
     models: {

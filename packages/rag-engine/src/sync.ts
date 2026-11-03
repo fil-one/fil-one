@@ -6,21 +6,27 @@ import type { RagEngineSyncState, RagEngineTarget } from '@filone/shared';
 import { resolveContentType } from './content-type.ts';
 import { readEngineState, writeEngineState, type EngineState } from './engine-state.ts';
 import type { EngineContext } from './engine-context.ts';
+import { summarizeError } from './errors.ts';
 import {
   connectDataset,
   deleteObjectRows,
   finalizeDataset,
+  missingIndexes,
+  openCommittedTable,
   readIndexedObjects,
+  tagSyncVersion,
   writeChunks,
   type ChunkRow,
   type IndexedObject,
 } from './lance-store.ts';
 import {
   TABLE_NAME,
+  bucketExists,
   companionBucketName,
   createS3Client,
   ensureBucket,
   getObject,
+  isNoSuchBucket,
   listSourceObjects,
   storageFor,
   type SourceObject,
@@ -156,21 +162,34 @@ function toRows(object: SourceObject, chunks: string[], vectors: number[][]): Ch
   }));
 }
 
+/** Table names in the dataset; none while the companion bucket does not exist. */
+async function tableNames(db: lancedb.Connection): Promise<string[]> {
+  try {
+    return await db.tableNames();
+  } catch (error) {
+    if (isNoSuchBucket(error)) return [];
+    throw error;
+  }
+}
+
 /** Open the table, dropping it first if it was built with another embedding model. */
 async function openForSync(
   run: SyncRun,
   db: lancedb.Connection,
   engineState: EngineState,
 ): Promise<lancedb.Table | undefined> {
-  if (!(await db.tableNames()).includes(TABLE_NAME)) return undefined;
+  if (!(await tableNames(db)).includes(TABLE_NAME)) return undefined;
   const model = engineState.embedding?.model;
   if (model && model !== run.ctx.embedder.model) {
-    run.ctx.log('info', 'embedding_model_changed', { from: model, to: run.ctx.embedder.model });
+    run.ctx.log('info', 'embedding_model_changed', {
+      from: model,
+      to: run.ctx.embedder.model,
+    });
     await db.dropTable(TABLE_NAME);
     engineState.skipped = {};
     return undefined;
   }
-  return db.openTable(TABLE_NAME);
+  return openCommittedTable(db);
 }
 
 interface IndexWork {
@@ -203,37 +222,116 @@ async function indexObjects(run: SyncRun, work: IndexWork): Promise<number | und
   return dimension;
 }
 
+/** How often a sync with nothing to do still records `lastSyncedAt` in the bucket. */
+const STATE_REFRESH_MS = 60 * 60 * 1000;
+
+const errorText = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/** The parts of the engine state whose change must be written back. */
+const durableState = (state: EngineState): string =>
+  JSON.stringify({ skipped: state.skipped, embedding: state.embedding });
+
+interface Dataset {
+  engineState: EngineState;
+  /** `durableState` as read, to tell whether the sync changed it. */
+  stateBefore: string;
+  /** Undefined until the companion bucket exists. */
+  db?: lancedb.Connection;
+  table?: lancedb.Table;
+}
+
+/**
+ * Read the engine state and open the dataset. Before the first sync with work
+ * there is no companion bucket; checking first keeps Lance from retrying a
+ * listing of a bucket that is not there.
+ */
+async function loadDataset(run: SyncRun): Promise<Dataset> {
+  if (!(await bucketExists(run.s3, run.companion))) {
+    const engineState: EngineState = { skipped: {} };
+    return { engineState, stateBefore: durableState(engineState) };
+  }
+  const engineState = await readEngineState(run.s3, run.companion);
+  const stateBefore = durableState(engineState);
+  const db = await connectDataset(run.storage, run.companion);
+  const table = await openForSync(run, db, engineState);
+  return { engineState, stateBefore, db, table };
+}
+
+/**
+ * Build missing indexes, compact, and tag the finished version. A sync with no
+ * changes still does this when an index is missing: an earlier sync stopped
+ * between its data commits and its index commits.
+ */
+async function finishDataset(run: SyncRun, table: lancedb.Table, changed: boolean, at: Date) {
+  const options = { vectorIndexMinRows: run.ctx.config.vectorIndexMinRows };
+  if (!changed) {
+    const missing = await missingIndexes(table, options);
+    if (!missing.text && !missing.vector) return;
+  }
+  await finalizeDataset(table, options);
+  try {
+    await tagSyncVersion(table, at);
+  } catch (error) {
+    // The tag only marks the version for the history view; the sync stands.
+    run.ctx.log('warn', 'tag_failed', { bucket: run.target.bucketName, error: errorText(error) });
+  }
+}
+
+/**
+ * Write the engine state when the sync changed it, or hourly to refresh
+ * `lastSyncedAt`; a sync of an unchanged bucket otherwise writes nothing.
+ */
+async function saveState(run: SyncRun, dataset: Dataset, changed: boolean, at: Date) {
+  const { engineState } = dataset;
+  const previous = engineState.lastSyncedAt ? Date.parse(engineState.lastSyncedAt) : 0;
+  const stale = at.getTime() - previous >= STATE_REFRESH_MS;
+  engineState.lastSyncedAt = at.toISOString();
+  run.state.lastSyncedAt = engineState.lastSyncedAt;
+  const stateChanged = changed || durableState(engineState) !== dataset.stateBefore;
+  if (stateChanged || (stale && dataset.table)) {
+    await writeEngineState(run.s3, run.companion, engineState);
+  }
+}
+
 async function reconcile(run: SyncRun): Promise<void> {
   const { ctx, s3, companion } = run;
-  await ensureBucket(s3, companion);
-  const engineState = await readEngineState(s3, companion);
-  const db = await connectDataset(run.storage, companion);
-  const table = await openForSync(run, db, engineState);
+  const dataset = await loadDataset(run);
+  const { engineState, table } = dataset;
   const indexed = table ? await readIndexedObjects(table) : new Map<string, IndexedObject>();
   const source = await listSourceObjects(s3, run.target.bucketName);
   const plan = planSync(source, indexed, engineState.skipped, ctx.config.maxObjectBytes);
-  run.state.progress = { objectsTotal: plan.toIndex.length, objectsDone: 0, chunksWritten: 0 };
-
-  const writer = new BatchWriter(db, table, ctx.config.flushRows, run.state.progress);
-  const dimension = await indexObjects(run, { plan, writer, indexed, engineState });
-  if (writer.table && plan.removed.length > 0) await deleteObjectRows(writer.table, plan.removed);
-  if (writer.table && (plan.toIndex.length > 0 || plan.removed.length > 0)) {
-    await finalizeDataset(writer.table, { vectorIndexMinRows: ctx.config.vectorIndexMinRows });
+  const progress = { objectsTotal: plan.toIndex.length, objectsDone: 0, chunksWritten: 0 };
+  run.state.progress = progress;
+  // Never indexed and nothing to index: nothing to write either.
+  if (!dataset.db && plan.toIndex.length === 0) {
+    run.state.lastSyncedAt = new Date().toISOString();
+    return;
   }
+  if (!dataset.db) {
+    await ensureBucket(s3, companion);
+    dataset.db = await connectDataset(run.storage, companion);
+  }
+
+  const writer = new BatchWriter(dataset.db, table, ctx.config.flushRows, progress);
+  const dimension = await indexObjects(run, { plan, writer, indexed, engineState });
+  dataset.table = writer.table;
+  if (writer.table && plan.removed.length > 0) await deleteObjectRows(writer.table, plan.removed);
+  const changed = plan.toIndex.length > 0 || plan.removed.length > 0;
+  const syncedAt = new Date();
+  if (writer.table) await finishDataset(run, writer.table, changed, syncedAt);
 
   const present = new Set(source.map((object) => object.key));
   for (const key of Object.keys(engineState.skipped)) {
     if (!present.has(key)) delete engineState.skipped[key];
   }
-  engineState.lastSyncedAt = new Date().toISOString();
   if (dimension) engineState.embedding = { model: ctx.embedder.model, dimension };
-  await writeEngineState(s3, companion, engineState);
-  run.state.lastSyncedAt = engineState.lastSyncedAt;
+  await saveState(run, dataset, changed, syncedAt);
   ctx.log('info', 'sync_done', {
     bucket: run.target.bucketName,
     indexed: plan.toIndex.length,
     removed: plan.removed.length,
-    chunks: run.state.progress.chunksWritten,
+    chunks: progress.chunksWritten,
   });
 }
 
@@ -265,7 +363,7 @@ export class SyncManager {
       cancelled: false,
       progress: { objectsTotal: 0, objectsDone: 0, chunksWritten: 0 },
     };
-    const storage = storageFor(target, this.#ctx.config.s3EndpointOverride);
+    const storage = storageFor(target, this.#ctx.config.s3EndpointOverrides);
     const run: SyncRun = {
       ctx: this.#ctx,
       target,
@@ -281,10 +379,11 @@ export class SyncManager {
       })
       .catch((error: unknown) => {
         state.syncState = 'error';
-        state.lastSyncError = error instanceof Error ? error.message : String(error);
+        // The status response carries a short summary; the log keeps the full error.
+        state.lastSyncError = summarizeError(error);
         this.#ctx.log('error', 'sync_failed', {
           bucket: target.bucketName,
-          error: state.lastSyncError,
+          error: error instanceof Error ? error.message : String(error),
         });
       })
       .finally(() => {

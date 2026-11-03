@@ -17,7 +17,8 @@ The wire contract with the console backend is
   objects with it and keeps the dataset at
   `s3://filone-rag-<hash>/lance/chunks.lance`, where the hash is the first 40
   hex characters of sha256(`orgId#region#bucketName`). It creates the companion
-  bucket on the first sync.
+  bucket on the first sync that has something to index. A sync of an unchanged
+  bucket only reads; it rewrites the engine state at most once an hour.
 - **The dataset describes itself.** Each row is one chunk: `objectKey`, `etag`,
   `objectSize`, `chunkIndex`, `text`, `vector`. A sync lists the source bucket,
   compares ETags with the dataset, indexes new and changed objects and removes
@@ -28,16 +29,32 @@ The wire contract with the console backend is
   sync builds an `IVF_HNSW_SQ` cosine index; below that, vector search is an
   exact flat scan and the trace says `flat`. Every sync ends with
   `optimize()`, which compacts fragments and folds new rows into the indexes.
+  A sync that finds an index missing (an earlier sync stopped between its data
+  and index commits) builds it even when no object changed.
 - **Versions.** Every commit is a Lance version. `/v1/versions` lists them and
-  `/v1/query` takes `version` to search the dataset as it was. Lance prunes
-  versions older than 7 days during `optimize()`.
+  `/v1/query` takes `version` to search the dataset as it was. Each sync tags
+  the version it finished at (`sync-20261105T100000.123Z`); tagged versions
+  carry every index, so a version picker should offer those. Lance prunes
+  untagged versions older than 7 days during `optimize()` and keeps tagged ones.
+- **Query traces.** Timings cover the request as served. `trace.io` comes from
+  Lance's analyzed plan, which runs the search a second time after the timed
+  one: it reflects a warm cache and is not part of `totalMs`. Hybrid search
+  reports no I/O.
+- **Answers are best effort.** The answer call has a 25 s budget. If it fails
+  or times out, the query still returns its citations with an empty `answer`.
 - **Reads never write.** Status, versions and queries only list and read.
 - **Engine state.** `lance/engine-state.json` next to the dataset records when
   the last sync finished, the embedding model, and objects that produced no
   text (so they are not re-read until they change). Sync progress lives in
   memory; one container serves all tenants.
 - **Commits need conditional PUT** (`If-None-Match: *`). Forge Ingot supports
-  it; a provider that refuses it fails the sync, and reads keep working.
+  it; a provider that refuses it fails the sync, and reads keep working. A
+  first commit that failed leaves data files without a manifest; the next sync
+  writes over them.
+- **Errors.** `lastSyncError` and `500` bodies carry a short summary, with a
+  stable prefix for the common causes (`CONDITIONAL_WRITE_REFUSED`,
+  `ACCESS_DENIED`, `BUCKET_NOT_FOUND`, `COMPANION_BUCKET_TAKEN`). The full
+  error goes to the engine log.
 
 ## Routes
 
@@ -58,24 +75,31 @@ Errors are `{ error: { code, message } }`: `400 BAD_REQUEST`/`BAD_JSON`,
 
 ## Configuration
 
-| Variable                            | Default                                                |                                                                              |
-| ----------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `ENGINE_TOKEN`                      | required                                               | Shared bearer token                                                          |
-| `ENGINE_PORT`                       | `8080`                                                 |                                                                              |
-| `ENGINE_S3_ENDPOINT_OVERRIDE`       | unset                                                  | Use this endpoint instead of `target.s3.endpointUrl`, e.g. Ingot on loopback |
-| `EMBEDDING_BASE_URL`                | required                                               | OpenAI-compatible base URL, e.g. `http://tei:80/v1`                          |
-| `EMBEDDING_MODEL`                   | `BAAI/bge-small-en-v1.5`                               |                                                                              |
-| `EMBEDDING_API_KEY`                 | unset                                                  |                                                                              |
-| `EMBEDDING_BATCH_SIZE`              | `32`                                                   |                                                                              |
-| `ANSWER_PROVIDER`                   | `anthropic` if `ANTHROPIC_API_KEY` is set, else `none` | `anthropic`, `openai-compatible` or `none`                                   |
-| `ANTHROPIC_API_KEY`                 | unset                                                  |                                                                              |
-| `ANSWER_MODEL`                      | `claude-opus-5-5` for Anthropic                        | Required for `openai-compatible`                                             |
-| `ANSWER_BASE_URL`, `ANSWER_API_KEY` | unset                                                  | For `openai-compatible`                                                      |
-| `ENGINE_VECTOR_INDEX_MIN_ROWS`      | `256`                                                  |                                                                              |
-| `ENGINE_FLUSH_ROWS`                 | `1500`                                                 |                                                                              |
-| `ENGINE_MAX_OBJECT_BYTES`           | `67108864`                                             | Larger objects are skipped                                                   |
+| Variable                            | Default                                                |                                                     |
+| ----------------------------------- | ------------------------------------------------------ | --------------------------------------------------- |
+| `ENGINE_TOKEN`                      | required                                               | Shared bearer token                                 |
+| `ENGINE_PORT`                       | `8080`                                                 |                                                     |
+| `ENGINE_S3_ENDPOINT_OVERRIDE`       | unset                                                  | `region=url` pairs, comma-separated; see below      |
+| `EMBEDDING_BASE_URL`                | required                                               | OpenAI-compatible base URL, e.g. `http://tei:80/v1` |
+| `EMBEDDING_MODEL`                   | `BAAI/bge-small-en-v1.5`                               |                                                     |
+| `EMBEDDING_API_KEY`                 | unset                                                  |                                                     |
+| `EMBEDDING_BATCH_SIZE`              | `32`                                                   |                                                     |
+| `ANSWER_PROVIDER`                   | `anthropic` if `ANTHROPIC_API_KEY` is set, else `none` | `anthropic`, `openai-compatible` or `none`          |
+| `ANTHROPIC_API_KEY`                 | unset                                                  |                                                     |
+| `ANSWER_MODEL`                      | `claude-opus-5-5` for Anthropic                        | Required for `openai-compatible`                    |
+| `ANSWER_BASE_URL`, `ANSWER_API_KEY` | unset                                                  | For `openai-compatible`                             |
+| `ENGINE_VECTOR_INDEX_MIN_ROWS`      | `256`                                                  |                                                     |
+| `ENGINE_FLUSH_ROWS`                 | `1500`                                                 |                                                     |
+| `ENGINE_MAX_OBJECT_BYTES`           | `67108864`                                             | Larger objects are skipped                          |
 
 With no answer provider, queries return citations and an empty `answer`.
+
+`ENGINE_S3_ENDPOINT_OVERRIDE` replaces `target.s3.endpointUrl` for the named
+regions only, for example `eu-central-3=http://127.0.0.1:15200` on the
+appliance that runs that region's Ingot. Other regions use the endpoint the
+console sends. `*=url` overrides every region and suits a local engine talking
+to one Ingot. A bare URL is refused, because on a stage with both Forge regions
+it would send one region's requests to the other region's gateway.
 
 ## Running locally against smelt
 

@@ -5,12 +5,15 @@ import {
   DeleteBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
   S3ServiceException,
 } from '@aws-sdk/client-s3';
 import { RAG_COMPANION_BUCKET_PREFIX, type RagEngineTarget } from '@filone/shared';
+
+import { EngineError } from './errors.ts';
 
 /** Where the Lance dataset lives inside the companion bucket. */
 export const DATASET_ROOT = 'lance';
@@ -39,9 +42,22 @@ export interface StorageContext {
   secretAccessKey: string;
 }
 
-export function storageFor(target: RagEngineTarget, endpointOverride?: string): StorageContext {
+/** Endpoint overrides keyed by Forge region; `*` matches every region. */
+export type EndpointOverrides = Readonly<Record<string, string>>;
+
+/**
+ * Connection details for `target`. An override replaces the endpoint the
+ * console passed only for the region it names, so one engine can serve a
+ * local Ingot and reach every other region at its public endpoint.
+ */
+export function storageFor(
+  target: RagEngineTarget,
+  overrides: EndpointOverrides = {},
+): StorageContext {
+  const region = target.s3.region;
+  const override = Object.hasOwn(overrides, region) ? overrides[region] : overrides['*'];
   return {
-    endpointUrl: endpointOverride ?? target.s3.endpointUrl,
+    endpointUrl: override ?? target.s3.endpointUrl,
     region: target.s3.region,
     accessKeyId: target.s3.accessKeyId,
     secretAccessKey: target.s3.secretAccessKey,
@@ -98,13 +114,35 @@ export function isNoSuchBucket(error: unknown): boolean {
   return message.includes('nosuchbucket') || message.includes('no such bucket');
 }
 
-/** Create the companion bucket if it does not exist yet. */
-export async function ensureBucket(s3: S3Client, bucket: string): Promise<void> {
+/**
+ * Create the companion bucket if it does not exist yet. Bucket names are
+ * global, so `BucketAlreadyExists` means another tenant holds the name.
+ */
+export async function ensureBucket(s3: Pick<S3Client, 'send'>, bucket: string): Promise<void> {
   try {
     await s3.send(new CreateBucketCommand({ Bucket: bucket }));
   } catch (error) {
     const name = errorName(error);
-    if (name === 'BucketAlreadyOwnedByYou' || name === 'BucketAlreadyExists') return;
+    if (name === 'BucketAlreadyOwnedByYou') return;
+    if (name === 'BucketAlreadyExists') {
+      throw new EngineError(
+        409,
+        'COMPANION_BUCKET_TAKEN',
+        `The index bucket ${bucket} already belongs to another account`,
+      );
+    }
+    throw error;
+  }
+}
+
+/** Whether the bucket exists, by one HeadBucket read. */
+export async function bucketExists(s3: Pick<S3Client, 'send'>, bucket: string): Promise<boolean> {
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: bucket }));
+    return true;
+  } catch (error) {
+    const name = errorName(error);
+    if (name === 'NotFound' || isNoSuchBucket(error)) return false;
     throw error;
   }
 }

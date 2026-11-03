@@ -64,7 +64,7 @@ export async function buildStatus(
   target: RagEngineTarget,
 ): Promise<RagEngineStatus> {
   const companion = companionBucketName(target.orgId, target.region, target.bucketName);
-  const storage = storageFor(target, ctx.config.s3EndpointOverride);
+  const storage = storageFor(target, ctx.config.s3EndpointOverrides);
   const memory = syncs.get(companion);
   const s3 = createS3Client(storage);
   try {
@@ -99,7 +99,7 @@ export async function listVersions(
   target: RagEngineTarget,
 ): Promise<RagEngineVersion[]> {
   const companion = companionBucketName(target.orgId, target.region, target.bucketName);
-  const table = await openTable(storageFor(target, ctx.config.s3EndpointOverride), companion);
+  const table = await openTable(storageFor(target, ctx.config.s3EndpointOverrides), companion);
   if (!table) return [];
   const [versions, tags] = await Promise.all([
     table.listVersions(),

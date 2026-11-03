@@ -4,6 +4,8 @@ import { Field, FixedSizeList, Float32, Int32, Int64, Schema, Utf8 } from 'apach
 
 import {
   TABLE_NAME,
+  bucketExists,
+  createS3Client,
   datasetUri,
   isNoSuchBucket,
   lanceStorageOptions,
@@ -89,6 +91,13 @@ export async function openTable(
   companionBucket: string,
   version?: number,
 ): Promise<lancedb.Table | undefined> {
+  // One HEAD instead of Lance retrying a listing of a bucket that is not there.
+  const s3 = createS3Client(storage);
+  try {
+    if (!(await bucketExists(s3, companionBucket))) return undefined;
+  } finally {
+    s3.destroy();
+  }
   let names: string[];
   let db: lancedb.Connection;
   try {
@@ -99,17 +108,45 @@ export async function openTable(
     throw error;
   }
   if (!names.includes(TABLE_NAME)) return undefined;
-  let table: lancedb.Table;
+  const table = await openCommittedTable(db);
+  if (table && version !== undefined) {
+    try {
+      await table.checkout(version);
+    } catch (error) {
+      if (isMissingManifest(error)) throw new VersionNotFoundError(version);
+      throw error;
+    }
+  }
+  return table;
+}
+
+/** Raised when a requested dataset version has no manifest. */
+export class VersionNotFoundError extends Error {
+  constructor(version: number) {
+    super(`Version ${version} does not exist`);
+    this.name = 'VersionNotFoundError';
+  }
+}
+
+/** Lance's error for a dataset path or version manifest that is not there. */
+export function isMissingManifest(error: unknown): boolean {
+  return error instanceof Error && /not found/i.test(error.message);
+}
+
+/**
+ * Open the chunks table from a connection that lists it. Data files without a
+ * committed manifest (a first commit that failed part way) are not a table
+ * yet: undefined, and the next `createTable` writes over them.
+ */
+export async function openCommittedTable(
+  db: lancedb.Connection,
+): Promise<lancedb.Table | undefined> {
   try {
-    table = await db.openTable(TABLE_NAME);
+    return await db.openTable(TABLE_NAME);
   } catch (error) {
-    // Data files without a committed manifest (a first commit that failed)
-    // are not a table yet.
-    if (error instanceof Error && /not found/i.test(error.message)) return undefined;
+    if (isMissingManifest(error)) return undefined;
     throw error;
   }
-  if (version !== undefined) await table.checkout(version);
-  return table;
 }
 
 export interface IndexedObject {
@@ -170,7 +207,9 @@ export async function writeChunks(
     .mergeInsert(['objectKey', 'chunkIndex'])
     .whenMatchedUpdateAll()
     .whenNotMatchedInsertAll()
-    .whenNotMatchedBySourceDelete({ where: inPredicates(replaceKeys)[0] ?? 'false' })
+    .whenNotMatchedBySourceDelete({
+      where: inPredicates(replaceKeys)[0] ?? 'false',
+    })
     .execute(data);
   return table;
 }
@@ -199,15 +238,49 @@ export async function finalizeDataset(
   table: lancedb.Table,
   options: { vectorIndexMinRows: number },
 ): Promise<void> {
-  const indexes = await table.listIndices();
-  if (!indexes.some((index) => index.columns.includes(TEXT_COLUMN))) {
-    await table.createIndex(TEXT_COLUMN, { config: lancedb.Index.fts() });
-  }
-  const hasVectorIndex = indexes.some((index) => index.columns.includes(VECTOR_COLUMN));
-  if (!hasVectorIndex && (await table.countRows()) >= options.vectorIndexMinRows) {
-    await table.createIndex(VECTOR_COLUMN, { config: await vectorIndexConfig(table) });
+  const missing = await missingIndexes(table, options);
+  if (missing.text) await table.createIndex(TEXT_COLUMN, { config: lancedb.Index.fts() });
+  if (missing.vector) {
+    await table.createIndex(VECTOR_COLUMN, {
+      config: await vectorIndexConfig(table),
+    });
   }
   await table.optimize();
+}
+
+/**
+ * Indexes the latest version should have but lacks: the full-text index
+ * always, the vector index from `vectorIndexMinRows` rows. A sync interrupted
+ * between its data commits and its index commits leaves one of these missing.
+ */
+export async function missingIndexes(
+  table: lancedb.Table,
+  options: { vectorIndexMinRows: number },
+): Promise<{ text: boolean; vector: boolean }> {
+  const indexes = await table.listIndices();
+  const text = !indexes.some((index) => index.columns.includes(TEXT_COLUMN));
+  const vector =
+    !indexes.some((index) => index.columns.includes(VECTOR_COLUMN)) &&
+    (await table.countRows()) >= options.vectorIndexMinRows;
+  return { text, vector };
+}
+
+/**
+ * Tag name for the version a sync finished at, e.g. `sync-20261105T100000.123Z`
+ * (Lance tags allow only letters, digits, `.`, `-` and `_`).
+ */
+export function syncTagName(at: Date): string {
+  return `sync-${at.toISOString().replace(/[-:]/g, '')}`;
+}
+
+/**
+ * Tag the latest version as a finished sync. Tagged versions are the ones a
+ * caller should offer for time travel: every one has the full-text index, and
+ * Lance's cleanup keeps tagged versions past its retention window.
+ */
+export async function tagSyncVersion(table: lancedb.Table, at: Date): Promise<void> {
+  const tags = await table.tags();
+  await tags.create(syncTagName(at), await table.version());
 }
 
 /** Indexes on the table at its checked-out version, with coverage. */

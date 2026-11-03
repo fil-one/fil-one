@@ -27,7 +27,7 @@ server.listen(config.port, () => {
     embeddingModel: config.embedding.model,
     answerProvider: config.answer.provider,
     answerModel: ctx.answer?.model,
-    s3EndpointOverride: config.s3EndpointOverride,
+    s3EndpointOverrides: config.s3EndpointOverrides,
   });
 });
 
@@ -37,6 +37,13 @@ function shutdown(signal: string): void {
   // In-flight syncs are abandoned; the next sync resumes from the dataset.
   setTimeout(() => process.exit(0), 5_000).unref();
 }
+
+// Backstop: log and keep serving rather than exit on a stray rejection.
+process.on('unhandledRejection', (reason) => {
+  jsonLogger('error', 'unhandled_rejection', {
+    error: reason instanceof Error ? reason.message : String(reason),
+  });
+});
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
