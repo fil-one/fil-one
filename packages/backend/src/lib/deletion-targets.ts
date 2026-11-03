@@ -211,7 +211,7 @@ const INVITED: OrgMembershipSource = 'invitation';
  * an account with another membership still has somewhere to log in to. And the
  * membership must be the member's own rather than an invitation, because an
  * invited member's account was never this org's to delete — the same test
- * `isSoloPersonalOrg` applies to a trial claim.
+ * `isOwnOrgForTrial` applies to a trial claim.
  *
  * A member the conversion has not reached yet has no inverse items and no
  * recorded source, so both conditions hold and the account is torn down as it

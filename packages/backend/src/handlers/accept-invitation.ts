@@ -57,8 +57,9 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * What the request never touches is as load-bearing as what it does. No
  * entitlement row, no Stripe call, no billing read: an invitation must not
  * create a trial, must not resurrect suppressed eligibility, and must not burn
- * the invitee's own claim, which stays available for their personal org (ADR §4,
- * §5). Those three are pinned by tests in the billing chain; the test here is
+ * the invitee's own claim, which stays available for an org of their own (ADR §4,
+ * §5): one they create, or the one an account made before the invitation came
+ * with. Those three are pinned by tests in the billing chain; the test here is
  * simply that this path makes no such call.
  *
  * Everything else lands in one transaction:
