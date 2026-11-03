@@ -21,7 +21,7 @@ import {
 } from '../lib/deletion-record.ts';
 import { resolveDeletionTargets } from '../lib/deletion-targets.ts';
 import { ragAllowlistKey } from '../middleware/rag-access.ts';
-import { scrubOrgRecords } from '../lib/deletion-scrub.ts';
+import { moveSurvivingMembers, scrubOrgRecords } from '../lib/deletion-scrub.ts';
 import { deleteReplacedOrgLogo } from '../lib/org-logo-storage.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { tearDownStripe } from '../lib/deletion-stripe-teardown.ts';
@@ -53,6 +53,10 @@ export async function handler(event: AccountDeletionWorkerPayload): Promise<void
   await beginPass(orgId);
 
   const { members, tenantIds } = await resolveDeletionTargets(orgId);
+
+  // Before any teardown: until a surviving member's home moves off this org,
+  // every request they make is refused as a deleted account.
+  await moveSurvivingMembers(orgId, members);
 
   // Auth0 first: it holds the only copy of the email that keys each ALLOWLIST# row.
   // Stripe before tenant deletion, because the usage report must land on a live

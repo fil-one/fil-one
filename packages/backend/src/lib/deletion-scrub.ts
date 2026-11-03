@@ -222,10 +222,9 @@ async function destroyOrgCredentials(orgRows: Item[]): Promise<void> {
  * The first two rows are the member's account, so they are stamped only for a
  * member whose account this deletion ends (`deleteIdentity`). A member who was
  * invited here, or who belongs to another org, still logs in tomorrow, and a
- * `deletedAt` on their identity row would say otherwise. That member's rows are
- * re-pointed instead, to another org they belong to or, when there is none, to a
- * floor org made for them. The legacy membership row is stamped either way: it
- * belongs to this org.
+ * `deletedAt` on their identity row would say otherwise. That member's rows were
+ * moved off this org at the start of the pass ({@link moveSurvivingMembers}).
+ * The legacy membership row is stamped either way: it belongs to this org.
  *
  * The identity row is stamped only while it still names the member's userId.
  * Once a pass marks the deletion done, accepting an invitation replaces the row
@@ -246,12 +245,31 @@ async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<v
         pk: `USER#${member.userId}`,
         sk: 'AVATAR_UPLOAD_RATE',
       });
-    } else if (member.needsFloorOrg) {
-      await moveToFloorOrg(orgId, member);
-    } else {
-      await repointHomeOrg(orgId, member);
     }
     await scrubRow({ key: { pk: `ORG#${orgId}`, sk: `MEMBER#${member.userId}` } });
+  }
+}
+
+/**
+ * Moves every member whose account outlives the org off it: to another org they
+ * belong to, or, when there is none, to a floor org made for them.
+ *
+ * The first step of a pass, before any teardown. From the deletion's confirm
+ * until this runs, a member whose home is this org is refused on every request
+ * as a deleted account, so the earlier they move, the shorter that is. Nothing
+ * a later step reads depends on where a survivor's home points: the census has
+ * already run, and the teardown reaches only the accounts it ends.
+ *
+ * A member whose account ends has neither `needsFloorOrg` nor `homeOrgId`, so
+ * {@link repointHomeOrg} leaves their rows alone.
+ */
+export async function moveSurvivingMembers(
+  orgId: string,
+  members: DeletionMember[],
+): Promise<void> {
+  for (const member of members) {
+    if (member.needsFloorOrg) await moveToFloorOrg(orgId, member);
+    else await repointHomeOrg(orgId, member);
   }
 }
 
