@@ -3,13 +3,25 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { Resource } from 'sst';
 import type { ErrorResponse, QueryBucketResponse } from '@filone/shared';
-import { ApiErrorCode, QueryBucketSchema, S3Region, isSupportedRegion } from '@filone/shared';
+import {
+  ApiErrorCode,
+  QueryBucketSchema,
+  S3Region,
+  isSupportedRegion,
+  usesRagEngine,
+} from '@filone/shared';
 import { S3VectorsStore, complete, embed } from '@filone/rag-shared';
 import type { VectorQueryResult } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.ts';
 import { RAGKeys } from '../lib/dynamo-records.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
+import {
+  getRagEngineClient,
+  ragEngineErrorResponse,
+  ragEngineTarget,
+} from '../lib/rag-engine-client.ts';
+import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
@@ -79,7 +91,7 @@ export async function baseHandler(
       .body<ErrorResponse>({ message: parsed.error.issues[0].message })
       .build();
   }
-  const { query, top_k, model } = parsed.data;
+  const { query, top_k, model, search_mode, version } = parsed.data;
 
   const { orgId, userId, membership, apiKeySession } = getUserInfo(event);
 
@@ -105,6 +117,20 @@ export async function baseHandler(
       .status(404)
       .body<ErrorResponse>({ message: 'Bucket not found' })
       .build();
+  }
+
+  if (usesRagEngine(region)) {
+    return queryEngine({
+      orchestrator,
+      tenantId,
+      orgId,
+      region,
+      bucketName,
+      query,
+      topK: top_k,
+      searchMode: search_mode,
+      version,
+    });
   }
 
   // A bucket that has never completed its first indexing pass has nothing to
@@ -147,6 +173,62 @@ export async function baseHandler(
     .status(200)
     .body<QueryBucketResponse>({ answer, sources: sourcesFromChunks(chunks) })
     .build();
+}
+
+/**
+ * Forge regions: the engine on the Forge appliance retrieves from the bucket's
+ * Lance dataset and writes the grounded answer. The bucket must have been
+ * enabled; whether it has been indexed yet is the engine's answer (409 below).
+ * `model` names a Bedrock model and does not apply here.
+ */
+async function queryEngine(args: {
+  orchestrator: RegionOrchestrator;
+  tenantId: string;
+  orgId: string;
+  region: S3Region;
+  bucketName: string;
+  query: string;
+  topK: number;
+  searchMode: 'vector' | 'fulltext' | 'hybrid' | undefined;
+  version: number | undefined;
+}): Promise<APIGatewayProxyStructuredResultV2> {
+  const { orchestrator, tenantId, orgId, region, bucketName } = args;
+  if (!(await getOwnedBucketEnablement(orgId, region, bucketName))) {
+    return new ResponseBuilder()
+      .status(409)
+      .body<ErrorResponse>({
+        message:
+          'This bucket has not been indexed yet. Queries become available after the first indexing pass completes.',
+        code: ApiErrorCode.BUCKET_NOT_INDEXED,
+      })
+      .build();
+  }
+
+  try {
+    const client = getRagEngineClient();
+    const target = await ragEngineTarget(orchestrator, tenantId, { orgId, region, bucketName });
+    const result = await client.query({
+      target,
+      query: args.query,
+      topK: args.topK,
+      searchMode: args.searchMode ?? 'vector',
+      ...(args.version ? { version: args.version } : {}),
+      answer: true,
+    });
+    const answer =
+      result.citations.length === 0 && !result.answer.trim() ? NO_RELEVANT_CONTENT : result.answer;
+    return new ResponseBuilder()
+      .status(200)
+      .body<QueryBucketResponse>({
+        answer,
+        sources: result.sources,
+        citations: result.citations,
+        trace: result.trace,
+      })
+      .build();
+  } catch (error) {
+    return ragEngineErrorResponse(error);
+  }
 }
 
 /**

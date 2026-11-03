@@ -52,6 +52,14 @@ declare module "sst" {
       value: string;
       type: "sst.Secret";
     };
+    RagEngineUrl: {
+      value: string;
+      type: "sst.Secret";
+    };
+    RagEngineToken: {
+      value: string;
+      type: "sst.Secret";
+    };
     SendGridApiKey: {
       value: string;
       type: "sst.Secret";

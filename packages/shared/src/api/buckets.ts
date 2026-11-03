@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { S3Region } from '../constants.ts';
+import { RAG_COMPANION_BUCKET_PREFIX } from './rag-engine.ts';
 
 export const BUCKET_NAME_MIN_LENGTH = 3;
 export const BUCKET_NAME_MAX_LENGTH = 63;
@@ -30,6 +31,14 @@ const RetentionSchema = z
     },
   );
 
+/**
+ * Whether a bucket holds Bucket Intelligence's Lance dataset rather than user
+ * data. Those buckets are reserved and hidden from bucket listings.
+ */
+export function isRagCompanionBucket(bucketName: string): boolean {
+  return bucketName.startsWith(RAG_COMPANION_BUCKET_PREFIX);
+}
+
 export const CreateBucketSchema = z
   .object({
     bucketName: z
@@ -46,7 +55,10 @@ export const CreateBucketSchema = z
       .regex(
         BUCKET_NAME_PATTERN,
         'Lowercase letters, numbers, and hyphens only. Must start and end with a letter or number.',
-      ),
+      )
+      .refine((name) => !isRagCompanionBucket(name), {
+        message: `Bucket names starting with "${RAG_COMPANION_BUCKET_PREFIX}" are reserved.`,
+      }),
     region: z.string().min(1, 'Region is required'),
     versioning: z.boolean().optional().default(false),
     lock: z.boolean().optional().default(false),

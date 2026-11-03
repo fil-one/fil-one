@@ -94,6 +94,23 @@ describe('CreateBucketSchema', () => {
     });
   });
 
+  it('reserves the Bucket Intelligence companion bucket prefix', () => {
+    const result = CreateBucketSchema.safeParse({
+      bucketName: 'filone-rag-abc',
+      region: 'eu-central-3',
+    });
+    expect(result).toMatchZodValidationError({
+      path: ['bucketName'],
+      message: 'Bucket names starting with "filone-rag-" are reserved.',
+    });
+  });
+
+  it('accepts names that only contain the prefix later on', () => {
+    expect(
+      CreateBucketSchema.safeParse({ bucketName: 'my-filone-rag-notes', region: 'eu-west-1' }),
+    ).toMatchObject({ success: true });
+  });
+
   describe('invalid combinations', () => {
     it('rejects lock ON without versioning', () => {
       const result = CreateBucketSchema.safeParse({

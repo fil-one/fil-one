@@ -61,6 +61,23 @@ vi.mock('@filone/rag-shared', () => ({
   },
 }));
 
+// Forge regions query the Bucket Intelligence engine. The client is faked;
+// the real target builder and error mapping run.
+let engine: FakeRagEngine = fakeRagEngine();
+let engineConfigured = true;
+vi.mock('../lib/rag-engine-client.ts', async () => {
+  const actual = await vi.importActual<typeof import('../lib/rag-engine-client.ts')>(
+    '../lib/rag-engine-client.ts',
+  );
+  return {
+    ...actual,
+    getRagEngineClient: () => {
+      if (!engineConfigured) throw new actual.RagEngineNotConfiguredError();
+      return engine;
+    },
+  };
+});
+
 // The real ragAccessMiddleware resolves access via hasRagAccess → isAllowlisted,
 // which reads UserInfoTable with a single GetItemCommand. We drive that path
 // with aws-sdk-client-mock so the *real* gate runs end-to-end. A non-foundation
@@ -99,7 +116,14 @@ import {
   tenantFor,
   type FakeOrchestrator,
 } from '../test/fake-orchestrator.ts';
-import { OrgRole, S3Region } from '@filone/shared';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
+import {
+  engineQueryResponse,
+  expectedTarget,
+  fakeRagEngine,
+  type FakeRagEngine,
+} from '../test/fake-rag-engine.ts';
+import { RagEngineRequestError } from '../lib/rag-engine-client.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
 const USER_1 = '00000000-0000-0000-0000-000000000001';
@@ -720,6 +744,167 @@ describe('query-bucket member scope on an iam region', () => {
       const result = await baseHandler(cookieEvent(role));
 
       expect(result.statusCode).toBe(200);
+    },
+  );
+});
+
+describe('query-bucket on a Forge region (Bucket Intelligence engine)', () => {
+  const FORGE_ENABLEMENT = {
+    pk: 'BUCKET#org-1#eu-central-3#my-bucket',
+    orgId: 'org-1',
+    status: 'active',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    engine = fakeRagEngine();
+    engineConfigured = true;
+    orch = fakeOrchestrator('forge', { bucket: BUCKET, region: S3Region.EuCentral3 });
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+    mockGetEnablement.mockResolvedValue(FORGE_ENABLEMENT);
+  });
+
+  it('answers from the engine with citations and the trace', async () => {
+    const result = await baseHandler(
+      queryEvent({ query: 'what color is the sky?' }, { region: S3Region.EuCentral3 }),
+    );
+
+    expect(result.statusCode).toBe(200);
+    const expected = engineQueryResponse();
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      answer: expected.answer,
+      sources: expected.sources,
+      citations: expected.citations,
+      trace: expected.trace,
+    });
+  });
+
+  it('sends the tenant target, top_k, search mode and version to the engine', async () => {
+    await baseHandler(
+      queryEvent(
+        { query: 'sky', top_k: 4, search_mode: 'hybrid', version: 3 },
+        { region: S3Region.EuCentral3 },
+      ),
+    );
+
+    expect(engine.query).toHaveBeenCalledWith({
+      target: expectedTarget('forge', S3Region.EuCentral3, 'my-bucket'),
+      query: 'sky',
+      topK: 4,
+      searchMode: 'hybrid',
+      version: 3,
+      answer: true,
+    });
+  });
+
+  it('defaults to vector search on the latest version', async () => {
+    mockGetEnablement.mockResolvedValue({
+      ...FORGE_ENABLEMENT,
+      pk: 'BUCKET#org-1#us-east-9#my-bucket',
+    });
+
+    await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.UsEast9 }));
+
+    const request = engine.query.mock.calls[0][0];
+    expect(request.searchMode).toBe('vector');
+    expect(request).not.toHaveProperty('version');
+    expect(request.target.region).toBe(S3Region.UsEast9);
+  });
+
+  it('never touches Bedrock or S3 Vectors', async () => {
+    await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
+
+    expect(mockEmbed).not.toHaveBeenCalled();
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockComplete).not.toHaveBeenCalled();
+  });
+
+  it('answers the no-content message when the engine retrieves nothing', async () => {
+    engine.query.mockResolvedValue(engineQueryResponse({ answer: '', citations: [], sources: [] }));
+
+    const result = await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!).answer).toBe(
+      'No relevant content was found in this bucket for your query.',
+    );
+  });
+
+  it('returns 409 BUCKET_NOT_INDEXED for a bucket never enabled', async () => {
+    mockGetEnablement.mockResolvedValue(undefined);
+
+    const result = await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
+
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.BUCKET_NOT_INDEXED);
+    expect(engine.query).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 BUCKET_NOT_INDEXED when the engine has no dataset yet', async () => {
+    engine.query.mockRejectedValue(new RagEngineRequestError('no dataset', 404));
+
+    const result = await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
+
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.BUCKET_NOT_INDEXED);
+  });
+
+  it('returns 502 when the engine fails', async () => {
+    engine.query.mockRejectedValue(new RagEngineRequestError('boom', 500));
+
+    const result = await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
+
+    expect(result.statusCode).toBe(502);
+  });
+
+  it('returns 503 when the stage has no engine', async () => {
+    engineConfigured = false;
+
+    const result = await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
+
+    expect(result.statusCode).toBe(503);
+  });
+});
+
+describe('query-bucket outside Forge regions keeps the S3 Vectors path', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    engine = fakeRagEngine();
+    engineConfigured = true;
+    mockEmbed.mockResolvedValue([0.1, 0.2, 0.3]);
+    mockComplete.mockResolvedValue('grounded answer');
+    mockQuery.mockResolvedValue([vector('doc.pdf#0', 'doc.pdf')]);
+  });
+
+  it.each([S3Region.EuWest1, S3Region.UsEast1])(
+    'answers %s from S3 Vectors and Bedrock without calling the engine',
+    async (region) => {
+      orch = fakeOrchestrator(region === S3Region.EuWest1 ? 'aurora' : 'fth', {
+        bucket: BUCKET,
+        region,
+      });
+      mockGetOrchestratorForRegion.mockReturnValue(orch);
+      mockGetEnablement.mockResolvedValue({
+        ...SYNCED_ENABLEMENT,
+        pk: `BUCKET#org-1#${region}#my-bucket`,
+      });
+
+      const result = await baseHandler(
+        queryEvent({ query: 'hello', search_mode: 'hybrid', version: 2 }, { region }),
+      );
+
+      expect(result.statusCode).toBe(200);
+      expect(JSON.parse(result.body!)).toStrictEqual({
+        answer: 'grounded answer',
+        sources: ['doc.pdf'],
+      });
+      expect(mockQuery).toHaveBeenCalledWith('org-1', region, 'my-bucket', {
+        embedding: [0.1, 0.2, 0.3],
+        k: 10,
+        filters: undefined,
+      });
+      expect(engine.query).not.toHaveBeenCalled();
+      expect(orch.getS3ClientContext).not.toHaveBeenCalled();
     },
   );
 });

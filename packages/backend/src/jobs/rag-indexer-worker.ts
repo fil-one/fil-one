@@ -17,8 +17,9 @@ import { createS3Client } from '../lib/s3-client.ts';
 import { updateBucketTelemetry } from '../lib/bucket-rag-enablement.ts';
 import { indexBucket } from './rag-indexer-helpers.ts';
 import { reportMetric } from '../lib/metrics.ts';
-import { S3Region } from '@filone/shared';
+import { S3Region, usesRagEngine } from '@filone/shared';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
+import { getRagEngineClient, ragEngineTarget } from '../lib/rag-engine-client.ts';
 
 const LOG = '[rag-indexer-worker]';
 
@@ -101,7 +102,10 @@ export async function handler(
       }
 
       try {
-        const stats = await indexRegion({
+        // Forge regions index on the Bucket Intelligence engine, which keeps
+        // the bucket's Lance dataset on Forge storage; S3 Vectors is not used.
+        const indexer = usesRagEngine(region) ? syncRegionOnEngine : indexRegion;
+        const stats = await indexer({
           orgId,
           region,
           tenantId,
@@ -258,6 +262,59 @@ async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
         region,
         bucketName,
         error,
+      });
+    }
+  }
+  return stats;
+}
+
+/**
+ * Forge regions: ask the engine to sync each bucket. A sync runs in the
+ * background on the engine, so a started sync counts as indexed here; the
+ * engine reports its own progress and failures through `/v1/status`. A bucket
+ * whose sync could not be started is recorded as a failed sync, as in
+ * {@link indexRegion}. No engine on this stage fails the whole region.
+ */
+async function syncRegionOnEngine(args: IndexRegionArgs): Promise<RegionIndexStats> {
+  const { orgId, region, tenantId, bucketNames } = args;
+
+  const client = getRagEngineClient();
+  const orchestrator = getOrchestratorForRegion(region);
+
+  const stats: RegionIndexStats = {
+    bucketsIndexed: 0,
+    bucketsCheckpointed: 0,
+    bucketFailures: 0,
+    objectsAdded: 0,
+    objectsUpdated: 0,
+    objectsRemoved: 0,
+    objectsFailed: 0,
+  };
+  for (const bucketName of bucketNames) {
+    if (await isOrgDeletedOrDeleting(orgId)) {
+      console.warn(`${LOG} Org deletion started mid-run, stopping`, { orgId, region });
+      break;
+    }
+    try {
+      const target = await ragEngineTarget(orchestrator, tenantId, { orgId, region, bucketName });
+      await client.sync(target);
+      stats.bucketsIndexed++;
+    } catch (error) {
+      stats.bucketFailures++;
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        await updateBucketTelemetry(orgId, region, bucketName, {
+          syncState: 'error',
+          lastSyncError: message,
+        });
+      } catch (telemetryError) {
+        console.error(`${LOG} Failed to persist error telemetry`, { bucketName, telemetryError });
+      }
+      console.error(`${LOG} Engine sync failed to start, continuing`, {
+        orgId,
+        region,
+        bucketName,
+        error: message,
       });
     }
   }

@@ -8,7 +8,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { S3VectorsStore } from '@filone/rag-shared';
-import { SubscriptionStatus, type S3Region } from '@filone/shared';
+import { SubscriptionStatus, usesRagEngine, type S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import {
   clearCheckpoint,
@@ -160,7 +160,9 @@ async function purgeRagBucket(
     sk: RAGKeys.enablementSk(),
   });
   await clearCheckpoint(orgId, region, bucketName);
-  await vectorStore.dropIndex(orgId, region, bucketName);
+  // Forge regions keep the index on the engine, dropped before the tenants
+  // were deleted (rag-engine-teardown); there is no S3 Vectors index to drop.
+  if (!usesRagEngine(region)) await vectorStore.dropIndex(orgId, region, bucketName);
 }
 
 /**

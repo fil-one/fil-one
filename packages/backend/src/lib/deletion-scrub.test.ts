@@ -295,6 +295,22 @@ describe('scrubOrgRecords', () => {
       );
     });
 
+    // The engine dropped the Lance dataset before the tenants went; there is
+    // no S3 Vectors index for a Forge-region bucket.
+    it.each([S3Region.EuCentral3, S3Region.UsEast9])(
+      'purges the rows of a %s bucket without touching S3 Vectors',
+      async (region) => {
+        const forgePk = `BUCKET#${ORG}#${region}#docs`;
+        ddbMock.on(ScanCommand).resolves({ Items: [marshall({ pk: forgePk })] });
+
+        await scrubOrgRecords(ORG, MEMBERS);
+
+        expect(deletedKeys()).toContain(`RagIndexerTable:${forgePk}/RAG`);
+        expect(mockClearCheckpoint).toHaveBeenCalledWith(ORG, region, 'docs');
+        expect(mockDropIndex).not.toHaveBeenCalled();
+      },
+    );
+
     it('purges a bucket known only from its checkpoint row, exactly once', async () => {
       ddbMock.on(ScanCommand).resolves({
         Items: [
