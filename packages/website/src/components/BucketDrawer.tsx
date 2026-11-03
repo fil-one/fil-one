@@ -35,7 +35,7 @@ import { CodeBlock } from './CodeBlock.js';
 import { Input } from './Input.js';
 import { QueryAnswer } from './QueryAnswer.js';
 import { RagDatasetPanel, RagEngineSyncStrip } from './RagEnginePanel.js';
-import { RagSearchControls } from './RagSearchControls.js';
+import { RagSearchControls, useDatasetVersion } from './RagSearchControls.js';
 import { RequirePermission } from './RequirePermission.js';
 import { BucketStatus } from './BucketStatus.js';
 
@@ -64,9 +64,10 @@ export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: Buc
   const [visible, setVisible] = useState(false);
   const [closing, setClosing] = useState(false);
   const [searchMode, setSearchMode] = useState<RagSearchMode>('hybrid');
-  const [version, setVersion] = useState<number | undefined>(undefined);
 
   const engine = useRagEngine(rowBucket);
+  const versions = engine.data?.versions ?? EMPTY_VERSIONS;
+  const [version, setVersion] = useDatasetVersion(versions);
   // The engine reads its own dataset, so while the drawer is open its numbers
   // are fresher than the row's enablement poll.
   const bucket = engine.isEngine ? withEngineStatus(rowBucket, engine.data) : rowBucket;
@@ -112,7 +113,7 @@ export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: Buc
         role="dialog"
         aria-modal="true"
         aria-label={`RAG query playground for ${bucket.name}`}
-        className={`fixed inset-y-0 right-0 z-40 flex ${engine.isEngine ? 'w-[560px]' : 'w-[460px]'} max-w-full flex-col bg-white shadow-xl transition-transform duration-200 motion-reduce:duration-0 ${shown ? 'translate-x-0 ease-out' : 'translate-x-full ease-in'}`}
+        className={`fixed inset-y-0 right-0 z-40 flex ${engine.isEngine ? 'w-[560px] max-w-full' : 'w-[460px]'} flex-col bg-white shadow-xl transition-transform duration-200 motion-reduce:duration-0 ${shown ? 'translate-x-0 ease-out' : 'translate-x-full ease-in'}`}
       >
         <DrawerHeader bucket={bucket} onClose={handleClose} />
         <StatsBar bucket={bucket} engine={engine.isEngine} />
@@ -143,7 +144,7 @@ export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: Buc
                   onModeChange={setSearchMode}
                   version={version}
                   onVersionChange={setVersion}
-                  versions={engine.data?.versions ?? EMPTY_VERSIONS}
+                  versions={versions}
                   disabled={!bucket.lastSyncedAt}
                 />
               ) : null
@@ -439,22 +440,10 @@ function useRagEngine(bucket: RagBucket) {
   const isEngine = usesRagEngine(bucket.region);
   const queryClient = useQueryClient();
   const canSync = useHasPermission('buckets.create');
-  const [syncRequested, setSyncRequested] = useState(false);
   const key = queryKeys.ragBucketEngineFor(bucket.name, bucket.region);
-
-  const { data, error: engineError } = useQuery({
-    queryKey: key,
-    queryFn: () => getBucketRagEngine(bucket.name, bucket.region),
-    enabled: isEngine && bucket.enabled,
-    refetchInterval: (query) =>
-      query.state.data?.status.syncState === 'syncing' || syncRequested
-        ? ENGINE_SYNC_POLL_MS
-        : false,
-  });
 
   const syncMutation = useMutation({
     mutationFn: () => syncBucketRag(bucket.name, bucket.region),
-    onMutate: () => setSyncRequested(true),
     onSuccess: (status) => {
       // The engine answers with its status; lay it over the cached response so
       // progress shows without waiting for the next poll.
@@ -471,7 +460,16 @@ function useRagEngine(bucket: RagBucket) {
         queryKey: queryKeys.ragBucketEnabledFor(bucket.name, bucket.region),
       });
     },
-    onSettled: () => setSyncRequested(false),
+  });
+
+  const { data, error: engineError } = useQuery({
+    queryKey: key,
+    queryFn: () => getBucketRagEngine(bucket.name, bucket.region),
+    enabled: isEngine && bucket.enabled,
+    refetchInterval: (query) =>
+      query.state.data?.status.syncState === 'syncing' || syncMutation.isPending
+        ? ENGINE_SYNC_POLL_MS
+        : false,
   });
 
   const syncState = data?.status.syncState;

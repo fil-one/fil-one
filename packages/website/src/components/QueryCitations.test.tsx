@@ -111,8 +111,9 @@ describe('QueryAnswer with engine citations', () => {
   it('says so when no answer was generated but passages were found', async () => {
     renderAnswer({ ...hybridAnswer, answer: '' });
     expect(await screen.findByTestId('query-answer-empty')).toHaveTextContent(
-      'No answer was generated',
+      'No answer was generated in time. These passages matched.',
     );
+    expect(screen.queryByTestId('query-answer-text')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('citation-card')).toHaveLength(3);
   });
 

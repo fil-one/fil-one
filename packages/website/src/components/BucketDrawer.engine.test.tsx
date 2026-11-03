@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   createMemoryHistory,
@@ -22,6 +22,7 @@ vi.mock('../lib/rag-bucket-api.js', async (importOriginal) => ({
   syncBucketRag: (...a: unknown[]) => mockSync(...a),
 }));
 
+import { queryKeys } from '../lib/query-client.js';
 import type { RagBucket } from '../lib/rag-bucket-api';
 import {
   QUESTION,
@@ -155,6 +156,35 @@ describe('BucketDrawer — Forge (engine-backed) bucket', () => {
     expect(options).toHaveLength(14);
     fireEvent.change(screen.getByLabelText('Dataset version'), { target: { value: '11' } });
     expect(screen.getByTestId('version-hint')).toHaveTextContent('(before-retention-update)');
+  });
+
+  it('resets to Latest when the selected version drops out of the list', async () => {
+    const { client } = renderDrawer();
+    await screen.findByTestId('rag-dataset-panel');
+    const select = screen.getByLabelText('Dataset version');
+    fireEvent.change(select, { target: { value: '11' } });
+    expect(select).toHaveValue('11');
+
+    // The next poll comes back without version history.
+    act(() => {
+      client.setQueryData(queryKeys.ragBucketEngineFor('acme-handbook', S3Region.EuCentral3), {
+        ...engineResponse,
+        versions: [],
+      });
+    });
+    await waitFor(() => expect(select).toHaveValue(''));
+    expect(screen.queryByTestId('version-hint')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Ask about acme-handbook…'), {
+      target: { value: 'q' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+    await waitFor(() =>
+      expect(mockQueryBucket).toHaveBeenCalledWith('acme-handbook', 'eu-central-3', 'q', {
+        searchMode: 'hybrid',
+        version: undefined,
+      }),
+    );
   });
 
   it('starts a run with Index now and shows its progress', async () => {

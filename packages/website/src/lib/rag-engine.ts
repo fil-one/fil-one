@@ -143,41 +143,54 @@ export function isEngineStatus(value: unknown): value is RagEngineStatus {
 export const ENGINE_SYNC_POLL_MS = 3_000;
 
 /**
+ * The directory that holds a dataset's tables: the dataset URI without its
+ * trailing `/<table>.lance`. A URI in another shape loses its last segment.
+ */
+export function lanceDatabaseUri(datasetUri: string, table: string): string {
+  const suffix = `/${table}.lance`;
+  if (datasetUri.endsWith(suffix)) return datasetUri.slice(0, -suffix.length);
+  const cut = datasetUri.replace(/\/+$/, '').lastIndexOf('/');
+  return cut > 's3://'.length ? datasetUri.slice(0, cut) : datasetUri;
+}
+
+/**
  * Python that opens the bucket's Lance dataset directly from Forge storage with
  * the open-source `lancedb` package. Credentials come from environment variables
- * so a pasted snippet never carries a real key.
+ * so a pasted snippet never carries a real key, and the session token is pinned
+ * empty so one exported for another AWS account is never sent to Forge.
  */
 export function buildLancePythonSnippet({
-  companionBucket,
+  datasetUri,
   table,
   endpoint,
   region,
 }: {
-  companionBucket: string;
+  datasetUri: string;
   table: string;
   endpoint: string;
   region: string;
 }): string {
-  const lines = [
-    'import os',
-    'import lancedb',
-    '',
-    'db = lancedb.connect(',
-    `    "s3://${companionBucket}/lance",`,
-    '    storage_options={',
+  const storageOptions = [
     `        "aws_endpoint": "${endpoint}",`,
     `        "aws_region": "${region}",`,
     '        "aws_access_key_id": os.environ["FILONE_ACCESS_KEY_ID"],',
     '        "aws_secret_access_key": os.environ["FILONE_SECRET_ACCESS_KEY"],',
+    '        "aws_session_token": "",',
     '        "aws_virtual_hosted_style_request": "false",',
+  ];
+  if (endpoint.startsWith('http://')) storageOptions.push('        "allow_http": "true",');
+  return [
+    'import os',
+    'import lancedb',
+    '',
+    'db = lancedb.connect(',
+    `    "${lanceDatabaseUri(datasetUri, table)}",`,
+    '    storage_options={',
+    ...storageOptions,
     '    },',
     ')',
     `table = db.open_table("${table}")`,
     'print(table.count_rows(), table.version)',
-    'print(table.search("retention", query_type="fts").limit(5).to_pandas())',
-  ];
-  if (endpoint.startsWith('http://')) {
-    lines.splice(11, 0, '        "allow_http": "true",');
-  }
-  return lines.join('\n');
+    'print(table.search("your search terms", query_type="fts").limit(5).to_list())',
+  ].join('\n');
 }

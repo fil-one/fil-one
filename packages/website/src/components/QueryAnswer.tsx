@@ -84,7 +84,7 @@ function EngineAnswer({ bucket, result }: { bucket: RagBucket; result: QueryBuck
       ) : (
         <p data-testid="query-answer-empty" className="text-sm text-zinc-500">
           {citations.length > 0
-            ? 'No answer was generated. These are the closest passages.'
+            ? 'No answer was generated in time. These passages matched.'
             : 'Nothing in this bucket matched the question.'}
         </p>
       )}

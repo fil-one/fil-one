@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import {
   buildLancePythonSnippet,
+  lanceDatabaseUri,
   formatCitationScore,
   formatDuration,
   formatIndexType,
@@ -98,7 +99,7 @@ describe('sync progress', () => {
 
 describe('buildLancePythonSnippet', () => {
   const args = {
-    companionBucket: 'filone-rag-abc',
+    datasetUri: 's3://filone-rag-abc/lance/chunks.lance',
     table: 'chunks',
     endpoint: 'https://s3.eu-central-3.staging.filonecontent.com',
     region: 'eu-central-3',
@@ -123,6 +124,35 @@ describe('buildLancePythonSnippet', () => {
   it('allows plain HTTP only for an http endpoint', () => {
     const code = buildLancePythonSnippet({ ...args, endpoint: 'http://127.0.0.1:15130' });
     expect(code).toContain('"allow_http": "true",\n    },');
+  });
+
+  it('pins the session token empty so an exported AWS token is never sent', () => {
+    expect(buildLancePythonSnippet(args)).toContain('"aws_session_token": "",');
+  });
+
+  it('opens the directory that holds the dataset URI', () => {
+    const code = buildLancePythonSnippet({
+      ...args,
+      datasetUri: 's3://filone-rag-abc/v2/data/chunks.lance',
+    });
+    expect(code).toContain('lancedb.connect(\n    "s3://filone-rag-abc/v2/data",');
+  });
+
+  it('ends with a search that needs only lancedb, on a neutral query', () => {
+    const code = buildLancePythonSnippet(args);
+    expect(code).toContain('.limit(5).to_list())');
+    expect(code).not.toContain('to_pandas');
+    expect(code).not.toContain('retention');
+  });
+});
+
+describe('lanceDatabaseUri', () => {
+  it('strips the table directory from the dataset URI', () => {
+    expect(lanceDatabaseUri('s3://b/lance/chunks.lance', 'chunks')).toBe('s3://b/lance');
+  });
+
+  it('drops the last segment of a URI in another shape', () => {
+    expect(lanceDatabaseUri('s3://b/lance/other.lance/', 'chunks')).toBe('s3://b/lance');
   });
 });
 

@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect, within } from 'storybook/test';
 
 import {
   createMemoryHistory,
@@ -89,7 +90,7 @@ export const EngineAnswerTimeTravel: Story = {
   args: { bucket: forgeBucket, question: QUESTION, result: timeTravelAnswer },
 };
 
-/** Forge bucket: retrieval only (no answer model configured). */
+/** Forge bucket: no answer came back in time, so the matching passages stand alone. */
 export const EngineRetrievalOnly: Story = {
   args: {
     bucket: forgeBucket,
@@ -103,5 +104,13 @@ export const EngineRetrievalOnly: Story = {
         models: { embedding: 'BAAI/bge-small-en-v1.5' },
       },
     },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByTestId('query-answer-empty')).toHaveTextContent(
+      'No answer was generated in time. These passages matched.',
+    );
+    await expect(canvas.queryByTestId('query-answer-text')).not.toBeInTheDocument();
+    await expect(canvas.getAllByTestId('citation-card')).toHaveLength(3);
   },
 };

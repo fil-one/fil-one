@@ -234,7 +234,7 @@ export function RagDatasetPanel({ bucket, dataset }: RagDatasetPanelProps) {
         <CodeBlock
           language="python"
           code={buildLancePythonSnippet({
-            companionBucket: dataset.companionBucket,
+            datasetUri: dataset.uri,
             table: dataset.table,
             endpoint: getS3Endpoint(bucket.region, FILONE_STAGE),
             region: bucket.region,

@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import { clsx } from 'clsx';
 
 import { RAG_SEARCH_MODES, type RagEngineVersion, type RagSearchMode } from '@filone/shared';
@@ -15,6 +17,19 @@ export type RagSearchControlsProps = {
   versions: RagEngineVersion[];
   disabled?: boolean;
 };
+
+/**
+ * The selected dataset version, or undefined for the latest. A selection that
+ * drops out of the version list (a failed history read, or cleanup removing old
+ * versions) resets to Latest, so the picker and the version a question is
+ * asked of always agree.
+ */
+export function useDatasetVersion(versions: RagEngineVersion[]) {
+  const [version, setVersion] = useState<number | undefined>(undefined);
+  const missing = version !== undefined && !versions.some((v) => v.version === version);
+  if (missing) setVersion(undefined);
+  return [missing ? undefined : version, setVersion] as const;
+}
 
 /**
  * Search mode and dataset version for an engine-backed (Forge) bucket's query.
