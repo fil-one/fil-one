@@ -146,6 +146,24 @@ describe('EditOrganizationPage', () => {
     },
   );
 
+  it('shows a placeholder for both sections while the permissions themselves load', async () => {
+    // No permissions seeded, and /me never settles, so whether the caller gets
+    // the danger zone is not known yet.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    mockGetMe.mockReturnValue(new Promise(() => {}));
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <EditOrganizationPage />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    const loading = await screen.findByRole('status', { name: 'Loading organization' });
+    // A heading bar and a card for General, and the same for Danger zone.
+    expect(loading.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(4);
+  });
+
   it('shows an error instead of the loading state when /me fails to load', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     seedPermissions(client, OrgRole.Owner, me(OrgRole.Owner));

@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import type { ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeftIcon,
@@ -183,6 +182,8 @@ export function ObjectDetailPage({
 
   // Everything in the header is known from the URL, so it stays on screen while
   // the metadata loads or after it fails, and only the cards below wait for it.
+  // The actions hide on failure: the object may be gone, and S3 reports success
+  // for deleting or presigning a key that does not exist.
   const header = (
     <>
       {/* Breadcrumb */}
@@ -214,35 +215,37 @@ export function ObjectDetailPage({
           <p className="text-sm text-(--color-paragraph-text-subtle)">{bucketName}</p>
         </div>
 
-        <div className="flex items-center gap-1">
-          <IconButton
-            id="object-download-button"
-            icon={DownloadSimpleIcon}
-            aria-label="Download object"
-            tooltip="Download"
-            tooltipSide="bottom"
-            onClick={() => void objectActions.downloadObject(objectKey, versionId)}
-          />
-          <IconButton
-            id="object-share-button"
-            icon={LinkIcon}
-            aria-label="Share object"
-            tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
-            tooltipSide="bottom"
-            disabled={!canShare}
-            onClick={() => setShareOpen(true)}
-          />
-          {mayDelete && (
+        {!isError && (
+          <div className="flex items-center gap-1">
             <IconButton
-              id="object-delete-button"
-              icon={TrashIcon}
-              aria-label="Delete object"
-              tooltip="Delete"
+              id="object-download-button"
+              icon={DownloadSimpleIcon}
+              aria-label="Download object"
+              tooltip="Download"
               tooltipSide="bottom"
-              onClick={() => setConfirmDeleteOpen(true)}
+              onClick={() => void objectActions.downloadObject(objectKey, versionId)}
             />
-          )}
-        </div>
+            <IconButton
+              id="object-share-button"
+              icon={LinkIcon}
+              aria-label="Share object"
+              tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
+              tooltipSide="bottom"
+              disabled={!canShare}
+              onClick={() => setShareOpen(true)}
+            />
+            {mayDelete && (
+              <IconButton
+                id="object-delete-button"
+                icon={TrashIcon}
+                aria-label="Delete object"
+                tooltip="Delete"
+                tooltipSide="bottom"
+                onClick={() => setConfirmDeleteOpen(true)}
+              />
+            )}
+          </div>
+        )}
       </div>
     </>
   );
@@ -274,21 +277,39 @@ export function ObjectDetailPage({
     </>
   );
 
+  // Version history comes from the bucket listing cache and the API example from
+  // the URL, so neither waits for the metadata.
+  const versionHistory = (
+    <VersionHistoryCard
+      versions={objectVersions}
+      currentVersionId={versionId}
+      bucketName={bucketName}
+      region={region}
+    />
+  );
+
+  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
+
+  const apiExample = `# Retrieve via S3 API
+aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
+  --endpoint-url ${s3Endpoint}`;
+
+  const apiExampleCard = (
+    <Card className="mt-6">
+      <Heading tag="h2" size="sm" className="mb-3">
+        API access example
+      </Heading>
+      <CodeBlock code={apiExample} language="bash" />
+    </Card>
+  );
+
   if (isPending) {
     return (
       <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
         {header}
-        <ObjectDetailSkeleton
-          hasVersionId={versionId !== undefined}
-          versionHistory={
-            <VersionHistoryCard
-              versions={objectVersions}
-              currentVersionId={versionId}
-              bucketName={bucketName}
-              region={region}
-            />
-          }
-        />
+        <ObjectDetailSkeleton hasVersionId={versionId !== undefined} />
+        {versionHistory}
+        {apiExampleCard}
         {dialogs}
       </div>
     );
@@ -321,12 +342,6 @@ export function ObjectDetailPage({
   const etag = metadata?.etag?.replace(/^"|"$/g, '');
 
   const s3Path = `s3://${bucketName}/${objectKey}`;
-
-  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
-
-  const apiExample = `# Retrieve via S3 API
-aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
-  --endpoint-url ${s3Endpoint}`;
 
   return (
     <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
@@ -396,20 +411,10 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
       )}
 
       {/* Version history */}
-      <VersionHistoryCard
-        versions={objectVersions}
-        currentVersionId={versionId}
-        bucketName={bucketName}
-        region={region}
-      />
+      {versionHistory}
 
       {/* API access example card */}
-      <Card className="mt-6">
-        <Heading tag="h2" size="sm" className="mb-3">
-          API access example
-        </Heading>
-        <CodeBlock code={apiExample} language="bash" />
-      </Card>
+      {apiExampleCard}
 
       {dialogs}
     </div>
@@ -417,27 +422,16 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
 }
 
 /**
- * One block per card that waits for the metadata, at the height of the real
- * one and with its spacing. The Version ID row (a 36px row plus a 4px gap)
- * shows when the URL names a version, so the details block grows to match.
- * Version history comes from the bucket listing cache, not the metadata, so
- * the real card renders between the blocks.
+ * The object details card is the only one that waits for the metadata, so it
+ * is the only placeholder, at the height of the real card. The Version ID row
+ * (a 36px row plus a 4px gap) shows when the URL names a version, so the
+ * block grows to match.
  */
-function ObjectDetailSkeleton({
-  hasVersionId,
-  versionHistory,
-}: {
-  hasVersionId: boolean;
-  versionHistory: ReactNode;
-}) {
+function ObjectDetailSkeleton({ hasVersionId }: { hasVersionId: boolean }) {
   return (
-    <>
-      <div role="status" aria-label="Loading object details">
-        <Skeleton className={`rounded-xl ${hasVersionId ? 'h-[390px]' : 'h-[350px]'}`} />
-      </div>
-      {versionHistory}
-      <Skeleton className="mt-6 h-[204px] rounded-xl" />
-    </>
+    <div role="status" aria-label="Loading object details">
+      <Skeleton className={`rounded-xl ${hasVersionId ? 'h-[390px]' : 'h-[350px]'}`} />
+    </div>
   );
 }
 

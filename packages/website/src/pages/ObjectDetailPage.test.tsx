@@ -127,6 +127,7 @@ describe('ObjectDetailPage while the metadata loads', () => {
       open: openShare,
       dialog: 'share-object-modal',
       settle: (p: ReturnType<typeof deferPresign>) => p.resolve(PRESIGNED_HEAD),
+      expectSettled: () => screen.getByRole('heading', { name: 'Object details' }),
     },
     {
       control: 'Share',
@@ -134,6 +135,7 @@ describe('ObjectDetailPage while the metadata loads', () => {
       open: openShare,
       dialog: 'share-object-modal',
       settle: (p: ReturnType<typeof deferPresign>) => p.reject(new Error('any failure')),
+      expectSettled: () => screen.getByText('any failure'),
     },
     {
       control: 'Delete',
@@ -141,6 +143,7 @@ describe('ObjectDetailPage while the metadata loads', () => {
       open: openDelete,
       dialog: 'confirm-dialog',
       settle: (p: ReturnType<typeof deferPresign>) => p.resolve(PRESIGNED_HEAD),
+      expectSettled: () => screen.getByRole('heading', { name: 'Object details' }),
     },
     {
       control: 'Delete',
@@ -148,10 +151,11 @@ describe('ObjectDetailPage while the metadata loads', () => {
       open: openDelete,
       dialog: 'confirm-dialog',
       settle: (p: ReturnType<typeof deferPresign>) => p.reject(new Error('any failure')),
+      expectSettled: () => screen.getByText('any failure'),
     },
   ])(
     'keeps the $control dialog open when the metadata then $outcome',
-    async ({ open, dialog, settle }) => {
+    async ({ open, dialog, settle, expectSettled }) => {
       const presign = deferPresign();
       renderPage();
       await open();
@@ -159,11 +163,8 @@ describe('ObjectDetailPage while the metadata loads', () => {
 
       await act(async () => settle(presign));
 
-      await waitFor(() =>
-        expect(
-          screen.queryByRole('status', { name: 'Loading object details' }),
-        ).not.toBeInTheDocument(),
-      );
+      // The page reached the state the case names, not just any state after loading.
+      await waitFor(() => expect(expectSettled()).toBeInTheDocument());
       expect(screen.getByTestId(dialog)).toBeInTheDocument();
     },
   );
@@ -183,6 +184,16 @@ describe('ObjectDetailPage while the metadata loads', () => {
   });
 });
 
+describe('ObjectDetailPage API example', () => {
+  it('shows the API example before the metadata arrives', () => {
+    deferPresign();
+    renderPage();
+
+    expect(screen.getByRole('status', { name: 'Loading object details' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'API access example' })).toBeInTheDocument();
+  });
+});
+
 describe('ObjectDetailPage when the metadata fails to load', () => {
   it('keeps the object header above the error', async () => {
     mockBatchPresign.mockRejectedValue(new Error('any failure'));
@@ -192,4 +203,15 @@ describe('ObjectDetailPage when the metadata fails to load', () => {
     expect(screen.getByRole('heading', { level: 1, name: OBJECT_KEY })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Back to bucket' })).toBeInTheDocument();
   });
+
+  it.each(['Download object', 'Share object', 'Delete object'])(
+    'hides the %s action, since the object may no longer exist',
+    async (action) => {
+      mockBatchPresign.mockRejectedValue(new Error('any failure'));
+      renderPage();
+
+      expect(await screen.findByText('any failure')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: action })).not.toBeInTheDocument();
+    },
+  );
 });
