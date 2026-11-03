@@ -144,12 +144,24 @@ test.describe('the key form', () => {
   test.describe('as the owner', () => {
     test.use({ storageState: STORAGE_STATE.owner });
 
+    // The owner may mint a service key, so the form offers the choice. The
+    // Personal key option's own description says it follows bucket policies,
+    // so the separate notice is only for callers who get no choice.
+    test('starts on a personal key, with no separate policy notice', async ({ page }) => {
+      await page.goto('/api-keys/create');
+      await page.locator('#key-region').click();
+      await page.locator(`[data-testid="region-option"][data-region="${REGION}"]`).click();
+      await expect(
+        page.getByTestId('access-key-type-principal').locator('input[type="radio"]'),
+      ).toBeChecked();
+      await expect(page.getByTestId('access-key-follows-bucket-policy')).toHaveCount(0);
+    });
+
     test('offers a service key, and asks for its permissions and buckets', async ({ page }) => {
       await page.goto('/api-keys/create');
       await page.locator('#key-name').fill(`policy-e2e-svc-ui-${randomUUID().slice(0, 8)}`);
       await page.locator('#key-region').click();
       await page.locator(`[data-testid="region-option"][data-region="${REGION}"]`).click();
-      await expect(page.getByTestId('access-key-follows-bucket-policy')).toBeVisible();
 
       await page.getByTestId('access-key-type-service').click();
       await expect(page.getByTestId('access-key-permissions')).toBeVisible();
@@ -167,7 +179,9 @@ test.describe('the key form', () => {
       const row = page.locator(
         `[data-testid="access-key-row"][data-access-key-id="${key.accessKeyId}"]`,
       );
-      await expect(row.getByTestId('permission-badge-bucket-info')).toBeVisible();
+      // The row badges each object permission the key holds, and the form
+      // grants Read by default.
+      await expect(row.getByTestId('permission-badge-read')).toBeVisible();
       await expect(row.getByTestId('permission-badge-follows-bucket-policy')).toHaveCount(0);
     });
   });
