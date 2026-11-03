@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   daysRemainingLabel,
+  formatDaysLeft,
+  formatTrialDaysLeft,
   daysUntil,
   expiresAtFromForm,
   formatCalendarDate,
@@ -94,6 +96,26 @@ describe('daysRemainingLabel', () => {
 
   it('pluralizes for more than one day', () => {
     expect(daysRemainingLabel(5)).toBe('5 days remaining');
+  });
+});
+
+describe('formatDaysLeft', () => {
+  it.each([
+    { days: 0, label: 'Ends today' },
+    { days: 1, label: '1 day left' },
+    { days: 5, label: '5 days left' },
+  ])('says "$label" for a count of $days', ({ days, label }) => {
+    expect(formatDaysLeft(days)).toBe(label);
+  });
+});
+
+describe('formatTrialDaysLeft', () => {
+  it.each([
+    { days: 0, label: 'Trial ends today' },
+    { days: 1, label: '1 day left in trial' },
+    { days: 5, label: '5 days left in trial' },
+  ])('says "$label" for a count of $days', ({ days, label }) => {
+    expect(formatTrialDaysLeft(days)).toBe(label);
   });
 });
 

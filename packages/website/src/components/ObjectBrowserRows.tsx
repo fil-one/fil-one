@@ -267,7 +267,7 @@ function NameCell({
       {hasMultipleVersions && (
         // Below `sm` the expand caret alone says there is history, so the
         // name keeps the room.
-        <span className="ml-1 hidden shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-meta font-medium text-zinc-500 sm:inline">
+        <span className="ml-1 hidden shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-meta font-medium text-zinc-600 sm:inline">
           {group.versionCount} versions
         </span>
       )}

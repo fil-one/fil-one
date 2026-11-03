@@ -24,6 +24,7 @@ import {
   putObject,
   toCanonicalPolicy,
   ConsoleApi,
+  IS_BEHIND_CLOUDFRONT,
   PAYLOAD,
   REGION,
   SEEDED_KEY,
@@ -171,6 +172,56 @@ test(
     });
     expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
     expect(await owner.readPolicy(seededBucket)).toEqual(before);
+  },
+);
+
+test('a write under the weak form of the ETag replaces the policy', { tag: '@api' }, async () => {
+  // A write answers 204 with no body, which CloudFront never compresses, so
+  // the ETag it returns is strong on every stage.
+  const etag = await owner.replaceStatements(seededBucket, [grantAllToOwner(ownerId)]);
+
+  const res = await owner.putPolicy(seededBucket, {
+    policy: buildBucketPolicy(seededBucket, [
+      grantAllToOwner(ownerId),
+      allow([memberId], ['s3:ListBucket']),
+    ]),
+    etag: `W/${etag}`,
+  });
+  expect({ isWeak: etag.startsWith('W/'), status: res.status() }, await res.text()).toEqual({
+    isWeak: false,
+    status: 204,
+  });
+});
+
+// CloudFront gzips an API response of 1,000 bytes or more and marks its ETag
+// weak. Twelve member statements put the policy read at 2,000 bytes or more,
+// well clear of that threshold.
+test(
+  'a policy read of 2,000 bytes or more carries a weak ETag that a write accepts',
+  { tag: '@api' },
+  async () => {
+    test.skip(!IS_BEHIND_CLOUDFRONT, 'a local stage has no CloudFront to compress the read');
+    await owner.replaceStatements(seededBucket, [
+      grantAllToOwner(ownerId),
+      ...Array.from({ length: 12 }, (_, i) =>
+        allow([memberId], ['s3:GetObject'], `member-read-${i}`),
+      ),
+    ]);
+    const read = await owner.fetchPolicyResponse(seededBucket);
+    expect(
+      (await read.body()).byteLength,
+      'the policy read must be 2,000 bytes or more',
+    ).toBeGreaterThanOrEqual(2000);
+    const etag = read.headers().etag!;
+
+    const res = await owner.putPolicy(seededBucket, {
+      policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
+      etag,
+    });
+    expect({ isWeak: etag.startsWith('W/'), status: res.status() }).toEqual({
+      isWeak: true,
+      status: 204,
+    });
   },
 );
 

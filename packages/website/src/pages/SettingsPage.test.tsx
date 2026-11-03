@@ -272,3 +272,13 @@ describe('SettingsPage — the danger zone', () => {
     expect(link).toHaveAttribute('href', 'mailto:support@fil.one');
   });
 });
+
+describe('SettingsPage — loading', () => {
+  it('keeps the page heading in place while the profile loads', () => {
+    // Asserted on the first render, before the mocked `/me` resolves.
+    renderSettings(OrgRole.Admin);
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading settings' })).toBeInTheDocument();
+  });
+});
