@@ -11,7 +11,7 @@ import type { RagBucket } from './rag-bucket-api.js';
 /**
  * Realistic engine data for stories and tests: a Forge bucket of ~40 policy and
  * runbook documents chunked into 1,912 rows, fourteen dataset versions, an
- * IVF_PQ vector index plus a full-text index, and a hybrid answer citing three
+ * IVF_HNSW_SQ vector index plus a full-text index, and a hybrid answer citing three
  * passages. Kept in one place so the drawer, the panel and the answer agree.
  */
 
@@ -60,7 +60,7 @@ export const engineStatus: RagEngineStatus = {
     indexes: [
       {
         name: 'vector_idx',
-        type: 'IVF_PQ',
+        type: 'IVF_HNSW_SQ',
         columns: ['vector'],
         indexedRows: 1_880,
         unindexedRows: 32,
@@ -161,7 +161,7 @@ export const hybridAnswer: QueryBucketResponse = {
     searchMode: 'hybrid',
     version: 14,
     rows: 1_912,
-    indexType: 'IVF_PQ',
+    indexType: 'IVF_HNSW_SQ+FTS',
     datasetUri: `s3://${COMPANION_BUCKET}/lance/chunks.lance`,
     timings: { embedMs: 21, searchMs: 38, answerMs: 5_840, totalMs: 5_912 },
     io: { bytesRead: 412_672, requests: 27 },
@@ -196,7 +196,7 @@ export const timeTravelAnswer: QueryBucketResponse = {
     searchMode: 'vector',
     version: 11,
     rows: 1_874,
-    indexType: 'IVF_PQ',
+    indexType: 'IVF_HNSW_SQ',
     datasetUri: `s3://${COMPANION_BUCKET}/lance/chunks.lance`,
     timings: { embedMs: 19, searchMs: 31, answerMs: 4_210, totalMs: 4_266 },
     models: { embedding: 'BAAI/bge-small-en-v1.5', answer: 'claude-opus-5-5' },

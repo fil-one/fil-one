@@ -56,7 +56,7 @@ export const SyncFailed: Story = { args: { status: engineError.status } };
 /** A read-only member sees progress but cannot start a run. */
 export const SyncReadOnly: Story = { args: { status: engineSyncing.status, canSync: false } };
 
-/** The Lance dataset: IVF_PQ vector index plus full-text index, 1,912 rows. */
+/** The Lance dataset: IVF_HNSW_SQ vector index plus full-text index, 1,912 rows. */
 export const Dataset: StoryObj<typeof RagDatasetPanel> = {
   render: () => <RagDatasetPanel bucket={forgeBucket} dataset={engineResponse.status.dataset!} />,
 };

@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-query';
 
 import {
+  ApiErrorCode,
   formatBytes,
   usesRagEngine,
   type BucketRagEngineResponse,
@@ -23,6 +24,7 @@ import {
   type QueryBucketOptions,
   type RagBucket,
 } from '../lib/rag-bucket-api.js';
+import { errorCodeOf } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 import { ENGINE_SYNC_POLL_MS, isEngineStatus } from '../lib/rag-engine.js';
 import { useHasPermission } from '../lib/use-permissions.js';
@@ -120,6 +122,7 @@ export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: Buc
             canSync={engine.canSync}
             onSync={engine.sync}
             syncRequested={engine.syncRequested}
+            error={engine.error}
           />
         )}
 
@@ -132,6 +135,7 @@ export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: Buc
             onInputChange={setInput}
             onAsk={handleAsk}
             queryMutation={queryMutation}
+            canSync={engine.canSync}
             controls={
               engine.isEngine ? (
                 <RagSearchControls
@@ -276,6 +280,8 @@ type AskSectionProps = {
   queryMutation: UseMutationResult<QueryBucketResponse, Error, AskVariables>;
   /** Engine-backed buckets: search mode and dataset version, above the input. */
   controls?: React.ReactNode;
+  /** Whether the viewer can start an engine run, so the copy only names Index now when they have it. */
+  canSync?: boolean;
 };
 
 /**
@@ -294,6 +300,7 @@ function AskSection({
   onAsk,
   queryMutation,
   controls,
+  canSync,
 }: AskSectionProps) {
   const { isPending, isError, error, data: result } = queryMutation;
   const notYetIndexed = !bucket.lastSyncedAt;
@@ -313,8 +320,19 @@ function AskSection({
           }
           value={input}
           onChange={onInputChange}
+          // Enter-to-ask is part of the engine-backed drawer only; other regions
+          // keep their existing behaviour. An Enter that confirms an IME
+          // candidate is not a submit.
           onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
-            if (event.key === 'Enter' && !notYetIndexed && input.trim()) onAsk();
+            if (
+              engine &&
+              event.key === 'Enter' &&
+              !event.nativeEvent.isComposing &&
+              !notYetIndexed &&
+              input.trim()
+            ) {
+              onAsk();
+            }
           }}
           disabled={notYetIndexed}
           className="flex-1"
@@ -332,7 +350,9 @@ function AskSection({
       {notYetIndexed && (
         <p data-testid="bucket-drawer-not-indexed" className="mt-2 text-xs text-zinc-500">
           {engine
-            ? 'You can ask questions once the first indexing run has finished. Start one with Index now.'
+            ? canSync
+              ? 'You can ask questions once the first indexing run has finished. Start one with Index now.'
+              : 'You can ask questions once the first indexing run has finished.'
             : 'You can ask questions once the first indexing pass has completed, which can take up to 6 hours.'}
         </p>
       )}
@@ -384,10 +404,29 @@ function withEngineStatus(
     ...bucket,
     filesIndexed: status.filesIndexed,
     indexSize: status.indexedBytes,
-    ...(status.lastSyncedAt ? { lastSyncedAt: status.lastSyncedAt } : {}),
+    // The engine is the source of truth inside the drawer: a field it leaves out
+    // is cleared rather than inherited from a stale row.
+    lastSyncedAt: status.lastSyncedAt,
     syncState: status.syncState,
-    ...(status.lastSyncError ? { lastSyncError: status.lastSyncError } : {}),
+    lastSyncError: status.lastSyncError,
   };
+}
+
+/**
+ * What the sync strip says when Index now or the engine read fails. The sync
+ * error wins, since it answers the presenter's last click (a new click clears
+ * it). An engine read refused with BUCKET_NOT_INDEXED means no dataset exists
+ * yet, which the strip already shows as the empty state.
+ */
+function engineErrorMessage(
+  syncError: Error | null,
+  engineError: Error | null,
+): string | undefined {
+  if (syncError) return `Couldn't start indexing. ${syncError.message}`;
+  if (engineError && errorCodeOf(engineError) !== ApiErrorCode.BUCKET_NOT_INDEXED) {
+    return `Couldn't reach the indexing engine. ${engineError.message}`;
+  }
+  return undefined;
 }
 
 /**
@@ -403,7 +442,7 @@ function useRagEngine(bucket: RagBucket) {
   const [syncRequested, setSyncRequested] = useState(false);
   const key = queryKeys.ragBucketEngineFor(bucket.name, bucket.region);
 
-  const { data } = useQuery({
+  const { data, error: engineError } = useQuery({
     queryKey: key,
     queryFn: () => getBucketRagEngine(bucket.name, bucket.region),
     enabled: isEngine && bucket.enabled,
@@ -426,6 +465,11 @@ function useRagEngine(bucket: RagBucket) {
         }));
       }
       void queryClient.invalidateQueries({ queryKey: key });
+      // The row behind the drawer only polls while it reads `syncing`, so tell
+      // it a run has started rather than waiting for the run to end.
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.ragBucketEnabledFor(bucket.name, bucket.region),
+      });
     },
     onSettled: () => setSyncRequested(false),
   });
@@ -447,5 +491,6 @@ function useRagEngine(bucket: RagBucket) {
     canSync,
     sync: () => syncMutation.mutate(),
     syncRequested: syncMutation.isPending,
+    error: engineErrorMessage(syncMutation.error, engineError),
   };
 }

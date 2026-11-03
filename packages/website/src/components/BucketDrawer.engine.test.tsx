@@ -9,7 +9,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router';
 
-import { OrgRole, S3Region } from '@filone/shared';
+import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
 
 const mockQueryBucket = vi.fn();
 const mockGetEngine = vi.fn();
@@ -54,12 +54,20 @@ function renderDrawer(bucket: RagBucket = forgeBucket, role: OrgRole = OrgRole.O
     routeTree: rootRoute.addChildren([objectsRoute]),
     history: createMemoryHistory({ initialEntries: ['/'] }),
   });
-  return render(
+  const result = render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+  return { ...result, client };
 }
+
+/** An error shaped like the ones `apiRequest` throws. */
+function apiError(message: string, status: number, code?: string): Error {
+  return Object.assign(new Error(message), { status, code });
+}
+
+const ENABLEMENT_KEY = ['rag-bucket-enabled', 'acme-handbook', 'eu-central-3'];
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -85,7 +93,7 @@ describe('BucketDrawer — Forge (engine-backed) bucket', () => {
     );
     const indexes = within(panel).getAllByTestId('dataset-index');
     expect(indexes.map((i) => i.textContent)).toEqual([
-      expect.stringContaining('IVF_PQ'),
+      expect.stringContaining('IVF_HNSW_SQ'),
       expect.stringContaining('FTS'),
     ]);
     expect(indexes[0]).toHaveTextContent('32 pending');
@@ -187,6 +195,118 @@ describe('BucketDrawer — Forge (engine-backed) bucket', () => {
     renderDrawer(forgeBucket, OrgRole.ReadOnly);
     expect(await screen.findByTestId('rag-dataset-panel')).toBeInTheDocument();
     expect(screen.queryByTestId('rag-engine-sync-button')).not.toBeInTheDocument();
+  });
+});
+
+describe('BucketDrawer — Forge engine failures and transitions', () => {
+  it('shows why Index now failed, and clears it on the next click', async () => {
+    mockSync
+      .mockRejectedValueOnce(
+        apiError('Bucket Intelligence engine is not configured for this stage.', 503),
+      )
+      .mockResolvedValue(engineSyncing.status);
+    renderDrawer();
+    fireEvent.click(await screen.findByTestId('rag-engine-sync-button'));
+
+    const alert = await screen.findByTestId('rag-engine-request-error');
+    expect(alert).toHaveTextContent(
+      "Couldn't start indexing. Bucket Intelligence engine is not configured for this stage.",
+    );
+    expect(screen.getByTestId('rag-engine-sync-button')).toHaveTextContent('Index now');
+
+    fireEvent.click(screen.getByTestId('rag-engine-sync-button'));
+    await waitFor(() =>
+      expect(screen.queryByTestId('rag-engine-request-error')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('says the engine is unreachable when the engine route fails', async () => {
+    mockGetEngine.mockRejectedValue(apiError('Bad gateway', 502));
+    renderDrawer();
+    expect(await screen.findByTestId('rag-engine-request-error')).toHaveTextContent(
+      "Couldn't reach the indexing engine. Bad gateway",
+    );
+    expect(screen.queryByTestId('rag-dataset-panel')).not.toBeInTheDocument();
+  });
+
+  it('reads BUCKET_NOT_INDEXED from the engine route as no dataset yet, not an error', async () => {
+    mockGetEngine.mockRejectedValue(
+      apiError('Not indexed yet', 409, ApiErrorCode.BUCKET_NOT_INDEXED),
+    );
+    renderDrawer({ ...forgeBucket, filesIndexed: 0, indexSize: 0, lastSyncedAt: undefined });
+    expect(await screen.findByTestId('rag-engine-sync-button')).toHaveTextContent('Index now');
+    await waitFor(() => expect(mockGetEngine).toHaveBeenCalled());
+    expect(screen.queryByTestId('rag-engine-request-error')).not.toBeInTheDocument();
+  });
+
+  it('tells the row behind the drawer that a run started', async () => {
+    const { client } = renderDrawer();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    fireEvent.click(await screen.findByTestId('rag-engine-sync-button'));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ENABLEMENT_KEY }));
+  });
+
+  it('re-reads the row once a run finishes', async () => {
+    mockGetEngine.mockResolvedValueOnce(engineSyncing).mockResolvedValue(engineResponse);
+    const { client } = renderDrawer();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    expect(await screen.findByTestId('rag-engine-sync-progress-label')).toBeInTheDocument();
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ENABLEMENT_KEY });
+
+    await client.refetchQueries({ queryKey: ['rag-bucket-engine'] });
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ENABLEMENT_KEY }));
+  });
+
+  it('takes the engine status over the row, including fields the engine leaves out', async () => {
+    mockGetEngine.mockResolvedValue(engineEmpty);
+    // The row still remembers an earlier run; the engine says there is no dataset.
+    renderDrawer(forgeBucket);
+    expect(await screen.findByTestId('bucket-drawer-stat-waiting')).toHaveTextContent(
+      'Not indexed yet',
+    );
+  });
+
+  it('does not name Index now to a read-only member before the first run', async () => {
+    mockGetEngine.mockResolvedValue(engineEmpty);
+    renderDrawer(
+      { ...forgeBucket, filesIndexed: 0, indexSize: 0, lastSyncedAt: undefined },
+      OrgRole.ReadOnly,
+    );
+    expect(await screen.findByTestId('rag-engine-sync')).toHaveTextContent(
+      "Indexing hasn't run yet.",
+    );
+    expect(screen.getByTestId('bucket-drawer-not-indexed')).not.toHaveTextContent('Index now');
+  });
+});
+
+describe('BucketDrawer — Enter to ask', () => {
+  it('asks on Enter in a Forge bucket', async () => {
+    renderDrawer();
+    const input = await screen.findByPlaceholderText('Ask about acme-handbook…');
+    fireEvent.change(input, { target: { value: 'q' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(mockQueryBucket).toHaveBeenCalledTimes(1));
+  });
+
+  it('ignores the Enter that confirms an IME candidate', async () => {
+    renderDrawer();
+    const input = await screen.findByPlaceholderText('Ask about acme-handbook…');
+    fireEvent.change(input, { target: { value: 'バックアップ' } });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    // Asking clears the input at once; a composing Enter leaves it as typed.
+    expect(input).toHaveValue('バックアップ');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockQueryBucket).not.toHaveBeenCalled();
+  });
+
+  it('leaves other regions as they were, with no Enter-to-ask', async () => {
+    renderDrawer({ ...forgeBucket, region: S3Region.UsEast1 });
+    const input = await screen.findByPlaceholderText('Ask about acme-handbook…');
+    fireEvent.change(input, { target: { value: 'q' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(input).toHaveValue('q');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockQueryBucket).not.toHaveBeenCalled();
   });
 });
 

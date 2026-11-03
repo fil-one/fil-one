@@ -4,6 +4,7 @@ import {
   buildLancePythonSnippet,
   formatCitationScore,
   formatDuration,
+  formatIndexType,
   formatIo,
   isEngineStatus,
   objectBasename,
@@ -122,5 +123,22 @@ describe('buildLancePythonSnippet', () => {
   it('allows plain HTTP only for an http endpoint', () => {
     const code = buildLancePythonSnippet({ ...args, endpoint: 'http://127.0.0.1:15130' });
     expect(code).toContain('"allow_http": "true",\n    },');
+  });
+});
+
+describe('formatIndexType', () => {
+  it('names a flat scan, alone or as the vector half of hybrid', () => {
+    expect(formatIndexType('flat')).toBe('Flat scan');
+    expect(formatIndexType('flat+FTS')).toBe('Flat scan + FTS');
+  });
+
+  it('keeps real index names and spaces the hybrid join', () => {
+    expect(formatIndexType('IVF_HNSW_SQ')).toBe('IVF_HNSW_SQ');
+    expect(formatIndexType('IVF_HNSW_SQ+FTS')).toBe('IVF_HNSW_SQ + FTS');
+    expect(formatIndexType('FTS')).toBe('FTS');
+  });
+
+  it('says when full text had no index to use', () => {
+    expect(formatIndexType('none')).toBe('No index');
   });
 });

@@ -9,6 +9,7 @@ import {
   SEARCH_MODE_LABELS,
   formatCitationScore,
   formatDuration,
+  formatIndexType,
   formatIo,
   objectBasename,
   parseCitedAnswer,
@@ -39,7 +40,10 @@ export function CitedAnswer({
     citations.map((c) => c.n),
   );
   return (
-    <p data-testid="query-answer-text" className="text-sm leading-relaxed text-zinc-700">
+    <p
+      data-testid="query-answer-text"
+      className="text-sm leading-relaxed whitespace-pre-line text-zinc-700"
+    >
       {segments.map((segment, i) =>
         segment.kind === 'text' ? (
           // A marker sits against the word it supports, like a footnote.
@@ -183,7 +187,7 @@ export function QueryTrace({ trace }: { trace: RagQueryTrace }) {
     { label: 'Version', value: `v${trace.version}`, testId: 'trace-version' },
     {
       label: 'Index',
-      value: trace.indexType === 'flat' ? 'Flat scan' : trace.indexType,
+      value: formatIndexType(trace.indexType),
       testId: 'trace-index',
     },
     { label: 'Rows', value: trace.rows.toLocaleString(), testId: 'trace-rows' },

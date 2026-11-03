@@ -118,6 +118,18 @@ export function formatIo(io: { bytesRead: number; requests: number }): string {
   return `${formatBytes(io.bytesRead)} in ${io.requests.toLocaleString()} ${io.requests === 1 ? 'request' : 'requests'}`;
 }
 
+/**
+ * The index a query used, as the trace shows it. The engine reports `flat` when
+ * the vector column has no index yet, `none` when full text has no index, and
+ * joins the vector and text parts with `+` for hybrid (`flat+FTS`).
+ */
+export function formatIndexType(indexType: string): string {
+  return indexType
+    .split('+')
+    .map((part) => (part === 'flat' ? 'Flat scan' : part === 'none' ? 'No index' : part))
+    .join(' + ');
+}
+
 /** Whether a value looks like an engine status (the sync route may answer 202 with no body). */
 export function isEngineStatus(value: unknown): value is RagEngineStatus {
   return (

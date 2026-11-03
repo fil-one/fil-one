@@ -80,12 +80,22 @@ describe('QueryAnswer with engine citations', () => {
     expect(link.getAttribute('href')).toContain('region=eu-central-3');
   });
 
+  it('keeps the paragraph breaks in a multi-paragraph answer', async () => {
+    renderAnswer({
+      ...hybridAnswer,
+      answer: 'Backups are kept for 35 days [1].\n\nA litigation hold overrides that [3].',
+    });
+    const text = await screen.findByTestId('query-answer-text');
+    expect(text).toHaveClass('whitespace-pre-line');
+    expect(text.textContent).toContain('.\n\nA litigation hold');
+  });
+
   it('shows how the query was served, including bytes read from Forge', async () => {
     renderAnswer(hybridAnswer);
     const trace = await screen.findByTestId('query-trace');
     expect(within(trace).getByTestId('trace-mode')).toHaveTextContent('Hybrid');
     expect(within(trace).getByTestId('trace-version')).toHaveTextContent('v14');
-    expect(within(trace).getByTestId('trace-index')).toHaveTextContent('IVF_PQ');
+    expect(within(trace).getByTestId('trace-index')).toHaveTextContent('IVF_HNSW_SQ + FTS');
     expect(within(trace).getByTestId('trace-rows')).toHaveTextContent('1,912');
     expect(within(trace).getByTestId('trace-io')).toHaveTextContent('412.7 KB in 27 requests');
     expect(within(trace).getByTestId('trace-timings')).toHaveTextContent('5.8 s');

@@ -53,7 +53,12 @@ function answerFor(
       searchMode: mode,
       version,
       rows: version <= 11 ? base.trace!.rows : (engine.status.dataset?.rows ?? base.trace!.rows),
-      indexType: mode === 'fulltext' ? 'FTS' : base.trace!.indexType,
+      indexType:
+        mode === 'fulltext'
+          ? 'FTS'
+          : mode === 'vector'
+            ? base.trace!.indexType.replace(/\+FTS$/, '')
+            : `${base.trace!.indexType.replace(/\+FTS$/, '')}+FTS`,
     },
   };
 }

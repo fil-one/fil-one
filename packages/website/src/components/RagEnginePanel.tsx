@@ -31,6 +31,12 @@ export type RagEngineSyncStripProps = {
   onSync: () => void;
   /** True between the click and the engine reporting the run. */
   syncRequested: boolean;
+  /**
+   * Why the last Index now click or engine read failed, in the API's words.
+   * Without it a refused or unreachable engine leaves a button that seems to do
+   * nothing.
+   */
+  error?: string;
 };
 
 /**
@@ -42,6 +48,7 @@ export function RagEngineSyncStrip({
   canSync,
   onSync,
   syncRequested,
+  error,
 }: RagEngineSyncStripProps) {
   const syncing = status?.syncState === 'syncing';
   const busy = syncing || syncRequested;
@@ -54,17 +61,7 @@ export function RagEngineSyncStrip({
     >
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1 text-xs text-zinc-500">
-          {busy ? (
-            <span data-testid="rag-engine-sync-progress-label" className="text-zinc-700">
-              <span className="font-medium text-zinc-900">Indexing</span>
-              {' · '}
-              {syncProgressLabel(status?.progress)}
-            </span>
-          ) : status?.lastSyncedAt ? (
-            'New and changed files are picked up on the next run.'
-          ) : (
-            'Index now reads every supported file into a Lance dataset on your Forge storage.'
-          )}
+          <SyncStripLabel status={status} busy={busy} canSync={canSync} />
         </div>
         {canSync && (
           <Button
@@ -89,12 +86,58 @@ export function RagEngineSyncStrip({
           indeterminate={percent === undefined}
         />
       )}
-      {status?.syncState === 'error' && status.lastSyncError && !busy && (
-        <div data-testid="rag-engine-sync-error">
-          <Alert variant="red" description={status.lastSyncError} />
+      {!busy && <SyncStripErrors status={status} error={error} />}
+    </div>
+  );
+}
+
+function SyncStripLabel({
+  status,
+  busy,
+  canSync,
+}: {
+  status: RagEngineStatus | undefined;
+  busy: boolean;
+  canSync: boolean;
+}) {
+  if (busy) {
+    return (
+      <span data-testid="rag-engine-sync-progress-label" className="text-zinc-700">
+        <span className="font-medium text-zinc-900">Indexing</span>
+        {' · '}
+        {syncProgressLabel(status?.progress)}
+      </span>
+    );
+  }
+  if (status?.lastSyncedAt) return <>New and changed files are picked up on the next run.</>;
+  if (canSync) {
+    return <>Index now reads every supported file into a Lance dataset on your Forge storage.</>;
+  }
+  return <>Indexing hasn&apos;t run yet.</>;
+}
+
+/** A refused request, then the engine's own record of a failed run. */
+function SyncStripErrors({
+  status,
+  error,
+}: {
+  status: RagEngineStatus | undefined;
+  error: string | undefined;
+}) {
+  const runError = status?.syncState === 'error' ? status.lastSyncError : undefined;
+  return (
+    <>
+      {error && (
+        <div data-testid="rag-engine-request-error">
+          <Alert variant="red" description={error} />
         </div>
       )}
-    </div>
+      {runError && (
+        <div data-testid="rag-engine-sync-error">
+          <Alert variant="red" description={runError} />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -198,7 +241,7 @@ export function RagDatasetPanel({ bucket, dataset }: RagDatasetPanelProps) {
           })}
         />
         <p className="mt-2 text-xs text-zinc-500">
-          Use an access key for this bucket&apos;s region, exported as{' '}
+          Use an access key with access to all buckets in this region, exported as{' '}
           <code className="font-mono">FILONE_ACCESS_KEY_ID</code> and{' '}
           <code className="font-mono">FILONE_SECRET_ACCESS_KEY</code>.
         </p>
