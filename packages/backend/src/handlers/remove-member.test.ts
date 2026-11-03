@@ -382,9 +382,9 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     expect(result).toMatchObject({ statusCode: 200 });
     const items = transactItems();
-    // Both rows, the check that another membership stands, the mint-sequence
-    // fence, and the event.
-    expect(items).toHaveLength(5);
+    // Both rows, the checks that another membership stands in an org that is
+    // not being deleted, the mint-sequence fence, and the event.
+    expect(items).toHaveLength(6);
     expect(items[0].Delete).toMatchObject({
       Key: { pk: { S: OrgKeys.orgPk(ORG_ID) }, sk: { S: OrgKeys.memberSk(TARGET_ID) } },
       // Removing somebody already gone is a clean 404, not a silent success; the
@@ -400,7 +400,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     // the listing it revoked from turns the change into a retry. The row is
     // read, never deleted: its reading must not be satisfiable by a member who
     // left and rejoined.
-    expect(items[3].ConditionCheck?.Key).toEqual({
+    expect(items[4].ConditionCheck?.Key).toEqual({
       pk: { S: OrgKeys.orgPk(ORG_ID) },
       sk: { S: OrgKeys.accessKeyMintSeqSk(TARGET_ID) },
     });
@@ -408,10 +408,10 @@ describe('DELETE /api/org/members/{userId} handler', () => {
   });
 
   it('refuses a removal when a key was minted after the listing, and names whose', async () => {
-    // Two rows, the remaining-membership check, the fence, and the event: the
-    // fence is the fourth item, and it alone cancelling is what turns the
+    // Two rows, the two remaining-org checks, the fence, and the event: the
+    // fence is the fifth item, and it alone cancelling is what turns the
     // removal into a retry.
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(3, 5));
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(4, 6));
 
     const result = await handler(removeEvent(), buildContext());
 
@@ -425,7 +425,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
   it('names the member generically when a fence refusal has no address to use', async () => {
     stubTargetProfile(undefined);
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(3, 5));
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(4, 6));
 
     const result = await handler(removeEvent(), buildContext());
 
@@ -444,6 +444,69 @@ describe('DELETE /api/org/members/{userId} handler', () => {
       Key: { pk: { S: OrgKeys.userPk(TARGET_ID) }, sk: { S: OrgKeys.membershipSk('other-org-1') } },
       ConditionExpression: 'attribute_exists(pk)',
     });
+  });
+
+  // A home moved onto an org whose teardown then finishes stays fenced for good.
+  it('commits only while the org the account remains in is not being deleted', async () => {
+    await handler(removeEvent(), buildContext());
+
+    expect(transactItems()[3].ConditionCheck).toMatchObject({
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: 'ORG#other-org-1' }, sk: { S: 'PROFILE' } },
+    });
+  });
+
+  describe('when another of the account’s orgs is being deleted', () => {
+    function stubDeleting(orgId: string) {
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({ Item: { deleting: { BOOL: true } } });
+    }
+
+    it('moves the home past it, onto an org that remains', async () => {
+      stubMembershipCount(3);
+      stubDeleting('other-org-1');
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
+
+      const result = await handler(removeEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      const { identity, profile } = homeRepoints();
+      for (const repoint of [identity, profile]) {
+        expect(repoint?.ExpressionAttributeValues?.[':orgId']).toStrictEqual({ S: 'other-org-2' });
+      }
+    });
+
+    it('gives the account a floor org when it is the only other org', async () => {
+      stubMembershipCount(2);
+      stubDeleting('other-org-1');
+      stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
+
+      const result = await handler(removeEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      expect(
+        transactItems().find(
+          (item) => item.Put?.Item?.sk?.S === 'PROFILE' && item.Put.Item.pk?.S?.startsWith('ORG#'),
+        )?.Put?.Item,
+      ).toMatchObject({ floorOrg: { BOOL: true } });
+    });
+  });
+
+  // The floor org's rows and the home repoints ride the same transaction as the
+  // revocations, and DynamoDB refuses one of more than 100 items.
+  it('keeps a removal that makes a floor org within the transaction item limit', async () => {
+    stubMembershipCount(1);
+    stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
+    stubTargetInvitations(60);
+
+    const result = await handler(removeEvent(), buildContext());
+
+    expect(result).toMatchObject({ statusCode: 200 });
+    expect(transactItems().length).toBeLessThanOrEqual(100);
   });
 
   it('answers 409, to retry, when that other membership went meanwhile', async () => {
@@ -960,9 +1023,9 @@ describe('DELETE /api/org/members/{userId} handler', () => {
 
     it('returns 409 when a repoint finds the home org already moved', async () => {
       stubTargetProfile(TARGET_EMAIL, TARGET_ID, 'auth0|target', ORG_ID);
-      // The membership delete pair, the remaining-membership check, then the
-      // profile repoint at index 3, the identity repoint, the fence, the event.
-      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(3, 7));
+      // The membership delete pair, the two remaining-org checks, then the
+      // profile repoint at index 4, the identity repoint, the fence, the event.
+      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(4, 8));
 
       const result = await handler(removeEvent(), buildContext());
 

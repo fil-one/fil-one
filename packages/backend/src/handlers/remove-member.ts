@@ -13,7 +13,7 @@ import { removeMemberPrincipal } from '../lib/member-principals.ts';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
 import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
 import { requireManageableMember } from '../lib/manageable-member.ts';
-import { getOrgProfile } from '../lib/org-profile.ts';
+import { getOrgProfile, isOrgDeleting, orgNotDeletingCheck } from '../lib/org-profile.ts';
 import { proceed, refuse } from '../lib/result.ts';
 import type { Result } from '../lib/result.ts';
 import type { OrgProfileItem } from '../lib/org-profile.ts';
@@ -36,7 +36,7 @@ import {
   readOwnerCount,
   resolveMembership,
 } from '../lib/org-membership.ts';
-import type { OrgMembership } from '../lib/org-membership.ts';
+import type { OrgMembership, OrgMembershipRecord } from '../lib/org-membership.ts';
 import { readHomeOrgPointers, readUserProfile } from '../lib/user-profile.ts';
 import {
   ResponseBuilder,
@@ -58,6 +58,9 @@ import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 const SOURCE = 'remove-member';
+
+/** The `ConditionCheck` `commitAfterRevokingKeys` appends when the member holds keys. */
+const KEY_MINT_FENCE_ITEMS = 1;
 
 /**
  * The way out of a last-Owner refusal, for somebody removing an Owner: unlike a
@@ -164,19 +167,27 @@ export async function baseHandler(
       email: targetProfile?.email,
     }),
   ]);
-  const { now, later } = planRevocations(invitationsToRevoke, wasOwner ? 3 : 2);
+  const transactionFor = (invitations: InvitationRecord[]) =>
+    removalTransaction({
+      orgId,
+      targetUserId,
+      fromRole: target.role,
+      wasOwner,
+      invitations,
+      lastMembership,
+    });
+  // Counted from the transaction itself, so a floor org or a home repoint
+  // cannot push it past DynamoDB's item limit. The key-mint fence is appended
+  // later, by `commitAfterRevokingKeys`.
+  const { now, later } = planRevocations(
+    invitationsToRevoke,
+    transactionFor([]).items.length + KEY_MINT_FENCE_ITEMS,
+  );
 
   const refusal = await refuseBeforeRevokingKeys(orgId, wasOwner);
   if (refusal) return refusal;
 
-  const { items, failure } = removalTransaction({
-    orgId,
-    targetUserId,
-    fromRole: target.role,
-    wasOwner,
-    invitations: now,
-    lastMembership,
-  });
+  const { items, failure } = transactionFor(now);
 
   const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   const { keysToRevoke, fence } = await reviewKeysForRoleChange(orgId, targetUserId, NO_ROLE);
@@ -444,13 +455,19 @@ interface RemovalFailure {
  * The check comes with a repoint of each home-org pointer that names the org
  * being left, onto the org that remains.
  *
+ * An org being deleted does not count as one that remains. Its membership rows
+ * outlive most of its teardown, but a home moved onto it stays fenced once the
+ * teardown is done, with nothing left to move it again. So the remaining org is
+ * one that is not deleting, checked again when the removal commits, and an
+ * account whose other orgs are all deleting gets a floor org like one with
+ * none.
+ *
  * Neither, when this is the last membership but nothing here can name the row
  * that needs repointing.
  *
  * `listMemberships` is read fresh rather than reused from anywhere else: it is
  * the strongly-consistent count of every org this account belongs to right
- * now, and the removal about to happen is not among them yet, so a count of
- * one means this org is the only one — the removal would take it to zero.
+ * now, and the removal about to happen is not among them yet.
  */
 async function prepareFloorOrgIfLastMembership({
   targetUserId,
@@ -464,7 +481,9 @@ async function prepareFloorOrgIfLastMembership({
   email?: string;
 }): Promise<LastMembershipPlan> {
   const memberships = await listMemberships(targetUserId);
-  const remaining = memberships.find((membership) => membership.orgId !== orgId);
+  const remaining = await findLiveOrg(
+    memberships.filter((membership) => membership.orgId !== orgId),
+  );
 
   // Throws on a failed read rather than answering "no sub": this runs before
   // any key is revoked or row written, so a read error stops the removal here
@@ -476,6 +495,7 @@ async function prepareFloorOrgIfLastMembership({
     return {
       remainingItems: [
         membershipStandsCheck(targetUserId, remaining.orgId),
+        orgNotDeletingCheck(remaining.orgId),
         ...(profileOrgId === orgId
           ? [repointHomeOrg({ pk: `USER#${targetUserId}`, sk: 'PROFILE' }, remaining.orgId, orgId)]
           : []),
@@ -512,6 +532,19 @@ async function prepareFloorOrgIfLastMembership({
 interface LastMembershipPlan {
   floorOrg?: FloorOrgPreparation;
   remainingItems?: TransactWriteItem[];
+}
+
+/**
+ * The first of `memberships` whose org is not being deleted. Consistent reads,
+ * because a deletion confirmed moments ago is the case this exists to catch.
+ */
+async function findLiveOrg(
+  memberships: OrgMembershipRecord[],
+): Promise<OrgMembershipRecord | undefined> {
+  for (const membership of memberships) {
+    if (!(await isOrgDeleting(membership.orgId, { consistent: true }))) return membership;
+  }
+  return undefined;
 }
 
 /** A condition that the account's membership of `orgId` still stands. */
