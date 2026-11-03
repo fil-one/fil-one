@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DOCS_URL } from '@filone/shared';
+import { z } from 'zod';
 
 import { PageLayout } from '../components/PageLayout.js';
 import { Accordion, type AccordionItem } from '../components/Accordion';
@@ -13,6 +14,7 @@ import { Input } from '../components/Input';
 import { Link } from '../components/Link';
 import { RadioOption } from '../components/RadioOption';
 import { ReportBugDialog } from '../components/ReportBugDialog';
+import { Skeleton } from '../components/Skeleton';
 import { Textarea } from '../components/TextArea';
 import { useToast } from '../components/Toast';
 import { getMe } from '../lib/api.js';
@@ -77,8 +79,9 @@ function getSupportFormErrors(fields: {
   message: string;
 }): SupportFormErrors {
   const errors: SupportFormErrors = {};
+  // The form sets noValidate, so the browser's own check of type="email" never runs.
   if (fields.needsEmail && !fields.email.trim()) errors.email = 'Enter an email address.';
-  else if (fields.needsEmail && !fields.email.includes('@'))
+  else if (fields.needsEmail && !z.email().safeParse(fields.email.trim()).success)
     errors.email = 'Enter a valid email address.';
   if (!fields.category) errors.category = 'Choose a category.';
   if (!fields.message.trim()) errors.message = 'Tell us how we can help.';
@@ -94,12 +97,21 @@ export function SupportPage() {
   // Who is asking comes from the signed-in profile rather than the form. The
   // email field appears only for an account whose sign-in method gave no
   // address, so there is still somewhere to reply.
-  const { data: me } = useQuery({
+  //
+  // The app still renders when `/me` fails, and an outage is when people come
+  // here. Without a profile the form asks for an email and sends the ticket
+  // without a name or organization, rather than leaving Send disabled.
+  const {
+    data: me,
+    isError: meFailed,
+    isPending: meLoading,
+  } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
     staleTime: ME_STALE_TIME,
   });
-  const needsEmail = me !== undefined && !me.email;
+  const profileUnavailable = me === undefined && meFailed;
+  const needsEmail = profileUnavailable || (me !== undefined && !me.email);
 
   // Contact form state
   const [formEmail, setFormEmail] = useState('');
@@ -111,7 +123,7 @@ export function SupportPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting || !me) return;
+    if (submitting || meLoading) return;
     const nextErrors = getSupportFormErrors({
       needsEmail,
       email: formEmail,
@@ -123,17 +135,17 @@ export function SupportPage() {
     setSubmitting(true);
     try {
       await submitSupportForm({
-        name: me.name,
-        organization: me.orgName,
-        orgId: me.orgId,
-        email: me.email || formEmail.trim(),
+        name: me?.name,
+        organization: me?.orgName,
+        orgId: me?.orgId,
+        email: me?.email || formEmail.trim(),
         categories: [formCategory],
         message: formMessage.trim(),
       });
       setFormEmail('');
       setFormCategory('');
       setFormMessage('');
-      toast.success("Message sent! We'll get back to you within 1 business day.");
+      toast.success("Message sent. We'll get back to you within 1 business day.");
     } catch {
       toast.error('Failed to send message. Please try again.');
     } finally {
@@ -208,6 +220,9 @@ export function SupportPage() {
               </FormField>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                {/* Loading is reachable only after the app shell's own `/me` fetch
+                    failed and this page is retrying it. */}
+                {meLoading && <Skeleton className="h-4 w-48 max-w-full" />}
                 {me?.email && (
                   <p className="min-w-0 text-xs break-words text-(--color-paragraph-text-subtle)">
                     We&apos;ll reply to{' '}
@@ -220,7 +235,7 @@ export function SupportPage() {
                   id="support-submit-button"
                   variant="primary"
                   type="submit"
-                  disabled={!me}
+                  disabled={meLoading}
                   loading={submitting}
                   loadingLabel="Sending message"
                 >

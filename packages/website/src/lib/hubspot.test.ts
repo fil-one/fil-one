@@ -89,10 +89,57 @@ describe('submitSupportForm', () => {
     );
   });
 
-  it('leaves out the name fields when the user has no name', async () => {
+  it('splits the name on any run of spaces, ignoring spaces around it', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
     await submitSupportForm({
+      name: '  any   name ',
+      organization: 'any-org',
+      orgId: 'any-org-id',
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toEqual(
+      expect.arrayContaining([
+        { objectTypeId: '0-1', name: 'firstname', value: 'any' },
+        { objectTypeId: '0-1', name: 'lastname', value: 'name' },
+      ]),
+    );
+  });
+
+  it('sends a one-word name as the first name only', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      name: 'any',
+      organization: 'any-org',
+      orgId: 'any-org-id',
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toStrictEqual([
+      { objectTypeId: '0-1', name: 'firstname', value: 'any' },
+      { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
+      { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
+      { objectTypeId: '0-5', name: 'content', value: 'any message' },
+      { objectTypeId: '0-5', name: 'filone_org_name', value: 'any-org' },
+      { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
+    ]);
+  });
+
+  it.each([
+    { condition: 'the user has no name', name: undefined },
+    { condition: 'the name is an email address', name: 'any@example.com' },
+    { condition: 'the name is only spaces', name: '   ' },
+  ])('leaves out the name fields when $condition', async ({ name }) => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      name,
       organization: 'any-org',
       orgId: 'any-org-id',
       email: 'any@example.com',
@@ -109,13 +156,10 @@ describe('submitSupportForm', () => {
     ]);
   });
 
-  it('leaves out the name fields when the name is an email address', async () => {
+  it('leaves out the organization fields when the profile has none', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
     await submitSupportForm({
-      name: 'any@example.com',
-      organization: 'any-org',
-      orgId: 'any-org-id',
       email: 'any@example.com',
       categories: ['GENERAL_INQUIRY'],
       message: 'any message',
@@ -125,8 +169,6 @@ describe('submitSupportForm', () => {
       { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
       { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
       { objectTypeId: '0-5', name: 'content', value: 'any message' },
-      { objectTypeId: '0-5', name: 'filone_org_name', value: 'any-org' },
-      { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
     ]);
   });
 

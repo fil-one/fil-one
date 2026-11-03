@@ -41,15 +41,16 @@ export function Accordion({ items, className }: AccordionProps) {
             <CaretDownIcon
               size={14}
               aria-hidden="true"
-              className="mt-0.75 shrink-0 text-zinc-400 transition duration-200 group-hover:text-zinc-600 group-data-open:rotate-180"
+              className="mt-0.75 shrink-0 text-zinc-400 transition duration-200 group-hover:text-zinc-600 group-data-open:rotate-180 motion-reduce:transition-none"
             />
           </DisclosureButton>
           {/* Fades in on open and leaves at once on close. A closing fade
               holds the answer's full height until it ends, then the rows
-              below jump up, which reads as a stall. */}
+              below jump up, which reads as a stall. Under reduced motion only
+              the fade remains. */}
           <DisclosurePanel
             transition
-            className="pt-0.5 pr-8 pb-3 text-ui leading-relaxed text-pretty text-zinc-500 transition duration-150 ease-out data-closed:-translate-y-1 data-closed:opacity-0 data-leave:duration-0"
+            className="pt-0.5 pr-8 pb-3 text-ui leading-relaxed text-pretty text-zinc-500 transition duration-150 ease-out data-closed:-translate-y-1 data-closed:opacity-0 data-leave:duration-0 motion-reduce:data-closed:translate-y-0"
           >
             {item.content}
           </DisclosurePanel>
