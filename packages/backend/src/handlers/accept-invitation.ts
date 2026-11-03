@@ -21,6 +21,7 @@ import {
 } from '../lib/membership-changes.ts';
 import type { LabelledItems } from '../lib/membership-changes.ts';
 import { inviteeAccountRows } from '../lib/account-creation.ts';
+import { readLiveAccountUserId } from '../lib/identity-tombstone.ts';
 import { registerMemberPrincipal } from '../lib/member-principals.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
 import {
@@ -148,6 +149,7 @@ export async function baseHandler(
   } catch (err) {
     return await acceptFailureResponse(err, labels, {
       invitation,
+      sub,
       userId,
       verifiedEmail,
       accepterOrgId,
@@ -338,7 +340,16 @@ function acceptedEvent({
 async function acceptFailureResponse(
   err: unknown,
   labels: string[],
-  { invitation, userId, verifiedEmail, accepterOrgId }: AcceptContext,
+  {
+    invitation,
+    sub,
+    userId,
+    verifiedEmail,
+    accepterOrgId,
+  }: AcceptContext & {
+    /** Finds the account another request created, when this one lost that race. */
+    sub: string;
+  },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   // The deletion fence, read at its own index. The answer is the one a revoked
   // invitation gets, and it says nothing about the org: a stale link should not
@@ -354,20 +365,21 @@ async function acceptFailureResponse(
   if (failed.includes('accepterOrg')) throw new OrgDeletingError(accepterOrgId!);
 
   // The account this request was creating exists already: another tab signed
-  // in first, or a deleted account's row changed. The whole transaction
-  // cancelled, so the invitation is still pending and the link works again.
-  if (failed.includes('identity')) return accountChangedResponse();
+  // in first, or a deleted account's row changed. When that account is in the
+  // org, most often because the other tab accepted this same invitation, the
+  // caller has what they came for. Otherwise the whole transaction cancelled,
+  // so the invitation is still pending and the link works again.
+  if (failed.includes('identity')) {
+    const accountUserId = await readLiveAccountUserId(sub);
+    const joined =
+      accountUserId &&
+      (await alreadyMemberResponse({ invitation, userId: accountUserId, verifiedEmail }));
+    return joined || accountChangedResponse();
+  }
 
   if (failed.includes('membership')) {
-    const existing = await resolveMembership(invitation.orgId, userId);
-    if (existing) {
-      // The whole transaction cancelled, so the invitation is still pending: the
-      // idempotent answer has to carry the retirement it promised, or a link the
-      // caller has already used stays live for a fortnight.
-      await retireAfterRace({ invitation, userId, verifiedEmail });
-      await rememberVerifiedEmail(userId, verifiedEmail);
-      return await acceptedResponse({ invitation, role: existing.role, alreadyMember: true });
-    }
+    const joined = await alreadyMemberResponse({ invitation, userId, verifiedEmail });
+    if (joined) return joined;
   }
 
   if (failed.includes('inviter')) return inviterAuthorityResponse();
@@ -385,6 +397,26 @@ async function acceptFailureResponse(
   // The invitation's own condition: revoked, or accepted by another request,
   // between resolving the token and writing.
   return notFoundResponse();
+}
+
+/**
+ * The idempotent answer, for a caller who turns out to be in the org already,
+ * or undefined when they are not.
+ *
+ * The whole transaction cancelled, so the invitation may still be pending: the
+ * answer has to carry the retirement it promised, or a link the caller has
+ * already used stays live for a fortnight.
+ */
+async function alreadyMemberResponse({
+  invitation,
+  userId,
+  verifiedEmail,
+}: AcceptContext): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  const existing = await resolveMembership(invitation.orgId, userId);
+  if (!existing) return undefined;
+  await retireAfterRace({ invitation, userId, verifiedEmail });
+  await rememberVerifiedEmail(userId, verifiedEmail);
+  return await acceptedResponse({ invitation, role: existing.role, alreadyMember: true });
 }
 
 interface AcceptContext {

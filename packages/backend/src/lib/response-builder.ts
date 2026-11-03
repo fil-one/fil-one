@@ -1,5 +1,6 @@
 import { ApiErrorCode, type AccessKeySummary, type ErrorResponse } from '@filone/shared';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import type { DeletionInProgress } from './identity-tombstone.ts';
 
 export const COOKIE_ATTRIBUTES = 'HttpOnly; Secure; SameSite=Lax; Path=/';
 
@@ -132,11 +133,16 @@ export function accountDeletedResponse(): APIGatewayProxyStructuredResultV2 {
  * that has ended and leaves the page, while this caller can come back in once
  * the deletion finishes, and the page should say so.
  */
-export function accountDeletionInProgressResponse(): APIGatewayProxyStructuredResultV2 {
+export function accountDeletionInProgressResponse(
+  deleting: DeletionInProgress,
+): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
     .body<ErrorResponse>({
-      message: 'Your previous account is still being deleted. Try again in a few minutes.',
+      message:
+        deleting === 'account'
+          ? 'Your previous account is still being deleted. Try again in a few minutes.'
+          : 'Your organization is being deleted. Try again in a few minutes.',
     })
     .build();
 }

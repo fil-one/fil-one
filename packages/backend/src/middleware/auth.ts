@@ -416,7 +416,9 @@ async function resolveRejoiningAccount(
   const deletedOrgId = identityRow.orgId?.S;
   // A row naming no org has no deletion to wait for, and none to prove finished.
   if (!deletedOrgId) throw new AccountDeletedError();
-  if (!(await hasDeletionFinished(deletedOrgId))) throw new AccountDeletionInProgressError();
+  if (!(await hasDeletionFinished(deletedOrgId))) {
+    throw new AccountDeletionInProgressError('account');
+  }
   return { kind: 'rejoining', deletedAt: identityRow.deletedAt.S, ...pendingAccountFields(claims) };
 }
 
@@ -473,9 +475,12 @@ async function resolveUserAndOrg({
     // The session fence. On the org profile, so the confirm transaction stays three
     // items at any org size. Ahead of the backfill: a deleted org must not trigger it.
     // A route that lets a deleted account start over says when it can: the
-    // identity is stamped only later in the same teardown.
+    // identity is stamped only later in the same teardown, and a member who
+    // survives the teardown is moved off the org at its end.
     if (await isOrgDeleting(orgId)) {
-      throw deferAccountCreation ? new AccountDeletionInProgressError() : new AccountDeletedError();
+      throw deferAccountCreation
+        ? new AccountDeletionInProgressError('organization')
+        : new AccountDeletedError();
     }
 
     if (!email) {
@@ -817,7 +822,9 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     try {
       return await authenticate(request);
     } catch (err) {
-      if (err instanceof AccountDeletionInProgressError) return accountDeletionInProgressResponse();
+      if (err instanceof AccountDeletionInProgressError) {
+        return accountDeletionInProgressResponse(err.deleting);
+      }
       if (err instanceof AccountDeletedError) return accountDeletedResponse();
       throw err;
     }

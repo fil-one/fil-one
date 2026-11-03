@@ -42,13 +42,22 @@ export class AccountDeletedError extends Error {
  *
  * A subclass, so every path that passes a deleted account through as a decision
  * rather than a token failure passes this one through too.
+ *
+ * `deleting` says what the caller is waiting on. An identity already stamped is
+ * an account being deleted. A home org still being torn down is an organization
+ * being deleted, which is all that is true for a member who survives it.
  */
 export class AccountDeletionInProgressError extends AccountDeletedError {
-  constructor() {
+  readonly deleting: DeletionInProgress;
+
+  constructor(deleting: DeletionInProgress) {
     super();
     this.name = 'AccountDeletionInProgressError';
+    this.deleting = deleting;
   }
 }
+
+export type DeletionInProgress = 'account' | 'organization';
 
 /**
  * Whether the teardown of `orgId` has finished. The scrub stamps the identity
@@ -65,4 +74,22 @@ export async function hasDeletionFinished(orgId: string): Promise<boolean> {
     }),
   );
   return Item?.status?.S === DELETION_STATUS.done;
+}
+
+/**
+ * The userId of the account `sub` holds now, or undefined when it holds none or
+ * only a deleted one. Consistent, because it is read straight after a write that
+ * may have created the account.
+ */
+export async function readLiveAccountUserId(sub: string): Promise<string | undefined> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
+      ProjectionExpression: 'userId, deletedAt',
+      ConsistentRead: true,
+    }),
+  );
+  if (isIdentityTombstoned(Item)) return undefined;
+  return Item?.userId?.S;
 }

@@ -1047,10 +1047,27 @@ describe('POST /api/invitations/accept handler', () => {
       ).toStrictEqual([]);
     });
 
-    it('answers 409 and leaves the invitation pending when the account appeared meanwhile', async () => {
-      // Another tab's first request created the account between the read and
-      // the write. Item 1 is the identity: the fence is item 0.
-      ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 9));
+    /** The account another tab's request created between this one's read and its write. */
+    const OTHER_TAB_USER_ID = 'any-other-tab-user-id';
+
+    function stubAccountCreatedMeanwhile() {
+      // The first read is the auth middleware's, before the account existed;
+      // the next is the handler's, after its transaction lost to the other tab.
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolvesOnce({})
+        .resolves({
+          Item: { userId: { S: OTHER_TAB_USER_ID }, orgId: { S: INVITING_ORG_ID } },
+        });
+      // Item 1 is the identity: the fence is item 0.
+      ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(1, 9)).resolves({});
+    }
+
+    it('answers 409 and leaves the invitation pending when an account appeared meanwhile outside the inviting org', async () => {
+      stubAccountCreatedMeanwhile();
 
       const result = await handler(acceptEvent(), buildContext());
 
@@ -1059,6 +1076,34 @@ describe('POST /api/invitations/accept handler', () => {
         message:
           'Your account changed while we were setting it up. Open the invitation link again.',
       });
+    });
+
+    // Two tabs open on the same link: the other one created the account and
+    // spent the invitation, so reopening the link would only say it is invalid.
+    it('answers success when the account another tab created joined the inviting org', async () => {
+      stubAccountCreatedMeanwhile();
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'OrgTable',
+          Key: {
+            pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) },
+            sk: { S: OrgKeys.memberSk(OTHER_TAB_USER_ID) },
+          },
+        })
+        .resolves({
+          Item: {
+            pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) },
+            sk: { S: OrgKeys.memberSk(OTHER_TAB_USER_ID) },
+            role: { S: OrgRole.Member },
+            joinedAt: { S: CREATED_AT },
+            source: { S: 'invitation' },
+          },
+        });
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      expect(body(result)).toMatchObject({ alreadyMember: true, role: OrgRole.Member });
     });
 
     it('creates no account when the invitation is no longer valid', async () => {
@@ -1100,8 +1145,10 @@ describe('POST /api/invitations/accept handler', () => {
       expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
     });
 
-    it('answers that the deletion is still running before the identity is stamped', async () => {
-      // The teardown fences the org first and stamps the identity near its end.
+    // The teardown fences the org first, then stamps the identity of an account
+    // it ends, or moves a member who survives it, near its end. Until then the
+    // only thing known to be going away is the org.
+    it('answers that the organization is being deleted, and writes nothing, while the home org is torn down', async () => {
       ddbMock
         .on(GetItemCommand, {
           TableName: 'UserInfoTable',
@@ -1112,6 +1159,9 @@ describe('POST /api/invitations/accept handler', () => {
       const result = await handler(acceptEvent(), buildContext());
 
       expect(result).toMatchObject({ statusCode: 409 });
+      expect(body(result)).toStrictEqual({
+        message: 'Your organization is being deleted. Try again in a few minutes.',
+      });
       expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
     });
   });
