@@ -123,7 +123,7 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
       {visibleGroups.map((group, gi) => (
         <div key={gi} className={gi > 0 ? 'mt-4' : ''}>
           {!collapsed && group.label && (
-            <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wide text-zinc-400">
+            <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wide text-zinc-500">
               {group.label}
             </p>
           )}

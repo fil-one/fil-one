@@ -31,7 +31,7 @@ export const Stacked: Story = {
         description="Your account is protected with two-factor authentication"
         action={
           <Button variant="ghost" size="sm">
-            Add authenticator or key
+            Add method
           </Button>
         }
       />

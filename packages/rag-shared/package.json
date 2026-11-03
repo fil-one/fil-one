@@ -10,8 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "^3.1156.0",
-    "@aws-sdk/client-s3vectors": "^3.1156.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1160.0",
+    "@aws-sdk/client-s3vectors": "^3.1160.0",
     "@smithy/types": "^4.19.0",
     "fast-xml-parser": "^5.11.2",
     "unpdf": "^1.9.1",

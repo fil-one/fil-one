@@ -1,6 +1,6 @@
 import { formatBytes } from '@filone/shared';
 
-import { daysRemainingLabel } from '../lib/time.js';
+import { daysRemainingLabel, formatTrialDaysLeft } from '../lib/time.js';
 import { Button } from './Button.js';
 import { ProgressBar } from './ProgressBar.js';
 
@@ -48,7 +48,7 @@ export function StatusBanners({
         <div className="px-2 py-3">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
             <p className="text-xs font-medium text-zinc-900" title={trialEndsLabel}>
-              {trialDays !== null ? `${trialDays} days left in trial` : 'Trial active'}
+              {trialDays !== null ? formatTrialDaysLeft(trialDays) : 'Trial active'}
             </p>
             <div className="mt-2.5 space-y-2.5">
               <div>
