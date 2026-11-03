@@ -170,7 +170,9 @@ test.describe('the key form', () => {
       const row = page.locator(
         `[data-testid="access-key-row"][data-access-key-id="${key.accessKeyId}"]`,
       );
-      await expect(row.getByTestId('permission-badge-bucket-info')).toBeVisible();
+      // The row badges each object permission the key holds, and the form
+      // grants Read by default.
+      await expect(row.getByTestId('permission-badge-read')).toBeVisible();
       await expect(row.getByTestId('permission-badge-follows-bucket-policy')).toHaveCount(0);
     });
   });
