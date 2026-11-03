@@ -23,7 +23,7 @@ export AWS_REGION=us-east-1 LOCAL=true BASE_URL=https://localhost:5173
 SST_STAGE=local pnpm test:e2e:policies
 ```
 
-A local run skips "a policy over 1 KiB reads with a weak ETag that a write accepts": the test checks the weak ETag CloudFront gives a compressed response, and a local stage has no CloudFront in front of the console API.
+A local run skips "a policy read of 2,000 bytes or more carries a weak ETag that a write accepts": the test checks the weak ETag CloudFront gives a compressed response, and a local stage has no CloudFront in front of the console API.
 
 ## Remote stage
 
