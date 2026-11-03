@@ -30,12 +30,15 @@ The wire contract with the console backend is
   exact flat scan and the trace says `flat`. Every sync ends with
   `optimize()`, which compacts fragments and folds new rows into the indexes.
   A sync that finds an index missing (an earlier sync stopped between its data
-  and index commits) builds it even when no object changed.
-- **Versions.** Every commit is a Lance version. `/v1/versions` lists them and
-  `/v1/query` takes `version` to search the dataset as it was. Each sync tags
-  the version it finished at (`sync-20261105T100000.123Z`); tagged versions
-  carry every index, so a version picker should offer those. Lance prunes
-  untagged versions older than 7 days during `optimize()` and keeps tagged ones.
+  and index commits) builds it even when no object changed. The full-text index
+  stores token positions, so a query wrapped in double quotes runs as a phrase
+  search; a sync replaces a full-text index built without positions.
+- **Versions.** Every commit is a Lance version, and `/v1/query` takes
+  `version` to search the dataset as it was. Each sync tags the version it
+  finished at (`sync-20261105T100000.123Z`). `/v1/versions` lists the tagged
+  versions plus the latest; the commits in between are partial sync states, and
+  the first has no full-text index. The newest 30 sync tags are kept. Lance
+  prunes untagged versions older than 7 days during `optimize()`.
 - **Query traces.** Timings cover the request as served. `trace.io` comes from
   Lance's analyzed plan, which runs the search a second time after the timed
   one: it reflects a warm cache and is not part of `totalMs`. Hybrid search
@@ -71,7 +74,9 @@ All `/v1/*` routes are `POST` with a JSON body and need
 
 Errors are `{ error: { code, message } }`: `400 BAD_REQUEST`/`BAD_JSON`,
 `401 UNAUTHORIZED`, `404 VERSION_NOT_FOUND`, `409 NOT_INDEXED`,
-`409 NO_FULLTEXT_INDEX` (a version from before the full-text index), `500 INTERNAL`.
+`409 NO_FULLTEXT_INDEX` (a version from before the full-text index),
+`409 NO_PHRASE_INDEX` (a quoted phrase against a version whose full-text index
+has no token positions), `500 INTERNAL`.
 
 ## Configuration
 

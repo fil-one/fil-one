@@ -1,4 +1,9 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import type Anthropic from '@anthropic-ai/sdk';
+import * as lancedb from '@lancedb/lancedb';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -12,7 +17,7 @@ import { loadConfig, parseEndpointOverrides } from './config.ts';
 import { OpenAICompatibleEmbedder } from './embeddings.ts';
 import { sumPlanMetric } from './query.ts';
 import { EngineError, MAX_ERROR_MESSAGE, summarizeError } from './errors.ts';
-import { syncTagName } from './lance-store.ts';
+import { pruneSyncTags, syncTagName } from './lance-store.ts';
 import { isAuthorized, requestPath } from './server.ts';
 import { companionBucketName, ensureBucket, lanceStorageOptions, storageFor } from './storage.ts';
 import { planSync } from './sync.ts';
@@ -334,5 +339,45 @@ describe('syncTagName', () => {
     const name = syncTagName(new Date('2026-11-05T10:00:00.123Z'));
     expect(name).toBe('sync-20261105T100000.123Z');
     expect(name).toMatch(/^[A-Za-z0-9._-]+$/);
+  });
+});
+
+describe('pruneSyncTags', () => {
+  it('keeps the newest sync tags and leaves other tags alone', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rag-tags-'));
+    try {
+      const db = await lancedb.connect(dir);
+      const table = await db.createTable('t', [{ n: 0 }]);
+      const tags = await table.tags();
+      const at = (i: number) => new Date(Date.UTC(2026, 10, 5, 10, 0, i));
+      for (let i = 1; i <= 4; i += 1) {
+        await table.add([{ n: i }]);
+        await tags.create(syncTagName(at(i)), await table.version());
+      }
+      await tags.create('release', 1);
+      await pruneSyncTags(table, 2);
+      expect(Object.keys(await tags.list()).sort()).toEqual(
+        ['release', syncTagName(at(3)), syncTagName(at(4))].sort(),
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('summarizeError on bodiless responses', () => {
+  it('names the cause from the HTTP status when the message is UnknownError', () => {
+    const headError = (status: number) =>
+      Object.assign(new Error('UnknownError'), {
+        name: status === 404 ? 'NotFound' : 'Unknown',
+        $metadata: { httpStatusCode: status },
+      });
+    expect(summarizeError(headError(403))).toMatch(/^ACCESS_DENIED: /);
+    expect(summarizeError(headError(404))).toMatch(/^BUCKET_NOT_FOUND: /);
+    const missingKey = Object.assign(new Error('NoSuchKey'), {
+      name: 'NoSuchKey',
+      $metadata: { httpStatusCode: 404 },
+    });
+    expect(summarizeError(missingKey)).toBe('NoSuchKey');
   });
 });

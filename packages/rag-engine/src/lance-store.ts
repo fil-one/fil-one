@@ -191,7 +191,7 @@ export async function writeChunks(
       schema: chunkSchema(first.vector.length),
       mode: 'create',
     });
-    await created.createIndex(TEXT_COLUMN, { config: lancedb.Index.fts() });
+    await created.createIndex(TEXT_COLUMN, { config: textIndexConfig() });
     return created;
   }
   const data = rows as unknown as Record<string, unknown>[];
@@ -219,6 +219,14 @@ export async function deleteObjectRows(table: lancedb.Table, keys: string[]): Pr
   for (const predicate of inPredicates(keys)) await table.delete(predicate);
 }
 
+/**
+ * The full-text index. Token positions let it answer phrase queries: LanceDB
+ * runs a query wrapped in double quotes as a phrase, which fails without them.
+ */
+function textIndexConfig(): lancedb.Index {
+  return lancedb.Index.fts({ withPosition: true });
+}
+
 async function vectorIndexConfig(table: lancedb.Table): Promise<lancedb.Index> {
   const rows = await table.countRows();
   return lancedb.Index.hnswSq({
@@ -239,7 +247,8 @@ export async function finalizeDataset(
   options: { vectorIndexMinRows: number },
 ): Promise<void> {
   const missing = await missingIndexes(table, options);
-  if (missing.text) await table.createIndex(TEXT_COLUMN, { config: lancedb.Index.fts() });
+  // `replace` (the default) swaps an outdated text index for the new one.
+  if (missing.text) await table.createIndex(TEXT_COLUMN, { config: textIndexConfig() });
   if (missing.vector) {
     await table.createIndex(VECTOR_COLUMN, {
       config: await vectorIndexConfig(table),
@@ -252,13 +261,19 @@ export async function finalizeDataset(
  * Indexes the latest version should have but lacks: the full-text index
  * always, the vector index from `vectorIndexMinRows` rows. A sync interrupted
  * between its data commits and its index commits leaves one of these missing.
+ * A full-text index built without token positions (by an earlier engine)
+ * counts as missing, so the next sync rebuilds it for phrase queries.
  */
 export async function missingIndexes(
   table: lancedb.Table,
   options: { vectorIndexMinRows: number },
 ): Promise<{ text: boolean; vector: boolean }> {
   const indexes = await table.listIndices();
-  const text = !indexes.some((index) => index.columns.includes(TEXT_COLUMN));
+  const text = !indexes.some(
+    (index) =>
+      index.columns.includes(TEXT_COLUMN) &&
+      (index.indexDetails as { with_position?: boolean } | undefined)?.with_position !== false,
+  );
   const vector =
     !indexes.some((index) => index.columns.includes(VECTOR_COLUMN)) &&
     (await table.countRows()) >= options.vectorIndexMinRows;
@@ -278,9 +293,31 @@ export function syncTagName(at: Date): string {
  * caller should offer for time travel: every one has the full-text index, and
  * Lance's cleanup keeps tagged versions past its retention window.
  */
-export async function tagSyncVersion(table: lancedb.Table, at: Date): Promise<void> {
+export async function tagSyncVersion(
+  table: lancedb.Table,
+  at: Date,
+  keep = SYNC_TAGS_KEPT,
+): Promise<void> {
   const tags = await table.tags();
   await tags.create(syncTagName(at), await table.version());
+  await pruneSyncTags(table, keep);
+}
+
+/** Sync tags kept for time travel; older versions fall to Lance's 7-day cleanup. */
+export const SYNC_TAGS_KEPT = 30;
+
+/**
+ * Delete all but the newest `keep` sync tags. A tagged version keeps its data
+ * files forever, so without this a bucket that changes often grows its
+ * companion bucket without bound. Tag names sort by time.
+ */
+export async function pruneSyncTags(table: lancedb.Table, keep: number): Promise<void> {
+  const tags = await table.tags();
+  const names = Object.keys(await tags.list())
+    .filter((name) => name.startsWith('sync-'))
+    .sort()
+    .reverse();
+  for (const name of names.slice(keep)) await tags.delete(name);
 }
 
 /** Indexes on the table at its checked-out version, with coverage. */
@@ -305,6 +342,13 @@ export async function dropTable(
   storage: StorageContext,
   companionBucket: string,
 ): Promise<boolean> {
+  // One HEAD instead of Lance retrying a listing of a bucket that is not there.
+  const s3 = createS3Client(storage);
+  try {
+    if (!(await bucketExists(s3, companionBucket))) return false;
+  } finally {
+    s3.destroy();
+  }
   try {
     const db = await connectDataset(storage, companionBucket);
     if (!(await db.tableNames()).includes(TABLE_NAME)) return false;

@@ -172,7 +172,7 @@ async function handle(
   const path = requestPath(req.url);
   if (req.method === 'GET' && path === '/healthz')
     return { reply: { status: 200, body: { ok: true } } };
-  const route = table[path];
+  const route = Object.hasOwn(table, path) ? table[path] : undefined;
   if (!route)
     return {
       reply: {

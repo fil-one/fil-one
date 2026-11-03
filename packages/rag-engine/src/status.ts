@@ -93,7 +93,12 @@ export async function buildStatus(
   }
 }
 
-/** Every version of the dataset, newest first, with any tags pointing at it. */
+/**
+ * The versions worth offering for time travel, newest first, with their tags:
+ * the latest, and every version a sync finished at (tagged `sync-…`). The
+ * versions in between are partial commits of a running sync, and the first one
+ * has no full-text index yet.
+ */
 export async function listVersions(
   ctx: EngineContext,
   target: RagEngineTarget,
@@ -109,7 +114,13 @@ export async function listVersions(
   for (const [tag, info] of Object.entries(tags)) {
     tagsByVersion.set(info.version, [...(tagsByVersion.get(info.version) ?? []), tag]);
   }
+  const latest = Math.max(...versions.map((v) => v.version));
   return versions
+    .filter(
+      (v) =>
+        v.version === latest ||
+        tagsByVersion.get(v.version)?.some((tag) => tag.startsWith('sync-')),
+    )
     .map((v) => ({
       version: v.version,
       timestamp: v.timestamp.toISOString(),

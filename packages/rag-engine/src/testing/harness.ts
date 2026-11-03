@@ -36,8 +36,12 @@ export class FakeEmbedder implements Embedder {
   /** When set, the call with this number (1-based) fails. */
   failOnCall: number | undefined;
 
+  /** Runs at the start of every call, with the call number (1-based). */
+  onCall: ((call: number) => void) | undefined;
+
   async embed(texts: string[]): Promise<number[][]> {
     this.calls += 1;
+    this.onCall?.(this.calls);
     if (this.calls === this.failOnCall) throw new Error('embedding service unavailable');
     if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs));
     return texts.map((text) => FakeEmbedder.vector(text));

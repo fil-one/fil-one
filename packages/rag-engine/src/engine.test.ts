@@ -8,6 +8,7 @@ import type {
   RagEngineVersionsResponse,
 } from '@filone/shared';
 import { buildPdf } from '@filone/rag-shared/src/test-fixtures.ts';
+import * as lancedb from '@lancedb/lancedb';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { connectDataset } from './lance-store.ts';
@@ -175,6 +176,49 @@ describe('sync', () => {
     expect(result.body.citations[0]?.objectKey).toBe('space/mars.txt');
   });
 
+  it('rebuilds a full-text index that has no token positions', async () => {
+    const t = await harness();
+    seed(t);
+    await t.syncAndWait();
+    const companion = companionBucketName('org-1', 'us-east-9', 'docs');
+    const db = await connectDataset(storageFor(t.target), companion);
+    const table = await db.openTable(TABLE_NAME);
+    // The index an earlier engine built.
+    await table.createIndex('text', { config: lancedb.Index.fts(), replace: true });
+    const legacy = await t.call('/v1/query', {
+      target: t.target,
+      answer: false,
+      query: '"iron oxide"',
+      searchMode: 'hybrid',
+    });
+    expect(legacy.status).toBe(409);
+    expect(legacy.body.error.code).toBe('NO_PHRASE_INDEX');
+
+    await t.syncAndWait();
+    const rebuilt = await query(t, { query: '"iron oxide"', searchMode: 'hybrid' });
+    expect(rebuilt.status).toBe(200);
+    expect(rebuilt.body.citations[0]?.objectKey).toBe('space/mars.txt');
+  });
+
+  it('removes an indexed object deleted between the listing and its fetch', async () => {
+    const t = await harness();
+    seed(t);
+    await t.syncAndWait();
+    t.putSource('animals/cats.txt', 'Cats chase mice.');
+    t.putSource('space/mars.txt', 'Mars has two moons.');
+    const calls = t.embedder.calls;
+    // Objects are fetched in key order: cats is embedded before mars is fetched.
+    t.embedder.onCall = (call) => {
+      if (call === calls + 1) t.deleteSource('space/mars.txt');
+    };
+    const status = await t.syncAndWait();
+    expect(status.lastSyncError).toBeUndefined();
+    expect(status.syncState).toBe('idle');
+    expect(status.filesIndexed).toBe(2);
+    const result = await query(t, { query: 'moons', searchMode: 'fulltext' });
+    expect(result.body.citations).toEqual([]);
+  });
+
   it('never sends a session token from the environment to storage', async () => {
     const previous = process.env.AWS_SESSION_TOKEN;
     process.env.AWS_SESSION_TOKEN = 'LEAKED-ENV-TOKEN';
@@ -301,6 +345,22 @@ describe('query', () => {
     expect(hybrid.body.answer).toBe('');
   });
 
+  it('runs a query wrapped in double quotes as a phrase in full-text and hybrid mode', async () => {
+    const t = await harness();
+    seed(t);
+    t.putSource('notes/rust.txt', 'An oxide of iron forms when iron meets water.');
+    await t.syncAndWait();
+    for (const searchMode of ['fulltext', 'hybrid']) {
+      for (const q of ['"iron oxide"', '"iron"', '"Mars is the fourth planet"']) {
+        const result = await query(t, { query: q, searchMode });
+        expect(result.status, `${searchMode} ${q}`).toBe(200);
+        expect(result.body.citations.map((c) => c.objectKey)).toContain('space/mars.txt');
+      }
+    }
+    const phrase = await query(t, { query: '"iron oxide"', searchMode: 'fulltext' });
+    expect(phrase.body.citations.map((c) => c.objectKey)).toEqual(['space/mars.txt']);
+  });
+
   it('answers with the configured provider, citing passages by number', async () => {
     const t = await harness();
     seed(t);
@@ -381,6 +441,8 @@ describe('query', () => {
     ).body;
     const tagged = versions.filter((v) => v.tags?.some((tag) => tag.startsWith('sync-')));
     expect(tagged).toHaveLength(2);
+    // The partial commits in between (the first has no full-text index) are not offered.
+    expect(versions).toEqual(tagged);
     expect(tagged[0]!.version).toBe(versions[0]!.version);
     for (const v of tagged) {
       const result = await query(t, {
@@ -489,6 +551,15 @@ describe('drop', () => {
     });
     expect(again.body).toEqual({ dropped: false });
   });
+
+  it('drops a never-indexed bucket without listing it', async () => {
+    const t = await harness();
+    seed(t);
+    const dropped = await t.call<{ dropped: boolean }>('/v1/drop', { target: t.target });
+    expect(dropped.body).toEqual({ dropped: false });
+    // HeadBucket, then the state object and bucket deletes; Lance never lists.
+    expect(t.s3.stats.requests.map((r) => r.op)).toEqual(['HEAD', 'DELETE', 'DELETE']);
+  });
 });
 
 describe('http surface', () => {
@@ -533,6 +604,8 @@ describe('http surface', () => {
     const notJson = await t.call('/v1/status', '{not json');
     expect(notJson.status).toBe(400);
     expect((await t.call('/v1/nope', {})).status).toBe(404);
+    expect((await t.call('/v1/__proto__', {})).status).toBe(404);
+    expect((await t.call('/v1/constructor', {})).status).toBe(404);
   });
 
   it('uses the tenant key it is given', async () => {
@@ -548,5 +621,7 @@ describe('http surface', () => {
       target: t.target,
     });
     expect(status.body.filesIndexed).toBe(0);
+    // HeadBucket's 403 has no body; the status code still names the cause.
+    expect(status.body.lastSyncError).toMatch(/^ACCESS_DENIED: /);
   });
 });

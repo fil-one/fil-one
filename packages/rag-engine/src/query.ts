@@ -139,6 +139,15 @@ async function runSearch(
     return (await search.toArray()) as ResultRow[];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (mode !== 'vector' && /required for phrase queries/i.test(message)) {
+      // An index built before the engine recorded token positions; the next
+      // sync rebuilds it, and versions it wrote before then keep the old one.
+      throw new EngineError(
+        409,
+        'NO_PHRASE_INDEX',
+        'This dataset version cannot run a quoted phrase search; remove the quotes, or sync and search the latest version',
+      );
+    }
     if (mode !== 'vector' && /full text search|INVERTED index/i.test(message)) {
       throw new EngineError(
         409,

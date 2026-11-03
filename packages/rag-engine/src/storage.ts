@@ -107,6 +107,11 @@ function errorName(error: unknown): string | undefined {
   return undefined;
 }
 
+/** The object is not there (deleted since the listing, say). */
+export function isNoSuchKey(error: unknown): boolean {
+  return errorName(error) === 'NoSuchKey';
+}
+
 export function isNoSuchBucket(error: unknown): boolean {
   if (errorName(error) === 'NoSuchBucket') return true;
   if (!(error instanceof Error)) return false;

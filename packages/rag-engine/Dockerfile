@@ -30,6 +30,9 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
+# Lance logs deprecation and index-statistics warnings to stderr on every
+# hybrid query and status call; keep the appliance logs to errors.
+ENV LANCE_LOG=error
 WORKDIR /app
 COPY --from=deps /app ./
 COPY packages/shared/src packages/shared/src

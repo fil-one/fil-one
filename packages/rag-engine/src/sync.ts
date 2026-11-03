@@ -27,6 +27,7 @@ import {
   ensureBucket,
   getObject,
   isNoSuchBucket,
+  isNoSuchKey,
   listSourceObjects,
   storageFor,
   type SourceObject,
@@ -132,9 +133,22 @@ interface SyncRun {
   state: TargetSyncState;
 }
 
-/** Fetch, extract and chunk one object. Undefined when it yields no text. */
-async function chunkObject(run: SyncRun, object: SourceObject): Promise<string[] | undefined> {
-  const { bytes, contentType } = await getObject(run.s3, run.target.bucketName, object.key);
+/**
+ * Fetch, extract and chunk one object. Undefined when it yields no text;
+ * `'gone'` when it was deleted after the listing.
+ */
+async function chunkObject(
+  run: SyncRun,
+  object: SourceObject,
+): Promise<string[] | undefined | 'gone'> {
+  let fetched: Awaited<ReturnType<typeof getObject>>;
+  try {
+    fetched = await getObject(run.s3, run.target.bucketName, object.key);
+  } catch (error) {
+    if (isNoSuchKey(error)) return 'gone';
+    throw error;
+  }
+  const { bytes, contentType } = fetched;
   const type = resolveContentType(object.key, contentType);
   if (!type) return undefined;
   try {
@@ -207,7 +221,9 @@ async function indexObjects(run: SyncRun, work: IndexWork): Promise<number | und
   for (const object of plan.toIndex) {
     if (run.state.cancelled) throw new Error('Sync cancelled');
     const chunks = await chunkObject(run, object);
-    if (!chunks) {
+    if (chunks === 'gone') {
+      if (indexed.has(object.key)) plan.removed.push(object.key);
+    } else if (!chunks) {
       engineState.skipped[object.key] = object.etag;
       if (indexed.has(object.key)) plan.removed.push(object.key);
     } else {

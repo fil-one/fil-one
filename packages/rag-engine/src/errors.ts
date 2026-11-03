@@ -37,6 +37,16 @@ const KNOWN_CAUSES: { code: string; pattern: RegExp; message: string }[] = [
   },
 ];
 
+/** The known cause an AWS SDK error's HTTP status implies, if any. */
+function statusCause(error: unknown): string | undefined {
+  const meta = (error as { $metadata?: { httpStatusCode?: number } } | undefined)?.$metadata;
+  const name = (error as { name?: string } | undefined)?.name;
+  if (meta?.httpStatusCode === 403) return 'ACCESS_DENIED';
+  // Only HeadBucket's bodiless 404; a GetObject 404 is a missing key.
+  if (meta?.httpStatusCode === 404 && name === 'NotFound') return 'BUCKET_NOT_FOUND';
+  return undefined;
+}
+
 /**
  * A short, caller-safe description of an error: a stable code for the common
  * causes, otherwise the first line with Rust source paths removed, capped at
@@ -45,6 +55,10 @@ const KNOWN_CAUSES: { code: string; pattern: RegExp; message: string }[] = [
 export function summarizeError(error: unknown): string {
   if (error instanceof EngineError) return `${error.code}: ${error.message}`;
   const raw = error instanceof Error ? error.message : String(error);
+  // A HEAD response has no body, so the SDK's message is just "UnknownError";
+  // the status code is all there is to go on.
+  const byStatus = KNOWN_CAUSES.find((cause) => cause.code === statusCause(error));
+  if (byStatus) return `${byStatus.code}: ${byStatus.message}`;
   const known = KNOWN_CAUSES.find((cause) => cause.pattern.test(raw));
   if (known) return `${known.code}: ${known.message}`;
   const firstLine = (raw.split('\n')[0] ?? '')
