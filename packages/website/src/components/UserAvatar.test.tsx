@@ -28,6 +28,23 @@ describe('UserAvatar', () => {
     expect(container.textContent).toBe('');
   });
 
+  // The fill would otherwise show at the rounded edge as a hairline.
+  it('drops the fill behind a picture that has loaded, a caller-supplied fill included', () => {
+    const { container } = render(
+      <UserAvatar src="https://example.com/me.png" initial="F" className="bg-zinc-700" />,
+    );
+    fireEvent.load(container.querySelector('img')!);
+    expect(container.firstElementChild).toHaveClass('bg-transparent');
+    expect(container.firstElementChild).not.toHaveClass('bg-zinc-700', 'bg-zinc-200');
+  });
+
+  it('keeps the fill behind the initial while the picture loads', () => {
+    const { container } = render(
+      <UserAvatar src="https://example.com/me.png" initial="F" className="bg-zinc-700" />,
+    );
+    expect(container.firstElementChild).toHaveClass('bg-zinc-700');
+  });
+
   it('falls back to the initial when the picture fails to load', () => {
     const { container } = render(<UserAvatar src="https://example.com/broken.png" initial="F" />);
     fireEvent.error(container.querySelector('img')!);

@@ -11,7 +11,7 @@
 import { PlanId, SubscriptionStatus, TB_BYTES, getUsageLimits } from '@filone/shared';
 import type { BillingInfo, Subscription } from '@filone/shared';
 
-import { daysUntil, formatDate, formatMonthDay, pluralizeDays } from './time.js';
+import { daysUntil, formatDate, formatDaysLeft, formatMonthDay, pluralizeDays } from './time.js';
 
 export type StatusTone = 'green' | 'blue' | 'amber' | 'red' | 'grey';
 
@@ -203,8 +203,7 @@ export function billingPeriodRange(subscription: Subscription): string | null {
  */
 export function daysLeftLabel(subscription: Subscription): string | null {
   if (!subscription.currentPeriodEnd) return null;
-  const days = daysUntil(subscription.currentPeriodEnd);
-  return days === 0 ? 'Ends today' : `${pluralizeDays(days)} left`;
+  return formatDaysLeft(daysUntil(subscription.currentPeriodEnd));
 }
 
 /**

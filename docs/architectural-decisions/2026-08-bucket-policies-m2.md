@@ -215,7 +215,10 @@ so an admin can answer "what does this person have" from the person's page.
 version to bump, so the storage system supplies one instead. A read returns a
 strong ETag over the stored document, a write carries it back, and a write whose
 ETag no longer matches is refused with nothing written. Creating a bucket's
-first policy is the same check against no policy existing.
+first policy is the same check against no policy existing. CloudFront marks the
+ETag of a read of 1,000 bytes or more weak (`W/"…"`) when it compresses it, so
+the console drops that prefix from `If-Match` before the write reaches the
+storage system.
 
 ## Architectural changes
 
