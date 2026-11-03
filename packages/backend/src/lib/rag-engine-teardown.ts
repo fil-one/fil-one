@@ -5,7 +5,7 @@ import { usesRagEngine, type S3Region } from '@filone/shared';
 import { getDynamoClient } from './ddb-client.ts';
 import { collectPages } from './ddb-paging.ts';
 import { RAGKeys } from './dynamo-records.ts';
-import { getRagEngineClient, ragEngineTarget } from './rag-engine-client.ts';
+import { getRagEngineClient, getRagEngineConfig, ragEngineTarget } from './rag-engine-client.ts';
 import { getOrchestratorForRegion } from './service-orchestrator-registry.ts';
 
 const LOG = '[rag-engine-teardown]';
@@ -17,7 +17,8 @@ const LOG = '[rag-engine-teardown]';
  * Runs before the tenants are deleted, because the engine reaches the dataset
  * with the tenant's own Forge credentials. Best effort: deleting the tenant
  * removes its companion buckets with everything else it owns, so an engine that
- * is down or unconfigured is logged and never blocks the teardown.
+ * is down is logged and never blocks the teardown. A stage with no engine
+ * (production) returns at once, without reading the table.
  *
  * @param tenantIds the org's tenant id per orchestrator id, as the deletion
  *   targets resolve them.
@@ -26,14 +27,17 @@ export async function dropRagEngineDatasets(
   orgId: string,
   tenantIds: Record<string, string>,
 ): Promise<void> {
-  const buckets = await engineBuckets(orgId);
-  if (buckets.length === 0) return;
+  // Production has no engine and no Forge regions: return before the Scan, so
+  // account deletion there does no extra work and gains no failure point.
+  const config = getRagEngineConfig();
+  if (!config) return;
+  const client = getRagEngineClient(config);
 
-  let client;
+  let buckets: { region: S3Region; bucketName: string }[];
   try {
-    client = getRagEngineClient();
+    buckets = await engineBuckets(orgId);
   } catch (error) {
-    console.warn(`${LOG} no engine on this stage, leaving datasets to tenant deletion`, {
+    console.warn(`${LOG} could not list the org's buckets, leaving datasets to tenant deletion`, {
       orgId,
       error: error instanceof Error ? error.message : String(error),
     });

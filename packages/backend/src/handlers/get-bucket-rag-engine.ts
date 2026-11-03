@@ -71,13 +71,27 @@ export async function baseHandler(
   try {
     const client = getRagEngineClient();
     const target = await ragEngineTarget(orchestrator, tenantId, { orgId, region, bucketName });
-    const [status, { versions }] = await Promise.all([
+    // The UI polls this view for sync progress, so a versions failure alone
+    // still returns the status (with no versions); only a status failure fails.
+    const [status, versions] = await Promise.allSettled([
       client.status(target),
       client.versions(target),
     ]);
+    if (status.status === 'rejected') throw status.reason;
+    if (versions.status === 'rejected') {
+      const reason = versions.reason;
+      console.warn('[get-bucket-rag-engine] engine versions failed; returning status only', {
+        region,
+        bucketName,
+        error: reason instanceof Error ? reason.message : String(reason),
+      });
+    }
     return new ResponseBuilder()
       .status(200)
-      .body<BucketRagEngineResponse>({ status, versions })
+      .body<BucketRagEngineResponse>({
+        status: status.value,
+        versions: versions.status === 'fulfilled' ? versions.value.versions : [],
+      })
       .build();
   } catch (error) {
     return ragEngineErrorResponse(error);

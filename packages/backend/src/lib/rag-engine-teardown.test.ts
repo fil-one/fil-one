@@ -20,8 +20,10 @@ vi.mock('./rag-engine-client.ts', async () => {
     await vi.importActual<typeof import('./rag-engine-client.ts')>('./rag-engine-client.ts');
   return {
     ...actual,
-    getRagEngineClient: () => {
-      if (!engineConfigured) throw new actual.RagEngineNotConfiguredError();
+    getRagEngineConfig: () =>
+      engineConfigured ? { baseUrl: 'https://engine.test.invalid', token: 't' } : undefined,
+    getRagEngineClient: (config?: unknown) => {
+      if (!engineConfigured || !config) throw new actual.RagEngineNotConfiguredError();
       return engine;
     },
   };
@@ -106,5 +108,22 @@ describe('dropRagEngineDatasets', () => {
     rows(`BUCKET#${ORG}#${S3Region.EuCentral3}#docs`);
 
     await expect(dropRagEngineDatasets(ORG, TENANTS)).resolves.toBeUndefined();
+  });
+
+  it('does no Scan on a stage with no engine (production)', async () => {
+    engineConfigured = false;
+    rows(`BUCKET#${ORG}#${S3Region.EuCentral3}#docs`);
+
+    await dropRagEngineDatasets(ORG, TENANTS);
+
+    expect(ddbMock.commandCalls(ScanCommand)).toHaveLength(0);
+    expect(engine.drop).not.toHaveBeenCalled();
+  });
+
+  it('never throws when the Scan fails', async () => {
+    ddbMock.on(ScanCommand).rejects(new Error('throttled'));
+
+    await expect(dropRagEngineDatasets(ORG, TENANTS)).resolves.toBeUndefined();
+    expect(engine.drop).not.toHaveBeenCalled();
   });
 });

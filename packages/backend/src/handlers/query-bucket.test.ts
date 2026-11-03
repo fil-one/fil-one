@@ -841,12 +841,62 @@ describe('query-bucket on a Forge region (Bucket Intelligence engine)', () => {
   });
 
   it('returns 409 BUCKET_NOT_INDEXED when the engine has no dataset yet', async () => {
-    engine.query.mockRejectedValue(new RagEngineRequestError('no dataset', 404));
+    engine.query.mockRejectedValue(
+      new RagEngineRequestError('no dataset', 409, { code: 'NOT_INDEXED' }),
+    );
 
     const result = await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
 
     expect(result.statusCode).toBe(409);
     expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.BUCKET_NOT_INDEXED);
+  });
+
+  it('tells the caller to pick a later version when an old version has no full-text index', async () => {
+    engine.query.mockRejectedValue(
+      new RagEngineRequestError('no fts', 409, { code: 'NO_FULLTEXT_INDEX' }),
+    );
+
+    const result = await baseHandler(
+      queryEvent(
+        { query: 'sky', search_mode: 'hybrid', version: 1 },
+        { region: S3Region.EuCentral3 },
+      ),
+    );
+
+    const body = JSON.parse(result.body!);
+    expect(result.statusCode).toBe(409);
+    expect(body.code).toBeUndefined();
+    expect(body.message).toContain('no full-text index');
+  });
+
+  it('returns 404 when the selected version no longer exists', async () => {
+    engine.query.mockRejectedValue(
+      new RagEngineRequestError('gone', 404, { code: 'VERSION_NOT_FOUND' }),
+    );
+
+    const result = await baseHandler(
+      queryEvent({ query: 'sky', version: 2 }, { region: S3Region.EuCentral3 }),
+    );
+
+    expect(result.statusCode).toBe(404);
+    expect(JSON.parse(result.body!).code).toBeUndefined();
+  });
+
+  it('returns 502, not BUCKET_NOT_INDEXED, for a 404 without an engine code (wrong engine URL)', async () => {
+    engine.query.mockRejectedValue(new RagEngineRequestError('not found', 404));
+
+    const result = await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
+
+    expect(result.statusCode).toBe(502);
+  });
+
+  it('refuses a query scoped to one object with 400', async () => {
+    const result = await baseHandler(
+      queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3, objectKey: 'sky.md' }),
+    );
+
+    expect(result.statusCode).toBe(400);
+    expect(engine.query).not.toHaveBeenCalled();
   });
 
   it('returns 502 when the engine fails', async () => {

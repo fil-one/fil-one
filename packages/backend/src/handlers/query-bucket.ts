@@ -130,6 +130,7 @@ export async function baseHandler(
       topK: top_k,
       searchMode: search_mode,
       version,
+      objectKey: event.queryStringParameters?.objectKey,
     });
   }
 
@@ -191,8 +192,19 @@ async function queryEngine(args: {
   topK: number;
   searchMode: 'vector' | 'fulltext' | 'hybrid' | undefined;
   version: number | undefined;
+  objectKey: string | undefined;
 }): Promise<APIGatewayProxyStructuredResultV2> {
   const { orchestrator, tenantId, orgId, region, bucketName } = args;
+  // The engine searches the whole bucket; it has no per-object filter, so a
+  // scoped query is refused rather than answered from every object.
+  if (args.objectKey !== undefined) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({
+        message: 'Queries scoped to one object are not available for buckets in Forge regions.',
+      })
+      .build();
+  }
   if (!(await getOwnedBucketEnablement(orgId, region, bucketName))) {
     return new ResponseBuilder()
       .status(409)

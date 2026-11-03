@@ -133,11 +133,34 @@ describe('get-bucket-rag-engine baseHandler', () => {
   });
 
   it('answers 409 BUCKET_NOT_INDEXED when the engine has no dataset', async () => {
-    engine.versions.mockRejectedValue(new RagEngineRequestError('no dataset', 404));
+    engine.status.mockRejectedValue(
+      new RagEngineRequestError('no dataset', 409, { code: 'NOT_INDEXED' }),
+    );
 
     const result = await baseHandler(event(S3Region.UsEast9));
 
     expect(result.statusCode).toBe(409);
     expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.BUCKET_NOT_INDEXED);
+  });
+
+  it('still returns the status, with no versions, when only versions fails', async () => {
+    engine.status.mockResolvedValue(engineStatus({ syncState: 'syncing' }));
+    engine.versions.mockRejectedValue(new RagEngineRequestError('boom', 500));
+
+    const result = await baseHandler(event(S3Region.UsEast9));
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      status: engineStatus({ syncState: 'syncing' }),
+      versions: [],
+    });
+  });
+
+  it('answers 502 when status fails, even if versions succeeds', async () => {
+    engine.status.mockRejectedValue(new RagEngineRequestError('boom', 500));
+
+    const result = await baseHandler(event(S3Region.UsEast9));
+
+    expect(result.statusCode).toBe(502);
   });
 });

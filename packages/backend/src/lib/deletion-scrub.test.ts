@@ -295,10 +295,11 @@ describe('scrubOrgRecords', () => {
       );
     });
 
-    // The engine dropped the Lance dataset before the tenants went; there is
-    // no S3 Vectors index for a Forge-region bucket.
+    // The engine dropped the Lance dataset before the tenants went. A Forge
+    // bucket indexed by the S3 Vectors pipeline before the engine existed may
+    // still hold an index, so its drop runs too (it ignores a missing index).
     it.each([S3Region.EuCentral3, S3Region.UsEast9])(
-      'purges the rows of a %s bucket without touching S3 Vectors',
+      'purges the rows and any S3 Vectors index of a %s bucket',
       async (region) => {
         const forgePk = `BUCKET#${ORG}#${region}#docs`;
         ddbMock.on(ScanCommand).resolves({ Items: [marshall({ pk: forgePk })] });
@@ -307,7 +308,7 @@ describe('scrubOrgRecords', () => {
 
         expect(deletedKeys()).toContain(`RagIndexerTable:${forgePk}/RAG`);
         expect(mockClearCheckpoint).toHaveBeenCalledWith(ORG, region, 'docs');
-        expect(mockDropIndex).not.toHaveBeenCalled();
+        expect(mockDropIndex).toHaveBeenCalledWith(ORG, region, 'docs');
       },
     );
 

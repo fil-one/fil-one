@@ -46,14 +46,38 @@ export class RagEngineNotConfiguredError extends Error {
   }
 }
 
+/**
+ * Error codes the engine sends in `{ error: { code, message } }` that the
+ * console answers differently from a generic engine failure. The engine keeps
+ * these codes stable; its messages for them name no tenant data or secret.
+ */
+export const RagEngineErrorCode = {
+  /** No dataset exists for the bucket yet. */
+  NOT_INDEXED: 'NOT_INDEXED',
+  /** The requested dataset version does not exist (pruned, or never written). */
+  VERSION_NOT_FOUND: 'VERSION_NOT_FOUND',
+  /** Full-text or hybrid search on a version that predates the full-text index. */
+  NO_FULLTEXT_INDEX: 'NO_FULLTEXT_INDEX',
+} as const;
+
 /** The engine answered with a non-2xx status, timed out, or could not be reached. */
 export class RagEngineRequestError extends Error {
   /** HTTP status from the engine; absent when the request never got an answer. */
   readonly status?: number;
-  constructor(message: string, status?: number, options?: { cause?: unknown }) {
+  /** The engine's error code (`error.code` in its body), when it sent one. */
+  readonly code?: string;
+  /** The engine's own error message (`error.message`), when it sent one. */
+  readonly engineMessage?: string;
+  constructor(
+    message: string,
+    status?: number,
+    options?: { cause?: unknown; code?: string; engineMessage?: string },
+  ) {
     super(message, options);
     this.name = 'RagEngineRequestError';
     this.status = status;
+    this.code = options?.code;
+    this.engineMessage = options?.engineMessage;
   }
 }
 
@@ -77,11 +101,25 @@ export function getRagEngineConfig(): RagEngineConfig | undefined {
   if (!baseUrl || !token || token === RAG_ENGINE_SECRET_PLACEHOLDER) return undefined;
   try {
     const url = new URL(baseUrl);
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
+    // The engine token and every tenant's Forge secret key travel in these
+    // requests, so plain http is accepted only for a local engine.
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLocalHost(url.hostname))) {
+      console.warn(`${LOG} RagEngineUrl must be https (http only for a local engine); ignoring it`);
+      return undefined;
+    }
   } catch {
     return undefined;
   }
   return { baseUrl: baseUrl.replace(/\/+$/, ''), token };
+}
+
+function isLocalHost(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '[::1]' ||
+    hostname === 'host.docker.internal'
+  );
 }
 
 /** The value the SST secrets hold until an operator sets them (see sst.config.ts). */
@@ -127,13 +165,19 @@ export function getRagEngineClient(config = getRagEngineConfig()): RagEngineClie
       );
     }
 
-    const text = await response.text();
-    if (!response.ok) {
+    // The timeout signal also aborts the body stream, and a connection can
+    // reset mid-body; both are engine failures, not unclassified errors.
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
       throw new RagEngineRequestError(
-        `Bucket Intelligence engine answered /${route} with ${response.status}: ${engineMessage(text)}`,
+        `Bucket Intelligence engine response for /${route} could not be read`,
         response.status,
+        { cause: error },
       );
     }
+    if (!response.ok) throw engineStatusError(route, response.status, text);
     if (!text) return undefined as T;
     try {
       return JSON.parse(text) as T;
@@ -157,16 +201,35 @@ export function getRagEngineClient(config = getRagEngineConfig()): RagEngineClie
   };
 }
 
-/** The engine's error message, when its body carries one; never the whole body. */
-function engineMessage(text: string): string {
+/** The error for a non-2xx engine answer, carrying the engine's code and message. */
+function engineStatusError(route: string, status: number, text: string): RagEngineRequestError {
+  const { code, message } = engineError(text);
+  const label = code ? `${status} ${code}` : String(status);
+  const detail = message ?? (text.slice(0, 300) || 'no body');
+  return new RagEngineRequestError(
+    `Bucket Intelligence engine answered /${route} with ${label}: ${detail}`,
+    status,
+    { code, engineMessage: message },
+  );
+}
+
+/**
+ * The code and message from the engine's error body,
+ * `{ error: { code, message } }`. Either is undefined when the body is not
+ * that shape (a proxy's error page, for example).
+ */
+function engineError(text: string): { code?: string; message?: string } {
   try {
-    const parsed = JSON.parse(text) as { message?: unknown; error?: unknown };
-    const message = parsed.message ?? parsed.error;
-    if (typeof message === 'string') return message.slice(0, 300);
+    const parsed = JSON.parse(text) as { error?: { code?: unknown; message?: unknown } };
+    const code = parsed?.error?.code;
+    const message = parsed?.error?.message;
+    return {
+      ...(typeof code === 'string' ? { code } : {}),
+      ...(typeof message === 'string' ? { message: message.slice(0, 300) } : {}),
+    };
   } catch {
-    // Not JSON.
+    return {};
   }
-  return text.slice(0, 300) || 'no body';
 }
 
 /**
@@ -194,8 +257,11 @@ export async function ragEngineTarget(
 
 /**
  * The console response for an engine failure: 503 when the stage has no
- * engine, 409 when the engine has no dataset for the bucket yet, 502 for any
- * other engine failure. Anything else is rethrown for the error handler.
+ * engine; 409 BUCKET_NOT_INDEXED when the engine has no dataset for the bucket
+ * yet; 404 when the requested version is gone; 409 with the engine's message
+ * when the version has no full-text index; 502 for any other engine failure,
+ * including a 404 from a wrong engine URL. Anything else is rethrown for the
+ * error handler.
  */
 export function ragEngineErrorResponse(error: unknown): APIGatewayProxyStructuredResultV2 {
   if (error instanceof RagEngineNotConfiguredError) {
@@ -208,15 +274,31 @@ export function ragEngineErrorResponse(error: unknown): APIGatewayProxyStructure
   }
   if (error instanceof RagEngineRequestError) {
     console.error(`${LOG} engine request failed`, { message: error.message, status: error.status });
-    if (error.status === 404 || error.status === 409) {
-      return new ResponseBuilder()
-        .status(409)
-        .body<ErrorResponse>({
-          message:
-            'This bucket has not been indexed yet. Queries become available after the first indexing pass completes.',
-          code: ApiErrorCode.BUCKET_NOT_INDEXED,
-        })
-        .build();
+    switch (error.code) {
+      case RagEngineErrorCode.NOT_INDEXED:
+        return new ResponseBuilder()
+          .status(409)
+          .body<ErrorResponse>({
+            message:
+              'This bucket has not been indexed yet. Queries become available after the first indexing pass completes.',
+            code: ApiErrorCode.BUCKET_NOT_INDEXED,
+          })
+          .build();
+      case RagEngineErrorCode.VERSION_NOT_FOUND:
+        return new ResponseBuilder()
+          .status(404)
+          .body<ErrorResponse>({
+            message: 'That index version is no longer available. Choose another version.',
+          })
+          .build();
+      case RagEngineErrorCode.NO_FULLTEXT_INDEX:
+        return new ResponseBuilder()
+          .status(409)
+          .body<ErrorResponse>({
+            message:
+              'This index version has no full-text index. Search a later version or use vector search.',
+          })
+          .build();
     }
     return new ResponseBuilder()
       .status(502)

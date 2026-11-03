@@ -72,6 +72,21 @@ describe('getRagEngineConfig', () => {
     expect(getRagEngineConfig()).toBeUndefined();
   });
 
+  it('is undefined for a plain-http URL to a remote host', () => {
+    secrets.RagEngineUrl = { value: 'http://s3.eu-central-3.staging.filonecontent.com/_rag' };
+    secrets.RagEngineToken = { value: 'engine-token' };
+    expect(getRagEngineConfig()).toBeUndefined();
+  });
+
+  it.each(['http://127.0.0.1:8090', 'http://localhost:8090', 'http://host.docker.internal:8090'])(
+    'accepts plain http for a local engine (%s)',
+    (url) => {
+      secrets.RagEngineUrl = { value: url };
+      secrets.RagEngineToken = { value: 'engine-token' };
+      expect(getRagEngineConfig()).toStrictEqual({ baseUrl: url, token: 'engine-token' });
+    },
+  );
+
   it('reads the URL without a trailing slash, and the token', () => {
     secrets.RagEngineUrl = { value: 'https://engine.test.invalid/ ' };
     secrets.RagEngineToken = { value: 'engine-token' };
@@ -148,8 +163,31 @@ describe('getRagEngineClient', () => {
     await expect(getRagEngineClient(CONFIG).drop(TARGET)).resolves.toBeUndefined();
   });
 
-  it('throws RagEngineRequestError with the status and engine message on a non-2xx', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(404, { message: 'no dataset' }));
+  it('throws RagEngineRequestError with the engine’s status, code and message on a non-2xx', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(409, {
+        error: {
+          code: 'NO_FULLTEXT_INDEX',
+          message: 'This dataset version has no full-text index',
+        },
+      }),
+    );
+
+    const error = await getRagEngineClient(CONFIG)
+      .query({ target: TARGET, query: 'q', topK: 5, searchMode: 'hybrid', answer: true })
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(RagEngineRequestError);
+    expect((error as RagEngineRequestError).status).toBe(409);
+    expect((error as RagEngineRequestError).code).toBe('NO_FULLTEXT_INDEX');
+    expect((error as RagEngineRequestError).engineMessage).toBe(
+      'This dataset version has no full-text index',
+    );
+    expect((error as Error).message).toContain('no full-text index');
+  });
+
+  it('leaves the code undefined for a body that is not the engine’s error shape', async () => {
+    fetchMock.mockResolvedValue(new Response('<html>404 Not Found</html>', { status: 404 }));
 
     const error = await getRagEngineClient(CONFIG)
       .status(TARGET)
@@ -157,7 +195,24 @@ describe('getRagEngineClient', () => {
 
     expect(error).toBeInstanceOf(RagEngineRequestError);
     expect((error as RagEngineRequestError).status).toBe(404);
-    expect((error as Error).message).toContain('no dataset');
+    expect((error as RagEngineRequestError).code).toBeUndefined();
+    expect((error as Error).message).toContain('404 Not Found');
+  });
+
+  it('wraps a response body that fails mid-read in RagEngineRequestError', async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.error(new TypeError('terminated'));
+      },
+    });
+    fetchMock.mockResolvedValue(new Response(body, { status: 200 }));
+
+    const error = await getRagEngineClient(CONFIG)
+      .status(TARGET)
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(RagEngineRequestError);
+    expect(ragEngineErrorResponse(error).statusCode).toBe(502);
   });
 
   it('throws RagEngineRequestError without a status when the engine is unreachable', async () => {
@@ -213,14 +268,42 @@ describe('ragEngineErrorResponse', () => {
     expect(response.statusCode).toBe(503);
   });
 
-  it.each([404, 409])('answers 409 BUCKET_NOT_INDEXED for an engine %s', (status) => {
-    const response = ragEngineErrorResponse(new RagEngineRequestError('x', status));
+  function engineError(status: number, code?: string) {
+    return new RagEngineRequestError('x', status, { code, engineMessage: 'engine text' });
+  }
+
+  it('answers 409 BUCKET_NOT_INDEXED for the engine’s NOT_INDEXED', () => {
+    const response = ragEngineErrorResponse(engineError(409, 'NOT_INDEXED'));
     expect(response.statusCode).toBe(409);
     expect(JSON.parse(response.body as string).code).toBe(ApiErrorCode.BUCKET_NOT_INDEXED);
   });
 
-  it('answers 502 for any other engine failure', () => {
-    expect(ragEngineErrorResponse(new RagEngineRequestError('x', 500)).statusCode).toBe(502);
+  it('answers 404 with a version message for VERSION_NOT_FOUND', () => {
+    const response = ragEngineErrorResponse(engineError(404, 'VERSION_NOT_FOUND'));
+    const body = JSON.parse(response.body as string);
+    expect(response.statusCode).toBe(404);
+    expect(body.code).toBeUndefined();
+    expect(body.message).toContain('version is no longer available');
+  });
+
+  it('answers 409 with a full-text message, not BUCKET_NOT_INDEXED, for NO_FULLTEXT_INDEX', () => {
+    const response = ragEngineErrorResponse(engineError(409, 'NO_FULLTEXT_INDEX'));
+    const body = JSON.parse(response.body as string);
+    expect(response.statusCode).toBe(409);
+    expect(body.code).toBeUndefined();
+    expect(body.message).toContain('no full-text index');
+  });
+
+  it.each([
+    ['a route 404', 404, 'NOT_FOUND'],
+    ['a non-JSON 404 (wrong engine URL)', 404, undefined],
+    ['a 409 without a code', 409, undefined],
+    ['a 500', 500, 'INTERNAL'],
+  ])('answers 502 for %s', (_name, status, code) => {
+    expect(ragEngineErrorResponse(engineError(status, code)).statusCode).toBe(502);
+  });
+
+  it('answers 502 when the engine never answered', () => {
     expect(ragEngineErrorResponse(new RagEngineRequestError('x')).statusCode).toBe(502);
   });
 
