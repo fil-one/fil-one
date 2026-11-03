@@ -135,13 +135,7 @@ test.describe('the key form', () => {
   test.describe('as the owner', () => {
     test.use({ storageState: STORAGE_STATE.owner });
 
-    // Quarantined: stale. The form shows access-key-follows-bucket-policy only
-    // when the caller can't choose a service key (AccessKeyFormFields.tsx), so
-    // for the owner it never appears. Update the first expectation, then
-    // restore with `test`.
-    test.fixme('offers a service key, and asks for its permissions and buckets', async ({
-      page,
-    }) => {
+    test('offers a service key, and asks for its permissions and buckets', async ({ page }) => {
       await page.goto('/api-keys/create');
       await page.locator('#key-name').fill(`policy-e2e-svc-ui-${randomUUID().slice(0, 8)}`);
       await page.locator('#key-region').click();
