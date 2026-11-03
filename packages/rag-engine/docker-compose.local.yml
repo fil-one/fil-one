@@ -1,0 +1,50 @@
+# The engine and a CPU embedding server, for local testing against a smelt
+# Forge network (fil-forge/smelt: `INGOT_REGION=us-east-9 make up`, then
+# `make s3-key`). Ingot serves plain HTTP on the host at :15130; the engine
+# reaches it through host.docker.internal.
+#
+#   docker compose -f packages/rag-engine/docker-compose.local.yml up -d --build
+#
+# On Apple silicon, use the arm64 embedding image:
+#
+#   TEI_IMAGE=ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9 docker compose ...
+#
+# Set ANTHROPIC_API_KEY to have the engine write answers; without it, queries
+# return retrieval results only.
+
+name: filone-rag-engine
+
+services:
+  tei:
+    image: ${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}
+    command: ['--model-id', 'BAAI/bge-small-en-v1.5', '--max-client-batch-size', '64']
+    ports:
+      - '127.0.0.1:18081:80'
+    volumes:
+      - tei-models:/data
+
+  engine:
+    build:
+      context: ../..
+      dockerfile: packages/rag-engine/Dockerfile
+    image: filone/rag-engine:local
+    depends_on:
+      - tei
+    environment:
+      ENGINE_TOKEN: ${ENGINE_TOKEN:-local-dev-token}
+      EMBEDDING_BASE_URL: http://tei:80/v1
+      EMBEDDING_MODEL: BAAI/bge-small-en-v1.5
+      ENGINE_S3_ENDPOINT_OVERRIDE: ${ENGINE_S3_ENDPOINT_OVERRIDE:-http://host.docker.internal:15130}
+      ENGINE_VECTOR_INDEX_MIN_ROWS: ${ENGINE_VECTOR_INDEX_MIN_ROWS:-256}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANSWER_PROVIDER: ${ANSWER_PROVIDER:-}
+      ANSWER_BASE_URL: ${ANSWER_BASE_URL:-}
+      ANSWER_MODEL: ${ANSWER_MODEL:-}
+      ANSWER_API_KEY: ${ANSWER_API_KEY:-}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '127.0.0.1:18080:8080'
+
+volumes:
+  tei-models:
