@@ -1,0 +1,70 @@
+name: 'Image [rag-engine]'
+
+# Builds the Bucket Intelligence engine image and publishes it to GHCR on
+# merges to main. The Forge staging appliance pins it by digest in
+# fil-forge/infra-nodes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/rag-engine/**
+      - packages/rag-shared/**
+      - packages/shared/**
+      - pnpm-lock.yaml
+      - .github/workflows/rag-engine-image.yaml
+  pull_request:
+    paths:
+      - packages/rag-engine/**
+      - .github/workflows/rag-engine-image.yaml
+
+concurrency:
+  group: rag-engine-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/fil-one/rag-engine
+          tags: |
+            type=raw,value=main
+            type=sha
+
+      - id: build
+        name: Build (and push on main)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: packages/rag-engine/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Record the digest
+        if: github.event_name == 'push'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "Pushed ghcr.io/fil-one/rag-engine@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"

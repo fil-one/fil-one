@@ -7,8 +7,9 @@ import type {
   RagSearchMode,
 } from '@filone/shared';
 
+import { ANSWER_TIMEOUT_MS } from './answer.ts';
 import type { EngineContext } from './engine-context.ts';
-import { EngineError } from './errors.ts';
+import { EngineError, errorLogFields } from './errors.ts';
 import { TEXT_COLUMN, VECTOR_COLUMN, VersionNotFoundError, openTable } from './lance-store.ts';
 import { TABLE_NAME, companionBucketName, datasetUri, storageFor } from './storage.ts';
 
@@ -171,22 +172,42 @@ function toCitations(rows: ResultRow[], mode: RagSearchMode): RagCitation[] {
 }
 
 /**
- * The model's answer, or '' when the provider fails: the retrieved citations
- * are still worth returning, as they are when no provider is configured.
+ * The model's answer, or '' when the provider fails or runs past the
+ * deadline: the retrieved citations are still worth returning, as they are
+ * when no provider is configured. The deadline aborts the provider call, and
+ * the race returns on time even if a provider ignores the abort.
  */
 async function answerOrEmpty(
   ctx: EngineContext,
   question: string,
   citations: RagCitation[],
 ): Promise<string> {
+  const timeoutMs = ctx.config.answerTimeoutMs ?? ANSWER_TIMEOUT_MS;
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => {
+      resolve('timeout');
+      controller.abort();
+    }, timeoutMs);
+  });
   try {
-    return await ctx.answer!.answer(question, citations);
-  } catch (error) {
-    ctx.log('warn', 'answer_failed', {
-      model: ctx.answer?.model,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    const result = await Promise.race([
+      ctx.answer!.answer(question, citations, controller.signal),
+      timedOut,
+    ]);
+    if (result !== 'timeout') return result;
+    ctx.log('warn', 'answer_timeout', { model: ctx.answer?.model, timeoutMs });
     return '';
+  } catch (error) {
+    if (controller.signal.aborted) {
+      ctx.log('warn', 'answer_timeout', { model: ctx.answer?.model, timeoutMs });
+      return '';
+    }
+    ctx.log('warn', 'answer_failed', { model: ctx.answer?.model, ...errorLogFields(error) });
+    return '';
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -212,21 +233,31 @@ export async function runQuery(
   const searchMs = performance.now() - searchStart;
   const citations = toCitations(rows, searchMode);
 
-  const answerStart = performance.now();
-  const answer =
-    request.answer && ctx.answer && citations.length > 0
-      ? await answerOrEmpty(ctx, request.query, citations)
-      : '';
-  const answerMs = request.answer && ctx.answer ? performance.now() - answerStart : 0;
-  // Timings stop here: the I/O measurement below runs the search a second time.
-  const totalMs = performance.now() - started;
-
-  const [version, rowCount, indexType, io] = await Promise.all([
+  // The trace's storage reads do not depend on the answer, so they run while
+  // it is written rather than after it.
+  const details = Promise.all([
     table.version(),
     table.countRows(),
     indexTypeFor(table, searchMode),
     measureIo(query, searchMode),
   ]);
+  const wantsAnswer = Boolean(request.answer && ctx.answer);
+  const answerStart = performance.now();
+  const answered = (
+    wantsAnswer && citations.length > 0
+      ? answerOrEmpty(ctx, request.query, citations)
+      : Promise.resolve('')
+  ).then((text) => {
+    // Timings stop here: the I/O measurement runs the search a second time.
+    const finished = performance.now();
+    return {
+      text,
+      answerMs: wantsAnswer ? finished - answerStart : 0,
+      totalMs: finished - started,
+    };
+  });
+  const [{ text: answer, answerMs, totalMs }, [version, rowCount, indexType, io]] =
+    await Promise.all([answered, details]);
   const trace: RagQueryTrace = {
     searchMode,
     version,
@@ -242,7 +273,7 @@ export async function runQuery(
     ...(io ? { io } : {}),
     models: {
       embedding: ctx.embedder.model,
-      ...(request.answer && ctx.answer ? { answer: ctx.answer.model } : {}),
+      ...(wantsAnswer && ctx.answer ? { answer: ctx.answer.model } : {}),
     },
   };
   const sources = [...new Set(citations.map((c) => c.objectKey))];

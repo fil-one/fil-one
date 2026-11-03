@@ -16,7 +16,14 @@ import {
 import { loadConfig, parseEndpointOverrides } from './config.ts';
 import { OpenAICompatibleEmbedder } from './embeddings.ts';
 import { sumPlanMetric } from './query.ts';
-import { EngineError, MAX_ERROR_MESSAGE, summarizeError } from './errors.ts';
+import {
+  EngineError,
+  MAX_ERROR_MESSAGE,
+  errorLogFields,
+  safeMessage,
+  storageErrorFor,
+  summarizeError,
+} from './errors.ts';
 import { pruneSyncTags, syncTagName } from './lance-store.ts';
 import { isAuthorized, requestPath } from './server.ts';
 import { companionBucketName, ensureBucket, lanceStorageOptions, storageFor } from './storage.ts';
@@ -379,5 +386,39 @@ describe('summarizeError on bodiless responses', () => {
       $metadata: { httpStatusCode: 404 },
     });
     expect(summarizeError(missingKey)).toBe('NoSuchKey');
+  });
+});
+
+describe('errors safe for a browser', () => {
+  it('keeps the first line, at most 200 characters, without credentials or presigned queries', () => {
+    const raw =
+      'lance error: request to https://AKID:SECRET@s3.example.com/bucket/key?X-Amz-Signature=abc&X-Amz-Credential=AKID failed, /home/u/.cargo/registry/src/lance-io/src/object_store.rs:12:3\nCaused by: more';
+    const summary = summarizeError(new Error(raw));
+    expect(summary).toBe('lance error: request to https://s3.example.com/bucket/key failed');
+    expect(summary).not.toMatch(/SECRET|AKID|Signature|cargo|\n/);
+    expect(summarizeError(new Error(`${'z'.repeat(500)}\nsecond`)).length).toBe(200);
+    expect(safeMessage('a\nb')).toBe('a');
+  });
+
+  it('names the HTTP status of a bodiless storage error other than 403 and 404', () => {
+    const regionMismatch = Object.assign(new Error('UnknownError'), {
+      name: 'Unknown',
+      $metadata: { httpStatusCode: 400 },
+    });
+    expect(summarizeError(regionMismatch)).toMatch(/^S3_HTTP_400: .*HTTP 400/);
+    expect(errorLogFields(regionMismatch)).toEqual({
+      error: 'UnknownError',
+      name: 'Unknown',
+      httpStatus: 400,
+    });
+  });
+
+  it('maps a denied tenant key to a 403 and leaves other errors as 500s', () => {
+    const denied = Object.assign(new Error('UnknownError'), {
+      name: 'Unknown',
+      $metadata: { httpStatusCode: 403 },
+    });
+    expect(storageErrorFor(denied)).toMatchObject({ status: 403, code: 'S3_ACCESS_DENIED' });
+    expect(storageErrorFor(new Error('boom'))).toBeUndefined();
   });
 });

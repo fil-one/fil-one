@@ -428,6 +428,66 @@ describe('query', () => {
     expect(result.body.citations[0]?.objectKey).toBe('space/mars.txt');
   });
 
+  it('stops waiting for the answer at the deadline, aborts the call, and returns the retrieval', async () => {
+    const t = await harness({ config: { answerTimeoutMs: 300 } });
+    seed(t);
+    await t.syncAndWait();
+    t.answer.hang = 'until-aborted';
+    const started = performance.now();
+    const result = await t.call<RagEngineQueryResponse>('/v1/query', {
+      target: t.target,
+      query: 'What colour is Mars?',
+      searchMode: 'hybrid',
+    });
+    expect(performance.now() - started).toBeLessThan(5000);
+    expect(result.status).toBe(200);
+    expect(result.body.answer).toBe('');
+    expect(result.body.citations[0]?.objectKey).toBe('space/mars.txt');
+    expect(result.body.sources).toContain('space/mars.txt');
+    expect(result.body.trace.models.answer).toBe('fake-answer');
+    expect(result.body.trace.rows).toBeGreaterThan(0);
+    expect(t.answer.signals[0]?.aborted).toBe(true);
+    expect(t.logs.find((l) => l.event === 'answer_timeout')?.fields).toMatchObject({
+      model: 'fake-answer',
+      timeoutMs: 300,
+    });
+  });
+
+  it('returns on time even when the provider ignores the abort', async () => {
+    const t = await harness({ config: { answerTimeoutMs: 300 } });
+    seed(t);
+    await t.syncAndWait();
+    t.answer.hang = 'forever';
+    const result = await t.call<RagEngineQueryResponse>('/v1/query', {
+      target: t.target,
+      query: 'iron oxide',
+      searchMode: 'fulltext',
+    });
+    expect(result.status).toBe(200);
+    expect(result.body.answer).toBe('');
+    expect(result.body.citations[0]?.objectKey).toBe('space/mars.txt');
+    expect(result.body.trace.io).toBeDefined();
+  });
+
+  it('logs why the answer failed without the tenant key', async () => {
+    const t = await harness();
+    seed(t);
+    await t.syncAndWait();
+    t.answer.failWith = Object.assign(new Error('529 overloaded'), {
+      $metadata: { httpStatusCode: 529 },
+    });
+    const result = await t.call<RagEngineQueryResponse>('/v1/query', {
+      target: t.target,
+      query: 'What colour is Mars?',
+      searchMode: 'vector',
+    });
+    expect(result.status).toBe(200);
+    expect(result.body.answer).toBe('');
+    const line = t.logs.find((l) => l.event === 'answer_failed');
+    expect(line?.fields).toMatchObject({ error: '529 overloaded', httpStatus: 529 });
+    expect(JSON.stringify(t.logs)).not.toContain(t.target.s3.secretAccessKey);
+  });
+
   it('tags the version each sync finished at, and every tagged version serves hybrid search', async () => {
     const t = await harness();
     seed(t);
@@ -606,6 +666,32 @@ describe('http surface', () => {
     expect((await t.call('/v1/nope', {})).status).toBe(404);
     expect((await t.call('/v1/__proto__', {})).status).toBe(404);
     expect((await t.call('/v1/constructor', {})).status).toBe(404);
+  });
+
+  it('answers a bad tenant key on /v1/status with a mapped 403, and /v1/sync with 202', async () => {
+    const t = await harness();
+    seed(t);
+    await t.syncAndWait();
+    const target = {
+      ...t.target,
+      s3: { ...t.target.s3, accessKeyId: 'SOMEONE-ELSE' },
+    };
+    const status = await t.call('/v1/status', { target });
+    expect(status.status).toBe(403);
+    expect(status.body.error.code).toBe('S3_ACCESS_DENIED');
+    expect(status.body.error.message).toBeTruthy();
+
+    const sync = await t.call<RagEngineStatus>('/v1/sync', { target });
+    expect(sync.status).toBe(202);
+    expect(['syncing', 'error']).toContain(sync.body.syncState);
+    await t.syncs.idle();
+
+    const after = await t.call('/v1/status', { target });
+    expect(after.status).toBe(403);
+    expect(after.body.error.code).toBe('S3_ACCESS_DENIED');
+    const failed = t.logs.find((l) => l.event === 'sync_failed');
+    expect(failed?.fields).toMatchObject({ httpStatus: 403 });
+    expect(JSON.stringify(t.logs)).not.toContain(t.target.s3.secretAccessKey);
   });
 
   it('uses the tenant key it is given', async () => {

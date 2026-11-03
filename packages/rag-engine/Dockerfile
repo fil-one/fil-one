@@ -31,8 +31,9 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 # Lance logs deprecation and index-statistics warnings to stderr on every
-# hybrid query and status call; keep the appliance logs to errors.
-ENV LANCE_LOG=error
+# hybrid query and status call; keep the appliance logs to errors. The Node
+# binding reads LANCEDB_LOG (LANCE_LOG has no effect on it).
+ENV LANCEDB_LOG=error
 WORKDIR /app
 COPY --from=deps /app ./
 COPY packages/shared/src packages/shared/src

@@ -6,7 +6,7 @@ import type { RagEngineSyncState, RagEngineTarget } from '@filone/shared';
 import { resolveContentType } from './content-type.ts';
 import { readEngineState, writeEngineState, type EngineState } from './engine-state.ts';
 import type { EngineContext } from './engine-context.ts';
-import { summarizeError } from './errors.ts';
+import { errorLogFields, summarizeError } from './errors.ts';
 import {
   connectDataset,
   deleteObjectRows,
@@ -399,7 +399,7 @@ export class SyncManager {
         state.lastSyncError = summarizeError(error);
         this.#ctx.log('error', 'sync_failed', {
           bucket: target.bucketName,
-          error: error instanceof Error ? error.message : String(error),
+          ...errorLogFields(error),
         });
       })
       .finally(() => {

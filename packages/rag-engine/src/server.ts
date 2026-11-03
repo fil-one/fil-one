@@ -10,10 +10,16 @@ import {
 import type { z } from 'zod';
 
 import type { EngineContext } from './engine-context.ts';
-import { EngineError, summarizeError, type EngineErrorBody } from './errors.ts';
+import {
+  EngineError,
+  errorLogFields,
+  storageErrorFor,
+  summarizeError,
+  type EngineErrorBody,
+} from './errors.ts';
 import { dropTable } from './lance-store.ts';
 import { runQuery } from './query.ts';
-import { buildStatus, listVersions } from './status.ts';
+import { buildStatus, listVersions, memoryStatus } from './status.ts';
 import {
   STATE_KEY,
   companionBucketName,
@@ -76,16 +82,43 @@ async function drop(ctx: EngineContext, syncs: SyncManager, target: RagEngineTar
   return response;
 }
 
+/**
+ * `buildStatus`, with a storage failure that has a known cause (a wrong or
+ * rotated tenant key, a missing bucket) reported as that cause, not a 500.
+ */
+async function statusOrMappedError(
+  ctx: EngineContext,
+  syncs: SyncManager,
+  target: RagEngineTarget,
+) {
+  try {
+    return await buildStatus(ctx, syncs, target);
+  } catch (error) {
+    const mapped = storageErrorFor(error);
+    if (!mapped) throw error;
+    ctx.log('warn', 'status_failed', { code: mapped.code, ...errorLogFields(error) });
+    throw mapped;
+  }
+}
+
 function routes(ctx: EngineContext, syncs: SyncManager): Record<string, RouteHandler> {
   return {
     '/v1/sync': async (body) => {
       const target = targetOf(body);
-      syncs.start(target);
-      return { status: 202, body: await buildStatus(ctx, syncs, target) };
+      const started = syncs.start(target);
+      // The sync is running whatever happens next, so the caller hears 202.
+      // When the status cannot be read (a wrong key fails the same way the
+      // sync will), the reply carries what the engine holds in memory.
+      try {
+        return { status: 202, body: await buildStatus(ctx, syncs, target) };
+      } catch (error) {
+        ctx.log('warn', 'sync_status_failed', { ...targetFields(body), ...errorLogFields(error) });
+        return { status: 202, body: memoryStatus(started) };
+      }
     },
     '/v1/status': async (body) => ({
       status: 200,
-      body: await buildStatus(ctx, syncs, targetOf(body)),
+      body: await statusOrMappedError(ctx, syncs, targetOf(body)),
     }),
     '/v1/versions': async (body) => {
       const response: RagEngineVersionsResponse = {
@@ -137,9 +170,8 @@ function errorReply(ctx: EngineContext, error: unknown, path: string): Reply {
     if (issues) body.error.issues = issues;
     return { status: error.status, body };
   }
-  const message = error instanceof Error ? error.message : String(error);
   // The full error stays in the log; the caller gets a short summary.
-  ctx.log('error', 'request_failed', { path, error: message });
+  ctx.log('error', 'request_failed', { path, ...errorLogFields(error) });
   const body: EngineErrorBody = {
     error: { code: 'INTERNAL', message: summarizeError(error) },
   };

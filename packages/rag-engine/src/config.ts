@@ -39,6 +39,8 @@ export interface EngineConfig {
   s3EndpointOverrides: EndpointOverrides;
   embedding: EmbeddingConfig;
   answer: AnswerConfig;
+  /** Longest wait for an answer before the query returns without one. */
+  answerTimeoutMs?: number;
   /** Rows at which a sync builds the ANN vector index; below it, search is a flat scan. */
   vectorIndexMinRows: number;
   /** Chunks buffered before one Lance commit during a sync. */

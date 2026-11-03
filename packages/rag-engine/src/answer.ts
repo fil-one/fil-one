@@ -12,15 +12,24 @@ export interface AnswerPassage {
 /** Writes a grounded answer from retrieved passages. */
 export interface AnswerProvider {
   readonly model: string;
-  answer(question: string, passages: AnswerPassage[]): Promise<string>;
+  /** `signal` aborts the provider call when the engine stops waiting. */
+  answer(question: string, passages: AnswerPassage[], signal?: AbortSignal): Promise<string>;
 }
 
 export const MAX_ANSWER_TOKENS = 4000;
 /**
- * Longest wait for an answer. The console's API route gives up at about 29 s,
- * so a longer wait only holds engine resources for a reply nobody reads.
+ * Longest wait for an answer. The console aborts the whole query at 27 s, and
+ * the retrieval before the answer and the storage reads around it need their
+ * share of that, so the engine stops waiting at 18 s and returns the citations
+ * without an answer.
  */
-export const ANSWER_TIMEOUT_MS = 25_000;
+export const ANSWER_TIMEOUT_MS = 18_000;
+
+/** The caller's signal, if any, combined with the engine's own deadline. */
+function deadline(signal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(ANSWER_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
 
 export const SYSTEM_PROMPT = [
   'You answer questions about the documents stored in a storage bucket.',
@@ -61,7 +70,7 @@ export class AnthropicAnswerProvider implements AnswerProvider {
     this.#client = client ?? new Anthropic({ apiKey, timeout: ANSWER_TIMEOUT_MS, maxRetries: 1 });
   }
 
-  async answer(question: string, passages: AnswerPassage[]): Promise<string> {
+  async answer(question: string, passages: AnswerPassage[], signal?: AbortSignal): Promise<string> {
     const response = await this.#client.messages.create(
       {
         model: this.model,
@@ -72,7 +81,7 @@ export class AnthropicAnswerProvider implements AnswerProvider {
         messages: [{ role: 'user', content: buildUserMessage(question, passages) }],
       },
       // One budget across the SDK's retry.
-      { signal: AbortSignal.timeout(ANSWER_TIMEOUT_MS) },
+      { signal: deadline(signal) },
     );
     if (response.stop_reason === 'refusal') return REFUSAL_ANSWER;
     // `max_tokens` keeps whatever text was produced; the citations still stand.
@@ -104,7 +113,7 @@ export class OpenAICompatibleAnswerProvider implements AnswerProvider {
     this.#fetch = fetchImpl;
   }
 
-  async answer(question: string, passages: AnswerPassage[]): Promise<string> {
+  async answer(question: string, passages: AnswerPassage[], signal?: AbortSignal): Promise<string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -120,7 +129,7 @@ export class OpenAICompatibleAnswerProvider implements AnswerProvider {
           { role: 'user', content: buildUserMessage(question, passages) },
         ],
       }),
-      signal: AbortSignal.timeout(ANSWER_TIMEOUT_MS),
+      signal: deadline(signal),
     });
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 300);

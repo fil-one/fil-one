@@ -65,10 +65,21 @@ export class FakeAnswerProvider implements AnswerProvider {
   readonly questions: { question: string; passages: AnswerPassage[] }[] = [];
   /** When set, `answer` rejects with this error. */
   failWith: Error | undefined;
+  /** `'until-aborted'` waits for the engine's abort; `'forever'` ignores it. */
+  hang: 'until-aborted' | 'forever' | undefined;
+  /** The signal each call received. */
+  readonly signals: (AbortSignal | undefined)[] = [];
 
-  answer(question: string, passages: AnswerPassage[]): Promise<string> {
+  answer(question: string, passages: AnswerPassage[], signal?: AbortSignal): Promise<string> {
     this.questions.push({ question, passages });
+    this.signals.push(signal);
     if (this.failWith) return Promise.reject(this.failWith);
+    if (this.hang === 'forever') return new Promise(() => {});
+    if (this.hang === 'until-aborted') {
+      return new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    }
     return Promise.resolve(`Answer citing [1] from ${passages[0]?.objectKey ?? 'nothing'}`);
   }
 }
@@ -81,6 +92,8 @@ export interface Harness {
   embedder: FakeEmbedder;
   answer: FakeAnswerProvider;
   syncs: SyncManager;
+  /** Every line the engine logged. */
+  logs: { level: string; event: string; fields?: Record<string, unknown> }[];
   putSource(key: string, body: string | Uint8Array): void;
   deleteSource(key: string): void;
   call<T = ErrorResponse>(
@@ -113,6 +126,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
 
   const embedder = new FakeEmbedder();
   const answer = new FakeAnswerProvider();
+  const logs: Harness['logs'] = [];
   const ctx: EngineContext = {
     config: {
       port: 0,
@@ -131,7 +145,9 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     },
     embedder,
     answer,
-    log: () => {},
+    log: (level, event, fields) => {
+      logs.push({ level, event, fields });
+    },
   };
   const syncs = new SyncManager(ctx);
   const server: http.Server = createEngineServer(ctx, syncs);
@@ -172,6 +188,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     embedder,
     answer,
     syncs,
+    logs,
     putSource(key, body) {
       const file = path.join(root, SOURCE_BUCKET, key);
       fs.mkdirSync(path.dirname(file), { recursive: true });

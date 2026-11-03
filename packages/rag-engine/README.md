@@ -40,11 +40,13 @@ The wire contract with the console backend is
   the first has no full-text index. The newest 30 sync tags are kept. Lance
   prunes untagged versions older than 7 days during `optimize()`.
 - **Query traces.** Timings cover the request as served. `trace.io` comes from
-  Lance's analyzed plan, which runs the search a second time after the timed
-  one: it reflects a warm cache and is not part of `totalMs`. Hybrid search
-  reports no I/O.
-- **Answers are best effort.** The answer call has a 25 s budget. If it fails
-  or times out, the query still returns its citations with an empty `answer`.
+  Lance's analyzed plan, which runs the search a second time while the answer
+  is written: it reflects a warm cache and is not part of `totalMs`. Hybrid
+  search reports no I/O.
+- **Answers are best effort.** The engine waits 18 s for an answer, then aborts
+  the provider call; the console gives up on the whole query at 27 s. If the
+  answer fails or times out, the query still returns 200 with its citations,
+  sources and trace, and an empty `answer`; the log records why.
 - **Reads never write.** Status, versions and queries only list and read.
 - **Engine state.** `lance/engine-state.json` next to the dataset records when
   the last sync finished, the embedding model, and objects that produced no

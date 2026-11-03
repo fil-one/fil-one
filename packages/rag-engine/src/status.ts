@@ -16,7 +16,7 @@ import {
   datasetUri,
   storageFor,
 } from './storage.ts';
-import type { SyncManager } from './sync.ts';
+import type { SyncManager, TargetSyncState } from './sync.ts';
 
 /** Vector width from the table schema, for datasets with no engine state yet. */
 async function schemaDimension(table: lancedb.Table): Promise<number> {
@@ -58,6 +58,18 @@ function embeddingInfo(
   return state.embedding ?? { model: ctx.embedder.model, dimension };
 }
 
+/** The status from what the engine holds in memory, without reading storage. */
+export function memoryStatus(memory: TargetSyncState | undefined): RagEngineStatus {
+  return {
+    syncState: memory?.syncState ?? 'idle',
+    lastSyncedAt: memory?.lastSyncedAt,
+    lastSyncError: memory?.lastSyncError,
+    progress: memory?.syncState === 'syncing' ? memory.progress : undefined,
+    filesIndexed: 0,
+    indexedBytes: 0,
+  };
+}
+
 export async function buildStatus(
   ctx: EngineContext,
   syncs: SyncManager,
@@ -72,14 +84,8 @@ export async function buildStatus(
       openTable(storage, companion),
       readEngineState(s3, companion),
     ]);
-    const status: RagEngineStatus = {
-      syncState: memory?.syncState ?? 'idle',
-      lastSyncedAt: memory?.lastSyncedAt ?? state.lastSyncedAt,
-      lastSyncError: memory?.lastSyncError,
-      progress: memory?.syncState === 'syncing' ? memory.progress : undefined,
-      filesIndexed: 0,
-      indexedBytes: 0,
-    };
+    const status = memoryStatus(memory);
+    status.lastSyncedAt ??= state.lastSyncedAt;
     if (!table) return status;
 
     const objects = await readIndexedObjects(table);
