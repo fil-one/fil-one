@@ -70,6 +70,10 @@ export const RagEngineErrorCode = {
 /** What the browser sees for a failed engine sync; the engine's own text goes to the log. */
 export const RAG_ENGINE_SYNC_FAILED_MESSAGE = 'The last indexing run failed. Try Index now again.';
 
+/** What the browser sees when Forge storage refused the tenant's key to the engine. */
+export const RAG_ENGINE_ACCESS_DENIED_MESSAGE =
+  "The Bucket Intelligence engine could not read this bucket with your organization's storage key.";
+
 /** The engine answered with a non-2xx status, timed out, or could not be reached. */
 export class RagEngineRequestError extends Error {
   /** HTTP status from the engine; absent when the request never got an answer. */
@@ -322,10 +326,7 @@ export function ragEngineErrorResponse(error: unknown): APIGatewayProxyStructure
       case RagEngineErrorCode.S3_ACCESS_DENIED:
         return new ResponseBuilder()
           .status(502)
-          .body<ErrorResponse>({
-            message:
-              "The Bucket Intelligence engine could not read this bucket with your organization's storage key.",
-          })
+          .body<ErrorResponse>({ message: RAG_ENGINE_ACCESS_DENIED_MESSAGE })
           .build();
     }
     return new ResponseBuilder()
@@ -374,15 +375,21 @@ export function browserSafeEngineStatus(status: RagEngineStatus): RagEngineStatu
 
 /**
  * An enablement response that reports the engine failure as a failed sync, so
- * the bucket page still renders when the engine is down or unconfigured.
+ * the bucket page still renders when the engine is down or unconfigured. An
+ * access denial gets the same text the engine view shows for it.
  */
 export function withEngineFailure(
   response: BucketRagEnablementResponse,
   error: unknown,
 ): BucketRagEnablementResponse {
-  const lastSyncError =
-    error instanceof RagEngineNotConfiguredError
-      ? 'Bucket Intelligence is not available in this region yet.'
-      : 'The Bucket Intelligence engine could not be reached.';
+  let lastSyncError = 'The Bucket Intelligence engine could not be reached.';
+  if (error instanceof RagEngineNotConfiguredError) {
+    lastSyncError = 'Bucket Intelligence is not available in this region yet.';
+  } else if (
+    error instanceof RagEngineRequestError &&
+    error.code === RagEngineErrorCode.S3_ACCESS_DENIED
+  ) {
+    lastSyncError = RAG_ENGINE_ACCESS_DENIED_MESSAGE;
+  }
   return { ...response, syncState: 'error', lastSyncError };
 }

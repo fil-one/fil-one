@@ -24,6 +24,7 @@ import {
   RagEngineNotConfiguredError,
   RagEngineRequestError,
   browserSafeEngineStatus,
+  RAG_ENGINE_ACCESS_DENIED_MESSAGE,
   RAG_ENGINE_DEFAULT_TIMEOUT_MS,
   RAG_ENGINE_SYNC_FAILED_MESSAGE,
   withEngineFailure,
@@ -402,5 +403,20 @@ describe('withEngineStatus', () => {
       syncState: 'error',
       lastSyncError: 'The Bucket Intelligence engine could not be reached.',
     });
+  });
+
+  it('reports an access denial with the engine view’s access message', () => {
+    const error = new RagEngineRequestError('denied', 403, {
+      code: 'S3_ACCESS_DENIED',
+      engineMessage: 'engine text',
+    });
+    const merged = withEngineFailure(base, error);
+    expect(merged).toMatchObject({
+      syncState: 'error',
+      lastSyncError: RAG_ENGINE_ACCESS_DENIED_MESSAGE,
+    });
+    expect(JSON.parse(ragEngineErrorResponse(error).body as string).message).toBe(
+      merged.lastSyncError,
+    );
   });
 });

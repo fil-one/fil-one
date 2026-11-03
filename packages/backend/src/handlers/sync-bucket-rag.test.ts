@@ -55,7 +55,7 @@ import {
   fakeRagEngine,
   type FakeRagEngine,
 } from '../test/fake-rag-engine.ts';
-import { RagEngineRequestError } from '../lib/rag-engine-client.ts';
+import { RAG_ENGINE_SYNC_FAILED_MESSAGE, RagEngineRequestError } from '../lib/rag-engine-client.ts';
 import { S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
@@ -104,6 +104,29 @@ describe('sync-bucket-rag baseHandler', () => {
       expectedTarget('forge', S3Region.EuCentral3, 'my-bucket'),
     );
     expect(JSON.parse(result.body!)).toStrictEqual(engineStatus({ syncState: 'syncing' }));
+  });
+
+  it('answers a failed sync with fixed text and logs the engine’s text', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    engine.sync.mockResolvedValue(
+      engineStatus({
+        syncState: 'error',
+        lastSyncError: 'connect ECONNREFUSED ingot.internal:9000',
+      }),
+    );
+
+    try {
+      const result = await baseHandler(event(S3Region.EuCentral3));
+
+      expect(result.statusCode).toBe(202);
+      const body = JSON.parse(result.body!);
+      expect(body.syncState).toBe('error');
+      expect(body.lastSyncError).toBe(RAG_ENGINE_SYNC_FAILED_MESSAGE);
+      expect(result.body).not.toContain('ingot.internal');
+      expect(JSON.stringify(warn.mock.calls)).toContain('ingot.internal:9000');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it.each([S3Region.EuWest1, S3Region.UsEast1])(

@@ -14,6 +14,7 @@ import {
 } from '../lib/response-builder.ts';
 import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.ts';
 import {
+  browserSafeEngineStatus,
   getRagEngineClient,
   ragEngineErrorResponse,
   ragEngineTarget,
@@ -84,7 +85,10 @@ export async function baseHandler(
     const client = getRagEngineClient();
     const target = await ragEngineTarget(orchestrator, tenantId, { orgId, region, bucketName });
     const status = await client.sync(target);
-    return new ResponseBuilder().status(202).body<RagEngineStatus>(status).build();
+    return new ResponseBuilder()
+      .status(202)
+      .body<RagEngineStatus>(browserSafeEngineStatus(status))
+      .build();
   } catch (error) {
     return ragEngineErrorResponse(error);
   }
