@@ -77,6 +77,7 @@ import {
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketConfigurationError,
+  BucketPolicyWriteError,
   BucketNotEmptyError,
   BucketNotFoundError,
   PolicyConflictError,
@@ -450,18 +451,18 @@ describe('createBucket', () => {
     expect(mockPutBucketPolicy).toHaveBeenCalledTimes(2);
   });
 
-  it('passes a PolicyValidationError from the policy write through unwrapped', async () => {
+  // The wrapper tells the handler the bucket exists; the cause is what it answers for.
+  it("wraps a failed policy write in BucketPolicyWriteError carrying the write's own error", async () => {
     s3Mock.on(CreateBucketCommand).resolves({});
     const err = new PolicyValidationError('unknown principal');
     mockPutBucketPolicy.mockRejectedValue(err);
 
-    // The handler answers 400 only for a PolicyValidationError.
-    await expect(
-      orchestrator.createBucket(tenantId, {
-        bucketName: 'my-bucket',
-        policy: grantGetObjectToUser,
-      }),
-    ).rejects.toBe(err);
+    const rejection = orchestrator
+      .createBucket(tenantId, { bucketName: 'my-bucket', policy: grantGetObjectToUser })
+      .catch((caught: unknown) => caught);
+
+    await expect(rejection).resolves.toBeInstanceOf(BucketPolicyWriteError);
+    await expect(rejection).resolves.toMatchObject({ bucketName: 'my-bucket', cause: err });
   });
 
   it('does not write a policy when the create has no policy', async () => {

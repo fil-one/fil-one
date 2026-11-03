@@ -19,7 +19,7 @@ export function reportAuditQuery({
   durationMs,
   rowsReturned,
 }: {
-  route: 'list' | 'export';
+  route: 'list' | 'export' | 'activity';
   cost: AuditQueryCost;
   durationMs: number;
   rowsReturned: number;

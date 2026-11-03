@@ -10,7 +10,12 @@ vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { queryAllAuditEvents, queryAuditEvents, resolveWindow } from './audit-query.ts';
+import {
+  queryActivityEvents,
+  queryAllAuditEvents,
+  queryAuditEvents,
+  resolveWindow,
+} from './audit-query.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const OTHER_ORG = '99999999-8888-7777-6666-555555555555';
@@ -403,5 +408,241 @@ describe('queryAllAuditEvents', () => {
     const result = await queryAllAuditEvents({ orgId: ORG_ID, filters: WINDOW, maxRows: 2 });
 
     expect(result.truncated).toBe(true);
+  });
+});
+
+describe('queryActivityEvents', () => {
+  const ACTIVITY_WINDOW = { from: '2026-08-01T00:00:00.000Z', to: NOW };
+  const OWNER_SCOPES = { bucketEvents: { sees: 'all' }, keyEvents: { sees: 'all' } } as const;
+  const MORE = { LastEvaluatedKey: marshall({ gsi1sk: 'any' }) };
+
+  /** The event type a Query reads, from the index partition it names. */
+  function typeOf(input: { ExpressionAttributeValues?: Record<string, unknown> }): string {
+    const pk = unmarshall(input.ExpressionAttributeValues as never)[':pk'] as string;
+    return pk.split('#TYPE#')[1];
+  }
+
+  /** Answers each type's reads, in order, from its own list of pages. */
+  function pagesByType(pages: Record<string, { Items: unknown[]; LastEvaluatedKey?: unknown }[]>) {
+    ddbMock.on(QueryCommand).callsFake((input) => pages[typeOf(input)]?.shift() ?? { Items: [] });
+  }
+
+  /** A page whose last examined row is `sortKey`, with older rows left unread. */
+  function stoppedAt(sortKey: string) {
+    return { LastEvaluatedKey: marshall({ gsi1sk: sortKey }) };
+  }
+
+  function readsOf(type: string) {
+    return ddbMock.commandCalls(QueryCommand).filter((call) => typeOf(call.args[0].input) === type);
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    ddbMock.reset();
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('reads each event type on the type index, newest first, over the window it is given', async () => {
+    await queryActivityEvents({ orgId: ORG_ID, ...OWNER_SCOPES, ...ACTIVITY_WINDOW, limit: 10 });
+
+    expect(queryInput()).toMatchObject({
+      IndexName: 'byType',
+      KeyConditionExpression: 'gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to',
+      Limit: 100,
+      ScanIndexForward: false,
+    });
+    expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
+      ':pk': `ORG#${ORG_ID}#TYPE#bucket.created`,
+      ':from': ACTIVITY_WINDOW.from,
+      ':to': ACTIVITY_WINDOW.to,
+    });
+  });
+
+  // Asserted whole per type rather than by fragment: a clause on the wrong type,
+  // such as the key-only `keyKind` check on a bucket read, hides every row of it
+  // and would still contain each expected fragment.
+  const SUCCEEDED = '#ttl > :now AND #outcome = :succeeded';
+  const S3 = `${SUCCEEDED} AND details.keyKind = :s3`;
+  const NOT_ROTATION = `${S3} AND NOT details.reason = :rotation`;
+  const MINE = ' AND actor.id = :actorId';
+
+  it.each([
+    [
+      'the whole org’s succeeded bucket and S3 key events, rotation deletes left out, for Owner and Admin',
+      OWNER_SCOPES,
+      {
+        'bucket.created': SUCCEEDED,
+        'bucket.deleted': SUCCEEDED,
+        'key.created': S3,
+        'key.rotated': S3,
+        'key.deleted': NOT_ROTATION,
+      },
+    ],
+    [
+      'only the bucket and key events the reader acted on, for a Member',
+      {
+        bucketEvents: { sees: 'own', actorId: USER_ID },
+        keyEvents: { sees: 'own', actorId: USER_ID },
+      } as const,
+      {
+        'bucket.created': SUCCEEDED + MINE,
+        'bucket.deleted': SUCCEEDED + MINE,
+        'key.created': S3 + MINE,
+        'key.rotated': S3 + MINE,
+        'key.deleted': NOT_ROTATION + MINE,
+      },
+    ],
+    [
+      'only the bucket events the reader acted on and no key events, for ReadOnly',
+      { bucketEvents: { sees: 'own', actorId: USER_ID }, keyEvents: { sees: 'none' } } as const,
+      { 'bucket.created': SUCCEEDED + MINE, 'bucket.deleted': SUCCEEDED + MINE },
+    ],
+  ])('reads %s', async (_case, scopes, filterByType) => {
+    await queryActivityEvents({ orgId: ORG_ID, ...scopes, ...ACTIVITY_WINDOW, limit: 10 });
+
+    const filters = Object.fromEntries(
+      ddbMock
+        .commandCalls(QueryCommand)
+        .map((call) => [typeOf(call.args[0].input), call.args[0].input.FilterExpression]),
+    );
+    expect(filters).toStrictEqual(filterByType);
+  });
+
+  it('merges the types newest first and returns no more than the limit', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [storedEvent('2026-08-10T00:00:00.000Z', 'evt-old', 'bucket.created')] },
+      ],
+      'key.created': [
+        { Items: [storedEvent('2026-08-12T00:00:00.000Z', 'evt-new', 'key.created')] },
+      ],
+      'key.deleted': [
+        { Items: [storedEvent('2026-08-11T00:00:00.000Z', 'evt-mid', 'key.deleted')] },
+      ],
+    });
+
+    const result = await queryActivityEvents({
+      orgId: ORG_ID,
+      ...OWNER_SCOPES,
+      ...ACTIVITY_WINDOW,
+      limit: 2,
+    });
+
+    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-new', 'evt-mid']);
+  });
+
+  it('keeps reading a type past a page that matched nothing', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [], ...MORE },
+        { Items: [storedEvent('2026-08-10T00:00:00.000Z', 'evt-1', 'bucket.created')] },
+      ],
+    });
+
+    const result = await queryActivityEvents({
+      orgId: ORG_ID,
+      ...OWNER_SCOPES,
+      ...ACTIVITY_WINDOW,
+      limit: 1,
+    });
+
+    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-1']);
+    expect(readsOf('bucket.created')).toHaveLength(2);
+  });
+
+  it('stops reading a type once the limit is matched', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [storedEvent('2026-08-10T00:00:00.000Z', 'evt-1', 'bucket.created')], ...MORE },
+      ],
+    });
+
+    await queryActivityEvents({ orgId: ORG_ID, ...OWNER_SCOPES, ...ACTIVITY_WINDOW, limit: 1 });
+
+    expect(readsOf('bucket.created')).toHaveLength(1);
+  });
+
+  it('stops reading a type after three pages however much history is left', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [], ...MORE });
+
+    const result = await queryActivityEvents({
+      orgId: ORG_ID,
+      ...OWNER_SCOPES,
+      ...ACTIVITY_WINDOW,
+      limit: 5,
+    });
+
+    expect(readsOf('bucket.created')).toHaveLength(3);
+    expect(result.cost).toStrictEqual({ pages: 15, rows: 0 });
+  });
+
+  it('leaves out events older than where a read stopped early, so the order holds', async () => {
+    // `key.created` stopped on 08-11 with older rows unread, so an 08-10 bucket
+    // event could be outranked by one of them and is not shown.
+    pagesByType({
+      'bucket.created': [
+        { Items: [storedEvent('2026-08-10T00:00:00.000Z', 'evt-older', 'bucket.created')] },
+      ],
+      'key.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        {
+          Items: [storedEvent('2026-08-12T00:00:00.000Z', 'evt-newer', 'key.created')],
+          ...stoppedAt('2026-08-11T00:00:00.000Z#any-event'),
+        },
+      ],
+    });
+
+    const result = await queryActivityEvents({
+      orgId: ORG_ID,
+      ...OWNER_SCOPES,
+      ...ACTIVITY_WINDOW,
+      limit: 5,
+    });
+
+    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-newer']);
+  });
+
+  it('keeps the event a read stopped on, since that row was read', async () => {
+    // The page budget ran out on a row that matched, so nothing at or above it
+    // is unread.
+    pagesByType({
+      'key.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        {
+          Items: [storedEvent('2026-08-11T00:00:00.000Z', 'evt-edge', 'key.created')],
+          ...stoppedAt('2026-08-11T00:00:00.000Z#evt-edge'),
+        },
+      ],
+    });
+
+    const result = await queryActivityEvents({
+      orgId: ORG_ID,
+      ...OWNER_SCOPES,
+      ...ACTIVITY_WINDOW,
+      limit: 5,
+    });
+
+    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-edge']);
+  });
+
+  it('cancels every read with the signal it is given', async () => {
+    const signal = new AbortController().signal;
+
+    await queryActivityEvents({
+      orgId: ORG_ID,
+      ...OWNER_SCOPES,
+      ...ACTIVITY_WINDOW,
+      limit: 5,
+      signal,
+    });
+
+    // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
+    // but the recorded call carries every argument `send` received.
+    const options = ddbMock.commandCalls(QueryCommand).map((call) => (call.args as unknown[])[1]);
+    expect(options).toStrictEqual(Array(5).fill({ abortSignal: signal }));
   });
 });

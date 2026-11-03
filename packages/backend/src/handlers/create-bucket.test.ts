@@ -55,6 +55,7 @@ import { baseHandler } from './create-bucket.ts';
 import {
   BucketAlreadyExistsError,
   BucketConfigurationError,
+  BucketPolicyWriteError,
   PolicyPublishError,
   PolicyValidationError,
 } from '../lib/errors.ts';
@@ -71,6 +72,11 @@ const USER_1 = '00000000-0000-0000-0000-000000000001';
 const USER_INFO = { userId: USER_1, orgId: 'org-1' };
 
 const parseResponseBody = (result: { body?: string }) => JSON.parse(result.body ?? '{}');
+
+/** A failure at the first policy write, wrapped as the orchestrator raises it. */
+function policyWriteFailure(cause: unknown) {
+  return new BucketPolicyWriteError('my-bucket', { cause });
+}
 
 function validBody() {
   return JSON.stringify({ bucketName: 'my-bucket', region: S3_REGION });
@@ -287,7 +293,8 @@ describe('create-bucket baseHandler', () => {
   describe('on a region serving the iam access model', () => {
     const buildIamRegionBody = () =>
       JSON.stringify({ bucketName: 'my-bucket', region: IAM_REGION });
-    const findAuditEvent = (phase: string) => getAuditEvents().find((e) => e.phase === phase);
+    const findAuditEvent = (phase: string) =>
+      getAuditEvents().find((e) => e.type === 'bucket_policy.created' && e.phase === phase);
 
     beforeEach(() => {
       mockCreateBucket.mockResolvedValue(undefined);
@@ -353,7 +360,9 @@ describe('create-bucket baseHandler', () => {
     });
 
     it('answers 400 when the storage system refuses the policy written after the create', async () => {
-      mockCreateBucket.mockRejectedValue(new PolicyValidationError('unknown principal'));
+      mockCreateBucket.mockRejectedValue(
+        policyWriteFailure(new PolicyValidationError('unknown principal')),
+      );
 
       const result = await baseHandler(
         buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }),
@@ -366,7 +375,9 @@ describe('create-bucket baseHandler', () => {
     });
 
     it('records the policy write as failed when the storage system refuses the policy', async () => {
-      mockCreateBucket.mockRejectedValue(new PolicyValidationError('unknown principal'));
+      mockCreateBucket.mockRejectedValue(
+        policyWriteFailure(new PolicyValidationError('unknown principal')),
+      );
 
       await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO }));
 
@@ -377,7 +388,7 @@ describe('create-bucket baseHandler', () => {
     });
 
     it('rethrows a PolicyPublishError from the policy write', async () => {
-      mockCreateBucket.mockRejectedValue(new PolicyPublishError());
+      mockCreateBucket.mockRejectedValue(policyWriteFailure(new PolicyPublishError()));
 
       // errorHandlerMiddleware renders what baseHandler throws as a 500.
       await expect(
@@ -385,8 +396,36 @@ describe('create-bucket baseHandler', () => {
       ).rejects.toBeInstanceOf(PolicyPublishError);
     });
 
+    it('leaves the policy write open when the create times out', async () => {
+      mockCreateBucket.mockRejectedValue(
+        Object.assign(new Error('any timeout'), { name: 'TimeoutError' }),
+      );
+
+      await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(findAuditEvent('intent')).toMatchObject({ type: 'bucket_policy.created' });
+      expect(findAuditEvent('completion')).toBeUndefined();
+    });
+
+    it('leaves the policy write open when the policy write itself times out', async () => {
+      mockCreateBucket.mockRejectedValue(
+        policyWriteFailure(Object.assign(new Error('any timeout'), { name: 'TimeoutError' })),
+      );
+
+      await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(findAuditEvent('completion')).toBeUndefined();
+      expect(
+        getAuditEvents().find((e) => e.type === 'bucket.created' && e.phase === 'completion'),
+      ).toMatchObject({ outcome: 'succeeded' });
+    });
+
     it('records the policy write as failed when it cannot be published', async () => {
-      mockCreateBucket.mockRejectedValue(new PolicyPublishError());
+      mockCreateBucket.mockRejectedValue(policyWriteFailure(new PolicyPublishError()));
 
       await baseHandler(buildEvent({ body: buildIamRegionBody(), userInfo: USER_INFO })).catch(
         () => undefined,
@@ -407,11 +446,99 @@ describe('create-bucket baseHandler', () => {
     expect(mockCreateBucket.mock.calls[0]![1]).not.toHaveProperty('policy');
   });
 
-  it('writes no audit event on a service-keys region', async () => {
+  it('writes no bucket policy event on a service-keys region', async () => {
     mockCreateBucket.mockResolvedValue(undefined);
 
     await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
 
-    expect(getAuditEvents()).toStrictEqual([]);
+    expect(getAuditEvents().map((e) => e.type)).not.toContain('bucket_policy.created');
+  });
+
+  describe('bucket.created audit', () => {
+    const findBucketEvent = (phase: string) =>
+      getAuditEvents().find((e) => e.type === 'bucket.created' && e.phase === phase);
+
+    it('records a bucket.created intent naming the region and bucket before the create', async () => {
+      mockCreateBucket.mockImplementation(async () => {
+        expect(findBucketEvent('intent')).toBeDefined();
+      });
+
+      await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+      expect(findBucketEvent('intent')).toMatchObject({
+        actor: { kind: 'user', id: USER_1 },
+        orgId: 'org-1',
+        subject: `bucket:${S3_REGION}/my-bucket`,
+        details: { region: S3_REGION, bucketName: 'my-bucket' },
+      });
+    });
+
+    it('completes the bucket.created as succeeded when the create goes through', async () => {
+      mockCreateBucket.mockResolvedValue(undefined);
+
+      await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+      expect(findBucketEvent('completion')).toMatchObject({ outcome: 'succeeded' });
+    });
+
+    // Each of these fails after the storage system created the bucket, so the
+    // bucket exists and the event says so.
+    it.each([
+      ['its configuration fails', new BucketConfigurationError('my-bucket')],
+      ['its policy is refused', policyWriteFailure(new PolicyValidationError('unknown principal'))],
+      // An error the policy classes do not name, such as a 403 from the gateway.
+      ['its policy write fails any other way', policyWriteFailure(new Error('AccessDenied'))],
+    ])('completes the bucket.created as succeeded when %s', async (_case, err) => {
+      mockCreateBucket.mockRejectedValue(err);
+
+      await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(findBucketEvent('completion')).toMatchObject({ outcome: 'succeeded' });
+    });
+
+    it.each([
+      ['the name is taken', new BucketAlreadyExistsError('my-bucket')],
+      ['the storage system fails', new Error('S3 gateway unavailable')],
+    ])('completes the bucket.created as failed when %s', async (_case, err) => {
+      mockCreateBucket.mockRejectedValue(err);
+
+      await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(findBucketEvent('completion')).toMatchObject({ outcome: 'failed' });
+    });
+
+    // A timeout may or may not have created the bucket, so neither outcome is
+    // recorded and the intent stays open.
+    it.each([
+      [
+        'the storage call times out',
+        Object.assign(new Error('any timeout'), { name: 'TimeoutError' }),
+      ],
+      [
+        'the storage call is aborted',
+        Object.assign(new Error('any abort'), { name: 'AbortError' }),
+      ],
+    ])('leaves the bucket.created open when %s', async (_case, err) => {
+      mockCreateBucket.mockRejectedValue(err);
+
+      await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO })).catch(
+        () => undefined,
+      );
+
+      expect(getAuditEvents().filter((e) => e.phase === 'completion')).toStrictEqual([]);
+    });
+
+    it('creates the bucket even when the audit log cannot be written', async () => {
+      ddbMock.on(PutItemCommand).rejects(new Error('audit table unavailable'));
+      mockCreateBucket.mockResolvedValue(undefined);
+
+      const result = await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
+
+      expect(result).toMatchObject({ statusCode: 201 });
+    });
   });
 });
