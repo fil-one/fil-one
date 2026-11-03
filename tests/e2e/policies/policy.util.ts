@@ -43,6 +43,9 @@ export const REGION =
 export const S3_ENDPOINT =
   process.env.E2E_POLICY_S3_ENDPOINT ??
   (STAGE === 'local' ? 'http://localhost:15130' : getS3Endpoint(REGION, STAGE));
+// A local stage serves the console from the Vite dev server, with no CloudFront
+// in front of its API.
+export const IS_BEHIND_CLOUDFRONT = STAGE !== 'local';
 export const PAYLOAD = Buffer.from('policy-e2e');
 export const SEEDED_KEY = 'seeded.txt';
 
