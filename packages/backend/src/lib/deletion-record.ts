@@ -69,6 +69,13 @@ export interface DeletionMember {
    */
   homeOrgId?: string;
   /**
+   * Set for a member whose account outlives the org but who has no other
+   * membership to move to: one who was only ever invited here. The scrub gives
+   * them a floor org, as a removal from their last org does, so they are not
+   * fenced out by an org that no longer exists.
+   */
+  needsFloorOrg?: boolean;
+  /**
    * Every census condition that kept this account, in the order they are
    * tested. Empty when `deleteIdentity` is true. More than one can hold at
    * once, and the teardown log prints them all — collapsing them to the first

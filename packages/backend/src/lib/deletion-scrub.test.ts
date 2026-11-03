@@ -6,6 +6,8 @@ import {
   DynamoDBClient,
   QueryCommand,
   ScanCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -486,6 +488,59 @@ describe('scrubOrgRecords', () => {
         `SUB#auth0|one/IDENTITY -> ${OTHER_ORG}`,
         `USER#user-1/PROFILE -> ${OTHER_ORG}`,
       ]);
+    });
+
+    describe('with no other org to move to', () => {
+      const STRANDED: DeletionMember[] = [
+        { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, needsFloorOrg: true },
+      ];
+
+      function floorOrgItems() {
+        const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
+        expect(calls).toHaveLength(1);
+        return calls[0]!.args[0].input.TransactItems!;
+      }
+
+      it('moves them onto a floor org of their own, while their home still names the deleting org', async () => {
+        await scrubOrgRecords(ORG, STRANDED);
+
+        const items = floorOrgItems();
+        const profile = items.find((item) => item.Put?.Item?.sk?.S === 'PROFILE')!.Put!.Item!;
+        const floorOrgId = profile.pk!.S!.slice('ORG#'.length);
+        expect(profile).toMatchObject({ floorOrg: { BOOL: true } });
+        expect(
+          items.find((item) => item.Update?.Key?.pk?.S === 'SUB#auth0|one')?.Update,
+        ).toMatchObject({
+          ConditionExpression: 'attribute_exists(pk) AND orgId = :expected',
+          ExpressionAttributeValues: { ':orgId': { S: floorOrgId }, ':expected': { S: ORG } },
+        });
+        expect(
+          items.find((item) => item.Update?.Key?.pk?.S === 'USER#user-1')?.Update,
+        ).toMatchObject({
+          ExpressionAttributeValues: { ':orgId': { S: floorOrgId }, ':expected': { S: ORG } },
+        });
+      });
+
+      // A re-drive, or an overlapping pass that moved them first.
+      it('finishes the scrub when their home has moved already', async () => {
+        ddbMock.on(TransactWriteItemsCommand).rejects(
+          new TransactionCanceledException({
+            message: 'cancelled',
+            $metadata: {},
+            CancellationReasons: [{ Code: 'None' }, { Code: 'ConditionalCheckFailed' }],
+          }),
+        );
+
+        await scrubOrgRecords(ORG, STRANDED);
+
+        expect(scrubbedKeys()).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
+      });
+
+      it('fails the pass, to be retried, when the floor org cannot be written', async () => {
+        ddbMock.on(TransactWriteItemsCommand).rejects(new Error('any-throttle'));
+
+        await expect(scrubOrgRecords(ORG, STRANDED)).rejects.toThrow('any-throttle');
+      });
     });
 
     it('conditions the move on the row still naming the deleting org', async () => {

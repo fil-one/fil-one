@@ -15,12 +15,15 @@ import {
   deleteManifestEntry,
   loadManifest,
 } from '../jobs/rag-indexer-manifest.ts';
-import { AuditKeys } from './audit.ts';
+import { prepareFloorOrg } from './account-creation.ts';
+import { AuditKeys, commitAudited } from './audit.ts';
 import { getDynamoClient } from './ddb-client.ts';
 import { collectPages } from './ddb-paging.ts';
 import { RAGKeys } from './dynamo-records.ts';
+import { cancelledLabels } from './membership-changes.ts';
 import { OrgKeys } from './org-membership.ts';
 import type { DeletionMember } from './deletion-record.ts';
+import { readUserProfile } from './user-profile.ts';
 import { RagApiKeyKeys } from './rag-api-keys.ts';
 import { SubscriptionKeys } from './subscription-store.ts';
 
@@ -220,7 +223,8 @@ async function destroyOrgCredentials(orgRows: Item[]): Promise<void> {
  * member whose account this deletion ends (`deleteIdentity`). A member who was
  * invited here, or who belongs to another org, still logs in tomorrow, and a
  * `deletedAt` on their identity row would say otherwise. That member's rows are
- * re-pointed instead. The legacy membership row is stamped either way: it
+ * re-pointed instead, to another org they belong to or, when there is none, to a
+ * floor org made for them. The legacy membership row is stamped either way: it
  * belongs to this org.
  *
  * The identity row is stamped only while it still names the member's userId.
@@ -242,6 +246,8 @@ async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<v
         pk: `USER#${member.userId}`,
         sk: 'AVATAR_UPLOAD_RATE',
       });
+    } else if (member.needsFloorOrg) {
+      await moveToFloorOrg(orgId, member);
     } else {
       await repointHomeOrg(orgId, member);
     }
@@ -257,9 +263,10 @@ async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<v
  * any `X-Org-Id` header is looked at. A member left naming this org would keep
  * their Auth0 user and their rows and still be refused on every request.
  *
- * `homeOrgId` is absent when the member has no other membership to move to —
- * an invited sole member, whose account survives with nowhere to send it. The
- * rows are left as they are; there is no org to name.
+ * `homeOrgId` is absent when the census could not choose one. A member with no
+ * other membership goes to {@link moveToFloorOrg} instead; any other member
+ * left without one (the census could not read all their memberships) keeps the
+ * rows as they are.
  *
  * Both writes are conditioned on the row still naming the deleting org, so a
  * re-drive after the move lands on a row that no longer matches and changes
@@ -290,6 +297,36 @@ async function repointRow(
   } catch (err) {
     // The row is gone or already moved. Either way there is nothing to do.
     if (!(err instanceof ConditionalCheckFailedException)) throw err;
+  }
+}
+
+/**
+ * Gives a surviving member with no other org a floor org and moves their home
+ * onto it, as a removal from their last org does. Without it they would be
+ * fenced out on every request by an org that no longer exists. Their next
+ * request lands on `/left-organization`, which offers to create an org.
+ *
+ * The org and both repoints commit together, the repoints conditioned on still
+ * naming the deleting org. A pass that finds them moved already (a re-drive
+ * after this one, or an overlapping pass that got there first) writes nothing.
+ * A re-drive also reads the floor org as another membership, so the census
+ * sends it to {@link repointHomeOrg} rather than here.
+ */
+async function moveToFloorOrg(orgId: string, member: DeletionMember): Promise<void> {
+  const profile = await readUserProfile(member.userId, { consistentRead: true });
+  const floorOrg = await prepareFloorOrg({
+    userId: member.userId,
+    sub: member.sub,
+    homeOrgIds: { profile: orgId, identity: orgId },
+    name: profile?.name,
+    email: profile?.email,
+  });
+  try {
+    await commitAudited({ items: floorOrg.items, event: floorOrg.event });
+  } catch (err) {
+    // The org rows are create-only under a fresh id, so a failed condition is
+    // a repoint: the home has moved already. Anything else is retried.
+    if (cancelledLabels(err, []).length === 0) throw err;
   }
 }
 

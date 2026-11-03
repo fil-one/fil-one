@@ -1,7 +1,7 @@
 import { UpdateItemCommand, type Put, type TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { Resource } from 'sst';
 import { OrgRole } from '@filone/shared';
-import type { AuditEvent } from '@filone/shared';
+import type { CommittableAuditEvent } from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from './audit.ts';
 import { getDynamoClient } from './ddb-client.ts';
 import { OrgKeys } from './org-membership.ts';
@@ -133,10 +133,12 @@ export interface FloorOrgPreparation {
    */
   items: TransactWriteItem[];
   /**
-   * The `org.created` event, for the caller to append via {@link auditPut}
-   * alongside its own event — `commitAudited` takes only one.
+   * The `org.created` event. A removal appends it via {@link auditPut}
+   * alongside its own event, since `commitAudited` takes only one; an org
+   * deletion, which has no event of its own here, commits it with
+   * `commitAudited`.
    */
-  event: AuditEvent;
+  event: CommittableAuditEvent;
 }
 
 /**

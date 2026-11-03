@@ -390,7 +390,7 @@ describe('resolveDeletionTargets', () => {
     });
 
     // Invited into the org they are losing, and a member of nothing else.
-    it('is unset for a survivor with nowhere to go', async () => {
+    it('is a floor org for a survivor with nowhere else to go', async () => {
       stubMembers({
         orgTable: [memberRow('user-1', { source: 'invitation' })],
         memberships: { 'user-1': [inverseItem('user-1', ORG)] },
@@ -398,8 +398,40 @@ describe('resolveDeletionTargets', () => {
 
       const { members } = await resolveDeletionTargets(ORG);
 
-      expect(members[0]!).toMatchObject({ deleteIdentity: false });
+      expect(members[0]!).toMatchObject({ deleteIdentity: false, needsFloorOrg: true });
       expect(members[0]!.homeOrgId).toBeUndefined();
+    });
+
+    it('is not a floor org for a survivor who belongs to another org', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'invitation' })],
+        memberships: { 'user-1': [inverseItem('user-1', ORG), inverseItem('user-1', OTHER_ORG)] },
+      });
+
+      const { members } = await resolveDeletionTargets(ORG);
+
+      expect(members[0]!).toMatchObject({ homeOrgId: OTHER_ORG });
+      expect(members[0]!.needsFloorOrg).toBeUndefined();
+    });
+
+    // The row that will not decode may be the org they would have moved to.
+    it('is not a floor org while one of the survivor’s membership rows will not decode', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'invitation' })],
+        memberships: {
+          'user-1': [
+            inverseItem('user-1', ORG),
+            // An empty org id after the prefix: the row cannot be decoded.
+            marshall({ pk: 'USER#user-1', sk: 'MEMBERSHIP#', role: 'owner', joinedAt: '' }),
+          ],
+        },
+      });
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const { members } = await resolveDeletionTargets(ORG);
+
+      expect(members[0]!).toMatchObject({ deleteIdentity: false });
+      expect(members[0]!.needsFloorOrg).toBeUndefined();
     });
   });
 

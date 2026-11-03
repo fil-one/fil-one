@@ -177,10 +177,14 @@ async function resolveMember(orgId: string, row: MemberRow): Promise<DeletionMem
   const keptReasons = censusMember(orgId, row, others, listing.undecodable);
   const deleteIdentity = keptReasons.length === 0;
   const homeOrgId = deleteIdentity ? undefined : chooseHomeOrg(others);
+  // Kept with nowhere to go. Only once every membership row decoded: one that
+  // did not may be the org they would have moved to.
+  const needsFloorOrg = !deleteIdentity && others.length === 0 && listing.undecodable === 0;
   return {
     userId: row.userId,
     sub,
     ...(homeOrgId ? { homeOrgId } : {}),
+    ...(needsFloorOrg ? { needsFloorOrg } : {}),
     deleteIdentity,
     ...(deleteIdentity ? {} : { keptReasons }),
   };
