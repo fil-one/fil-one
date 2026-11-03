@@ -112,9 +112,7 @@ test.describe('through the API', { tag: '@api' }, () => {
     );
   });
 
-  // Quarantined: on staging, a write under a freshly read ETag is refused with
-  // 412 (FIL-1646). Restore with `test` once that's resolved.
-  test.fixme('an owner grants the pair, and an admin may keep or drop it', async () => {
+  test('an owner grants the pair, and an admin may keep or drop it', async () => {
     const granted = allow([memberId], ['s3:PutObjectRetention', 's3:PutObjectLegalHold'], 'hold');
     const { etag } = await owner.readPolicy(bucket);
     expect(await putPolicyAs(owner, [...getStoredStatements(), granted], etag)).toEqual({
