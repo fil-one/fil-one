@@ -166,17 +166,20 @@ describe('getStageFromHostname', () => {
   }
 });
 
-describe('demo alias constants', () => {
+describe('alias constants', () => {
   it('gives every production console origin a marketing site to log out to', () => {
     for (const host of [PROD_CONSOLE_HOST, ...PROD_CONSOLE_ALIAS_HOSTS]) {
       expect(MARKETING_URL_BY_CONSOLE_ORIGIN[`https://${host}`]).toBeDefined();
     }
   });
 
-  // The alias console must not send a signed-out user to fil.one, which is the
-  // domain the alias exists to route around.
-  it('keeps each alias console on its own marketing domain', () => {
-    expect(MARKETING_URL_BY_CONSOLE_ORIGIN['https://app.filone.ai']).toBe('https://filone.ai');
+  // An alias console must not send a signed-out user to fil.one, which the demo
+  // alias exists to route around and the filone.com console is moving away from.
+  it.each([
+    ['https://app.filone.ai', 'https://filone.ai'],
+    ['https://app.filone.com', 'https://www.filone.com'],
+  ])('keeps the %s console on its own marketing domain', (origin, marketingUrl) => {
+    expect(MARKETING_URL_BY_CONSOLE_ORIGIN[origin]).toBe(marketingUrl);
   });
 
   it('leaves non-production origins out of the table', () => {
@@ -192,10 +195,14 @@ describe('demo alias constants', () => {
     }
   });
 
-  it('keeps aliases off the Auth0 custom domain on the flagged TLD', () => {
-    for (const host of PROD_CONSOLE_ALIAS_HOSTS) {
-      expect(AUTH0_DOMAIN_BY_CONSOLE_ORIGIN[`https://${host}`]).not.toBe('auth.fil.one');
-    }
+  it('keeps the demo alias off the Auth0 custom domain on the flagged TLD', () => {
+    expect(AUTH0_DOMAIN_BY_CONSOLE_ORIGIN['https://app.filone.ai']).toBe('fil-one.us.auth0.com');
+  });
+
+  // Passkeys are bound to the Auth0 hostname, so any other domain would strand the
+  // passkeys customers enrolled on app.fil.one.
+  it('signs app.filone.com in through the Auth0 custom domain', () => {
+    expect(AUTH0_DOMAIN_BY_CONSOLE_ORIGIN['https://app.filone.com']).toBe('auth.fil.one');
   });
 
   // getStageFromHostname lowercases its input before comparing, so an entry
@@ -220,6 +227,10 @@ describe('logoutReturnTo', () => {
 
   it('hands a demo alias off to the alias marketing site', () => {
     expect(logoutReturnTo('https://app.filone.ai')).toBe('https://filone.ai');
+  });
+
+  it('hands app.filone.com off to the filone.com marketing site', () => {
+    expect(logoutReturnTo('https://app.filone.com')).toBe('https://www.filone.com');
   });
 
   // Non-production stages have no marketing site of their own, and being thrown onto

@@ -411,24 +411,23 @@ export default $config({
         ? 'staging.fil.one'
         : `${stage}.dev.fil.one`;
 
-    // Extra hostnames the production console answers on: unlisted demo aliases on
-    // a domain with clean reputation, for when fil.one is blocklisted. They are
-    // alternate domain names on this same distribution, not another deployment.
+    // Extra hostnames the production console answers on: the unlisted demo alias for
+    // when fil.one is blocklisted, and app.filone.com, the domain the console is
+    // moving to. They are alternate domain names on this same distribution, not
+    // another deployment.
     const aliasHosts = isProduction ? [...PROD_CONSOLE_ALIAS_HOSTS] : [];
 
     // ACM cert must be in us-east-1 for CloudFront. Ephemeral stages share a
     // wildcard cert for *.dev.fil.one provisioned in the fil-one/infrastructure repo.
     //
-    // In production the cert is looked up by its alias name rather than by
-    // domainName: CloudFront allows one viewer certificate per distribution, so a
-    // single cert has to carry every alias, and the one provisioned for this
-    // purpose deliberately uses the first alias host as its primary domain so the
-    // lookup cannot also match the older app.fil.one-only cert it supersedes.
-    // See environments/prod/filone-ai.tf in fil-one/infrastructure.
+    // CloudFront allows one viewer certificate per distribution, so in production a
+    // single cert carries app.fil.one and every alias. It is named after
+    // app.filone.com, the console's next canonical host, and looked up by that name.
+    // See environments/prod/filone-com.tf in fil-one/infrastructure.
     const certDomain = isEphemeralStage
       ? '*.dev.fil.one'
       : isProduction
-        ? PROD_CONSOLE_ALIAS_HOSTS[0]
+        ? 'app.filone.com'
         : domainName;
     const usEast1 = new aws.Provider('useast1', { region: 'us-east-1' });
     const cert = isLocal
@@ -439,7 +438,7 @@ export default $config({
             statuses: ['ISSUED'],
             // The lookup errors if more than one ISSUED cert matches. That happens
             // transiently whenever a cert is replaced rather than mutated in place,
-            // since both carry the same primary domain until the old one is retired.
+            // since both carry the same domain name until the old one is retired.
             // Picking the newest is right: the older one is the one going away.
             mostRecent: true,
           },
@@ -533,7 +532,9 @@ export default $config({
           contentSecurityPolicy: {
             // img-src: our own uploads, plus the social providers' picture hosts
             // (`pictureHost` in connection-providers.ts), the only pictures /me shows.
-            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com ${orgLogoOrigin}; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://status.fil.one ${s3GatewayUrls} ${orgLogoOrigin}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
+            // connect-src: both status hosts, so the status badge keeps working when the
+            // Instatus page moves from status.fil.one to status.filone.com (FIL-1379).
+            contentSecurityPolicy: $interpolate`default-src 'none'; script-src 'self' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' blob: https://lh3.googleusercontent.com https://avatars.githubusercontent.com ${orgLogoOrigin}; font-src 'self'; connect-src 'self' https://api.stripe.com https://api.hsforms.com https://o4507369657991168.ingest.us.sentry.io https://plausible.io https://status.fil.one https://status.filone.com ${s3GatewayUrls} ${orgLogoOrigin}; frame-src https://js.stripe.com; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; report-uri ${sentryCspEndpoint}; report-to csp-endpoint`,
             override: true,
           },
           frameOptions: {
@@ -727,10 +728,9 @@ export default $config({
                 // must never be written into the shared Auth0 tenant.
                 SiteAliasUrls: aliasHosts.map((h) => `https://${h}`).join(','),
                 Stage: $app.stage,
-                // Bumped for the SiteAliasUrls property: this custom resource only
-                // re-runs when a property changes, and SiteUrl is unchanged, so
-                // without a bump the alias never reaches the Auth0 client.
-                Version: '2.12',
+                // Bump whenever the Auth0 client settings need re-registering: this
+                // custom resource only re-runs when a property changes.
+                Version: '2.13',
               },
             },
           },
