@@ -175,10 +175,11 @@ test(
 );
 
 // CloudFront gzips an API response of 1,000 bytes or more and marks its ETag
-// weak, so the write sends back `W/"…"`. A local stage has no CloudFront and
-// returns the strong ETag whatever the size.
+// weak, so the browser sends back `W/"…"`. A local stage has no CloudFront, and
+// CloudFront may skip compression, so the test makes the ETag weak itself
+// whenever the read returned it strong.
 test(
-  'a policy over 1 KiB is replaced under the ETag it was read with',
+  'a policy over 1 KiB is replaced under the weak form of the ETag it was read with',
   { tag: '@api' },
   async () => {
     await owner.replaceStatements(seededBucket, [
@@ -191,10 +192,11 @@ test(
     expect((await read.body()).byteLength, 'the policy read must exceed 1 KiB').toBeGreaterThan(
       1024,
     );
+    const etag = read.headers().etag!;
 
     const res = await owner.putPolicy(seededBucket, {
       policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
-      etag: read.headers().etag,
+      etag: etag.startsWith('W/') ? etag : `W/${etag}`,
     });
     expect(res.status(), await res.text()).toBe(204);
   },
