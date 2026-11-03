@@ -40,8 +40,7 @@ describe('submitSupportForm', () => {
 
     await submitSupportForm({
       name: 'Jane Doe',
-      organization: 'Acme Inc',
-      orgId: 'any-org-id',
+      organization: { name: 'Acme Inc', id: 'any-org-id' },
       email: 'jane@acme.com',
       categories: ['PRODUCT_ISSUE'],
       message: 'Help needed',
@@ -74,8 +73,7 @@ describe('submitSupportForm', () => {
 
     await submitSupportForm({
       name: 'any first multi-part last',
-      organization: 'any-org',
-      orgId: 'any-org-id',
+      organization: { name: 'any-org', id: 'any-org-id' },
       email: 'any@example.com',
       categories: ['GENERAL_INQUIRY'],
       message: 'any message',
@@ -94,8 +92,7 @@ describe('submitSupportForm', () => {
 
     await submitSupportForm({
       name: '  any   name ',
-      organization: 'any-org',
-      orgId: 'any-org-id',
+      organization: { name: 'any-org', id: 'any-org-id' },
       email: 'any@example.com',
       categories: ['GENERAL_INQUIRY'],
       message: 'any message',
@@ -114,8 +111,7 @@ describe('submitSupportForm', () => {
 
     await submitSupportForm({
       name: 'any',
-      organization: 'any-org',
-      orgId: 'any-org-id',
+      organization: { name: 'any-org', id: 'any-org-id' },
       email: 'any@example.com',
       categories: ['GENERAL_INQUIRY'],
       message: 'any message',
@@ -140,8 +136,7 @@ describe('submitSupportForm', () => {
 
     await submitSupportForm({
       name,
-      organization: 'any-org',
-      orgId: 'any-org-id',
+      organization: { name: 'any-org', id: 'any-org-id' },
       email: 'any@example.com',
       categories: ['GENERAL_INQUIRY'],
       message: 'any message',
@@ -177,8 +172,7 @@ describe('submitSupportForm', () => {
 
     await submitSupportForm({
       name: 'John Smith',
-      organization: 'Test Corp',
-      orgId: 'any-org-id',
+      organization: { name: 'Test Corp', id: 'any-org-id' },
       email: 'john@test.com',
       categories: ['PRODUCT_ISSUE', 'BILLING_ISSUE', 'FEATURE_REQUEST'],
       message: 'Multiple issues',
@@ -198,8 +192,7 @@ describe('submitSupportForm', () => {
 
     await submitSupportForm({
       name: 'Test User',
-      organization: 'Company',
-      orgId: 'any-org-id',
+      organization: { name: 'Company', id: 'any-org-id' },
       email: 'test@example.com',
       categories: [],
       message: 'No category',
@@ -220,8 +213,7 @@ describe('submitSupportForm', () => {
     await expect(
       submitSupportForm({
         name: 'Jane Doe',
-        organization: 'Acme',
-        orgId: 'any-org-id',
+        organization: { name: 'Acme', id: 'any-org-id' },
         email: 'jane@acme.com',
         categories: ['GENERAL_INQUIRY'],
         message: 'Test',
@@ -235,8 +227,7 @@ describe('submitSupportForm', () => {
     await expect(
       submitSupportForm({
         name: 'Jane Doe',
-        organization: 'Acme',
-        orgId: 'any-org-id',
+        organization: { name: 'Acme', id: 'any-org-id' },
         email: 'jane@acme.com',
         categories: ['PRODUCT_ISSUE'],
         message: 'Test',

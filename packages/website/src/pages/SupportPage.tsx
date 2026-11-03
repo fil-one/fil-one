@@ -101,16 +101,21 @@ export function SupportPage() {
   // The app still renders when `/me` fails, and an outage is when people come
   // here. Without a profile the form asks for an email and sends the ticket
   // without a name or organization, rather than leaving Send disabled.
+  //
+  // The fallback keys on `/me` having failed at least once, not on the
+  // current status: a query with no data refetches on window focus, and each
+  // refetch returns it to pending, which would hide the email field mid-typing.
   const {
     data: me,
-    isError: meFailed,
-    isPending: meLoading,
+    isPending,
+    errorUpdateCount,
   } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
     staleTime: ME_STALE_TIME,
   });
-  const profileUnavailable = me === undefined && meFailed;
+  const profileUnavailable = me === undefined && errorUpdateCount > 0;
+  const meLoading = isPending && !profileUnavailable;
   const needsEmail = profileUnavailable || (me !== undefined && !me.email);
 
   // Contact form state
@@ -136,8 +141,7 @@ export function SupportPage() {
     try {
       await submitSupportForm({
         name: me?.name,
-        organization: me?.orgName,
-        orgId: me?.orgId,
+        organization: me && { name: me.orgName, id: me.orgId },
         email: me?.email || formEmail.trim(),
         categories: [formCategory],
         message: formMessage.trim(),
@@ -171,7 +175,16 @@ export function SupportPage() {
                 so each field shows its error under itself instead. */}
             <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
               {needsEmail && (
-                <FormField label="Email" htmlFor="support-email" error={errors.email}>
+                <FormField
+                  label="Email"
+                  htmlFor="support-email"
+                  error={errors.email}
+                  description={
+                    profileUnavailable
+                      ? "We couldn't load your account, so tell us where to reply."
+                      : undefined
+                  }
+                >
                   <Input
                     id="support-email"
                     type="email"
@@ -220,8 +233,9 @@ export function SupportPage() {
               </FormField>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                {/* Loading is reachable only after the app shell's own `/me` fetch
-                    failed and this page is retrying it. */}
+                {/* While `/me` has no answer yet: after an org switch clears the
+                    cache, or when the app shell's own fetch failed and this page
+                    is trying again. */}
                 {meLoading && <Skeleton className="h-4 w-48 max-w-full" />}
                 {me?.email && (
                   <p className="min-w-0 text-xs break-words text-(--color-paragraph-text-subtle)">

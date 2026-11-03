@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { MeResponse } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
+import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 
 const mockGetMe = vi.fn();
@@ -60,7 +61,7 @@ describe('SupportPage', () => {
     mockSubmitSupportForm.mockResolvedValue(undefined);
   });
 
-  it('shows an error under each missing field and sends nothing', async () => {
+  it('shows an error under each missing field and sends nothing', () => {
     renderWithAccount({ email: undefined });
 
     send();
@@ -71,7 +72,7 @@ describe('SupportPage', () => {
     expect(mockSubmitSupportForm).not.toHaveBeenCalled();
   });
 
-  it('treats a message of only spaces as missing', async () => {
+  it('treats a message of only spaces as missing', () => {
     renderWithAccount();
 
     fireEvent.click(screen.getByLabelText('Product issue'));
@@ -89,7 +90,7 @@ describe('SupportPage', () => {
     'any',
     // No domain before the dot
     'any@.com',
-  ])('rejects the typed email %s and sends nothing', async (email) => {
+  ])('rejects the typed email %s and sends nothing', (email) => {
     renderWithAccount({ email: undefined });
 
     type(screen.getByPlaceholderText('you@example.com'), email);
@@ -100,7 +101,7 @@ describe('SupportPage', () => {
     expect(mockSubmitSupportForm).not.toHaveBeenCalled();
   });
 
-  it('sends the account email, name and organization with the message', async () => {
+  it('sends the account email, name and organization with the message', () => {
     renderWithAccount({
       email: 'any@example.com',
       name: 'any name',
@@ -114,15 +115,14 @@ describe('SupportPage', () => {
 
     expect(mockSubmitSupportForm).toHaveBeenCalledWith({
       name: 'any name',
-      organization: 'any-org',
-      orgId: 'any-org-id',
+      organization: { name: 'any-org', id: 'any-org-id' },
       email: 'any@example.com',
       categories: ['PRODUCT_ISSUE'],
       message: 'any message',
     });
   });
 
-  it('sends the typed email for an account without one', async () => {
+  it('sends the typed email for an account without one', () => {
     renderWithAccount({ email: undefined });
 
     type(screen.getByPlaceholderText('you@example.com'), ' typed@example.com ');
@@ -146,11 +146,25 @@ describe('SupportPage', () => {
     expect(mockSubmitSupportForm).toHaveBeenCalledWith({
       name: undefined,
       organization: undefined,
-      orgId: undefined,
       email: 'typed@example.com',
       categories: ['PRODUCT_ISSUE'],
       message: 'any message',
     });
+  });
+
+  it('keeps the email field and Send while a failed profile is fetched again', async () => {
+    mockGetMe.mockRejectedValue(new Error('any failure'));
+    const client = newClient();
+    renderPage(client);
+    await screen.findByPlaceholderText('you@example.com');
+
+    // A fetch that never settles holds the query in its refetching state.
+    mockGetMe.mockReturnValue(new Promise(() => {}));
+    void client.refetchQueries({ queryKey: queryKeys.me });
+
+    await waitFor(() => expect(mockGetMe).toHaveBeenCalledTimes(2));
+    expect(screen.getByPlaceholderText('you@example.com')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled();
   });
 
   it('keeps Send disabled while the profile is loading', () => {

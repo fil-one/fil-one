@@ -68,8 +68,7 @@ type SupportFields = {
    * any value here. They help support find the account; they do not prove the
    * sender belongs to it.
    */
-  organization?: string;
-  orgId?: string;
+  organization?: { name: string; id: string };
   email: string;
   categories: string[];
   message: string;
@@ -95,14 +94,10 @@ export async function submitSupportForm(fields: SupportFields): Promise<void> {
     { objectTypeId: '0-5', name: 'content', value: fields.message },
   );
   if (fields.organization) {
-    hubspotFields.push({
-      objectTypeId: '0-5',
-      name: 'filone_org_name',
-      value: fields.organization,
-    });
-  }
-  if (fields.orgId) {
-    hubspotFields.push({ objectTypeId: '0-5', name: 'filone_org_id', value: fields.orgId });
+    hubspotFields.push(
+      { objectTypeId: '0-5', name: 'filone_org_name', value: fields.organization.name },
+      { objectTypeId: '0-5', name: 'filone_org_id', value: fields.organization.id },
+    );
   }
   // No `filone_user_id`: the backend's contact sync owns it and addresses
   // contacts by it, and HubSpot keeps it unique. A form submission matches its

@@ -54,25 +54,36 @@ export const MissingFields: Story = {
 };
 
 /**
+ * A client whose `/me` has already failed and never fetches again. The page
+ * passes its own `queryFn`, which would win over one set here, so the failure
+ * is stored once and every refetch trigger is switched off instead. Created
+ * once, so re-rendering the story does not fetch again.
+ */
+const profileUnavailableClient = (() => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryDefaults(queryKeys.me, {
+    retryOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  void client.prefetchQuery({
+    queryKey: queryKeys.me,
+    queryFn: () => Promise.reject(new Error('Profile unavailable')),
+  });
+  return client;
+})();
+
+/**
  * `/me` failed, so the form asks for an email and the ticket goes without a
  * name or organization.
  */
 export const ProfileUnavailable: Story = {
   decorators: [
-    (Story) => {
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-      // Keeps the page from fetching `/me` again on mount, so the failure below stands.
-      client.setQueryDefaults(queryKeys.me, { retryOnMount: false });
-      void client.prefetchQuery({
-        queryKey: queryKeys.me,
-        queryFn: () => Promise.reject(new Error('Profile unavailable')),
-      });
-      return (
-        <QueryClientProvider client={client}>
-          <Story />
-        </QueryClientProvider>
-      );
-    },
+    (Story) => (
+      <QueryClientProvider client={profileUnavailableClient}>
+        <Story />
+      </QueryClientProvider>
+    ),
   ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
