@@ -174,6 +174,32 @@ test(
   },
 );
 
+// CloudFront gzips an API response of 1,000 bytes or more and marks its ETag
+// weak, so the write sends back `W/"…"`. A local stage has no CloudFront and
+// returns the strong ETag whatever the size.
+test(
+  'a policy over 1 KiB is replaced under the ETag it was read with',
+  { tag: '@api' },
+  async () => {
+    await owner.replaceStatements(seededBucket, [
+      grantAllToOwner(ownerId),
+      ...Array.from({ length: 8 }, (_, i) =>
+        allow([memberId], ['s3:GetObject'], `member-read-${i}`),
+      ),
+    ]);
+    const read = await owner.fetchPolicyResponse(seededBucket);
+    expect((await read.body()).byteLength, 'the policy read must exceed 1 KiB').toBeGreaterThan(
+      1024,
+    );
+
+    const res = await owner.putPolicy(seededBucket, {
+      policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
+      etag: read.headers().etag,
+    });
+    expect(res.status(), await res.text()).toBe(204);
+  },
+);
+
 test(
   'creating a policy under If-None-Match: * where one exists is refused with 412 POLICY_CONFLICT',
   { tag: '@api' },
