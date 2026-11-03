@@ -11,6 +11,12 @@ import {
 import { S3Region } from '@filone/shared';
 
 import type { RagBucket } from '../lib/rag-bucket-api';
+import {
+  QUESTION,
+  forgeBucket,
+  hybridAnswer,
+  timeTravelAnswer,
+} from '../lib/rag-engine-fixtures.js';
 import { QueryAnswer } from './QueryAnswer';
 
 const bucket: RagBucket = {
@@ -69,6 +75,33 @@ export const Answer: Story = {
     result: {
       answer: 'The default retention period is 90 days for standard objects.',
       sources: ['policies/data-retention.pdf', 'governance-whitepaper.pdf'],
+    },
+  },
+};
+
+/** Forge bucket: hybrid answer with clickable [n] markers, cited passages and the trace. */
+export const EngineAnswer: Story = {
+  args: { bucket: forgeBucket, question: QUESTION, result: hybridAnswer },
+};
+
+/** Forge bucket: vector search against an earlier dataset version, no IO figures. */
+export const EngineAnswerTimeTravel: Story = {
+  args: { bucket: forgeBucket, question: QUESTION, result: timeTravelAnswer },
+};
+
+/** Forge bucket: retrieval only (no answer model configured). */
+export const EngineRetrievalOnly: Story = {
+  args: {
+    bucket: forgeBucket,
+    question: QUESTION,
+    result: {
+      ...hybridAnswer,
+      answer: '',
+      trace: {
+        ...hybridAnswer.trace!,
+        timings: { embedMs: 21, searchMs: 38, answerMs: 0, totalMs: 59 },
+        models: { embedding: 'BAAI/bge-small-en-v1.5' },
+      },
     },
   },
 };

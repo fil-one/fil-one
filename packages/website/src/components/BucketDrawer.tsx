@@ -1,16 +1,39 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ProhibitIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
-import { useMutation, type UseMutationResult } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseMutationResult,
+} from '@tanstack/react-query';
 
-import { formatBytes, type QueryBucketResponse } from '@filone/shared';
+import {
+  formatBytes,
+  usesRagEngine,
+  type BucketRagEngineResponse,
+  type QueryBucketResponse,
+  type RagEngineVersion,
+  type RagSearchMode,
+} from '@filone/shared';
 
-import { queryBucket, type RagBucket } from '../lib/rag-bucket-api.js';
+import {
+  getBucketRagEngine,
+  queryBucket,
+  syncBucketRag,
+  type QueryBucketOptions,
+  type RagBucket,
+} from '../lib/rag-bucket-api.js';
+import { queryKeys } from '../lib/query-client.js';
+import { ENGINE_SYNC_POLL_MS, isEngineStatus } from '../lib/rag-engine.js';
+import { useHasPermission } from '../lib/use-permissions.js';
 import { buildQueryCurl } from '../lib/rag-query-snippet.js';
 import { timeAgo } from '../lib/time.js';
 import { Button } from './Button.js';
 import { CodeBlock } from './CodeBlock.js';
 import { Input } from './Input.js';
 import { QueryAnswer } from './QueryAnswer.js';
+import { RagDatasetPanel, RagEngineSyncStrip } from './RagEnginePanel.js';
+import { RagSearchControls } from './RagSearchControls.js';
 import { RequirePermission } from './RequirePermission.js';
 import { BucketStatus } from './BucketStatus.js';
 
@@ -24,15 +47,33 @@ export type BucketDrawerProps = {
   onStopIndexing: () => void;
 };
 
-/** Slide-over query playground for a single RAG-enabled bucket. */
-export function BucketDrawer({ bucket, onClose, onStopIndexing }: BucketDrawerProps) {
+type AskVariables = { query: string; searchMode?: RagSearchMode; version?: number };
+
+/**
+ * Slide-over query playground for a single RAG-enabled bucket.
+ *
+ * Engine-backed (Forge) buckets get more: Index now with live progress, a search
+ * mode and dataset version picker, cited answers with a retrieval trace, and the
+ * Lance dataset panel. Every other region renders as it always has.
+ */
+export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: BucketDrawerProps) {
   const [input, setInput] = useState('');
   const [question, setQuestion] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [searchMode, setSearchMode] = useState<RagSearchMode>('hybrid');
+  const [version, setVersion] = useState<number | undefined>(undefined);
+
+  const engine = useRagEngine(rowBucket);
+  // The engine reads its own dataset, so while the drawer is open its numbers
+  // are fresher than the row's enablement poll.
+  const bucket = engine.isEngine ? withEngineStatus(rowBucket, engine.data) : rowBucket;
 
   const queryMutation = useMutation({
-    mutationFn: (q: string) => queryBucket(bucket.name, bucket.region, q),
+    mutationFn: ({ query, ...options }: AskVariables) =>
+      engine.isEngine
+        ? queryBucket(bucket.name, bucket.region, query, options satisfies QueryBucketOptions)
+        : queryBucket(bucket.name, bucket.region, query),
   });
 
   useEffect(() => {
@@ -49,7 +90,9 @@ export function BucketDrawer({ bucket, onClose, onStopIndexing }: BucketDrawerPr
     if (!trimmed) return;
     setQuestion(trimmed);
     setInput('');
-    queryMutation.mutate(trimmed);
+    queryMutation.mutate(
+      engine.isEngine ? { query: trimmed, searchMode, version } : { query: trimmed },
+    );
   }
 
   const shown = visible && !closing;
@@ -67,10 +110,18 @@ export function BucketDrawer({ bucket, onClose, onStopIndexing }: BucketDrawerPr
         role="dialog"
         aria-modal="true"
         aria-label={`RAG query playground for ${bucket.name}`}
-        className={`fixed inset-y-0 right-0 z-40 flex w-[460px] flex-col bg-white shadow-xl transition-transform duration-200 motion-reduce:duration-0 ${shown ? 'translate-x-0 ease-out' : 'translate-x-full ease-in'}`}
+        className={`fixed inset-y-0 right-0 z-40 flex ${engine.isEngine ? 'w-[560px]' : 'w-[460px]'} max-w-full flex-col bg-white shadow-xl transition-transform duration-200 motion-reduce:duration-0 ${shown ? 'translate-x-0 ease-out' : 'translate-x-full ease-in'}`}
       >
         <DrawerHeader bucket={bucket} onClose={handleClose} />
-        <StatsBar bucket={bucket} />
+        <StatsBar bucket={bucket} engine={engine.isEngine} />
+        {engine.isEngine && (
+          <RagEngineSyncStrip
+            status={engine.data?.status}
+            canSync={engine.canSync}
+            onSync={engine.sync}
+            syncRequested={engine.syncRequested}
+          />
+        )}
 
         {/* Scrollable body */}
         <div data-testid="bucket-drawer-body" className="flex-1 overflow-y-auto">
@@ -81,7 +132,22 @@ export function BucketDrawer({ bucket, onClose, onStopIndexing }: BucketDrawerPr
             onInputChange={setInput}
             onAsk={handleAsk}
             queryMutation={queryMutation}
+            controls={
+              engine.isEngine ? (
+                <RagSearchControls
+                  mode={searchMode}
+                  onModeChange={setSearchMode}
+                  version={version}
+                  onVersionChange={setVersion}
+                  versions={engine.data?.versions ?? EMPTY_VERSIONS}
+                  disabled={!bucket.lastSyncedAt}
+                />
+              ) : null
+            }
           />
+          {engine.isEngine && engine.data?.status.dataset && (
+            <RagDatasetPanel bucket={bucket} dataset={engine.data.status.dataset} />
+          )}
           <QueryFromCodeSection bucket={bucket} />
         </div>
 
@@ -157,6 +223,8 @@ function DrawerHeader({ bucket, onClose }: DrawerHeaderProps) {
 
 type StatsBarProps = {
   bucket: RagBucket;
+  /** Engine-backed buckets index on demand, so there is no scheduled wait to quote. */
+  engine?: boolean;
 };
 
 /**
@@ -166,14 +234,16 @@ type StatsBarProps = {
  * "0 files · 0 B · Not yet synced" says "nothing yet" three times and buries the
  * only useful fact. That state shows the wait instead, matching the bucket row.
  */
-function StatsBar({ bucket }: StatsBarProps) {
+function StatsBar({ bucket, engine }: StatsBarProps) {
   const wrapper =
     'flex flex-shrink-0 items-center gap-4 border-b border-zinc-100 bg-zinc-50/60 px-5 py-2.5 text-xs text-zinc-500';
 
   if (!bucket.lastSyncedAt) {
     return (
       <div data-testid="bucket-drawer-stats" className={wrapper}>
-        <span data-testid="bucket-drawer-stat-waiting">Up to 6 hours until the first results</span>
+        <span data-testid="bucket-drawer-stat-waiting">
+          {engine ? 'Not indexed yet' : 'Up to 6 hours until the first results'}
+        </span>
       </div>
     );
   }
@@ -203,7 +273,9 @@ type AskSectionProps = {
   question: string | null;
   onInputChange: (value: string) => void;
   onAsk: () => void;
-  queryMutation: UseMutationResult<QueryBucketResponse, Error, string>;
+  queryMutation: UseMutationResult<QueryBucketResponse, Error, AskVariables>;
+  /** Engine-backed buckets: search mode and dataset version, above the input. */
+  controls?: React.ReactNode;
 };
 
 /**
@@ -221,15 +293,18 @@ function AskSection({
   onInputChange,
   onAsk,
   queryMutation,
+  controls,
 }: AskSectionProps) {
   const { isPending, isError, error, data: result } = queryMutation;
   const notYetIndexed = !bucket.lastSyncedAt;
+  const engine = usesRagEngine(bucket.region);
 
   return (
     <div data-testid="bucket-drawer-ask" className="px-5 py-5">
       <p className="mb-3 text-meta font-medium uppercase tracking-widest text-zinc-500">
         Ask a question
       </p>
+      {controls}
       <div className="flex gap-2">
         <Input
           aria-label="Ask a question"
@@ -238,6 +313,9 @@ function AskSection({
           }
           value={input}
           onChange={onInputChange}
+          onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
+            if (event.key === 'Enter' && !notYetIndexed && input.trim()) onAsk();
+          }}
           disabled={notYetIndexed}
           className="flex-1"
         />
@@ -253,8 +331,9 @@ function AskSection({
       </div>
       {notYetIndexed && (
         <p data-testid="bucket-drawer-not-indexed" className="mt-2 text-xs text-zinc-500">
-          You can ask questions once the first indexing pass has completed, which can take up to 6
-          hours.
+          {engine
+            ? 'You can ask questions once the first indexing run has finished. Start one with Index now.'
+            : 'You can ask questions once the first indexing pass has completed, which can take up to 6 hours.'}
         </p>
       )}
       <QueryAnswer
@@ -290,4 +369,83 @@ function QueryFromCodeSection({ bucket }: { bucket: RagBucket }) {
       </p>
     </div>
   );
+}
+
+const EMPTY_VERSIONS: RagEngineVersion[] = [];
+
+/** The drawer's bucket with the engine's own telemetry laid over the row's. */
+function withEngineStatus(
+  bucket: RagBucket,
+  engine: BucketRagEngineResponse | undefined,
+): RagBucket {
+  if (!engine) return bucket;
+  const { status } = engine;
+  return {
+    ...bucket,
+    filesIndexed: status.filesIndexed,
+    indexSize: status.indexedBytes,
+    ...(status.lastSyncedAt ? { lastSyncedAt: status.lastSyncedAt } : {}),
+    syncState: status.syncState,
+    ...(status.lastSyncError ? { lastSyncError: status.lastSyncError } : {}),
+  };
+}
+
+/**
+ * Engine status, version history and Index now for a Forge bucket. Polls every
+ * few seconds while a run is in flight (or was just requested), and stops once
+ * it settles. When a run finishes, the bucket's enablement is re-read so the
+ * row behind the drawer catches up.
+ */
+function useRagEngine(bucket: RagBucket) {
+  const isEngine = usesRagEngine(bucket.region);
+  const queryClient = useQueryClient();
+  const canSync = useHasPermission('buckets.create');
+  const [syncRequested, setSyncRequested] = useState(false);
+  const key = queryKeys.ragBucketEngineFor(bucket.name, bucket.region);
+
+  const { data } = useQuery({
+    queryKey: key,
+    queryFn: () => getBucketRagEngine(bucket.name, bucket.region),
+    enabled: isEngine && bucket.enabled,
+    refetchInterval: (query) =>
+      query.state.data?.status.syncState === 'syncing' || syncRequested
+        ? ENGINE_SYNC_POLL_MS
+        : false,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => syncBucketRag(bucket.name, bucket.region),
+    onMutate: () => setSyncRequested(true),
+    onSuccess: (status) => {
+      // The engine answers with its status; lay it over the cached response so
+      // progress shows without waiting for the next poll.
+      if (isEngineStatus(status)) {
+        queryClient.setQueryData<BucketRagEngineResponse>(key, (prev) => ({
+          versions: prev?.versions ?? [],
+          status: { ...prev?.status, ...status },
+        }));
+      }
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
+    onSettled: () => setSyncRequested(false),
+  });
+
+  const syncState = data?.status.syncState;
+  const previous = useRef(syncState);
+  useEffect(() => {
+    if (previous.current === 'syncing' && syncState !== 'syncing') {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.ragBucketEnabledFor(bucket.name, bucket.region),
+      });
+    }
+    previous.current = syncState;
+  }, [syncState, queryClient, bucket.name, bucket.region]);
+
+  return {
+    isEngine,
+    data,
+    canSync,
+    sync: () => syncMutation.mutate(),
+    syncRequested: syncMutation.isPending,
+  };
 }

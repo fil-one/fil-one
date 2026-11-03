@@ -1,7 +1,10 @@
+import { useState } from 'react';
+
 import type { QueryBucketResponse } from '@filone/shared';
 
 import type { RagBucket } from '../lib/rag-bucket-api.js';
 import { Alert } from './Alert.js';
+import { CitationList, CitedAnswer, QueryTrace } from './QueryCitations.js';
 import { QuerySources } from './QuerySources.js';
 
 export type QueryAnswerProps = {
@@ -13,7 +16,13 @@ export type QueryAnswerProps = {
   result: QueryBucketResponse | undefined;
 };
 
-/** Renders the query result region — loading skeleton, error, or grounded answer. */
+/**
+ * Renders the query result region — loading skeleton, error, or grounded answer.
+ *
+ * Engine-backed (Forge) answers carry numbered citations and a trace; those
+ * render with clickable `[n]` markers, the cited passages and how the query was
+ * served. Answers without citations keep the plain text and source pills.
+ */
 export function QueryAnswer({
   bucket,
   question,
@@ -51,13 +60,54 @@ export function QueryAnswer({
           />
         </div>
       ) : result ? (
-        <>
-          <p data-testid="query-answer-text" className="text-sm leading-relaxed text-zinc-700">
-            {result.answer}
-          </p>
-          <QuerySources bucket={bucket} sources={result.sources} />
-        </>
+        <QueryResult bucket={bucket} result={result} />
       ) : null}
     </div>
+  );
+}
+
+function EngineAnswer({ bucket, result }: { bucket: RagBucket; result: QueryBucketResponse }) {
+  // Tied to the result it was made on, so a new answer starts with nothing selected.
+  const [selected, setSelected] = useState<{ result: QueryBucketResponse; n: number } | null>(null);
+  const activeCitation = selected?.result === result ? selected.n : null;
+  const setActiveCitation = (n: number) => setSelected({ result, n });
+  const citations = result.citations ?? [];
+  return (
+    <>
+      {result.answer ? (
+        <CitedAnswer
+          answer={result.answer}
+          citations={citations}
+          activeCitation={activeCitation}
+          onSelectCitation={setActiveCitation}
+        />
+      ) : (
+        <p data-testid="query-answer-empty" className="text-sm text-zinc-500">
+          {citations.length > 0
+            ? 'No answer was generated. These are the closest passages.'
+            : 'Nothing in this bucket matched the question.'}
+        </p>
+      )}
+      <CitationList
+        bucket={bucket}
+        citations={citations}
+        activeCitation={activeCitation}
+        onSelectCitation={setActiveCitation}
+      />
+      {result.trace && <QueryTrace trace={result.trace} />}
+    </>
+  );
+}
+
+/** Engine answers carry citations; everything else is plain text plus source pills. */
+function QueryResult({ bucket, result }: { bucket: RagBucket; result: QueryBucketResponse }) {
+  if (result.citations) return <EngineAnswer bucket={bucket} result={result} />;
+  return (
+    <>
+      <p data-testid="query-answer-text" className="text-sm leading-relaxed text-zinc-700">
+        {result.answer}
+      </p>
+      <QuerySources bucket={bucket} sources={result.sources} />
+    </>
   );
 }
