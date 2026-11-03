@@ -24,6 +24,7 @@ import {
   putObject,
   toCanonicalPolicy,
   ConsoleApi,
+  IS_BEHIND_CLOUDFRONT,
   PAYLOAD,
   REGION,
   SEEDED_KEY,
@@ -174,31 +175,44 @@ test(
   },
 );
 
+test('a write under the weak form of the ETag replaces the policy', { tag: '@api' }, async () => {
+  // A write answers 204 with no body, which CloudFront never compresses, so
+  // the ETag it returns is strong on every stage.
+  const etag = await owner.replaceStatements(seededBucket, [grantAllToOwner(ownerId)]);
+
+  const res = await owner.putPolicy(seededBucket, {
+    policy: buildBucketPolicy(seededBucket, [
+      grantAllToOwner(ownerId),
+      allow([memberId], ['s3:ListBucket']),
+    ]),
+    etag: `W/${etag}`,
+  });
+  expect(res.status(), await res.text()).toBe(204);
+});
+
 // CloudFront gzips an API response of 1,000 bytes or more and marks its ETag
-// weak, so the browser sends back `W/"…"`. A local stage has no CloudFront, and
-// CloudFront may skip compression, so the test makes the ETag weak itself
-// whenever the read returned it strong.
+// weak. Eight member statements put the policy read past that size.
 test(
-  'a policy over 1 KiB is replaced under the weak form of the ETag it was read with',
+  'a policy over 1 KiB reads with a weak ETag that a write accepts',
   { tag: '@api' },
   async () => {
+    test.skip(!IS_BEHIND_CLOUDFRONT, 'a local stage has no CloudFront to compress the read');
     await owner.replaceStatements(seededBucket, [
       grantAllToOwner(ownerId),
       ...Array.from({ length: 8 }, (_, i) =>
         allow([memberId], ['s3:GetObject'], `member-read-${i}`),
       ),
     ]);
-    const read = await owner.fetchPolicyResponse(seededBucket);
-    expect((await read.body()).byteLength, 'the policy read must exceed 1 KiB').toBeGreaterThan(
-      1024,
-    );
-    const etag = read.headers().etag!;
+    const { etag } = await owner.readPolicy(seededBucket);
 
     const res = await owner.putPolicy(seededBucket, {
       policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
-      etag: etag.startsWith('W/') ? etag : `W/${etag}`,
+      etag,
     });
-    expect(res.status(), await res.text()).toBe(204);
+    expect({ isWeak: etag.startsWith('W/'), status: res.status() }).toEqual({
+      isWeak: true,
+      status: 204,
+    });
   },
 );
 
