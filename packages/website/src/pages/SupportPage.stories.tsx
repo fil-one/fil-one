@@ -57,11 +57,13 @@ export const MissingFields: Story = {
  * A client whose `/me` has already failed and never fetches again. The page
  * passes its own `queryFn`, which would win over one set here, so the failure
  * is stored once and every refetch trigger is switched off instead. Created
- * once, so re-rendering the story does not fetch again.
+ * once, so re-rendering the story does not fetch again, and kept out of
+ * garbage collection, since the story may open long after this file loads.
  */
 const profileUnavailableClient = (() => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryDefaults(queryKeys.me, {
+    gcTime: Infinity,
     retryOnMount: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,

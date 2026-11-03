@@ -233,9 +233,9 @@ export function SupportPage() {
               </FormField>
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                {/* While `/me` has no answer yet: after an org switch clears the
-                    cache, or when the app shell's own fetch failed and this page
-                    is trying again. */}
+                {/* While `/me` has neither answered nor failed for this org, which
+                    in practice is right after an org switch clears the cache. A
+                    failed fetch goes straight to the email fallback instead. */}
                 {meLoading && <Skeleton className="h-4 w-48 max-w-full" />}
                 {me?.email && (
                   <p className="min-w-0 text-xs break-words text-(--color-paragraph-text-subtle)">
