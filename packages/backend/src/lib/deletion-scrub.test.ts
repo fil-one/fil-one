@@ -595,7 +595,20 @@ describe('scrubOrgRecords', () => {
           );
         });
 
+        it('fails the pass, to be retried, when their profile cannot be read', async () => {
+          ddbMock
+            .on(GetItemCommand, {
+              TableName: 'UserInfoTable',
+              Key: { pk: { S: 'USER#user-1' }, sk: { S: 'PROFILE' } },
+            })
+            .rejects(new Error('any-read-failure'));
+
+          await expect(moveSurvivingMembers(ORG, STRANDED)).rejects.toThrow('any-read-failure');
+          expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+        });
+
         it('fails the pass, to be retried, when the floor org cannot be written', async () => {
+          stubHome({ profile: ORG, identity: ORG });
           ddbMock.on(TransactWriteItemsCommand).rejects(new Error('any-throttle'));
 
           await expect(moveSurvivingMembers(ORG, STRANDED)).rejects.toThrow('any-throttle');

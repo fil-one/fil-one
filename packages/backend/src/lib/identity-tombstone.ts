@@ -93,3 +93,21 @@ export async function readLiveAccountUserId(sub: string): Promise<string | undef
   if (isIdentityTombstoned(Item)) return undefined;
   return Item?.userId?.S;
 }
+
+/**
+ * Whether `sub`'s identity row now names an account other than `userId`: the
+ * new account an invitation made once that account's deletion had finished.
+ * A missing row, or one still naming `userId`, stamped or not, is not replaced.
+ */
+export async function isIdentityReplaced(sub: string, userId: string): Promise<boolean> {
+  const { Item } = await getDynamoClient().send(
+    new GetItemCommand({
+      TableName: Resource.UserInfoTable.name,
+      Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
+      ProjectionExpression: 'userId',
+      ConsistentRead: true,
+    }),
+  );
+  const current = Item?.userId?.S;
+  return current !== undefined && current !== userId;
+}

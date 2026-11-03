@@ -13,6 +13,7 @@ import {
 } from '../lib/auth0-management.ts';
 import { deleteReplacedAvatar } from '../lib/avatar-storage.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
+import { isIdentityReplaced } from '../lib/identity-tombstone.ts';
 import {
   deletionRecordKey,
   DELETION_STATUS,
@@ -159,12 +160,22 @@ async function deleteTenants(orgId: string, tenantIds: Record<string, string>): 
  * decides that per member, and the reasons it decided on are logged here.
  */
 async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
-  for (const { sub, deleteIdentity, keptReasons } of members) {
+  for (const { sub, userId, deleteIdentity, keptReasons } of members) {
     if (!deleteIdentity) {
       // The census's own reasons, not one of them: an account is also kept when
       // the member was only ever invited here, and when a membership row could
       // not be decoded and the census failed closed.
       console.log(`${LOG} account kept`, { sub, keptReasons });
+      continue;
+    }
+    // An overlapping pass may have finished the deletion, and an invitation
+    // then made a new account under the same sub. Its Auth0 user, allowlist
+    // row and avatar are that account's now.
+    if (await isIdentityReplaced(sub, userId)) {
+      console.warn(`${LOG} identity now belongs to a new account, leaving Auth0 alone`, {
+        sub,
+        userId,
+      });
       continue;
     }
     const email = await getAuth0UserEmail(sub);

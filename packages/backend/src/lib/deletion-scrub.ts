@@ -331,13 +331,19 @@ async function repointRow(
  * membership, so the census sends it to {@link repointHomeOrg} rather than here.
  * The profile's is conditioned on the org it was read naming, whichever that
  * is, so a profile that disagrees with the identity does not block the move.
+ * That read throws rather than answering "no org": a guess would cancel the
+ * move, and the pass would finish with the member still fenced out. The name
+ * and address only name the floor org, so their read is best-effort.
  */
 async function moveToFloorOrg(orgId: string, member: DeletionMember): Promise<void> {
-  const profile = await readUserProfile(member.userId, { consistentRead: true });
+  const [{ profileOrgId }, profile] = await Promise.all([
+    readHomeOrgPointers(member.userId),
+    readUserProfile(member.userId, { consistentRead: true }),
+  ]);
   const floorOrg = await prepareFloorOrg({
     userId: member.userId,
     sub: member.sub,
-    homeOrgIds: { profile: profile?.orgId, identity: orgId },
+    homeOrgIds: { profile: profileOrgId, identity: orgId },
     name: profile?.name,
     email: profile?.email,
   });

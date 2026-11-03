@@ -180,6 +180,19 @@ describe('account-deletion-worker', () => {
 
   // The teardown takes the same census the Auth0 step ran on, though it reads
   // only the org row today.
+  // An overlapping pass finished, and an invitation made a new account under the
+  // same sub. This pass's census predates it.
+  it('leaves Auth0 alone for an identity that now belongs to a new account', async () => {
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'SUB#auth0|one' }, sk: { S: 'IDENTITY' } } })
+      .resolves({ Item: { userId: { S: 'any-new-user-id' } } });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await handler({ orgId: ORG });
+
+    expect(order.filter((step) => step.endsWith('auth0|one'))).toStrictEqual([]);
+  });
+
   it('passes the resolved members to the Stripe teardown', async () => {
     await handler({ orgId: ORG });
 
