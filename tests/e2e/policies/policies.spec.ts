@@ -187,7 +187,10 @@ test('a write under the weak form of the ETag replaces the policy', { tag: '@api
     ]),
     etag: `W/${etag}`,
   });
-  expect(res.status(), await res.text()).toBe(204);
+  expect({ isWeak: etag.startsWith('W/'), status: res.status() }, await res.text()).toEqual({
+    isWeak: false,
+    status: 204,
+  });
 });
 
 // CloudFront gzips an API response of 1,000 bytes or more and marks its ETag
