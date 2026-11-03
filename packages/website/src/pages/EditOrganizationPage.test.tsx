@@ -119,24 +119,32 @@ describe('EditOrganizationPage', () => {
     expect(mockUpdateOrg).not.toHaveBeenCalled();
   });
 
-  it('shows a placeholder heading and card for each section under the page title while /me loads', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    seedPermissions(client, OrgRole.Owner, me(OrgRole.Owner));
-    // Never settles, so the page stays loading.
-    mockGetMe.mockReturnValue(new Promise(() => {}));
-    render(
-      <QueryClientProvider client={client}>
-        <ToastProvider>
-          <EditOrganizationPage />
-        </ToastProvider>
-      </QueryClientProvider>,
-    );
+  it.each([
+    // An Owner holds org.delete, so the danger zone gets a placeholder too.
+    { role: OrgRole.Owner, sections: 'General and Danger zone', skeletons: 4 },
+    // An Admin holds org.rename but not org.delete.
+    { role: OrgRole.Admin, sections: 'General only', skeletons: 2 },
+  ])(
+    'shows a placeholder heading and card for $sections under the page title while /me loads, as $role',
+    async ({ role, skeletons }) => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      seedPermissions(client, role, me(role));
+      // Never settles, so the page stays loading.
+      mockGetMe.mockReturnValue(new Promise(() => {}));
+      render(
+        <QueryClientProvider client={client}>
+          <ToastProvider>
+            <EditOrganizationPage />
+          </ToastProvider>
+        </QueryClientProvider>,
+      );
 
-    expect(screen.getByRole('heading', { name: 'Edit organization' })).toBeInTheDocument();
-    const loading = await screen.findByRole('status', { name: 'Loading organization' });
-    // A heading bar and a card for General, and the same for Danger zone.
-    expect(loading.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(4);
-  });
+      expect(screen.getByRole('heading', { name: 'Edit organization' })).toBeInTheDocument();
+      const loading = await screen.findByRole('status', { name: 'Loading organization' });
+      // A heading bar and a card per section.
+      expect(loading.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(skeletons);
+    },
+  );
 
   it('shows an error instead of the loading state when /me fails to load', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

@@ -361,6 +361,8 @@ describe('MembersInvitations — while the list loads', () => {
         .getAllByRole('columnheader')
         .map((h) => h.textContent),
     ).toStrictEqual(['Email', 'Role', 'Status', 'Expires']);
+    // The header row, then three placeholder rows.
+    expect(within(loading).getAllByRole('row')).toHaveLength(4);
   });
 });
 

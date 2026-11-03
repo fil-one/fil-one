@@ -175,7 +175,7 @@ describe('MembersPage — while the roster loads', () => {
     mockListInvitations.mockResolvedValue({ invitations: [] });
   });
 
-  it('shows the roster column headers above placeholder rows while the roster loads', async () => {
+  it('shows the roster column headers above placeholder rows', async () => {
     // Never settles, so the roster stays loading.
     mockListMembers.mockReturnValue(new Promise(() => {}));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -194,6 +194,8 @@ describe('MembersPage — while the roster loads', () => {
         .getAllByRole('columnheader')
         .map((h) => h.textContent),
     ).toStrictEqual(['Member', 'Role', 'Joined']);
+    // The header row, then three placeholder rows.
+    expect(within(loading).getAllByRole('row')).toHaveLength(4);
   });
 });
 

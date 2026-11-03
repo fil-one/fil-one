@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
   ArrowLeftIcon,
@@ -181,7 +182,7 @@ export function ObjectDetailPage({
   });
 
   // Everything in the header is known from the URL, so it stays on screen while
-  // the metadata loads and only the cards below wait for it.
+  // the metadata loads or after it fails, and only the cards below wait for it.
   const header = (
     <>
       {/* Breadcrumb */}
@@ -277,7 +278,17 @@ export function ObjectDetailPage({
     return (
       <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
         {header}
-        <ObjectDetailSkeleton />
+        <ObjectDetailSkeleton
+          hasVersionId={versionId !== undefined}
+          versionHistory={
+            <VersionHistoryCard
+              versions={objectVersions}
+              currentVersionId={versionId}
+              bucketName={bucketName}
+              region={region}
+            />
+          }
+        />
         {dialogs}
       </div>
     );
@@ -285,14 +296,8 @@ export function ObjectDetailPage({
 
   if (isError) {
     return (
-      <div className="p-10">
-        <Breadcrumb
-          items={[
-            { label: 'Buckets', href: '/buckets' },
-            { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
-            { label: objectKey },
-          ]}
-        />
+      <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
+        {header}
         <Alert variant="red" description={error?.message ?? 'Failed to load object metadata'} />
         {dialogs}
       </div>
@@ -411,23 +416,28 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
   );
 }
 
-const SKELETON_CARDS = [
-  { card: 'details', height: 'h-[350px]' },
-  { card: 'api-example', height: 'h-[204px]' },
-];
-
 /**
- * One block per card, at the height of the real ones and with their spacing.
- * Version history is left out: it only shows for an object with more than one
- * version, so a placeholder for it would vanish on most objects.
+ * One block per card that waits for the metadata, at the height of the real
+ * one and with its spacing. The Version ID row (a 36px row plus a 4px gap)
+ * shows when the URL names a version, so the details block grows to match.
+ * Version history comes from the bucket listing cache, not the metadata, so
+ * the real card renders between the blocks.
  */
-function ObjectDetailSkeleton() {
+function ObjectDetailSkeleton({
+  hasVersionId,
+  versionHistory,
+}: {
+  hasVersionId: boolean;
+  versionHistory: ReactNode;
+}) {
   return (
-    <div role="status" aria-label="Loading object details" className="flex flex-col gap-6">
-      {SKELETON_CARDS.map(({ card, height }) => (
-        <Skeleton key={card} className={`rounded-xl ${height}`} />
-      ))}
-    </div>
+    <>
+      <div role="status" aria-label="Loading object details">
+        <Skeleton className={`rounded-xl ${hasVersionId ? 'h-[390px]' : 'h-[350px]'}`} />
+      </div>
+      {versionHistory}
+      <Skeleton className="mt-6 h-[204px] rounded-xl" />
+    </>
   );
 }
 
