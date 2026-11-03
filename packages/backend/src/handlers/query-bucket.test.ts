@@ -830,6 +830,22 @@ describe('query-bucket on a Forge region (Bucket Intelligence engine)', () => {
     );
   });
 
+  it('answers 200 with the citations when the engine timed out the answer', async () => {
+    const withCitations = engineQueryResponse();
+    engine.query.mockResolvedValue(engineQueryResponse({ answer: '' }));
+
+    const result = await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
+
+    expect(result.statusCode).toBe(200);
+    expect(withCitations.citations.length).toBeGreaterThan(0);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      answer: '',
+      sources: withCitations.sources,
+      citations: withCitations.citations,
+      trace: withCitations.trace,
+    });
+  });
+
   it('returns 409 BUCKET_NOT_INDEXED for a bucket never enabled', async () => {
     mockGetEnablement.mockResolvedValue(undefined);
 

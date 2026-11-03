@@ -23,6 +23,9 @@ import {
   ragEngineTarget,
   RagEngineNotConfiguredError,
   RagEngineRequestError,
+  browserSafeEngineStatus,
+  RAG_ENGINE_DEFAULT_TIMEOUT_MS,
+  RAG_ENGINE_SYNC_FAILED_MESSAGE,
   withEngineFailure,
   withEngineStatus,
 } from './rag-engine-client.ts';
@@ -294,6 +297,26 @@ describe('ragEngineErrorResponse', () => {
     expect(body.message).toContain('no full-text index');
   });
 
+  it('answers 409 saying the index is being rebuilt for NO_PHRASE_INDEX', () => {
+    const response = ragEngineErrorResponse(engineError(409, 'NO_PHRASE_INDEX'));
+    const body = JSON.parse(response.body as string);
+    expect(response.statusCode).toBe(409);
+    expect(body.code).toBeUndefined();
+    expect(body.message).toContain('being rebuilt');
+    expect(body.message).toContain('Index now');
+    expect(body.message).not.toContain('engine text');
+  });
+
+  it('answers 502 saying the tenant key could not read the bucket for S3_ACCESS_DENIED', () => {
+    const response = ragEngineErrorResponse(engineError(403, 'S3_ACCESS_DENIED'));
+    const body = JSON.parse(response.body as string);
+    expect(response.statusCode).toBe(502);
+    expect(body.code).toBeUndefined();
+    expect(body.message).toContain('could not read this bucket');
+    expect(body.message).toContain('storage key');
+    expect(body.message).not.toContain('engine text');
+  });
+
   it.each([
     ['a route 404', 404, 'NOT_FOUND'],
     ['a non-JSON 404 (wrong engine URL)', 404, undefined],
@@ -312,6 +335,29 @@ describe('ragEngineErrorResponse', () => {
   });
 });
 
+describe('browserSafeEngineStatus', () => {
+  it('replaces the engine’s raw error text and keeps the rest', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const status = engineStatus({ syncState: 'error', lastSyncError: 'fetch failed' });
+    expect(browserSafeEngineStatus(status)).toStrictEqual({
+      ...status,
+      lastSyncError: RAG_ENGINE_SYNC_FAILED_MESSAGE,
+    });
+    vi.mocked(console.warn).mockRestore();
+  });
+
+  it('returns a status with no error unchanged', () => {
+    const status = engineStatus();
+    expect(browserSafeEngineStatus(status)).toBe(status);
+  });
+});
+
+describe('RAG_ENGINE_DEFAULT_TIMEOUT_MS', () => {
+  it('allows the engine 12 s for status, versions, sync and drop', () => {
+    expect(RAG_ENGINE_DEFAULT_TIMEOUT_MS).toBe(12_000);
+  });
+});
+
 describe('withEngineStatus', () => {
   const base = { enabled: true, status: 'active' as const, filesIndexed: 0, indexSize: 0 };
 
@@ -326,13 +372,28 @@ describe('withEngineStatus', () => {
     });
   });
 
-  it('carries the engine’s error only while it is in error', () => {
+  it('reports a failed sync with fixed text and logs the engine’s text', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const merged = withEngineStatus(
       base,
-      engineStatus({ syncState: 'error', lastSyncError: 'list failed' }),
+      engineStatus({
+        syncState: 'error',
+        lastSyncError: 'Generic S3 error: PUT http://ingot:9000/filone-rag-x 503',
+      }),
     );
     expect(merged.syncState).toBe('error');
-    expect(merged.lastSyncError).toBe('list failed');
+    expect(merged.lastSyncError).toBe('The last indexing run failed. Try Index now again.');
+    expect(JSON.stringify(merged)).not.toContain('ingot');
+    expect(JSON.stringify(warn.mock.calls)).toContain('http://ingot:9000');
+    warn.mockRestore();
+  });
+
+  it('omits lastSyncError when the engine is not in error', () => {
+    const merged = withEngineStatus(
+      base,
+      engineStatus({ syncState: 'idle', lastSyncError: 'stale text' }),
+    );
+    expect(merged).not.toHaveProperty('lastSyncError');
   });
 
   it('reports an engine failure as a failed sync', () => {

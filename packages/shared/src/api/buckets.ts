@@ -32,11 +32,19 @@ const RetentionSchema = z
   );
 
 /**
+ * The exact name shape of a companion bucket: the prefix and 40 hex characters
+ * (the engine's `companionBucketName`). Only this shape is hidden, so a bucket
+ * a customer named with the prefix before it was reserved stays visible.
+ */
+const RAG_COMPANION_BUCKET_NAME = new RegExp(`^${RAG_COMPANION_BUCKET_PREFIX}[0-9a-f]{40}$`);
+
+/**
  * Whether a bucket holds Bucket Intelligence's Lance dataset rather than user
- * data. Those buckets are reserved and hidden from bucket listings.
+ * data. Those buckets are hidden from bucket listings; the whole prefix is
+ * reserved at create.
  */
 export function isRagCompanionBucket(bucketName: string): boolean {
-  return bucketName.startsWith(RAG_COMPANION_BUCKET_PREFIX);
+  return RAG_COMPANION_BUCKET_NAME.test(bucketName);
 }
 
 export const CreateBucketSchema = z
@@ -56,7 +64,7 @@ export const CreateBucketSchema = z
         BUCKET_NAME_PATTERN,
         'Lowercase letters, numbers, and hyphens only. Must start and end with a letter or number.',
       )
-      .refine((name) => !isRagCompanionBucket(name), {
+      .refine((name) => !name.startsWith(RAG_COMPANION_BUCKET_PREFIX), {
         message: `Bucket names starting with "${RAG_COMPANION_BUCKET_PREFIX}" are reserved.`,
       }),
     region: z.string().min(1, 'Region is required'),

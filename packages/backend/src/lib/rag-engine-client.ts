@@ -30,8 +30,11 @@ const LOG = '[rag-engine-client]';
 
 /** Engine answers take 10–20 s; the query route's Lambda and API Gateway allow ~29 s. */
 export const RAG_ENGINE_QUERY_TIMEOUT_MS = 27_000;
-/** Status, versions, sync (which returns 202 at once) and drop. */
-export const RAG_ENGINE_DEFAULT_TIMEOUT_MS = 8_000;
+/**
+ * Status, versions, sync (which returns 202 at once) and drop. The engine can
+ * be slow to answer while it extracts a large file; the Lambdas allow 15 s.
+ */
+export const RAG_ENGINE_DEFAULT_TIMEOUT_MS = 12_000;
 
 export interface RagEngineConfig {
   baseUrl: string;
@@ -58,7 +61,14 @@ export const RagEngineErrorCode = {
   VERSION_NOT_FOUND: 'VERSION_NOT_FOUND',
   /** Full-text or hybrid search on a version that predates the full-text index. */
   NO_FULLTEXT_INDEX: 'NO_FULLTEXT_INDEX',
+  /** Phrase search on a version whose full-text index is being rebuilt. */
+  NO_PHRASE_INDEX: 'NO_PHRASE_INDEX',
+  /** Forge storage refused the tenant's key when the engine read the bucket. */
+  S3_ACCESS_DENIED: 'S3_ACCESS_DENIED',
 } as const;
+
+/** What the browser sees for a failed engine sync; the engine's own text goes to the log. */
+export const RAG_ENGINE_SYNC_FAILED_MESSAGE = 'The last indexing run failed. Try Index now again.';
 
 /** The engine answered with a non-2xx status, timed out, or could not be reached. */
 export class RagEngineRequestError extends Error {
@@ -259,7 +269,9 @@ export async function ragEngineTarget(
  * The console response for an engine failure: 503 when the stage has no
  * engine; 409 BUCKET_NOT_INDEXED when the engine has no dataset for the bucket
  * yet; 404 when the requested version is gone; 409 with the engine's message
- * when the version has no full-text index; 502 for any other engine failure,
+ * when the version has no full-text index; 409 when the phrase index is being
+ * rebuilt; 502 with an access message when Forge storage refused the tenant's
+ * key; 502 for any other engine failure,
  * including a 404 from a wrong engine URL. Anything else is rethrown for the
  * error handler.
  */
@@ -299,6 +311,22 @@ export function ragEngineErrorResponse(error: unknown): APIGatewayProxyStructure
               'This index version has no full-text index. Search a later version or use vector search.',
           })
           .build();
+      case RagEngineErrorCode.NO_PHRASE_INDEX:
+        return new ResponseBuilder()
+          .status(409)
+          .body<ErrorResponse>({
+            message:
+              'The full-text index for this bucket is being rebuilt. Run Index now, then search again.',
+          })
+          .build();
+      case RagEngineErrorCode.S3_ACCESS_DENIED:
+        return new ResponseBuilder()
+          .status(502)
+          .body<ErrorResponse>({
+            message:
+              "The Bucket Intelligence engine could not read this bucket with your organization's storage key.",
+          })
+          .build();
     }
     return new ResponseBuilder()
       .status(502)
@@ -317,8 +345,9 @@ export function ragEngineErrorResponse(error: unknown): APIGatewayProxyStructure
  */
 export function withEngineStatus(
   response: BucketRagEnablementResponse,
-  status: RagEngineStatus,
+  engineStatus: RagEngineStatus,
 ): BucketRagEnablementResponse {
+  const status = browserSafeEngineStatus(engineStatus);
   return {
     enabled: response.enabled,
     status: response.status,
@@ -330,6 +359,17 @@ export function withEngineStatus(
       ? { lastSyncError: status.lastSyncError }
       : {}),
   };
+}
+
+/**
+ * The engine's status with `lastSyncError` replaced by fixed text. The engine
+ * stores a failed reconcile's raw exception message, which can name internal
+ * hosts and companion paths; that text is logged here and never returned.
+ */
+export function browserSafeEngineStatus(status: RagEngineStatus): RagEngineStatus {
+  if (!status.lastSyncError) return status;
+  console.warn(`${LOG} engine reports a failed sync`, { lastSyncError: status.lastSyncError });
+  return { ...status, lastSyncError: RAG_ENGINE_SYNC_FAILED_MESSAGE };
 }
 
 /**

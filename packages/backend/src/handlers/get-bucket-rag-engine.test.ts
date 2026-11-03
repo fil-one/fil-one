@@ -156,6 +156,22 @@ describe('get-bucket-rag-engine baseHandler', () => {
     });
   });
 
+  it('replaces the engine’s raw sync error with fixed text', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    engine.status.mockResolvedValue(
+      engineStatus({ syncState: 'error', lastSyncError: 'PUT http://ingot:9000/x failed' }),
+    );
+
+    const result = await baseHandler(event(S3Region.UsEast9));
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!).status.lastSyncError).toBe(
+      'The last indexing run failed. Try Index now again.',
+    );
+    expect(result.body).not.toContain('ingot');
+    vi.mocked(console.warn).mockRestore();
+  });
+
   it('answers 502 when status fails, even if versions succeeds', async () => {
     engine.status.mockRejectedValue(new RagEngineRequestError('boom', 500));
 

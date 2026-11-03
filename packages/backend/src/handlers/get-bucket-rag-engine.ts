@@ -12,6 +12,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import {
+  browserSafeEngineStatus,
   getRagEngineClient,
   ragEngineErrorResponse,
   ragEngineTarget,
@@ -89,7 +90,7 @@ export async function baseHandler(
     return new ResponseBuilder()
       .status(200)
       .body<BucketRagEngineResponse>({
-        status: status.value,
+        status: browserSafeEngineStatus(status.value),
         versions: versions.status === 'fulfilled' ? versions.value.versions : [],
       })
       .build();

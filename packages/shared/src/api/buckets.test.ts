@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { CreateBucketSchema, listBucketsUnavailableMessage } from './buckets.ts';
+import {
+  CreateBucketSchema,
+  isRagCompanionBucket,
+  listBucketsUnavailableMessage,
+} from './buckets.ts';
 import { S3Region } from '../constants.ts';
 
 const validRetention = (
@@ -253,5 +257,22 @@ describe('listBucketsUnavailableMessage', () => {
       'Cannot list buckets in the eu-west-1, us-east-1 and eu-central-3 regions. ' +
         'Please try again later.',
     );
+  });
+});
+
+describe('isRagCompanionBucket', () => {
+  it('matches the companion name shape: the prefix and 40 hex characters', () => {
+    expect(isRagCompanionBucket('filone-rag-0123456789abcdef0123456789abcdef01234567')).toBe(true);
+  });
+
+  it.each([
+    'filone-rag-docs',
+    'filone-rag-0123456789abcdef0123456789abcdef0123456',
+    'filone-rag-0123456789abcdef0123456789abcdef012345678',
+    'filone-rag-0123456789ABCDEF0123456789abcdef01234567',
+    'x-filone-rag-0123456789abcdef0123456789abcdef01234567',
+    'my-bucket',
+  ])('leaves %s visible', (name) => {
+    expect(isRagCompanionBucket(name)).toBe(false);
   });
 });
