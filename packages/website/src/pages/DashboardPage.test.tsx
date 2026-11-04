@@ -115,6 +115,17 @@ describe('DashboardPage — the plan panels', () => {
     expect(screen.getByText('$4.99/TB per month · no egress fees')).toBeInTheDocument();
   });
 
+  it('names a manually billed plan and says it is billed by agreement', async () => {
+    mockGetBilling.mockResolvedValue({
+      subscription: { planId: PlanId.Manual, status: SubscriptionStatus.Manual },
+    });
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('Custom plan')).toBeInTheDocument();
+    expect(screen.getByText('Billed by agreement')).toBeInTheDocument();
+    expect(screen.queryByText('Est. monthly cost')).not.toBeInTheDocument();
+  });
+
   it('withholds an estimate from an org whose price states no rate', async () => {
     // The card used to multiply by a hardcoded $4.99, so a contracted org was
     // shown an estimate for a rate it does not pay.

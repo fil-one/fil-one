@@ -369,6 +369,64 @@ describe('BillingPage — an organization on a negotiated price', () => {
   });
 });
 
+describe('BillingPage — an organization billed manually', () => {
+  // What get-billing reports for a sales agreement invoiced outside Stripe.
+  function manualBilling(): BillingInfo {
+    return { subscription: { planId: PlanId.Manual, status: SubscriptionStatus.Manual } };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetBilling.mockResolvedValue(manualBilling());
+    mockGetUsage.mockResolvedValue({ storage: { usedBytes: 40e12 }, egress: { usedBytes: 2e12 } });
+    mockGetInvoices.mockResolvedValue({ invoices: [] });
+  });
+
+  it('names the plan and says it is billed by agreement', async () => {
+    renderPage();
+
+    expect(await screen.findByTestId('plan-name')).toHaveTextContent('Custom plan');
+    expect(screen.getByTestId('plan-meta')).toHaveTextContent(/^Billed by agreement$/);
+  });
+
+  it('offers no plan controls, since the plan is changed through the account team', async () => {
+    const { container } = renderPage();
+
+    await screen.findByTestId('plan-name');
+    expect(container.querySelector('#billing-plan-cta-button')).toBeNull();
+    expect(container.querySelector('#billing-manage-plan-button')).toBeNull();
+  });
+
+  it('offers no Stripe portal from the payment card, since nothing is billed in Stripe', async () => {
+    const { container } = renderPage();
+
+    await screen.findByTestId('billed-by-invoice');
+    expect(container.querySelector('#billing-invoiced-manage-button')).toBeNull();
+  });
+
+  it('says the total follows the agreement rather than pointing at Stripe', async () => {
+    renderPage();
+
+    expect(await screen.findByTestId('cost-follows-agreement')).toHaveTextContent(
+      'Your total for this period follows your agreement.',
+    );
+  });
+
+  it('reads no card as invoiced, not as missing', async () => {
+    renderPage();
+
+    expect(await screen.findByTestId('billed-by-invoice')).toBeInTheDocument();
+  });
+
+  it('neither lists Stripe invoices nor fetches them', async () => {
+    renderPage();
+
+    await screen.findByTestId('plan-name');
+    expect(screen.queryByText('Invoices')).not.toBeInTheDocument();
+    expect(mockGetInvoices).not.toHaveBeenCalled();
+  });
+});
+
 describe('BillingPage — permissions', () => {
   beforeEach(() => {
     vi.clearAllMocks();

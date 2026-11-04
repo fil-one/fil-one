@@ -1,4 +1,5 @@
 import { ArrowSquareOutIcon, CreditCardIcon, ReceiptIcon } from '@phosphor-icons/react/dist/ssr';
+import { SubscriptionStatus } from '@filone/shared';
 import type { BillingInfo } from '@filone/shared';
 
 import { Button } from '../Button';
@@ -50,7 +51,8 @@ export function PaymentMethodCard({
             plan card's button beside it. */}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <h3 className="text-sm font-medium text-zinc-900">Payment method</h3>
-          {mayManage && (
+          {/* A manually billed org has nothing in Stripe to manage. */}
+          {mayManage && billing.subscription.status !== SubscriptionStatus.Manual && (
             <PaymentAction posture={posture} onManage={onManage} onAddCard={onAddCard} />
           )}
         </div>

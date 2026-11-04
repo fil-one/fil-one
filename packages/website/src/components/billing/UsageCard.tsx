@@ -1,4 +1,4 @@
-import { formatBytes } from '@filone/shared';
+import { SubscriptionStatus, formatBytes } from '@filone/shared';
 import type { Subscription } from '@filone/shared';
 
 import { Badge } from '../Badge';
@@ -154,10 +154,13 @@ export function UsageCard({ subscription, storageBytesUsed, egressBytesUsed }: U
 
         {/* No rate to multiply by, so no number. Said rather than left blank: a
             customer on a contract should not be left wondering whether the
-            console simply failed to load it. */}
+            console simply failed to load it. A manually billed org has no
+            Stripe total to point at. */}
         {cost.kind === 'agreement' && (
           <p className="text-xs text-zinc-500" data-testid="cost-follows-agreement">
-            Your total for this period is in Stripe.
+            {subscription.status === SubscriptionStatus.Manual
+              ? 'Your total for this period follows your agreement.'
+              : 'Your total for this period is in Stripe.'}
           </p>
         )}
       </div>
