@@ -113,9 +113,13 @@ export const GRACE_STATE_PROJECTION = 'subscriptionStatus, canceledAt, gracePeri
  * A condition clause, and its value, that refuses a write to an org billed by
  * hand. Stripe events about the customer such an org signed up with keep
  * arriving, and none of them may change its status or start its teardown.
+ *
+ * The clause carries no parentheses of its own: DynamoDB rejects an expression
+ * with redundant ones, and `guardAgainstScrub` already wraps a lone condition.
+ * A caller ANDing it with another clause wraps it.
  */
 export const NOT_BILLED_MANUALLY = {
-  condition: '(attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual)',
+  condition: 'attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual',
   values: { ':manual': { S: SubscriptionStatus.Manual } },
 } as const;
 

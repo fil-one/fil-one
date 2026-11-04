@@ -185,7 +185,7 @@ describe('commitStripeTriggeredDeletion', () => {
         TableName: 'BillingTable',
         Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } },
         ConditionExpression:
-          '(attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual)',
+          'attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual',
         ExpressionAttributeValues: { ':manual': { S: 'manual' } },
       },
     });
