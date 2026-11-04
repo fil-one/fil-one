@@ -7,7 +7,7 @@ import { countAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import { type ProvisionedNetwork, getProvisionedNetworks } from '../lib/region-helpers.ts';
-import type { RegionOrchestrator, TenantInfo } from '../lib/service-orchestrator.ts';
+import type { TenantInfo } from '../lib/service-orchestrator.ts';
 import {
   getRequestDeadline,
   requestDeadlineMiddleware,
