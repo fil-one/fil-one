@@ -1,5 +1,5 @@
 import type Stripe from 'stripe';
-import { SubscriptionStatus } from '@filone/shared';
+import { SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import { emitGraceExpiredWithLiveSubscription } from '../lib/grace-period-metrics.ts';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
 import {
@@ -7,9 +7,13 @@ import {
   syncTenantStatusInProvisionedRegions,
 } from '../lib/region-helpers.ts';
 import { getStripeClient, isStripeResourceMissing } from '../lib/stripe-client.ts';
-import { scanSubscriptions, updateSubscriptionByUser } from '../lib/subscription-store.ts';
+import {
+  isConditionalCheckFailure,
+  scanSubscriptions,
+  updateSubscriptionByUser,
+} from '../lib/subscription-store.ts';
 
-type Action = 'cancel' | 'write_lock';
+type Action = 'cancel' | 'write_lock' | 'start_grace';
 
 interface Candidate {
   pk: string;
@@ -95,24 +99,46 @@ export async function handler(): Promise<void> {
 
 async function processCandidate(candidate: Candidate, now: Date): Promise<CandidateOutcome> {
   if (candidate.action === 'cancel') return cancelSubscriptionAndDisableTenant(candidate, now);
+  if (candidate.action === 'start_grace') return startTrialGrace(candidate, now);
 
   return ensureTenantWriteLocked(candidate);
 }
 
-/** Scan for grace_period records, one candidate per org. */
+/**
+ * Scan for grace_period records, and trialing records whose trial has ended,
+ * one candidate per org. The console moves an expired trial into grace on the
+ * org's next request; an org that only uses its S3 keys never makes one, and
+ * Stripe's trial runs on to the grace deadline, so this is what locks it.
+ */
 async function scanGracePeriodCandidates(nowMs: number): Promise<Candidate[]> {
   return scanSubscriptions<Candidate>({
     job: 'grace-period-enforcer',
-    filterExpression: 'sk = :sk AND subscriptionStatus = :gracePeriod',
+    filterExpression:
+      'sk = :sk AND (subscriptionStatus = :gracePeriod OR (subscriptionStatus = :trialing AND trialEndsAt < :now))',
     expressionAttributeValues: {
       ':sk': { S: 'SUBSCRIPTION' },
       ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
+      ':trialing': { S: SubscriptionStatus.Trialing },
+      ':now': { S: new Date(nowMs).toISOString() },
     },
     select: (record, owner) => {
+      const subscriptionStatus = record.subscriptionStatus as string;
+      if (subscriptionStatus === SubscriptionStatus.Trialing) {
+        const trialEndsAt = record.trialEndsAt as string | undefined;
+        if (!trialEndsAt || new Date(trialEndsAt).getTime() >= nowMs) return undefined;
+        return {
+          ...owner,
+          subscriptionStatus,
+          gracePeriodEndsAt: new Date(
+            new Date(trialEndsAt).getTime() + TRIAL_GRACE_DAYS * 24 * 60 * 60 * 1000,
+          ).toISOString(),
+          action: 'start_grace',
+        };
+      }
       const gracePeriodEndsAt = record.gracePeriodEndsAt as string | undefined;
       return {
         ...owner,
-        subscriptionStatus: record.subscriptionStatus as string,
+        subscriptionStatus,
         gracePeriodEndsAt,
         // Grace period expired → cancel + DISABLE. Still active → ensure WRITE_LOCKED.
         action:
@@ -214,6 +240,30 @@ async function retrieveIfExists(subscriptionId: string): Promise<Stripe.Subscrip
     if (isStripeResourceMissing(err)) return undefined;
     throw err;
   }
+}
+
+// Trial expired — move the row into the grace period the console would have
+// started, with the same deadline, then write-lock the tenant. Only while the
+// row is still trialing: a card added since the scan has ended the trial.
+async function startTrialGrace(candidate: Candidate, now: Date): Promise<CandidateOutcome> {
+  try {
+    await updateSubscriptionByUser(candidate, {
+      UpdateExpression:
+        'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+      ExpressionAttributeValues: {
+        ':status': { S: SubscriptionStatus.GracePeriod },
+        // The scan sets the deadline on every start_grace candidate.
+        ':grace': { S: candidate.gracePeriodEndsAt! },
+        ':now': { S: now.toISOString() },
+        ':trialing': { S: SubscriptionStatus.Trialing },
+      },
+      ConditionExpression: 'subscriptionStatus = :trialing',
+    });
+  } catch (err) {
+    if (!isConditionalCheckFailure(err)) throw err;
+    return 'skipped';
+  }
+  return ensureTenantWriteLocked(candidate);
 }
 
 // Non-expired grace period — ensure every orchestrator tenant is write-locked.
