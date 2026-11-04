@@ -1117,6 +1117,8 @@ describe('POST /api/invitations/accept handler', () => {
         message:
           'Your account changed while we were setting it up. Open the invitation link again.',
       });
+      // Only the accept that lost: nothing retired the invitation afterwards.
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
     });
 
     // Two tabs open on the same link: the other one created the account and
