@@ -111,6 +111,14 @@ describe('summarizeOutcomes', () => {
     ).toMatchObject({ failed: false });
   });
 
+  it('fails when a region reports the tenant missing, since nothing was made active there', () => {
+    expect(
+      summarizeOutcomes([
+        { orchestratorId: 'aurora', tenantId: 'any-tenant-a', outcome: 'not-found' },
+      ]),
+    ).toMatchObject({ failed: true });
+  });
+
   it('fails when the org has no provisioned region, so nothing was unlocked', () => {
     expect(summarizeOutcomes([])).toStrictEqual({
       lines: ['  (no provisioned regions)'],

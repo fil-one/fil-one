@@ -156,7 +156,9 @@ const { lines, failed } = summarizeOutcomes(
 console.log('Result:');
 for (const line of lines) console.log(line);
 if (failed) {
-  console.error('\nNot every region was unlocked. Re-run to retry the ones that failed.');
+  console.error(
+    '\nNot every region was unlocked. Re-run to retry an error; a not-found tenant needs investigating.',
+  );
   process.exit(1);
 }
 console.log('\nDone.');

@@ -92,8 +92,8 @@ export function unlockWarnings(subscriptionStatus: string | undefined): string[]
 }
 
 /**
- * One line per region, and whether the run failed: a region that errored, or
- * no region at all, means the org is not unlocked.
+ * One line per region, and whether the run failed: a region that errored or
+ * has no tenant, or no region at all, means the org is not unlocked.
  */
 export function summarizeOutcomes(outcomes: RegionSyncOutcome[]): {
   lines: string[];
@@ -106,6 +106,7 @@ export function summarizeOutcomes(outcomes: RegionSyncOutcome[]): {
         outcome === 'error' ? `error: ${(cause as Error | undefined)?.message}` : outcome;
       return `  ${orchestratorId}  ${tenantId}  ${detail}`;
     }),
-    failed: outcomes.some(({ outcome }) => outcome === 'error'),
+    // A missing tenant was not made active either.
+    failed: outcomes.some(({ outcome }) => outcome === 'error' || outcome === 'not-found'),
   };
 }
