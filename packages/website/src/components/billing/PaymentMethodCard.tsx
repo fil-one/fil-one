@@ -79,7 +79,7 @@ export function PaymentMethodCard({
         {posture === 'invoiced' && (
           <div className="mt-1 flex items-center gap-3" data-testid="billed-by-invoice">
             <IconBox icon={ReceiptIcon} color="grey" size="md" />
-            <p className="text-sm text-zinc-900">Billed by invoice</p>
+            <p className="text-sm text-zinc-900">Payments via invoice</p>
           </div>
         )}
 

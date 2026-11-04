@@ -121,7 +121,7 @@ export function pricingLine(subscription: Subscription): string {
   const { pricePerTbCents, status } = subscription;
 
   if (status === SubscriptionStatus.Trialing) return '';
-  if (status === SubscriptionStatus.Manual) return 'Billed by agreement';
+  if (status === SubscriptionStatus.Manual) return 'Billed manually';
   if (pricePerTbCents) return `${formatCents(pricePerTbCents)}/TB per month`;
   if (status === SubscriptionStatus.Inactive) return 'Choose a plan to start storing data';
 

@@ -325,8 +325,8 @@ describe('an org billed manually', () => {
     expect(planTitle(MANUAL)).toBe('Custom plan');
   });
 
-  it('says it is billed by agreement instead of stating a price or a renewal', () => {
-    expect(planMetaLine(MANUAL)).toBe('Billed by agreement');
+  it('says it is billed manually instead of stating a price or a renewal', () => {
+    expect(planMetaLine(MANUAL)).toBe('Billed manually');
   });
 
   it('points at the agreement instead of estimating a bill', () => {

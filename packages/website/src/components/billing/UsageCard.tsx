@@ -159,7 +159,7 @@ export function UsageCard({ subscription, storageBytesUsed, egressBytesUsed }: U
         {cost.kind === 'agreement' && (
           <p className="text-xs text-zinc-500" data-testid="cost-follows-agreement">
             {subscription.status === SubscriptionStatus.Manual
-              ? 'Your total for this period follows your agreement.'
+              ? 'Your contract sets the total for this period.'
               : 'Your total for this period is in Stripe.'}
           </p>
         )}

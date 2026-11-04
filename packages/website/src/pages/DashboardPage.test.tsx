@@ -115,14 +115,14 @@ describe('DashboardPage — the plan panels', () => {
     expect(screen.getByText('$4.99/TB per month · no egress fees')).toBeInTheDocument();
   });
 
-  it('names a manually billed plan and says it is billed by agreement', async () => {
+  it('names a manually billed plan and says it is billed manually', async () => {
     mockGetBilling.mockResolvedValue({
       subscription: { planId: PlanId.Manual, status: SubscriptionStatus.Manual },
     });
     renderPage(OrgRole.Owner);
 
     expect(await screen.findByText('Custom plan')).toBeInTheDocument();
-    expect(screen.getByText('Billed by agreement')).toBeInTheDocument();
+    expect(screen.getByText('Billed manually')).toBeInTheDocument();
     expect(screen.queryByText('Est. monthly cost')).not.toBeInTheDocument();
   });
 

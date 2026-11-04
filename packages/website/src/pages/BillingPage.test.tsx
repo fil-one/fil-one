@@ -382,11 +382,11 @@ describe('BillingPage — an organization billed manually', () => {
     mockGetInvoices.mockResolvedValue({ invoices: [] });
   });
 
-  it('names the plan and says it is billed by agreement', async () => {
+  it('names the plan and says it is billed manually', async () => {
     renderPage();
 
     expect(await screen.findByTestId('plan-name')).toHaveTextContent('Custom plan');
-    expect(screen.getByTestId('plan-meta')).toHaveTextContent(/^Billed by agreement$/);
+    expect(screen.getByTestId('plan-meta')).toHaveTextContent(/^Billed manually$/);
   });
 
   it('offers no plan controls, since the plan is changed through the account team', async () => {
@@ -404,18 +404,20 @@ describe('BillingPage — an organization billed manually', () => {
     expect(container.querySelector('#billing-invoiced-manage-button')).toBeNull();
   });
 
-  it('says the total follows the agreement rather than pointing at Stripe', async () => {
+  it('says the contract sets the total rather than pointing at Stripe', async () => {
     renderPage();
 
     expect(await screen.findByTestId('cost-follows-agreement')).toHaveTextContent(
-      'Your total for this period follows your agreement.',
+      'Your contract sets the total for this period.',
     );
   });
 
-  it('reads no card as invoiced, not as missing', async () => {
+  it('reads no card as payments via invoice, not as missing', async () => {
     renderPage();
 
-    expect(await screen.findByTestId('billed-by-invoice')).toBeInTheDocument();
+    expect(await screen.findByTestId('billed-by-invoice')).toHaveTextContent(
+      'Payments via invoice',
+    );
   });
 
   it('neither lists Stripe invoices nor fetches them', async () => {
