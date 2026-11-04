@@ -25,21 +25,15 @@ export interface MeResponse {
   mfaEnrollments: MfaEnrollment[];
   passkeys?: PasskeyEnrollment[];
   picture?: string;
-  /**
-   * Whether the user may access the RAG feature. Computed server-side from the
-   * verified email via the shared gate predicate (Foundation domain OR runtime
-   * allowlist) so the frontend stays consistent without a second lookup.
-   */
-  ragAccess: boolean;
   /** The caller's FilOne user id — the subject of every membership row. */
   userId?: string;
   /** The caller's role in {@link MeResponse.orgId}. */
   role?: OrgRole;
   /**
-   * The permissions {@link MeResponse.role} carries, computed server-side like
-   * {@link MeResponse.ragAccess} so the console gates rendering off the same
-   * table the server enforces. The server remains the enforcement point; the UI
-   * only hides what would be refused.
+   * The permissions {@link MeResponse.role} carries, computed server-side so
+   * the console gates rendering off the same table the server enforces. The
+   * server remains the enforcement point; the UI only hides what would be
+   * refused.
    */
   permissions?: readonly Permission[];
   /** Every org the caller belongs to, for the org switcher. */
@@ -57,9 +51,8 @@ export interface MeResponse {
   floorOrg?: boolean;
   /**
    * Whether the organizations beta is switched on for this caller — their own
-   * allowlist row, or {@link MeResponse.orgId}'s. Computed server-side like
-   * {@link MeResponse.ragAccess}, from the same predicate the invitation
-   * endpoint refuses on, so the console hides a members surface the server
+   * allowlist row, or {@link MeResponse.orgId}'s. Computed
+   * server-side, from the same predicate the invitation endpoint refuses on, so the console hides a members surface the server
    * would then refuse to populate rather than discovering the refusal.
    *
    * It answers for the active org only. Switching orgs re-reads `/me`, which is
@@ -68,9 +61,8 @@ export interface MeResponse {
   orgsBeta: boolean;
   /**
    * Whether the active org has usable billing — a plan chosen, trial or paid,
-   * as opposed to never having had one. Computed server-side like
-   * {@link MeResponse.ragAccess}, and visible to every role rather than gated
-   * on `billing.view`: the console's whole-console gate has to answer for a
+   * as opposed to never having had one. Computed server-side, and
+   * visible to every role rather than gated on `billing.view`: the console's whole-console gate has to answer for a
    * Member too, who cannot read the billing detail behind why but still needs
    * to know the org is blocked and who to ask.
    */

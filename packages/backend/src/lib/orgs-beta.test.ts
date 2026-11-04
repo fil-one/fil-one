@@ -49,8 +49,7 @@ describe('hasOrgsBetaAccess', () => {
   it('ignores an unverified or absent email but still honours the org row', async () => {
     grant('ALLOWLIST#inviter@example.com');
 
-    // The address a session claims without verifying it grants nothing, the same
-    // reading the RAG gate takes.
+    // The address a session claims without verifying it grants nothing.
     expect(await hasOrgsBetaAccess({ orgId: ORG_ID })).toBe(false);
 
     grant(`ORG#${ORG_ID}`);
@@ -70,7 +69,7 @@ describe('hasOrgsBetaAccess', () => {
   });
 
   it('grants a verified @fil.org email when neither row exists', async () => {
-    // Foundation staff are in the beta by default, as they are for RAG.
+    // Foundation staff are in the beta by default.
     expect(await hasOrgsBetaAccess({ verifiedEmail: FOUNDATION_EMAIL, orgId: ORG_ID })).toBe(true);
   });
 

@@ -16,14 +16,7 @@ export type RouteCategory =
   /** No session — the Auth0 login round trip. */
   | 'public'
   /** No Middy chain; authenticated by the provider's request signature. */
-  | 'webhook'
-  /** RAG bearer token resolved by `ragQueryAuthMiddleware`, which bypasses
-   * `authMiddleware` entirely on that branch and builds the caller from the key
-   * record. That path resolves the key creator's membership itself, so a
-   * revoked creator loses the key's authority. The same route still accepts a
-   * cookie session when no `Authorization` header is present, and that caller
-   * is gated on {@link RouteManifestEntry.cookieRequires}. */
-  | 'bearer';
+  | 'webhook';
 
 /**
  * What an authenticated route asks of the caller.
@@ -72,20 +65,6 @@ export interface RouteManifestEntry {
    * whole gate is in the chain.
    */
   capsInHandler?: boolean;
-  /**
-   * Set on `bearer` routes, which accept two kinds of caller. The bearer token
-   * carries its own authority; a caller arriving with a cookie session instead
-   * is an ordinary console user and holds this permission or is refused.
-   */
-  cookieRequires?: Permission;
-  /**
-   * Set on the routes whose chain installs `ragAccessMiddleware`. RAG is behind
-   * a per-email allowlist while it is in early access, so those routes carry a
-   * second gate on top of the role one: the caller reaches the handler from a
-   * foundation address or from a row on the allowlist, and is refused
-   * otherwise.
-   */
-  ragAllowlisted?: boolean;
 }
 
 const MANIFEST = [
@@ -151,27 +130,6 @@ const MANIFEST = [
     handler: 'delete-bucket-policy',
     category: 'authenticated',
     requires: 'buckets.policy_manage',
-  },
-  {
-    method: 'GET',
-    path: '/api/buckets/{name}/rag/enabled',
-    handler: 'get-bucket-rag-enablement',
-    category: 'authenticated',
-    requires: 'buckets.read',
-    ragAllowlisted: true,
-  },
-  // Turning indexing on for a bucket is a bucket-configuration write, so it
-  // sits with bucket creation rather than with object writes; turning it off
-  // discards the index, which is destructive configuration and sits with bucket
-  // deletion. The handler branches on the body: `enabled: true` needs
-  // `buckets.create`, `enabled: false` needs `buckets.delete`.
-  {
-    method: 'POST',
-    path: '/api/buckets/{name}/rag/enabled',
-    handler: 'set-bucket-rag-enablement',
-    category: 'authenticated',
-    requires: 'in-handler',
-    ragAllowlisted: true,
   },
 
   // ── Objects ──────────────────────────────────────────────────────
@@ -265,46 +223,6 @@ const MANIFEST = [
     requires: 'keys.create',
     capsInHandler: true,
   },
-  {
-    method: 'GET',
-    path: '/api/rag-api-keys',
-    handler: 'list-rag-api-keys',
-    category: 'authenticated',
-    requires: 'keys.manage_own',
-    ragAllowlisted: true,
-  },
-  // A RAG key carries no permission vocabulary to intersect — it queries the
-  // buckets its creator could query — so creation needs no in-handler cap.
-  {
-    method: 'POST',
-    path: '/api/rag-api-keys',
-    handler: 'create-rag-api-key',
-    category: 'authenticated',
-    requires: 'keys.create',
-    ragAllowlisted: true,
-  },
-  {
-    method: 'DELETE',
-    path: '/api/rag-api-keys/{keyId}',
-    handler: 'delete-rag-api-key',
-    category: 'authenticated',
-    requires: 'keys.manage_own',
-    ragAllowlisted: true,
-  },
-
-  // ── RAG query ────────────────────────────────────────────────────
-  // Dual auth: a bearer token authenticates itself, and the same route falls
-  // back to the cookie session when no `Authorization` header is present. The
-  // cookie caller is gated like any other read of bucket contents.
-  {
-    method: 'POST',
-    path: '/api/buckets/{name}/query',
-    handler: 'query-bucket',
-    category: 'bearer',
-    cookieRequires: 'buckets.read',
-    ragAllowlisted: true,
-  },
-
   // ── Organization ─────────────────────────────────────────────────
   // Rename and ownership transfer. Deletion carries its own permission and gets
   // its own route when it ships.
@@ -660,7 +578,7 @@ export type RouteHandler = (typeof MANIFEST)[number]['handler'];
 
 /**
  * The manifest as an ordinary array of entries. Widened on purpose: consumers
- * read optional fields (`requires`, `cookieRequires`, `ragAllowlisted`) off
+ * read optional fields (`requires`, `capsInHandler`) off
  * arbitrary elements, which the union of exact literal types does not permit.
  * The handler name is the one literal worth keeping, so it survives the
  * widening and anything keyed by handler can be checked against it.

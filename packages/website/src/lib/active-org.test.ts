@@ -169,7 +169,6 @@ describe('the active org stash', () => {
         orgName: 'any-org',
         emailVerified: true,
         mfaEnrollments: [],
-        ragAccess: false,
         orgsBeta: false,
         billingActive: true,
       });

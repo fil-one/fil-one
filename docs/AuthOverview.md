@@ -314,10 +314,8 @@ The middleware also stashes the resolved `subscriptionStatus` on `event.requestC
 
 Search: `grep -rn "subscriptionGuardMiddleware" packages/backend/src/handlers`. Fifteen handlers today:
 
-- **Read-gated:** `list-buckets`, `get-bucket`, `get-bucket-analytics`, `get-bucket-rag-enablement`, `list-access-keys`, `list-rag-api-keys`, `presign`, `query-bucket`
-- **Write-gated:** `create-bucket`, `delete-bucket`, `create-access-key`, `delete-access-key`, `create-rag-api-key`, `delete-rag-api-key`, `set-bucket-rag-enablement`
-
-The RAG surface rides the same guard: `/api/rag-api-keys`, `/api/buckets/{name}/query`, and `/api/buckets/{name}/rag/enabled`.
+- **Read-gated:** `list-buckets`, `get-bucket`, `get-bucket-analytics`, `get-bucket-policy`, `get-bulk-delete-job`, `list-access-keys`, `presign`
+- **Write-gated:** `create-bucket`, `delete-bucket`, `put-bucket-policy`, `delete-bucket-policy`, `create-bulk-delete-job`, `create-access-key`, `rotate-access-key`, `delete-access-key`
 
 Notably _not_ gated: `/api/me`, `/api/me/resend-verification`, anything under `/api/auth/*`, `/api/mfa/*`, `/api/billing/*`, the org and member routes, `stripe-webhook` (signature-verified, no auth middleware at all).
 

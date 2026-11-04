@@ -102,7 +102,7 @@ export default defineConfig({
       // x.ts the way esbuild and vitest do. Relative imports name the .ts file,
       // in import declarations and in import() calls alike.
       // See docs/architectural-decisions/2026-09-node-loadable-typescript-sources.md.
-      files: ['packages/shared/**/*.ts', 'packages/rag-shared/**/*.ts', 'packages/backend/**/*.ts'],
+      files: ['packages/shared/**/*.ts', 'packages/backend/**/*.ts'],
       rules: {
         '@filone/oxlint-rules/no-js-dynamic-import': 'error',
         'no-restricted-imports': [

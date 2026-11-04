@@ -15,13 +15,8 @@ import {
   UpdateItemCommand,
   type DynamoDBClient,
 } from '@aws-sdk/client-dynamodb';
-import {
-  DeleteIndexCommand,
-  GetVectorBucketCommand,
-  type S3VectorsClient,
-} from '@aws-sdk/client-s3vectors';
 import { DeleteParametersCommand, type SSMClient } from '@aws-sdk/client-ssm';
-import { AccessKeyKeys, RAGKeys } from '@filone/backend/src/lib/dynamo-records.ts';
+import { AccessKeyKeys } from '@filone/backend/src/lib/dynamo-records.ts';
 import { OrgSetupStatus } from '@filone/backend/src/lib/org-setup-status.ts';
 import { scanAll } from './dynamo.ts';
 import {
@@ -29,7 +24,6 @@ import {
   formatResetPlan,
   type AccountPlan,
   type OrgRows,
-  type RagBucketPlan,
   type ResetPlan,
   type StoredRow,
 } from './region-reset.ts';
@@ -45,11 +39,9 @@ export interface RegionResetContext {
   region: string;
   orchestratorId: string;
   awsRegion: string;
-  tables: { userInfo: string; ragIndexer: string };
-  vectorBucket: string;
+  tables: { userInfo: string };
   dynamo: DynamoDBClient;
   ssm: SSMClient;
-  s3vectors: S3VectorsClient;
 }
 
 export interface RegionResetOptions {
@@ -83,18 +75,11 @@ export async function runRegionReset(
   ctx: RegionResetContext,
   options: RegionResetOptions,
 ): Promise<AccountFailure[]> {
-  // Read the vector bucket before the plan prints: a name that has drifted from
-  // sst.config.ts must stop the run here, not halfway through the deletes, where
-  // DeleteIndex would report every missing index as already gone.
-  await requireVectorBucket(ctx);
-
   const plan = buildResetPlan({
     stage: ctx.stage,
     region: ctx.region,
     orchestratorId: ctx.orchestratorId,
-    vectorBucket: ctx.vectorBucket,
     orgRows: await scanOrgRows(ctx),
-    ragRows: await scanRagRows(ctx),
   });
 
   if (plan.accounts.length === 0) {
@@ -123,8 +108,6 @@ export async function runRegionReset(
   console.log(`Accounts cleared: ${result.clearedAccounts}`);
   console.log(`Not provisioned in ${ctx.region}: ${plan.notProvisioned}`);
   console.log(`Access-key rows deleted: ${result.accessKeysDeleted}`);
-  console.log(`RAG rows deleted: ${result.ragRowsDeleted}`);
-  console.log(`S3 Vectors indexes dropped: ${result.indexesDropped}`);
   console.log(`SSM parameters deleted: ${result.ssmParametersDeleted}`);
   for (const line of options.summarize?.() ?? []) console.log(line);
   console.log(`Backup: ${options.backupPath}`);
@@ -141,8 +124,6 @@ export interface ApplyResult {
   clearedAccounts: number;
   accessKeysDeleted: number;
   ssmParametersDeleted: number;
-  ragRowsDeleted: number;
-  indexesDropped: number;
   failures: AccountFailure[];
 }
 
@@ -156,8 +137,6 @@ export async function applyResetPlan(
     clearedAccounts: 0,
     accessKeysDeleted: 0,
     ssmParametersDeleted: 0,
-    ragRowsDeleted: 0,
-    indexesDropped: 0,
     failures: [],
   };
 
@@ -168,15 +147,6 @@ export async function applyResetPlan(
     if (failure) {
       result.failures.push(failure);
       continue;
-    }
-
-    for (const bucket of account.ragBuckets) {
-      // The index goes before its rows, because the rows are the only record of
-      // which index exists: the reverse order would strand an index nothing can
-      // name. That is the opposite of purgeRagBucket in deletion-scrub.ts, which
-      // can afford it because the deletion record survives to drive a retry.
-      result.indexesDropped += await dropRagIndex(ctx, account.orgId, bucket);
-      result.ragRowsDeleted += await deleteRows(ctx, ctx.tables.ragIndexer, bucket.rows);
     }
 
     result.accessKeysDeleted += await deleteRows(ctx, ctx.tables.userInfo, account.accessKeys);
@@ -208,28 +178,11 @@ async function runBeforeAccount(
 }
 
 /**
- * The vector bucket the RAG indexes live in, read so the run stops on a name
- * that no longer exists.
- */
-async function requireVectorBucket(ctx: RegionResetContext): Promise<void> {
-  try {
-    await ctx.s3vectors.send(new GetVectorBucketCommand({ vectorBucketName: ctx.vectorBucket }));
-  } catch (err) {
-    console.error(
-      `Could not read vector bucket "${ctx.vectorBucket}" in ${ctx.awsRegion}: ` +
-        `${err instanceof Error ? err.message : String(err)}\n` +
-        "Check the RagVectorBucket name in sst.config.ts and the profile's s3vectors permissions.",
-    );
-    process.exit(1);
-  }
-}
-
-/**
  * Every ORG# row in one pass, bucketed by partition key, so each account is
  * planned with its access keys already in hand.
  *
- * Both inventory scans read consistently: a row written moments before the
- * run must be in the plan, or the reset deletes around it and reports success.
+ * The scan reads consistently: a row written moments before the run must be in
+ * the plan, or the reset deletes around it and reports success.
  */
 async function scanOrgRows(ctx: RegionResetContext): Promise<Map<string, OrgRows>> {
   const result = new Map<string, OrgRows>();
@@ -258,31 +211,6 @@ async function scanOrgRows(ctx: RegionResetContext): Promise<Map<string, OrgRows
 }
 
 /**
- * Every RAG row keyed by a bucket or a checkpoint.
- *
- * The region sits in the partition key, so the filter cannot name it; the plan
- * keeps the rows whose key parses to the target region. The org-level
- * `RAGCONFIG` row is keyed `ORG#{orgId}` and stays out of both prefixes.
- */
-async function scanRagRows(ctx: RegionResetContext): Promise<StoredRow[]> {
-  const rows: StoredRow[] = [];
-
-  for await (const item of scanAll(ctx.dynamo, {
-    TableName: ctx.tables.ragIndexer,
-    ConsistentRead: true,
-    FilterExpression: 'begins_with(pk, :bucketPrefix) OR begins_with(pk, :checkpointPrefix)',
-    ExpressionAttributeValues: {
-      ':bucketPrefix': { S: RAGKeys.bucketPkPrefix() },
-      ':checkpointPrefix': { S: RAGKeys.checkpointPkPrefix() },
-    },
-  })) {
-    rows.push(item);
-  }
-
-  return rows;
-}
-
-/**
  * The plan as a file, written before anything is deleted.
  *
  * It carries the full stored rows rather than a summary, because that is what
@@ -303,8 +231,7 @@ function writeBackup(
     tenantIdAttribute: `${ctx.orchestratorId}TenantId`,
     awsRegion: ctx.awsRegion,
     generatedAt: new Date().toISOString(),
-    tables: { userInfo: ctx.tables.userInfo, ragIndexer: ctx.tables.ragIndexer },
-    vectorBucket: ctx.vectorBucket,
+    tables: { userInfo: ctx.tables.userInfo },
     accounts: resetPlan.accounts,
   };
 
@@ -338,42 +265,11 @@ async function confirm(question: string): Promise<void> {
 }
 
 /**
- * Drop one bucket's S3 Vectors index.
- *
- * A missing index comes back as NotFoundException rather than throwing the run
- * over, which is what makes a re-run — or a run interrupted between the index
- * and its rows — safe. The same rule as `S3VectorsStore.dropIndex` in
- * packages/rag-shared/src/s3-vectors-store.ts; this copy prints the outcome per
- * bucket and counts it, which the store does not.
- */
-async function dropRagIndex(
-  ctx: RegionResetContext,
-  orgId: string,
-  bucket: RagBucketPlan,
-): Promise<number> {
-  try {
-    await ctx.s3vectors.send(
-      new DeleteIndexCommand({ vectorBucketName: ctx.vectorBucket, indexName: bucket.indexName }),
-    );
-    console.log(`      dropped index ${bucket.indexName} (${bucket.bucketName})`);
-    return 1;
-  } catch (err) {
-    if ((err as { name?: string }).name === 'NotFoundException') {
-      console.warn(`      no index ${bucket.indexName} (${bucket.bucketName}) — already gone`);
-      return 0;
-    }
-    throw err;
-  }
-}
-
-/**
  * Delete rows by key, retrying the ones DynamoDB hands back.
  *
  * A throttled `BatchWriteItem` returns the keys it did not write in
- * `UnprocessedItems` rather than failing, and a bucket's manifest is one row
- * per indexed object — enough rows to hit that. Counting a batch as deleted
- * without checking would overstate the total and leave rows behind whose index
- * is already gone, so the run retries with the same backoff shape as
+ * `UnprocessedItems` rather than failing. Counting a batch as deleted without
+ * checking would overstate the total and leave rows behind, so the run retries with the same backoff shape as
  * `transactWithRetry` in bin/lib/dynamo.ts and stops if they keep coming back.
  */
 async function deleteRows(

@@ -39,7 +39,6 @@ function me(
     emailVerified: true,
     email: 'user@example.com',
     mfaEnrollments: [],
-    ragAccess: true,
     orgsBeta: true,
     billingActive: true,
     userId: 'user-1',

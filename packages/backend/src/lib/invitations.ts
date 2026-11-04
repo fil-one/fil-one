@@ -22,10 +22,8 @@ import { OrgKeys } from './org-membership.ts';
  *   invited address, the role, who issued it, a status, and an expiry, plus the
  *   token's SHA-256. Never the token.
  * - `INVITETOKEN#{sha256(token)}` / `LOOKUP` — the inverse item an accept link
- *   resolves through, the same idiom as `RAGKEYHASH#…/LOOKUP`
- *   (`lib/rag-api-keys.ts`) and for the same reason: the table has no GSIs, so
- *   the only way to find a row by something other than its key is to make that
- *   something a key.
+ *   resolves through. The table has no GSIs, so the only way to find a row by
+ *   something other than its key is to make that something a key.
  *
  * Two properties are worth naming because the whole design turns on them.
  *
@@ -78,8 +76,7 @@ export interface InvitationRecord {
   expiresAt: string;
   /**
    * SHA-256 of the token, the address of the lookup row. Held here so revoking
-   * and accepting can delete that row without the token — exactly what
-   * `RagKeyRecord.tokenHash` is for.
+   * and accepting can delete that row without the token.
    */
   tokenHash: string;
   /**
@@ -100,7 +97,7 @@ export interface InvitationRecord {
  * it. An invitation is the opposite question — did this session's verified
  * address receive this invitation — so the only safe normalization is the one
  * that changes nothing but case, which is also what the beta allowlist key uses
- * (`middleware/rag-access.ts`).
+ * (`lib/orgs-beta.ts`).
  */
 export function normalizeInviteEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -112,7 +109,7 @@ export function newInviteToken(): string {
 }
 
 /**
- * Hash a token for storage and lookup. Unsalted SHA-256, as with RAG keys: the
+ * Hash a token for storage and lookup. Unsalted SHA-256: the
  * input is a 256-bit random value rather than a guessable secret, and equal
  * tokens have to reach equal keys for the lookup to work at all.
  */

@@ -46,8 +46,6 @@ vi.mock('sst', () =>
     ForgeManagementApiToken: { value: 'test-forge-token' },
     ForgeDevManagementApiToken: { value: 'test-forge-dev-token' },
     FthManagementApiToken: { value: 'test-fth-token' },
-    RagIndexerTable: { name: 'RagIndexerTable' },
-    RagVectorBucket: { name: 'RagVectorBucket' },
     SendGridApiKey: { value: 'test-sendgrid-key' },
     StripePriceId: { value: 'price_test_fake' },
     StripePublishableKey: { value: 'pk_test_fake' },
@@ -109,13 +107,11 @@ function quietRefusalLog(): void {
 
 /**
  * Every route that expects a session — the permission-gated ones, the
- * body-dependent ones, the self-service ones, and the RAG query route on its
- * cookie branch, which delegates to the same middleware when no Authorization
- * header is present.
+ * body-dependent ones and the self-service ones.
  */
-const behindASession = ROUTE_MANIFEST.filter(
-  (route) => route.category === 'authenticated' || route.category === 'bearer',
-).map((route) => route.handler);
+const behindASession = ROUTE_MANIFEST.filter((route) => route.category === 'authenticated').map(
+  (route) => route.handler,
+);
 
 describe('routes behind a session refuse a request carrying no credentials', () => {
   quietRefusalLog();

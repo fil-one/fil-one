@@ -1,5 +1,4 @@
 import type { OrgMembershipSource, OrgRole } from './api/org.ts';
-import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
 
 /**
  * The audit event envelope: what the control plane appends and what the M2
@@ -601,6 +600,9 @@ export const AUDIT_RETENTION_DAYS = 90;
  * row an operator is looking at.
  */
 export const AUDIT_KEY_ID_SUFFIX_LENGTH = 4;
+
+/** Characters of a RAG key token the console listed, e.g. `sk_rag_AbC12`. */
+export const RAG_KEY_DISPLAY_PREFIX_LENGTH = 12;
 
 /**
  * The characters of a key an event records, by kind.

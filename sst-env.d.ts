@@ -138,10 +138,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "CreateRagApiKey": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
     "CreateSetupIntent": {
       "name": string
       "type": "sst.aws.Function"
@@ -163,10 +159,6 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "DeletePasskey": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "DeleteRagApiKey": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -219,10 +211,6 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "GetBucketPolicy": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "GetBucketRagEnablement": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -290,10 +278,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "ListRagApiKeys": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
     "OrgLogoBucket": {
       "name": string
       "type": "sst.aws.Bucket"
@@ -330,27 +314,6 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "QueryBucket": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "RagIndexerOrchestrator": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "RagIndexerTable": {
-      "name": string
-      "type": "sst.aws.Dynamo"
-    }
-    "RagIndexerWorker": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "RagVectorBucket": {
-      "arn": string
-      "name": string
-      "type": "sst.sst.Linkable"
-    }
     "RegenerateRecoveryCode": {
       "name": string
       "type": "sst.aws.Function"
@@ -372,10 +335,6 @@ declare module "sst" {
       "type": "sst.aws.Function"
     }
     "RotateAccessKey": {
-      "name": string
-      "type": "sst.aws.Function"
-    }
-    "SetBucketRagEnablement": {
       "name": string
       "type": "sst.aws.Function"
     }

@@ -20,8 +20,6 @@ export const ApiErrorCode = {
   EMAIL_NOT_VERIFIED: 'EMAIL_NOT_VERIFIED',
   /** The email domain is a known disposable/temporary address provider. */
   DISPOSABLE_EMAIL_BLOCKED: 'DISPOSABLE_EMAIL_BLOCKED',
-  /** The bucket's first indexing pass has not completed — RAG queries are unavailable. */
-  BUCKET_NOT_INDEXED: 'BUCKET_NOT_INDEXED',
   /** The bucket still holds objects or object versions — it must be emptied before deletion. */
   BUCKET_NOT_EMPTY: 'BUCKET_NOT_EMPTY',
   /** The submitted account-deletion code does not match the issued one. */

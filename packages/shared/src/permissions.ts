@@ -48,7 +48,7 @@ export const PERMISSIONS = [
   'objects.write',
   /** Delete objects (console and presign). */
   'objects.delete',
-  /** Mint a new access key or RAG key. */
+  /** Mint a new access key. */
   'keys.create',
   /** List and revoke keys the caller created. */
   'keys.manage_own',

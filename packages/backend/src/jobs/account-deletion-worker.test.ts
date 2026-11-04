@@ -1,11 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import {
-  DeleteItemCommand,
-  DynamoDBClient,
-  GetItemCommand,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import type { DeletionMember } from '../lib/deletion-record.ts';
 
@@ -17,10 +12,6 @@ const order: string[] = [];
 const mockTearDownStripe = vi.fn(async (..._args: unknown[]) => void order.push('stripe'));
 const mockScrub = vi.fn(async () => void order.push('scrub'));
 const mockDeleteAuth0User = vi.fn(async (sub: string) => void order.push(`auth0:${sub}`));
-const mockGetAuth0UserEmail = vi.fn(async (sub: string) => {
-  order.push(`email:${sub}`);
-  return 'user@example.com' as string | undefined;
-});
 const AVATAR_URL = 'https://logos.example/avatars/me.png';
 const LOGO_URL = 'https://logos.example/logos/org.png';
 const mockGetAuth0UserPicture = vi.fn(async (sub: string) => {
@@ -49,7 +40,6 @@ vi.mock('../lib/deletion-targets.ts', () => ({
 }));
 vi.mock('../lib/auth0-management.ts', () => ({
   deleteAuth0User: (sub: string) => mockDeleteAuth0User(sub),
-  getAuth0UserEmail: (sub: string) => mockGetAuth0UserEmail(sub),
   getAuth0UserPicture: (sub: string) => mockGetAuth0UserPicture(sub),
 }));
 vi.mock('../lib/avatar-storage.ts', () => ({
@@ -105,13 +95,13 @@ describe('account-deletion-worker', () => {
     mockGetAvailableOrchestrators.mockReturnValue([orchestrator('fth')]);
   });
 
-  // Auth0 first because it holds the only copy of the email keying ALLOWLIST#, and
-  // the scrub last because it destroys the rows the earlier steps read.
+  // Auth0 first because it holds the only record of which avatar is the
+  // account's, and the scrub last because it destroys the rows the earlier
+  // steps read.
   it('runs Auth0, Stripe, tenants and the scrub in that order', async () => {
     await handler({ orgId: ORG });
 
     expect(order).toEqual([
-      'email:auth0|one',
       'picture:auth0|one',
       `avatar:${AVATAR_URL}`,
       'auth0:auth0|one',
@@ -141,18 +131,11 @@ describe('account-deletion-worker', () => {
 
     // Erasure must not finish with a public image left behind; a retry re-deletes.
     it.each([
-      ['avatar', mockDeleteReplacedAvatar, ['email:auth0|one', 'picture:auth0|one']],
+      ['avatar', mockDeleteReplacedAvatar, ['picture:auth0|one']],
       [
         'logo',
         mockDeleteReplacedOrgLogo,
-        [
-          'email:auth0|one',
-          'picture:auth0|one',
-          `avatar:${AVATAR_URL}`,
-          'auth0:auth0|one',
-          'stripe',
-          'tenant:42',
-        ],
+        ['picture:auth0|one', `avatar:${AVATAR_URL}`, 'auth0:auth0|one', 'stripe', 'tenant:42'],
       ],
     ])('stops for a retry when the %s delete fails', async (_label, mock, ranBefore) => {
       mock.mockRejectedValueOnce(new Error('S3 down'));
@@ -176,27 +159,6 @@ describe('account-deletion-worker', () => {
     ]);
   });
 
-  describe('the allowlist row', () => {
-    it('is revoked while Auth0 can still resolve the email that keys it', async () => {
-      await handler({ orgId: ORG });
-
-      expect(ddbMock.commandCalls(DeleteItemCommand)[0]!.args[0].input.Key).toEqual({
-        pk: { S: 'ALLOWLIST#user@example.com' },
-        sk: { S: 'RAG' },
-      });
-    });
-
-    // A previous pass already deleted the user, so the row is already gone too.
-    it('is skipped when the lookup 404s, and the user delete still runs', async () => {
-      mockGetAuth0UserEmail.mockResolvedValueOnce(undefined);
-
-      await handler({ orgId: ORG });
-
-      expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(0);
-      expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|one');
-    });
-  });
-
   describe('a member whose account outlives the org', () => {
     beforeEach(() => {
       mockResolveTargets.mockResolvedValue({
@@ -215,7 +177,7 @@ describe('account-deletion-worker', () => {
 
     // They belong to another org, or were invited into this one. The org is going
     // away; their login is not.
-    it('leaves their Auth0 user and their allowlist row alone', async () => {
+    it('leaves their Auth0 user alone', async () => {
       const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
       try {
@@ -223,10 +185,8 @@ describe('account-deletion-worker', () => {
 
         expect(mockDeleteAuth0User).toHaveBeenCalledTimes(1);
         expect(mockDeleteAuth0User).toHaveBeenCalledWith('auth0|two');
-        expect(mockGetAuth0UserEmail).not.toHaveBeenCalledWith('auth0|one');
         // Their avatar goes with the account, and the account is staying.
         expect(mockGetAuth0UserPicture).not.toHaveBeenCalledWith('auth0|one');
-        expect(ddbMock.commandCalls(DeleteItemCommand)).toHaveLength(1);
       } finally {
         log.mockRestore();
       }

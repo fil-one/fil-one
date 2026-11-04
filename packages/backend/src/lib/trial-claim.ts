@@ -19,8 +19,6 @@ import type { UserInfo } from './user-context.ts';
 export type TrialClaimOutcome =
   /** A trial now exists for this org. */
   | 'claimed'
-  /** An API key session; `sub` names a credential, not a person who can hold a claim. */
-  | 'api-key-session'
   /** Somebody else's org, or one of several — the claim is not spendable here. */
   | 'not-own-org'
   /** Eligible to claim, but the entitlement is already spent (or the email is unverified). */
@@ -58,8 +56,7 @@ export function isTrialClaimable(record: SubscriptionRecord | undefined): boolea
  * how many orgs the caller belongs to.
  */
 export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialClaimOutcome> {
-  const { sub, userId, orgId, email, emailVerified, apiKeySession } = userInfo;
-  if (apiKeySession) return 'api-key-session';
+  const { sub, userId, orgId, email, emailVerified } = userInfo;
 
   if (!(await isSoloPersonalOrg(userInfo))) return 'not-own-org';
 

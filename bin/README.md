@@ -154,7 +154,7 @@ there is none, because `GET /me` reports `orgId` beside `userId` and both are
 UUIDs — an id taken from the wrong field would otherwise be written as a grant
 that reads back in `list` and grants nothing.
 
-Like `rag-access.ts`, this talks to AWS directly with your ambient credentials
+This talks to AWS directly with your ambient credentials
 rather than through `sst shell`, which cannot evaluate pulumi providers against
 production. Set `AWS_PROFILE` first.
 
@@ -174,8 +174,7 @@ reset takes the region away from every account at once. Every other stage
 allows every region the script knows. The check runs before the first AWS call.
 
 **Scan, plan, confirm.** The run prints one line per account — its tenant id,
-its access-key count, its RAG buckets with the S3 Vectors index behind each,
-and its SSM parameters — then asks for the literal `yes` on stdin. `--dry-run`
+its access-key count and its SSM parameters — then asks for the literal `yes` on stdin. `--dry-run`
 prints the plan and exits, `--yes` applies without prompting, and a run
 carrying both stays a dry run. An account that `AccountDeletionWorker` is
 already tearing down is marked in its plan line and reset like any other:
@@ -184,8 +183,8 @@ tenant is gone.
 
 **A run with something to reset writes a backup.** A JSON file, `--dry-run`
 included, holding the stored rows the run is about to delete: the tenant id,
-the profile attributes and their prior values, the `ACCESSKEY#` rows, the RAG
-rows with their index names, and the SSM parameter names. It refuses to
+the profile attributes and their prior values, the `ACCESSKEY#` rows, and the
+SSM parameter names. It refuses to
 overwrite an existing file, and `--backup <path>` names it. A run that finds no
 account provisioned in the region writes nothing.
 
@@ -194,8 +193,7 @@ the upstream tenant under the recorded tenant id and re-write the profile
 attributes. Access keys cannot be restored: the file carries no secret material,
 and a freshly minted key comes with a fresh secret that only the customer
 creating it ever sees. The recorded `ACCESSKEY#` rows are the list of keys each
-customer would have to re-create. RAG indexes would come back by re-enabling RAG
-and letting the indexer sync.
+customer would have to re-create.
 
 **What the reset leaves in place.** The orchestrators are never called, so
 upstream tenants, buckets and access keys stay where they are — the reset
@@ -205,11 +203,9 @@ tenants as well. `OrgTable` holds membership only and is not
 read. There is no DynamoDB PITR, so the printed plan is the only audit trail;
 capture stdout with `| tee reset-region.log`.
 
-Applying needs a role that can write UserInfoTable and RagIndexerTable, delete
-SSM parameters, and call `s3vectors:GetVectorBucket` and
-`s3vectors:DeleteIndex`. A read-only profile that can read the vector bucket
-gets as far as the plan and the backup, then fails on the first write; one that
-cannot stops before the scan.
+Applying needs a role that can write UserInfoTable and delete SSM parameters. A
+read-only profile gets as far as the plan and the backup, then fails on the
+first write.
 
 ## Resetting a stage on a Forge network
 
@@ -264,7 +260,7 @@ and read access to the stage's SST secrets.
 | `revert-billing-backfill.ts`       | Undo `backfill-billing-to-org.ts` — deletes only the org rows it wrote                                                                                                                                         |
 | `prefill-trial-entitlement-org.ts` | Stamp the org a trial went to on each pre-existing `TRIAL_ENTITLEMENT` claim, and record it on the account's own claim; dry run by default, `--execute` writes. Run before deploying PR 717 (multi-org part 4) |
 | `orgs-beta.ts`                     | Grant, revoke, list, and check the organizations beta flag (see above)                                                                                                                                         |
-| `rag-access.ts`                    | Enable, disable, or check RAG access for one email                                                                                                                                                             |
+| `purge-rag-data.ts`                | Delete the data Bucket Intelligence left on a stage: RAG rows in UserInfoTable, the S3 Vectors bucket, and the RagIndexerTable. Run after the removal deploys; dry run by default, `--execute` deletes         |
 | `extend-trial.ts`                  | Reset a non-production test account back to a fresh `trialing` state, across Stripe, BillingTable, Aurora, and FTH                                                                                             |
 | `tail-logs.sh`                     | Tail CloudWatch logs for a Lambda function                                                                                                                                                                     |
 | `tail-tenant-setup-logs.sh`        | Tail logs for the Aurora tenant setup Lambda                                                                                                                                                                   |

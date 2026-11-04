@@ -63,9 +63,8 @@ export interface S3ErrorContext {
 // callers' `err.name` and `instanceof` checks keep working. The context is
 // attached as an enumerable property instead of appended to `err.message`:
 // console.error prints enumerable error properties (like the SDK's $metadata),
-// while `err.message` escapes to end users in some paths (e.g. the RAG
-// indexer persists it as lastSyncError, which the enablement API returns)
-// and must not carry tenant ids or internal endpoints.
+// while `err.message` can escape to end users and must not carry tenant ids
+// or internal endpoints.
 function decorateS3Error(
   err: unknown,
   ctx: S3ClientContext,

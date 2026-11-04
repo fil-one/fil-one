@@ -5,37 +5,17 @@ import {
   DeleteItemCommand,
   DynamoDBClient,
   QueryCommand,
-  ScanCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { S3Region } from '@filone/shared';
 
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
     BillingTable: { name: 'BillingTable' },
-    RagIndexerTable: { name: 'RagIndexerTable' },
-    RagVectorBucket: { name: 'rag-vectors' },
     OrgTable: { name: 'OrgTable' },
     AuditLog: { name: 'AuditTable' },
   },
-}));
-
-const mockDropIndex = vi.fn(async () => undefined);
-vi.mock('@filone/rag-shared', () => ({
-  S3VectorsStore: class {
-    dropIndex = (...args: unknown[]) => mockDropIndex(...(args as []));
-  },
-}));
-
-const mockLoadManifest = vi.fn(async () => new Map<string, unknown>());
-const mockDeleteManifestEntry = vi.fn(async () => undefined);
-const mockClearCheckpoint = vi.fn(async () => undefined);
-vi.mock('../jobs/rag-indexer-manifest.ts', () => ({
-  loadManifest: () => mockLoadManifest(),
-  deleteManifestEntry: (...args: unknown[]) => mockDeleteManifestEntry(...(args as [])),
-  clearCheckpoint: (...args: unknown[]) => mockClearCheckpoint(...(args as [])),
 }));
 
 const ddbMock = mockClient(DynamoDBClient);
@@ -99,7 +79,6 @@ function orgRow(sk: string, extra: Record<string, unknown> = {}) {
 /** No rows anywhere unless a test says otherwise. */
 function stubEmpty() {
   ddbMock.on(QueryCommand).resolves({ Items: [] });
-  ddbMock.on(ScanCommand).resolves({ Items: [] });
   ddbMock.on(DeleteItemCommand).resolves({});
   ddbMock.on(UpdateItemCommand).resolves({});
 }
@@ -108,7 +87,6 @@ describe('scrubOrgRecords', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.clearAllMocks();
-    mockLoadManifest.mockResolvedValue(new Map());
     stubEmpty();
   });
 
@@ -119,16 +97,13 @@ describe('scrubOrgRecords', () => {
         orgRow('PROFILE'),
         orgRow('MEMBER#user-1'),
         orgRow('ACCESSKEY#ak-1'),
-        orgRow('RAGKEY#key-1', { tokenHash: 'hash-1' }),
       ],
     });
 
     await scrubOrgRecords(ORG, MEMBERS);
 
     expect(deletedKeys()).toEqual([
-      'UserInfoTable:RAGKEYHASH#hash-1/LOOKUP',
       `UserInfoTable:ORG#${ORG}/ACCESSKEY#ak-1`,
-      `UserInfoTable:ORG#${ORG}/RAGKEY#key-1`,
       'UserInfoTable:USER#user-1/AVATAR_UPLOAD_RATE',
       // The member's inverse item, from the member list rather than the OrgTable
       // partition: it is the row that would otherwise leave them holding a
@@ -171,22 +146,6 @@ describe('scrubOrgRecords', () => {
     );
     expect(update.ExpressionAttributeNames).toEqual({ '#name': 'name' });
     expect(update.ConditionExpression).toBe('attribute_exists(pk)');
-  });
-
-  // A lookup pk derives from the tokenHash on the RAGKEY# row, so deleting the
-  // partition first would leave rows nothing can ever find again.
-  it('deletes RAG key lookup rows before the partition that names them', async () => {
-    ddbMock.on(QueryCommand, { TableName: 'UserInfoTable' }).resolves({
-      Items: [orgRow('RAGKEY#key-1', { tokenHash: 'hash-1' }), orgRow('MEMBER#user-1')],
-    });
-
-    await scrubOrgRecords(ORG, MEMBERS);
-
-    const keys = deletedKeys();
-    const lookup = keys.indexOf('UserInfoTable:RAGKEYHASH#hash-1/LOOKUP');
-    const ragKey = keys.indexOf(`UserInfoTable:ORG#${ORG}/RAGKEY#key-1`);
-    expect(lookup).toBeGreaterThanOrEqual(0);
-    expect(lookup).toBeLessThan(ragKey);
   });
 
   // Emptying the row would break auth: it branches on the row holding both ids,
@@ -257,69 +216,6 @@ describe('scrubOrgRecords', () => {
       .rejects(new ConditionalCheckFailedException({ $metadata: {}, message: 'nope' }));
 
     await expect(scrubOrgRecords(ORG, MEMBERS)).resolves.toBeUndefined();
-  });
-
-  describe('RAG state', () => {
-    const BUCKET_PK = `BUCKET#${ORG}#${S3Region.EuWest1}#docs`;
-
-    it('purges manifests, the enablement row, the checkpoint and the vector index', async () => {
-      ddbMock.on(ScanCommand).resolves({ Items: [marshall({ pk: BUCKET_PK })] });
-      mockLoadManifest.mockResolvedValue(new Map([['reports/q1.pdf', {}]]));
-
-      await scrubOrgRecords(ORG, MEMBERS);
-
-      expect(mockDeleteManifestEntry).toHaveBeenCalledWith(
-        ORG,
-        S3Region.EuWest1,
-        'docs',
-        'reports/q1.pdf',
-      );
-      expect(deletedKeys()).toContain(`RagIndexerTable:${BUCKET_PK}/RAG`);
-      expect(mockClearCheckpoint).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'docs');
-      expect(mockDropIndex).toHaveBeenCalledWith(ORG, S3Region.EuWest1, 'docs');
-    });
-
-    // The sk is rebuilt by the same builder that wrote it, so a '#' in the key
-    // cannot be mangled by a split.
-    it('handles an objectKey containing the key delimiter', async () => {
-      ddbMock.on(ScanCommand).resolves({ Items: [marshall({ pk: BUCKET_PK })] });
-      mockLoadManifest.mockResolvedValue(new Map([['odd#name#2.pdf', {}]]));
-
-      await scrubOrgRecords(ORG, MEMBERS);
-
-      expect(mockDeleteManifestEntry).toHaveBeenCalledWith(
-        ORG,
-        S3Region.EuWest1,
-        'docs',
-        'odd#name#2.pdf',
-      );
-    });
-
-    it('purges a bucket known only from its checkpoint row, exactly once', async () => {
-      ddbMock.on(ScanCommand).resolves({
-        Items: [
-          marshall({ pk: BUCKET_PK }),
-          marshall({ pk: `INDEXER_CHECKPOINT#${ORG}#${S3Region.EuWest1}#docs` }),
-        ],
-      });
-
-      await scrubOrgRecords(ORG, MEMBERS);
-
-      expect(mockDropIndex).toHaveBeenCalledTimes(1);
-      expect(mockClearCheckpoint).toHaveBeenCalledTimes(1);
-    });
-
-    it('scans only this org, for both pk shapes', async () => {
-      await scrubOrgRecords(ORG, MEMBERS);
-
-      const scan = ddbMock.commandCalls(ScanCommand)[0]!.args[0].input;
-      expect(scan.FilterExpression).toBe(
-        'begins_with(pk, :bucket) OR begins_with(pk, :checkpoint)',
-      );
-      expect(scan.ExpressionAttributeValues).toEqual(
-        marshall({ ':bucket': `BUCKET#${ORG}#`, ':checkpoint': `INDEXER_CHECKPOINT#${ORG}#` }),
-      );
-    });
   });
 
   describe('the OrgTable rows', () => {
@@ -416,8 +312,7 @@ describe('scrubOrgRecords', () => {
       expect(query.ConsistentRead).toBe(true);
     });
 
-    // The lookup pk derives from the tokenHash on the invitation row, the same
-    // ordering the RAG key lookups need.
+    // The lookup pk derives from the tokenHash on the invitation row.
     it('deletes an invite token lookup before the invitation that names it', async () => {
       stubOrgTable([orgTableRow('INVITE#invite-1', { tokenHash: 'invite-hash' })]);
 

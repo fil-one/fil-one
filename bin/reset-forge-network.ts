@@ -51,7 +51,6 @@
 import { parseArgs } from 'node:util';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { LambdaClient } from '@aws-sdk/client-lambda';
-import { S3VectorsClient } from '@aws-sdk/client-s3vectors';
 import { SSMClient } from '@aws-sdk/client-ssm';
 import { extractApiMessage } from '@filone/backend/src/lib/orchestrator/api-message.ts';
 import { FilOneOrchestrator } from '@filone/backend/src/lib/orchestrator/orchestrator.ts';
@@ -91,9 +90,6 @@ try {
 
 const orchestratorId = ORCHESTRATOR_ID_BY_REGION[region];
 
-// Keep in sync with the RagVectorBucket name in sst.config.ts.
-const vectorBucket = `filone-${stage}-rag-vectors`;
-
 const backupPath =
   args.backup ??
   `forge-network-backup-${stage}-${networkName}-${new Date().toISOString().replaceAll(':', '-')}.json`;
@@ -101,11 +97,7 @@ const backupPath =
 requireAwsProfile();
 
 const resources = exportStageState(stage);
-const tables = resolveStageTables(
-  stage,
-  { userInfo: '::UserInfoTableTable', ragIndexer: '::RagIndexerTableTable' },
-  resources,
-);
+const tables = resolveStageTables(stage, { userInfo: '::UserInfoTableTable' }, resources);
 assertStageResources(stage, tables);
 
 // From the table's ARN: a personal stage lives wherever AWS_REGION pointed when
@@ -134,8 +126,7 @@ console.log(
 );
 console.log(`  stage=${stage} awsRegion=${awsRegion}`);
 console.log(`  Management API=${forgeApi.baseUrl}`);
-console.log(`  UserInfoTable=${tables.userInfo} RagIndexerTable=${tables.ragIndexer}`);
-console.log(`  vector bucket=${vectorBucket}`);
+console.log(`  UserInfoTable=${tables.userInfo}`);
 console.log('');
 
 let tenantsDeleted = 0;
@@ -147,10 +138,8 @@ const failures = await runRegionReset(
     orchestratorId,
     awsRegion,
     tables,
-    vectorBucket,
     dynamo: new DynamoDBClient({ region: awsRegion }),
     ssm: new SSMClient({ region: awsRegion }),
-    s3vectors: new S3VectorsClient({ region: awsRegion }),
   },
   {
     backupPath,

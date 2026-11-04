@@ -1194,7 +1194,7 @@ describe('get-billing baseHandler', () => {
       expect(body.subscription).toMatchObject({ status: SubscriptionStatus.Trialing });
     });
 
-    it.each(['not-own-org', 'not-entitled', 'api-key-session'] as const)(
+    it.each(['not-own-org', 'not-entitled'] as const)(
       'reports inactive, without writing, when the claim answers %s',
       async (outcome) => {
         ddbMock.on(GetItemCommand).resolves({});

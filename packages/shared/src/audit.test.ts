@@ -12,8 +12,8 @@ import {
   auditKeyIdSuffix,
   isAuditEventType,
   looksLikeCredential,
+  RAG_KEY_DISPLAY_PREFIX_LENGTH,
 } from './audit.ts';
-import { RAG_KEY_DISPLAY_PREFIX_LENGTH } from './api/rag-api-keys.ts';
 
 /**
  * Every event type the ADRs name, transcribed from them rather than derived
@@ -118,7 +118,7 @@ describe('auditKeyIdSuffix', () => {
 
   it('keeps the leading display prefix of a RAG key, which is what the console lists', () => {
     // Four trailing characters of a random token match nothing on screen; the
-    // prefix is the string RagPipelineKeysTab renders beside the key's name.
+    // prefix is the string the console rendered beside the key's name.
     expect(auditKeyIdSuffix('rag', 'sk_rag_AbC12rest-of-the-token')).toBe('sk_rag_AbC12');
     expect(auditKeyIdSuffix('rag', 'sk_rag_AbC12rest-of-the-token')).toHaveLength(
       RAG_KEY_DISPLAY_PREFIX_LENGTH,

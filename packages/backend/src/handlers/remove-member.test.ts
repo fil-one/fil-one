@@ -752,7 +752,7 @@ describe('DELETE /api/org/members/{userId} handler', () => {
   it('leaves the membership transaction free of key rows', async () => {
     // A key is revoked at its orchestrator and delisted by its own `key.deleted`
     // completion, never inside the membership write: those are separate
-    // transactions, and the RAG keys are outside the pass entirely.
+    // transactions.
     stubMemberKeys({ permissions: ['read'] });
 
     await handler(removeEvent(), buildContext());
@@ -760,7 +760,6 @@ describe('DELETE /api/org/members/{userId} handler', () => {
     const written = JSON.stringify(transactItems());
     // The mint-sequence fence rides this transaction; a key row never does.
     expect(written).not.toContain('ACCESSKEY#');
-    expect(written).not.toContain('RAGKEY');
   });
 
   it('revokes every key the departing member created, and nobody else’s', async () => {
