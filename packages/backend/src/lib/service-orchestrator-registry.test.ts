@@ -163,3 +163,19 @@ describe('orchestratorSupportsIamMethods', () => {
     }
   });
 });
+
+describe('getOrchestratorForRegion refusals', () => {
+  it('refuses a region the stage does not serve', () => {
+    process.env.FILONE_STAGE = Stage.Production;
+    expect(() => getOrchestratorForRegion(S3Region.EuCentral3)).toThrow(
+      /Unsupported region "eu-central-3"/,
+    );
+  });
+
+  it('refuses a value that is not a region at all', () => {
+    process.env.FILONE_STAGE = Stage.Staging;
+    expect(() => getOrchestratorForRegion('mars-1' as S3Region)).toThrow(
+      /Unsupported region "mars-1"/,
+    );
+  });
+});
