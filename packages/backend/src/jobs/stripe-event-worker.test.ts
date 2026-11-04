@@ -846,7 +846,7 @@ describe('stripe-event-worker handler', () => {
           ':manual': { S: SubscriptionStatus.Manual },
         },
         ConditionExpression:
-          'attribute_exists(pk) AND (((attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual)) AND attribute_not_exists(deletedAt))',
+          'attribute_exists(pk) AND ((attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual) AND attribute_not_exists(deletedAt))',
       });
 
       const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();

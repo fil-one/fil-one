@@ -343,7 +343,7 @@ async function updateBillingRecord({
       },
       // A late event for the subscription Stripe ended may not revive the row;
       // an event for a new subscription id, after reactivation, still writes.
-      ConditionExpression: `(attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND ${NOT_BILLED_MANUALLY.condition}`,
+      ConditionExpression: `(attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND (${NOT_BILLED_MANUALLY.condition})`,
       guardAgainstScrub: { caller: 'subscription.updated' },
     },
   );
