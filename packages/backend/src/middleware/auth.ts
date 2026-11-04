@@ -105,7 +105,7 @@ import { CSRF_COOKIE_NAME } from '@filone/shared';
 import {
   AccountDeletedError,
   AccountDeletionInProgressError,
-  hasDeletionFinished,
+  decideRejoinAfterDeletion,
   isIdentityTombstoned,
 } from '../lib/identity-tombstone.ts';
 import type { TombstonedIdentityRow } from '../lib/identity-tombstone.ts';
@@ -405,9 +405,8 @@ interface ResolvedIdentity {
 }
 
 /**
- * A deleted account, let back in once its deletion has finished. The scrub
- * stamps the identity before the teardown's last steps run, so the stamp alone
- * does not say it has.
+ * A deleted account, let back in once its deletion has finished, and only when
+ * the person asked for that deletion themselves.
  */
 async function resolveRejoiningAccount(
   identityRow: TombstonedIdentityRow,
@@ -416,9 +415,9 @@ async function resolveRejoiningAccount(
   const deletedOrgId = identityRow.orgId?.S;
   // A row naming no org has no deletion to wait for, and none to prove finished.
   if (!deletedOrgId) throw new AccountDeletedError();
-  if (!(await hasDeletionFinished(deletedOrgId))) {
-    throw new AccountDeletionInProgressError('account');
-  }
+  const decision = await decideRejoinAfterDeletion(deletedOrgId);
+  if (decision === 'wait') throw new AccountDeletionInProgressError('account');
+  if (decision === 'refuse') throw new AccountDeletedError();
   return { kind: 'rejoining', deletedAt: identityRow.deletedAt.S, ...pendingAccountFields(claims) };
 }
 

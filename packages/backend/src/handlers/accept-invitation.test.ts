@@ -10,6 +10,7 @@ import {
 import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
+import type { DeletionTrigger } from '../lib/deletion-record.ts';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
@@ -290,7 +291,7 @@ function stubIdentityRow(item: Record<string, AttributeValue> | undefined) {
 }
 
 /** An identity the account deletion stamped, and the state of that deletion. */
-function stubDeletedAccount(status: 'PENDING' | 'DONE') {
+function stubDeletedAccount(status: 'PENDING' | 'DONE', trigger: DeletionTrigger = 'USER_REQUEST') {
   stubIdentityRow({
     pk: { S: `SUB#${MOCK_SUB}` },
     sk: { S: 'IDENTITY' },
@@ -303,7 +304,7 @@ function stubDeletedAccount(status: 'PENDING' | 'DONE') {
       TableName: 'UserInfoTable',
       Key: { pk: { S: `ORG#${DELETED_ORG_ID}` }, sk: { S: 'DELETION' } },
     })
-    .resolves({ Item: { status: { S: status } } });
+    .resolves({ Item: { status: { S: status }, trigger: { S: trigger } } });
 }
 
 function putAt(items: TransactWriteItem[], pk: string) {
@@ -1174,6 +1175,21 @@ describe('POST /api/invitations/accept handler', () => {
       expect(identity!.Item!.userId.S).not.toBe(DELETED_USER_ID);
       expect(identity!.Item!.deletedAt).toBeUndefined();
     });
+
+    // Deleting the Stripe customer is the response to trial abuse, and an
+    // operator deletion is a decision made about the account, not by it.
+    it.each(['STRIPE_CUSTOMER_DELETED', 'OPERATOR'] as const)(
+      'refuses as a deleted account, and writes nothing, when the deletion was triggered by %s',
+      async (trigger) => {
+        stubDeletedAccount('DONE', trigger);
+
+        const result = await handler(acceptEvent(), buildContext());
+
+        expect(result).toMatchObject({ statusCode: 410 });
+        expect(body(result)).toMatchObject({ code: ApiErrorCode.ACCOUNT_DELETED });
+        expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+      },
+    );
 
     it('answers that the deletion is still running, and writes nothing, until it finishes', async () => {
       stubDeletedAccount('PENDING');
