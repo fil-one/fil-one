@@ -26,6 +26,7 @@ export interface StatusBadge {
 export function statusBadge(status: SubscriptionStatus): StatusBadge {
   switch (status) {
     case SubscriptionStatus.Active:
+    case SubscriptionStatus.Manual:
       return { label: 'Active', tone: 'green', dot: true };
     // Past due is active access with a failed payment. The banner above the
     // cards is what says so; a red pill here would read as cancelled.

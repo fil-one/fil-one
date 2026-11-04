@@ -16,6 +16,8 @@ export type ActivateSubscriptionRequest = z.input<typeof ActivateSubscriptionReq
 export const PlanId = {
   FreeTrial: 'free_trial',
   PayAsYouGo: 'pay_as_you_go',
+  /** Billed by hand under a sales agreement; see `SubscriptionStatus.Manual`. */
+  Manual: 'manual',
   /**
    * Read-model value only: reported by `GET /api/billing` when the account has
    * no entitlement (no billing record, or a record without a subscription
@@ -31,6 +33,12 @@ export const SubscriptionStatus = {
   PastDue: 'past_due',
   Canceled: 'canceled',
   GracePeriod: 'grace_period',
+  /**
+   * Billed by hand under a sales agreement, outside Stripe. Set only by ops
+   * (`bin/set-manual-billing.ts`), never by a Stripe event, and never returned
+   * by `mapStripeStatus`.
+   */
+  Manual: 'manual',
   /**
    * Read-model value only: the subscription-guard denies these accounts with
    * `SUBSCRIPTION_INACTIVE`, and `GET /api/billing` reports the same state

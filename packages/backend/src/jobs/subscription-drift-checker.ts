@@ -81,17 +81,20 @@ export async function handler(): Promise<void> {
 async function scanActiveSubscriptions(): Promise<ActiveCandidate[]> {
   return scanSubscriptions<ActiveCandidate>({
     job: 'subscription-drift-checker',
+    // A manually billed org is entitled to active tenants just as a paying one is.
     filterExpression:
-      'sk = :sk AND subscriptionStatus = :active AND attribute_not_exists(deletedAt)',
+      'sk = :sk AND (subscriptionStatus = :active OR subscriptionStatus = :manual) ' +
+      'AND attribute_not_exists(deletedAt)',
     expressionAttributeValues: {
       ':sk': { S: 'SUBSCRIPTION' },
       ':active': { S: SubscriptionStatus.Active },
+      ':manual': { S: SubscriptionStatus.Manual },
     },
     select: (_record, owner) => owner,
   });
 }
 
-// Probes a single org against a single orchestrator. An active subscription is
+// Probes a single org against a single orchestrator. An active or manually billed subscription is
 // expected to map to an `active` tenant; anything else (locked/disabled/missing)
 // is drift. Each orchestrator resolves its own tenant from the pre-fetched
 // PROFILE row via isTenantReady, so an org legitimately absent from an
