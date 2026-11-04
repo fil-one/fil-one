@@ -568,7 +568,7 @@ describe('usage-reporting-worker', () => {
       expect(auditItem()).toEqual(
         expect.objectContaining({
           orgSyncAction: { S: 'reconciled:customer-deleted' },
-          // The reconciliation disabled the tenant in all provisioned regions.
+          // The reconciliation disabled the tenant on every provisioned network.
           lockAction: { S: 'disabled' },
           reportedToStripe: { BOOL: false },
         }),

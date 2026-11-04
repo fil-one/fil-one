@@ -1,7 +1,7 @@
 import type Stripe from 'stripe';
 import type { DeletionMember } from './deletion-record.ts';
 import { reportOrgUsage } from './org-usage-report.ts';
-import { syncTenantStatusInProvisionedRegions } from './region-helpers.ts';
+import { syncTenantStatusInProvisionedNetworks } from './region-helpers.ts';
 import { getStripeClient, isStripeResourceMissing } from './stripe-client.ts';
 import { getSubscription } from './subscription-store.ts';
 import type { SubscriptionRecord } from './dynamo-records.ts';
@@ -34,7 +34,7 @@ const TEARDOWN_PROJECTION = 'stripeCustomerId, subscriptionId, currentPeriodStar
  * and so does every re-drive after the first.
  */
 export async function tearDownStripe(orgId: string, _members: DeletionMember[]): Promise<void> {
-  await syncTenantStatusInProvisionedRegions(orgId, 'disabled');
+  await syncTenantStatusInProvisionedNetworks(orgId, 'disabled');
 
   // Consistent: the row may have been written moments earlier, and a stale read
   // that missed the customer would leave a live subscription behind.

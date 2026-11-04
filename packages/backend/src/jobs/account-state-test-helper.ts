@@ -1,9 +1,9 @@
 import { PAID_GRACE_DAYS, Stage, SubscriptionStatus, TRIAL_GRACE_DAYS } from '@filone/shared';
 import type { TenantStatus } from '@filone/shared';
 import {
-  assertRegionSyncSucceeded,
-  syncTenantStatusInProvisionedRegions,
-  type RegionSyncOutcome,
+  assertTenantSyncSucceeded,
+  syncTenantStatusInProvisionedNetworks,
+  type TenantSyncOutcome,
 } from '../lib/region-helpers.ts';
 import { listMemberships } from '../lib/org-membership.ts';
 import {
@@ -41,7 +41,7 @@ export interface AccountStateTestHelperEvent {
 export interface AccountStateTestHelperResult {
   orgId: string;
   subscriptionStatus: SubscriptionStatus;
-  regions: Array<Pick<RegionSyncOutcome, 'orchestratorId' | 'tenantId' | 'outcome'>>;
+  regions: Array<Pick<TenantSyncOutcome, 'orchestratorId' | 'tenantId' | 'outcome'>>;
 }
 
 interface AccountStateDefinition {
@@ -125,7 +125,7 @@ export async function handler(event: unknown): Promise<AccountStateTestHelperRes
   // Production disables the tenants before it writes `canceled` (the grace-period
   // enforcer). It writes the row before it re-activates them (activate-subscription)
   // or write-locks them (the Stripe cancellation).
-  let outcomes: RegionSyncOutcome[];
+  let outcomes: TenantSyncOutcome[];
   if (definition.tenantStatus === 'disabled') {
     outcomes = await syncTenants(orgId, definition.tenantStatus);
     await writeBillingRow(orgId, userId, definition);
@@ -195,10 +195,10 @@ async function resolveHomeOrgId(userId: string): Promise<string> {
   );
 }
 
-async function syncTenants(orgId: string, status: TenantStatus): Promise<RegionSyncOutcome[]> {
+async function syncTenants(orgId: string, status: TenantStatus): Promise<TenantSyncOutcome[]> {
   // Consistent, so a region provisioned moments ago is not skipped.
-  const outcomes = await syncTenantStatusInProvisionedRegions(orgId, status, { consistent: true });
-  assertRegionSyncSucceeded(outcomes);
+  const outcomes = await syncTenantStatusInProvisionedNetworks(orgId, status, { consistent: true });
+  assertTenantSyncSucceeded(outcomes);
   return outcomes;
 }
 
