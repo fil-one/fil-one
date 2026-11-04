@@ -106,6 +106,27 @@ export function csvResponse(body: string, filename: string): APIGatewayProxyStru
   };
 }
 
+/**
+ * The key's row names a storage network this stage does not offer, so there is
+ * no orchestrator to act on it. Same class of answer as an unsupported region.
+ *
+ * The network's id is an internal name, so it goes to the log rather than to
+ * the caller, who can act on neither it nor the condition.
+ */
+export function accessKeyNetworkUnavailableResponse(
+  orchestratorId: string,
+): APIGatewayProxyStructuredResultV2 {
+  console.error('[access-key] No orchestrator is available for the network holding this key', {
+    orchestratorId,
+  });
+  return new ResponseBuilder()
+    .status(400)
+    .body<ErrorResponse>({
+      message: 'The storage network holding this access key is not available',
+    })
+    .build();
+}
+
 export function unsupportedRegionResponse(region: string): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(400)

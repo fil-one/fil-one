@@ -5,12 +5,12 @@ import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
-let regionsWithoutTenant: S3Region[] = [];
+let networksWithoutTenant: string[] = [];
 vi.mock('./service-orchestrator-registry.ts', () => ({
-  getOrchestratorForRegion: (region: S3Region) => ({
-    id: 'aurora',
-    region,
-    isTenantReady: () => (regionsWithoutTenant.includes(region) ? null : `tenant:${region}`),
+  findOrchestratorById: (id: string) => ({
+    id,
+    regions: [id === 'fth' ? S3Region.UsEast1 : S3Region.EuWest1],
+    isTenantReady: () => (networksWithoutTenant.includes(id) ? null : `tenant:${id}`),
     deleteAccessKey: vi.fn(),
   }),
 }));
@@ -34,12 +34,12 @@ const ADMIN_1 = '00000000-0000-0000-0000-0000000000a1';
 const ORG_ID = 'org-1';
 const ACTOR = userActor({ userId: ADMIN_1 });
 
-function keyToRevoke(id: string, region: S3Region = S3Region.UsEast1): AccessKeyToRevoke {
+function keyToRevoke(id: string, orchestratorId = 'fth'): AccessKeyToRevoke {
   return {
     id,
     keyName: `key ${id}`,
     accessKeyId: `AKIAEXAMPLE${id}`,
-    region,
+    orchestratorId,
     createdAt: '2026-02-01T00:00:00.000Z',
     createdBy: MEMBER_1,
     reason: 'exceeds_role',
@@ -47,7 +47,7 @@ function keyToRevoke(id: string, region: S3Region = S3Region.UsEast1): AccessKey
   };
 }
 
-const KEYS = [keyToRevoke('0001'), keyToRevoke('0002', S3Region.EuWest1), keyToRevoke('0003')];
+const KEYS = [keyToRevoke('0001'), keyToRevoke('0002', 'aurora'), keyToRevoke('0003')];
 
 function revoke() {
   return revokeMemberKeys({
@@ -72,7 +72,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   mockRevokeAccessKey.mockResolvedValue(undefined);
-  regionsWithoutTenant = [];
+  networksWithoutTenant = [];
 });
 
 describe('revokeMemberKeys', () => {
@@ -120,9 +120,9 @@ describe('revokeMemberKeys', () => {
     expect(vi.mocked(console.error).mock.calls[0]?.[0]).toContain('its row survives');
   });
 
-  it('treats a region with no tenant as a refusal rather than a crash, and the rest proceed', async () => {
+  it('treats a network with no tenant as a refusal rather than a crash, and the rest proceed', async () => {
     // Nothing to revoke at, which is a key still live like any other refusal.
-    regionsWithoutTenant = [S3Region.EuWest1];
+    networksWithoutTenant = ['aurora'];
 
     const outcome = await revoke();
 

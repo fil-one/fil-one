@@ -23,7 +23,7 @@ const backupKey: ServiceAccessKey = {
   permissions: ['read', 'list'],
   bucketScope: 'specific',
   buckets: ['backups', 'archives'],
-  region: S3Region.UsEast1,
+  regions: [S3Region.UsEast1],
 };
 
 const mockKeys: AccessKey[] = [
@@ -36,7 +36,7 @@ const mockKeys: AccessKey[] = [
     status: 'active',
     permissions: ['read', 'write', 'list'],
     bucketScope: 'all',
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
   },
   backupKey,
   {
@@ -49,7 +49,7 @@ const mockKeys: AccessKey[] = [
     expiresAt: '2026-03-01',
     permissions: ['read'],
     bucketScope: 'all',
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
   },
 ];
 
@@ -73,7 +73,7 @@ const keysWithBucketPermissions: AccessKey[] = [
     ],
     granularPermissions: ['GetObjectVersion', 'PutObjectRetention'],
     bucketScope: 'all',
-    region: S3Region.UsEast1,
+    regions: [S3Region.UsEast1],
   },
   {
     id: '11',
@@ -85,7 +85,7 @@ const keysWithBucketPermissions: AccessKey[] = [
     permissions: ['read', 'list', 'GetBucketVersioning', 'GetBucketObjectLockConfiguration'],
     bucketScope: 'specific',
     buckets: ['backups'],
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
   },
 ];
 
@@ -115,9 +115,9 @@ export const WithPrincipalKey: Story = {
         accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
         createdAt: '2026-09-16T12:00:00Z',
         status: 'active',
-        region: S3Region.UsEast9,
+        regions: [S3Region.UsEast9],
       },
-      { ...mockKeys[0], region: S3Region.UsEast9 },
+      { ...mockKeys[0], regions: [S3Region.UsEast9] },
     ],
     showRegion: true,
     showBuckets: true,
@@ -300,7 +300,7 @@ export const WithManyPermissions: Story = {
         permissions: ['read', 'write', 'list', 'GetBucketVersioning'],
         granularPermissions: ['GetObjectVersion', 'GetObjectRetention'],
         bucketScope: 'all',
-        region: S3Region.EuWest1,
+        regions: [S3Region.EuWest1],
       },
     ],
     showRegion: true,

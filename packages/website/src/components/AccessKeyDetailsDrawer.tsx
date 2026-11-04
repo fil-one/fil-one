@@ -219,14 +219,17 @@ function KeyFacts({
         </Fact>
       )}
       <Fact label="Type">{accessKey.type === 'principal' ? 'Personal' : 'Service'}</Fact>
-      {accessKey.region && (
-        <Fact label="Region">
-          <div className="flex items-center gap-2">
-            <RegionFlag region={accessKey.region} />
-            <span>
-              {getRegionLabel(accessKey.region)}{' '}
-              <span className="text-zinc-500">{accessKey.region}</span>
-            </span>
+      {accessKey.regions.length > 0 && (
+        <Fact label={accessKey.regions.length > 1 ? 'Regions' : 'Region'}>
+          <div className="flex flex-col gap-1">
+            {accessKey.regions.map((region) => (
+              <div key={region} className="flex items-center gap-2">
+                <RegionFlag region={region} />
+                <span>
+                  {getRegionLabel(region)} <span className="text-zinc-500">{region}</span>
+                </span>
+              </div>
+            ))}
           </div>
         </Fact>
       )}
@@ -277,7 +280,9 @@ function BucketsSection({
   }
 
   const buckets = accessKey.buckets ?? [];
-  const region = accessKey.region ?? S3_REGION;
+  // The bucket list is addressed in one region; a key spanning several works
+  // at each, so the first stands for the network here.
+  const region = accessKey.regions[0] ?? S3_REGION;
   const shown = showAll ? buckets : buckets.slice(0, BUCKETS_SHOWN_MAX);
   return (
     <DrawerSection
