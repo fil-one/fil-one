@@ -12,6 +12,12 @@ export const ApiErrorCode = {
    * the account holder to fix their own payment method.
    */
   ORG_BILLING_INACTIVE: 'ORG_BILLING_INACTIVE',
+  /**
+   * The org's Stripe customer already has a live subscription the billing row
+   * does not name. Activating would bill the customer twice, so nothing was
+   * created; support reconciles the two.
+   */
+  SUBSCRIPTION_CONFLICT: 'SUBSCRIPTION_CONFLICT',
   /** Promo code is invalid, expired, or inactive. */
   INVALID_PROMOTION_CODE: 'INVALID_PROMOTION_CODE',
   /** Trial accounts cannot generate presigned URLs — upgrade required. */
