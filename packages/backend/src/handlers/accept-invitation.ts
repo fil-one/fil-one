@@ -31,7 +31,7 @@ import { resolveMembership } from '../lib/org-membership.ts';
 import { isGuardRejection, orgNotDeletingCheck, resolveOrgSummary } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { accountDeletionInProgressResponse, ResponseBuilder } from '../lib/response-builder.ts';
-import type { AccountCreatingEvent, PendingAccount } from '../lib/user-context.ts';
+import type { AccountCreationEvent, PendingAccount } from '../lib/user-context.ts';
 import { getUserInfo, isPendingAccountEvent } from '../lib/user-context.ts';
 import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -88,7 +88,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * only two moments the control plane learns a verified address.
  */
 export async function baseHandler(
-  event: AccountCreatingEvent,
+  event: AccountCreationEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const caller = isPendingAccountEvent(event)
     ? event.requestContext.pendingAccount
@@ -146,7 +146,7 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return await acceptFailureResponse(err, labels, {
+    return await acceptInvitationFailureResponse(err, labels, {
       invitation,
       sub,
       userId,
@@ -335,7 +335,7 @@ function acceptedEvent({
  * case arriving by another route, so it re-reads and answers success rather than
  * telling somebody who is now a member that their invitation failed.
  */
-async function acceptFailureResponse(
+async function acceptInvitationFailureResponse(
   err: unknown,
   labels: string[],
   {

@@ -161,7 +161,7 @@ export async function baseHandler(
       email: targetProfile?.email,
     }),
   ]);
-  const transactionFor = (invitations: InvitationRecord[]) =>
+  const buildRemovalTransaction = (invitations: InvitationRecord[]) =>
     removalTransaction({
       orgId,
       targetUserId,
@@ -175,13 +175,13 @@ export async function baseHandler(
   // later, by `commitAfterRevokingKeys`.
   const { now, later } = planRevocations(
     invitationsToRevoke,
-    transactionFor([]).items.length + KEY_MINT_FENCE_ITEMS,
+    buildRemovalTransaction([]).items.length + KEY_MINT_FENCE_ITEMS,
   );
 
   const refusal = await refuseBeforeRevokingKeys(orgId, wasOwner);
   if (refusal) return refusal;
 
-  const { items, failure } = transactionFor(now);
+  const { items, failure } = buildRemovalTransaction(now);
 
   const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   const { keysToRevoke, fence } = await reviewKeysForRoleChange(orgId, targetUserId, NO_ROLE);

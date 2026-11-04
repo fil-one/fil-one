@@ -99,9 +99,9 @@ export interface PendingAccountEvent extends APIGatewayProxyEventV2 {
 }
 
 /** What a route with deferred account creation receives. */
-export type AccountCreatingEvent = AuthenticatedEvent | PendingAccountEvent;
+export type AccountCreationEvent = AuthenticatedEvent | PendingAccountEvent;
 
-export function isPendingAccountEvent(event: AccountCreatingEvent): event is PendingAccountEvent {
+export function isPendingAccountEvent(event: AccountCreationEvent): event is PendingAccountEvent {
   return 'pendingAccount' in event.requestContext;
 }
 
