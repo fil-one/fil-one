@@ -54,19 +54,13 @@ function forbiddenRoleResponse(message: string): APIGatewayProxyStructuredResult
 /**
  * Count a caller refused for having no membership row.
  *
- * A console session and a RAG key are counted apart, because the two mean
- * different things. `NotAMemberDenialCount` is the conversion's alarm: every
- * account is supposed to have a row, so a non-zero count says a cohort was
- * missed, and the runbook reads it that way. A key whose creator has left the
- * org is the design working — `RevokedKeyCreatorDenialCount` records it without
- * putting a lockout page on somebody's screen. The route is the only dimension:
- * it is bounded by the manifest, while org and user ids are not.
+ * `NotAMemberDenialCount` is the conversion's alarm: every account is supposed
+ * to have a row, so a non-zero count says a cohort was missed, and the runbook
+ * reads it that way. The route is the only dimension: it is bounded by the
+ * manifest, while org and user ids are not.
  */
-function reportNotAMember(
-  event: APIGatewayProxyEventV2,
-  { orgId, userId, apiKeySession }: UserInfo,
-): void {
-  const metric = apiKeySession ? 'RevokedKeyCreatorDenialCount' : 'NotAMemberDenialCount';
+function reportNotAMember(event: APIGatewayProxyEventV2, { orgId, userId }: UserInfo): void {
+  const metric = 'NotAMemberDenialCount';
   reportMetric({
     _aws: {
       Timestamp: Date.now(),
@@ -81,21 +75,14 @@ function reportNotAMember(
     route: event.requestContext.routeKey,
     [metric]: 1,
   });
-  console.error(
-    apiKeySession
-      ? '[authorize] Denied — the RAG key creator has no membership row in the key org'
-      : '[authorize] Denied — the caller has no membership row in the active org',
-    { orgId, userId, route: event.requestContext.routeKey },
-  );
+  console.error('[authorize] Denied — the caller has no membership row in the active org', {
+    orgId,
+    userId,
+    route: event.requestContext.routeKey,
+  });
 }
 
-/**
- * Refuse a caller with no membership row, counting the denial.
- *
- * The whole check for a caller whose authority is the membership itself rather
- * than a permission: the RAG bearer token carries its own authority, and what
- * it needs from the org is that its creator is still in it.
- */
+/** Refuse a caller with no membership row, counting the denial. */
 export function requireMembership(
   event: AuthenticatedEvent,
 ): APIGatewayProxyStructuredResultV2 | undefined {
@@ -124,10 +111,10 @@ export function requireMembership(
  * Check one permission against the caller's membership, returning the denial
  * response or undefined when the caller holds it.
  *
- * Exported because four routes serve several requirements through one path —
- * presign's seven operations, the key-creation cap, RAG enablement on and off,
- * the org rename — and their checks must speak the same registry and produce
- * the same two error codes as the middleware. `denialMessage` names what was
+ * Exported because three routes serve several requirements through one path —
+ * presign's seven operations, the key-creation cap, the org rename — and their
+ * checks must speak the same registry and produce the same two error codes as
+ * the middleware. `denialMessage` names what was
  * refused, which is the difference between "your role cannot do that" and a
  * message a support agent can act on.
  */

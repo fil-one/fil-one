@@ -7,7 +7,6 @@ import {
   DeleteBucketPolicyCommand,
   GetBucketPolicyCommand,
   GetBucketVersioningCommand,
-  GetObjectCommand,
   GetObjectLockConfigurationCommand,
   ListBucketsCommand,
   ListObjectsV2Command,
@@ -257,38 +256,6 @@ export async function listObjects(options: ListObjectsOptions): Promise<ListObje
     objects,
     nextToken: result.NextContinuationToken,
     isTruncated: result.IsTruncated ?? false,
-  };
-}
-
-export interface GetObjectBytesResult {
-  bytes: Uint8Array;
-  /** The object's stored Content-Type, when S3 reports one. */
-  contentType?: string;
-}
-
-/**
- * Fetch a single object's bytes and stored content type. Used by the RAG
- * indexer to read object contents for extraction. The content type comes from
- * GetObject's response (no extra HeadObject call); callers fall back to a
- * key-extension guess when S3 reports nothing useful.
- */
-export async function getObjectBytes(
-  s3: S3Client,
-  bucket: string,
-  key: string,
-  requestOptions?: S3RequestOptions,
-): Promise<GetObjectBytesResult> {
-  const result = await s3.send(
-    new GetObjectCommand({ Bucket: bucket, Key: key }),
-    toSendOptions(requestOptions),
-  );
-  if (!result.Body) {
-    throw new Error(`Object "${key}" in bucket "${bucket}" returned an empty body`);
-  }
-  const bytes = await result.Body.transformToByteArray();
-  return {
-    bytes,
-    ...(result.ContentType && { contentType: result.ContentType }),
   };
 }
 

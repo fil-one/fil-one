@@ -7,7 +7,6 @@ import { permissionsForRole } from '@filone/shared';
 import { shownPicture } from '../lib/avatar-storage.ts';
 import { getOrgProfile, orgSummary } from '../lib/org-profile.ts';
 import { summarizeMemberships } from '../lib/org-membership.ts';
-import { hasRagAccess } from '../middleware/rag-access.ts';
 import { hasOrgsBetaAccess } from '../lib/orgs-beta.ts';
 import { getSubscription } from '../lib/subscription-store.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
@@ -54,14 +53,13 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
   // is supposed to introduce it.
   const activeOrgProfile = getOrgProfile(orgId, { consistentRead: true });
 
-  const [orgProfile, enrollments, passkeys, ragAccess, orgsBeta, memberships, billingActive] =
+  const [orgProfile, enrollments, passkeys, orgsBeta, memberships, billingActive] =
     await Promise.all([
       activeOrgProfile,
       includeMfa ? getMfaEnrollments(sub) : Promise.resolve([]),
       includeMfa && connectionType === 'auth0'
         ? getPasskeyAuthenticators(sub)
         : Promise.resolve([]),
-      hasRagAccess(verifiedEmail),
       // The same predicate `POST /api/org/invitations` refuses on, asked here so
       // the console can leave the surface out rather than render it and collect a
       // 403 from the first thing the caller reaches for.
@@ -105,7 +103,6 @@ async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyRe
     }),
     picture: shownPicture(picture, connectionType),
     connectionType,
-    ragAccess,
     userId,
     ...(membership && { role: membership.role }),
     // Derived from the role on the way out rather than cached beside it, and

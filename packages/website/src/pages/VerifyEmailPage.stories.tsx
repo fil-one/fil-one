@@ -10,7 +10,6 @@ const me: MeResponse = {
   emailVerified: false,
   email: 'jane@acme.com',
   mfaEnrollments: [],
-  ragAccess: false,
   orgsBeta: false,
   billingActive: true,
 };

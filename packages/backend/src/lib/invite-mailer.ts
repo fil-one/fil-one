@@ -197,9 +197,8 @@ function getLogoUrl(acceptUrl: string): string | undefined {
 
 /**
  * How every line in this module names an invitation: by the ids that address the
- * row and the address it went to. Never the accept URL, and so never the token —
- * "logged by id, never by hash" is the convention the RAG key rows already hold
- * to, and a token in a log is a token in a log aggregator.
+ * row and the address it went to. Never the accept URL, and so never the token:
+ * a token in a log is a token in a log aggregator.
  */
 function invitationLogFields(params: SendInvitationEmailParams) {
   return {

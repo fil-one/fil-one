@@ -152,7 +152,7 @@ export default $config({
     // and the INVITETOKEN#{hash}/LOOKUP row that resolves an accept link. Its
     // own table rather than more sort keys in UserInfoTable: membership is read
     // on every authenticated request and nothing needs it co-located with the
-    // identity, entitlement, and RAG-key rows already sharing those partitions.
+    // identity and entitlement rows already sharing those partitions.
     const orgTable = new sst.aws.Dynamo('OrgTable', {
       fields: {
         pk: 'string',
@@ -255,21 +255,6 @@ export default $config({
       ],
     });
 
-    // RAG indexer's own store: per-object chunk manifests
-    // (BUCKET#{orgId}#{region}#{bucket} / MANIFEST#{objectKey}) and resumable indexer
-    // checkpoints (INDEXER_CHECKPOINT#{orgId}#{region}#{bucket} / CHECKPOINT). Kept out
-    // of UserInfoTable so this high-churn, indexer-derived state doesn't mix with
-    // user/org data. TTL attribute expires stale checkpoints (see
-    // rag-indexer-manifest.ts).
-    const ragIndexerTable = new sst.aws.Dynamo('RagIndexerTable', {
-      fields: {
-        pk: 'string',
-        sk: 'string',
-      },
-      primaryIndex: { hashKey: 'pk', rangeKey: 'sk' },
-      ttl: 'ttl',
-    });
-
     // User-initiated bulk deletions (BULKDELETE#{orgId} / JOB#{jobId}). Kept
     // separate from UserInfoTable because a running job rewrites its row on
     // every listing page, and finished jobs expire on their own via TTL.
@@ -330,62 +315,6 @@ export default $config({
       properties: { name: orgLogoBucket.name },
     });
 
-    // ── S3 Vectors bucket for RAG embeddings (FIL-548) ───────────────
-    // One vector bucket hosts one index per RAG-enabled bucket. The
-    // @filone/rag-shared S3VectorsStore reads the bucket name at runtime via
-    // Resource.RagVectorBucket.name.
-    const ragVectorBucketName = `filone-${$app.stage}-rag-vectors`;
-    if (ragVectorBucketName.length > 63) {
-      throw new Error(
-        `RagVectorBucket name too long (${ragVectorBucketName.length} chars): ${ragVectorBucketName}`,
-      );
-    }
-    const ragVectorBucketResource = new aws.s3.VectorsVectorBucket('RagVectorBucket', {
-      vectorBucketName: ragVectorBucketName,
-      // Indexes are created at runtime by the RAG indexer (one opaque
-      // rag-<hash> index per RAG-enabled bucket), so Pulumi has no knowledge of
-      // them. Without forceDestroy, `sst remove` of a preview/staging stage
-      // fails with a 409 ConflictException ("vector bucket is not empty") on
-      // DeleteVectorBucket. forceDestroy makes the provider delete all indexes
-      // and vectors first. Gated off production, which is removal:'retain' and
-      // never torn down anyway.
-      forceDestroy: !isProduction,
-    });
-
-    // Wrap the raw Pulumi resource so handlers can read it via SST resource
-    // linking (Resource.RagVectorBucket.name).
-    const ragVectorBucket = new sst.Linkable('RagVectorBucket', {
-      properties: {
-        name: ragVectorBucketResource.vectorBucketName,
-        arn: ragVectorBucketResource.vectorBucketArn,
-      },
-    });
-
-    // s3vectors:* scoped to the vector bucket and all of its indexes, plus
-    // bedrock:InvokeModel for the Titan embeddings model (FIL-552). Granted only
-    // to handlers that opt in via addRoute({ rag: true }) — i.e. those that use
-    // @filone/rag-shared.
-    const ragPermissions: sst.aws.FunctionPermissionArgs[] = [
-      {
-        actions: [
-          's3vectors:CreateIndex',
-          's3vectors:DeleteIndex',
-          's3vectors:PutVectors',
-          's3vectors:QueryVectors',
-          's3vectors:GetVectors',
-          's3vectors:DeleteVectors',
-        ],
-        resources: [
-          ragVectorBucketResource.vectorBucketArn,
-          $interpolate`${ragVectorBucketResource.vectorBucketArn}/index/*`,
-        ],
-      },
-      {
-        actions: ['bedrock:InvokeModel'],
-        resources: [$interpolate`arn:aws:bedrock:*::foundation-model/amazon.titan-embed-text-v2:0`],
-      },
-    ];
-
     // ── Stage-aware domain config ────────────────────────────────────
     // Ephemeral stages become subdomains of dev.fil.one — enforce DNS label rules.
     if (isEphemeralStage && !/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(stage)) {
@@ -402,7 +331,6 @@ export default $config({
       PROD_CONSOLE_HOST,
       S3Region,
       Stage,
-      SUPPORTED_COMPLETION_MODELS,
     } = await import('@filone/shared');
 
     const domainName = isProduction
@@ -768,7 +696,6 @@ export default $config({
       orgTable,
       auditLog,
       userFilesBucket,
-      ragVectorBucket,
       auth0ClientId,
       auth0ClientSecret,
       stripeSecretKey,
@@ -897,11 +824,6 @@ export default $config({
       provisionedConcurrency?: number;
       memory?: sst.aws.FunctionArgs['memory'];
       timeout?: sst.aws.FunctionArgs['timeout'];
-      /**
-       * Grant s3vectors:* (scoped to the RAG vector bucket + indexes) and
-       * bedrock:InvokeModel for handlers that use @filone/rag-shared.
-       */
-      rag?: boolean;
     }
 
     function addRoute({
@@ -914,7 +836,6 @@ export default $config({
       provisionedConcurrency,
       memory,
       timeout,
-      rag,
     }: AddRouteProps) {
       // e.g. "get-me", "auth-callback" → "GetMe", "AuthCallback"
       const fnName = handler
@@ -929,7 +850,7 @@ export default $config({
           ...sharedEnv,
           ...extraEnv,
         },
-        permissions: rag ? [...(permissions ?? []), ...ragPermissions] : permissions,
+        permissions,
         timeout: timeout ?? '10 seconds',
         ...(memory ? { memory } : {}),
         ...(provisionedConcurrency && provisionedConcurrency > 0
@@ -1044,8 +965,6 @@ export default $config({
       link: [
         billingTable,
         userInfoTable,
-        ragIndexerTable,
-        ragVectorBucket,
         auditLog,
         stripeSecretKey,
         stripePriceId,
@@ -1067,7 +986,6 @@ export default $config({
       timeout: '900 seconds',
       memory: '1024 MB',
       permissions: [
-        ...ragPermissions,
         { actions: ['sqs:SendMessage'], resources: [accountDeletionDlq.arn] },
         // The one credential in the system that may remove an audit entry. The
         // auditLog link above deliberately withholds this from every route, and
@@ -1269,10 +1187,6 @@ export default $config({
       'delete-bucket-policy': bucketPolicyWriteRoute,
 
       // ── Keys ───────────────────────────────────────────────────────
-      // The RAG API key routes take no entry: they are named bearer tokens
-      // scoped to the RAG query endpoint (distinct from S3 access keys), and
-      // their handlers touch nothing but UserInfoTable, which allResources
-      // already links.
       'list-access-keys': {
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
@@ -1321,52 +1235,6 @@ export default $config({
       'remove-member': {
         extraEnv: { ...orchestratorEnv, WEBSITE_URL: siteUrl },
         ...(sendGridApiKey ? { extraLink: [sendGridApiKey] } : {}),
-      },
-
-      // ── RAG ────────────────────────────────────────────────────────
-      // RAG query playground (FIL-554): embed the question, vector-search the
-      // bucket's index, and ground a Bedrock completion on the retrieved chunks.
-      // `rag: true` grants s3vectors:QueryVectors + bedrock:InvokeModel on the
-      // Titan embeddings model; the extra permission below covers the Claude
-      // completion model — both its cross-region inference profile and the
-      // underlying foundation model. Higher timeout/memory for the Bedrock calls.
-      'query-bucket': {
-        rag: true,
-        // Reads the bucket's enablement row to reject queries before the first
-        // indexing pass completes (BUCKET_NOT_INDEXED).
-        extraLink: [ragIndexerTable],
-        extraEnv: orchestratorEnv,
-        permissions: [
-          ...bucketReadPermissions,
-          {
-            actions: ['bedrock:InvokeModel'],
-            // Built from the shared allowlist so the grant and QueryBucketSchema's
-            // accepted `model` ids stay in sync — a model added there is invokable here.
-            resources: SUPPORTED_COMPLETION_MODELS.flatMap((m) => [
-              m.inferenceProfileArn,
-              m.foundationModelArn,
-            ]),
-          },
-        ],
-        timeout: '30 seconds',
-        memory: '512 MB',
-      },
-      // RAG per-bucket enablement (FIL-555): read/write the BUCKET#{name}/RAG
-      // enablement row + sync telemetry for the caller's tenant. Both are gated by
-      // auth + subscriptionGuard + ragAccessMiddleware. The enablement row lives in
-      // ragIndexerTable (extraLink below); they also read UserInfoTable (already
-      // linked via allResources) for tenant/org profile, and resolve tenant
-      // ownership via the orchestrator (SSM-backed S3 keys), so they need the SSM
-      // read grant but not `rag: true` (no s3vectors/bedrock).
-      'get-bucket-rag-enablement': {
-        extraEnv: orchestratorEnv,
-        extraLink: [ragIndexerTable],
-        permissions: bucketReadPermissions,
-      },
-      'set-bucket-rag-enablement': {
-        extraEnv: orchestratorEnv,
-        extraLink: [ragIndexerTable],
-        permissions: bucketReadPermissions,
       },
 
       // ── Auth ───────────────────────────────────────────────────────
@@ -1630,48 +1498,6 @@ export default $config({
         memory: '256 MB',
       });
     }
-
-    // ── RAG indexer (cron → orchestrator → per-org worker) ──────────
-    // Keeps each RAG-enabled bucket's vector index in sync with S3 contents via
-    // object-level ETag diffing. The worker reads per-tenant S3 keys (SSM +
-    // KMS) and uses @filone/rag-shared to extract/chunk/embed/upsert, so it
-    // gets the RAG permission set plus a large timeout/memory budget; large
-    // buckets are resumed across runs via a persisted continuation checkpoint.
-    const ragIndexerWorker = createFn('RagIndexerWorker', {
-      handler: 'packages/backend/src/jobs/rag-indexer-worker.handler',
-      link: [billingTable, userInfoTable, ragIndexerTable, ragVectorBucket, ...managementApiTokens],
-      environment: orchestratorEnv,
-      timeout: '900 seconds',
-      // 1024 MB: PDF text extraction runs in-process (pdf.js), which is
-      // CPU- and heap-hungry on large documents.
-      memory: '1024 MB',
-      permissions: [...s3DataPlanePermissions, ...ragPermissions],
-    });
-
-    const ragIndexerOrchestrator = createFn('RagIndexerOrchestrator', {
-      handler: 'packages/backend/src/jobs/rag-indexer-orchestrator.handler',
-      // Scans the enablement rows, now in ragIndexerTable (its only table dependency).
-      link: [ragIndexerTable],
-      environment: {
-        RAG_INDEXER_WORKER_FUNCTION_NAME: ragIndexerWorker.name,
-      },
-      timeout: '60 seconds',
-      memory: '256 MB',
-      permissions: [
-        {
-          actions: ['lambda:InvokeFunction'],
-          resources: [ragIndexerWorker.arn],
-        },
-      ],
-    });
-
-    new sst.aws.CronV2('RagIndexerCron', {
-      // Run every 6 hours (03:00, 09:00, 15:00, 21:00 UTC). Deliberately offset
-      // from the usage-reporting (07/19) and grace-period (08/20) crons so the
-      // indexer never collides with billing reconciliation.
-      schedule: 'cron(0 3/6 * * ? *)',
-      function: ragIndexerOrchestrator.arn,
-    });
 
     // ── Subscription drift checker (cron-based, observe-only) ───────
     const subscriptionDriftChecker = createFn('SubscriptionDriftChecker', {

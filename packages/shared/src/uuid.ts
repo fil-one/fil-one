@@ -5,8 +5,7 @@
  *
  * Deliberately not a version-and-variant check. The property callers need is
  * that the value is hex and hyphens and nothing else — a `#` in an org id would
- * reach a DynamoDB key expression, which is what `RAGKeys.parseBucketPk`
- * depends on not happening. A stricter regex would additionally reject ids
+ * reach a DynamoDB key expression. A stricter regex would additionally reject ids
  * outside the v1–v8 range, and the only thing that could produce is a lockout
  * on an id some other tool minted.
  */

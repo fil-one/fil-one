@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BatchWriteItemCommand, DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { DeleteIndexCommand, S3VectorsClient } from '@aws-sdk/client-s3vectors';
 import { DeleteParametersCommand, SSMClient } from '@aws-sdk/client-ssm';
 import { mockClient } from 'aws-sdk-client-mock';
 
@@ -9,7 +8,6 @@ import { applyResetPlan, type RegionResetContext } from './region-reset-run.ts';
 
 const dynamoMock = mockClient(DynamoDBClient);
 const ssmMock = mockClient(SSMClient);
-const s3vectorsMock = mockClient(S3VectorsClient);
 
 /** Every AWS command the apply loop sends and every step it runs, in order. */
 let calls: string[];
@@ -19,11 +17,9 @@ const ctx: RegionResetContext = {
   region: 'eu-central-3',
   orchestratorId: 'forge',
   awsRegion: 'us-east-2',
-  tables: { userInfo: 'filone-any-stage-UserInfo', ragIndexer: 'filone-any-stage-RagIndexer' },
-  vectorBucket: 'filone-any-stage-rag-vectors',
+  tables: { userInfo: 'filone-any-stage-UserInfo' },
   dynamo: new DynamoDBClient({ region: 'us-east-2' }),
   ssm: new SSMClient({ region: 'us-east-2' }),
-  s3vectors: new S3VectorsClient({ region: 'us-east-2' }),
 };
 
 function account(orgId: string): AccountPlan {
@@ -34,13 +30,6 @@ function account(orgId: string): AccountPlan {
     deleting: false,
     profileAttributes: {},
     accessKeys: [{ pk: { S: `ORG#${orgId}` }, sk: { S: 'ACCESSKEY#any-key' } }],
-    ragBuckets: [
-      {
-        bucketName: 'any-bucket',
-        indexName: 'any-index',
-        rows: [{ pk: { S: 'BUCKET#any' }, sk: { S: 'RAG' } }],
-      },
-    ],
     ssmParameterNames: [`/filone/any-stage/forge-s3/access-key/${orgId}-tenant`],
   };
 }
@@ -51,7 +40,6 @@ function plan(...accounts: AccountPlan[]): ResetPlan {
     region: ctx.region,
     orchestratorId: ctx.orchestratorId,
     tenantIdAttribute: 'forgeTenantId',
-    vectorBucket: ctx.vectorBucket,
     accounts,
     notProvisioned: 0,
   };
@@ -70,11 +58,6 @@ beforeEach(() => {
   calls = [];
   dynamoMock.reset();
   ssmMock.reset();
-  s3vectorsMock.reset();
-  s3vectorsMock.on(DeleteIndexCommand).callsFake(() => {
-    calls.push('DeleteIndex');
-    return {};
-  });
   dynamoMock.on(BatchWriteItemCommand).callsFake(() => {
     calls.push('BatchWriteItem');
     return {};
@@ -97,15 +80,9 @@ afterEach(() => {
 });
 
 describe('applyResetPlan', () => {
-  it('drops the index, then the rows and parameters, and clears the tenant link last', async () => {
+  it('deletes the rows and parameters, and clears the tenant link last', async () => {
     await applyResetPlan(ctx, plan(account('any-org')));
-    expect(calls).toStrictEqual([
-      'DeleteIndex',
-      'BatchWriteItem',
-      'BatchWriteItem',
-      'DeleteParameters',
-      'UpdateItem',
-    ]);
+    expect(calls).toStrictEqual(['BatchWriteItem', 'DeleteParameters', 'UpdateItem']);
   });
 
   it('runs the step before touching any of the account state', async () => {

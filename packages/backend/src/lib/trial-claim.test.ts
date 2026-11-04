@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { OrgRole } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -60,13 +60,6 @@ describe('claimTrialIfEligible', () => {
   it('claims for a solo owner in their own org', async () => {
     await expect(claimTrialIfEligible(soloOwner())).resolves.toBe('claimed');
     expect(mockEnsureTrialEntitlement).toHaveBeenCalledOnce();
-  });
-
-  it('does not claim under an API key session', async () => {
-    await expect(claimTrialIfEligible(soloOwner({ apiKeySession: true }))).resolves.toBe(
-      'api-key-session',
-    );
-    expect(ddbMock.commandCalls(GetItemCommand)).toHaveLength(0);
   });
 
   it('does not claim in somebody else’s org', async () => {

@@ -118,11 +118,8 @@ function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
  * retryable failure of ours, so it is a 503 rather than a 401 that would send
  * the console through a pointless refresh, or a 403 that would read as a
  * revoked membership.
- *
- * Exported for the RAG bearer path, which resolves the key creator's membership
- * itself and owes a failed read the same answer this one gives.
  */
-export function membershipUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
+function membershipUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(503)
     .body<ErrorResponse>({
@@ -605,7 +602,7 @@ function verifiedEmailGate(
  *
  * Every gate that runs after this middleware in the same before stack owes its
  * denials this call — `authorize`, the membership gate, CSRF, the subscription
- * guard, the RAG access gate, the MFA gate. Returning a response from `before`
+ * guard, the MFA gate. Returning a response from `before`
  * short-circuits the whole chain, the after hook included (@middy/core 7.2.2
  * runs the after stack only when the request carries no `earlyResponse`), so a
  * refresh that already happened has to set its own cookies here. Otherwise the

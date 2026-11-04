@@ -1,21 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
-import { RAGKeys } from '@filone/backend/src/lib/dynamo-records.ts';
-import { ragIndexName } from '@filone/rag-shared/src/s3-vectors-store.ts';
-import { S3Region } from '@filone/shared';
 
 import {
   assertRegionAllowed,
   buildResetPlan,
   formatResetPlan,
-  parseRagPk,
   type OrgRows,
   type StoredRow,
 } from './region-reset.ts';
 
 const ORG_ID = '4f1c2a80-9b3e-4a51-8d77-6b0c2f9a1e34';
 const ORG_PK = `ORG#${ORG_ID}`;
-const VECTOR_BUCKET = 'filone-staging-rag-vectors';
 
 function profileRow(attributes: Record<string, AttributeValue> = {}): StoredRow {
   return { pk: { S: ORG_PK }, sk: { S: 'PROFILE' }, ...attributes };
@@ -30,24 +25,8 @@ function accessKeyRow(keyId: string, region?: string): StoredRow {
   };
 }
 
-function ragRow(pk: string, sk: string): StoredRow {
-  return { pk: { S: pk }, sk: { S: sk } };
-}
-
-function plan(
-  orgRows: Map<string, OrgRows>,
-  ragRows: StoredRow[] = [],
-  region = 'eu-central-3',
-  orchestratorId = 'forge',
-) {
-  return buildResetPlan({
-    stage: 'staging',
-    region,
-    orchestratorId,
-    vectorBucket: VECTOR_BUCKET,
-    orgRows,
-    ragRows,
-  });
+function plan(orgRows: Map<string, OrgRows>, region = 'eu-central-3', orchestratorId = 'forge') {
+  return buildResetPlan({ stage: 'staging', region, orchestratorId, orgRows });
 }
 
 function orgRows(rows: OrgRows): Map<string, OrgRows> {
@@ -73,38 +52,6 @@ describe('assertRegionAllowed', () => {
   });
 });
 
-describe('parseRagPk', () => {
-  it('parses a bucket pk', () => {
-    expect(parseRagPk(RAGKeys.bucketPk(ORG_ID, S3Region.EuCentral3, 'my-bucket'))).toEqual({
-      kind: 'bucket',
-      orgId: ORG_ID,
-      region: 'eu-central-3',
-      bucketName: 'my-bucket',
-    });
-  });
-
-  it('parses a checkpoint pk', () => {
-    expect(parseRagPk(RAGKeys.checkpointPk(ORG_ID, S3Region.EuCentral3, 'my-bucket'))).toEqual({
-      kind: 'checkpoint',
-      orgId: ORG_ID,
-      region: 'eu-central-3',
-      bucketName: 'my-bucket',
-    });
-  });
-
-  const malformed: Record<string, string> = {
-    'the prefix is another record': `ORG#${ORG_ID}`,
-    'a segment is missing': `BUCKET#${ORG_ID}#eu-central-3`,
-    'the region is unknown': `BUCKET#${ORG_ID}#eu-north-7#my-bucket`,
-    'the bucket name is empty': `BUCKET#${ORG_ID}#eu-central-3#`,
-  };
-  for (const [description, pk] of Object.entries(malformed)) {
-    it(`returns undefined when ${description}`, () => {
-      expect(parseRagPk(pk)).toBeUndefined();
-    });
-  }
-});
-
 describe('buildResetPlan', () => {
   it('counts an account with no tenant id as not provisioned', () => {
     const result = plan(orgRows({ profile: profileRow(), accessKeys: [] }));
@@ -126,7 +73,6 @@ describe('buildResetPlan', () => {
         deleting: false,
         profileAttributes: { forgeTenantId: 'tenant-1' },
         accessKeys: [],
-        ragBuckets: [],
         ssmParameterNames: ['/filone/staging/forge-s3/access-key/tenant-1'],
       },
     ]);
@@ -149,7 +95,6 @@ describe('buildResetPlan', () => {
         profile: profileRow({ auroraTenantId: { S: 'tenant-1' } }),
         accessKeys: [legacyKey],
       }),
-      [],
       'eu-west-1',
       'aurora',
     );
@@ -176,7 +121,6 @@ describe('buildResetPlan', () => {
         }),
         accessKeys: [],
       }),
-      [],
       'eu-west-1',
       'aurora',
     );
@@ -190,7 +134,6 @@ describe('buildResetPlan', () => {
   it('names both Aurora SSM parameters for eu-west-1', () => {
     const result = plan(
       orgRows({ profile: profileRow({ auroraTenantId: { S: 'tenant-1' } }), accessKeys: [] }),
-      [],
       'eu-west-1',
       'aurora',
     );
@@ -198,49 +141,6 @@ describe('buildResetPlan', () => {
       '/filone/staging/aurora-s3/access-key/tenant-1',
       '/filone/staging/aurora-portal/tenant-api-key/tenant-1',
     ]);
-  });
-
-  it('groups a bucket enablement, manifest and checkpoint row under one entry', () => {
-    const bucketPk = RAGKeys.bucketPk(ORG_ID, S3Region.EuCentral3, 'my-bucket');
-    const checkpointPk = RAGKeys.checkpointPk(ORG_ID, S3Region.EuCentral3, 'my-bucket');
-    const rows = [
-      ragRow(bucketPk, RAGKeys.enablementSk()),
-      ragRow(bucketPk, RAGKeys.manifestSk('reports/q3.pdf')),
-      ragRow(checkpointPk, RAGKeys.checkpointSk()),
-    ];
-
-    const result = plan(
-      orgRows({ profile: profileRow({ forgeTenantId: { S: 'tenant-1' } }), accessKeys: [] }),
-      rows,
-    );
-
-    expect(result.accounts[0]).toHaveProperty('ragBuckets', [
-      {
-        bucketName: 'my-bucket',
-        indexName: ragIndexName(ORG_ID, 'eu-central-3', 'my-bucket'),
-        rows,
-      },
-    ]);
-  });
-
-  it('leaves RAG rows naming another region out of the plan', () => {
-    const result = plan(
-      orgRows({ profile: profileRow({ forgeTenantId: { S: 'tenant-1' } }), accessKeys: [] }),
-      [ragRow(RAGKeys.bucketPk(ORG_ID, S3Region.EuWest1, 'my-bucket'), RAGKeys.enablementSk())],
-    );
-    expect(result.accounts[0]).toHaveProperty('ragBuckets', []);
-  });
-
-  it('plans the dangling RAG rows of an account holding no tenant id', () => {
-    const result = plan(orgRows({ profile: profileRow(), accessKeys: [] }), [
-      ragRow(RAGKeys.bucketPk(ORG_ID, S3Region.EuCentral3, 'my-bucket'), RAGKeys.enablementSk()),
-    ]);
-    expect({
-      accounts: result.accounts.length,
-      tenantId: result.accounts[0]!.tenantId,
-      buckets: result.accounts[0]!.ragBuckets.map((bucket) => bucket.bucketName),
-      notProvisioned: result.notProvisioned,
-    }).toEqual({ accounts: 1, tenantId: undefined, buckets: ['my-bucket'], notProvisioned: 0 });
   });
 
   it('plans the dangling access keys of an account holding no tenant id', () => {
@@ -269,13 +169,6 @@ describe('buildResetPlan', () => {
       accounts: [],
       notProvisioned: 1,
     });
-  });
-
-  it('plans RAG rows whose account has no row in UserInfoTable', () => {
-    const result = plan(new Map(), [
-      ragRow(RAGKeys.bucketPk(ORG_ID, S3Region.EuCentral3, 'my-bucket'), RAGKeys.enablementSk()),
-    ]);
-    expect(result.accounts.map((account) => account.orgPk)).toEqual([ORG_PK]);
   });
 });
 

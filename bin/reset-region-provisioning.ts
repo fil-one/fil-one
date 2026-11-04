@@ -13,15 +13,13 @@
 // `ORG#{orgId}` / `PROFILE` row in UserInfoTable: an account is provisioned in
 // a region iff `{orchestratorId}TenantId` exists, because setup writes it last.
 // A personal account is an organization of one, so scanning `ORG#` covers both
-// kinds. For each provisioned account the reset drops the region's S3 Vectors
-// indexes and RagIndexerTable rows, deletes the region's ACCESSKEY# rows,
-// deletes the region's console credentials from SSM, and removes the tenant-id
+// kinds. For each provisioned account the reset deletes the region's
+// ACCESSKEY# rows, deletes the region's console credentials from SSM, and removes the tenant-id
 // attribute last — the inverse of setup, so an interrupted run stays resumable
 // instead of orphaning state nothing can name. For eu-west-1 it also rewinds
 // `auroraSetupStatus` to FILONE_ORG_CREATED and drops
 // `auroraSetupFailureCount`, because Aurora's setup state machine throws on any
-// other status. Regional ACCESSKEY# rows and RAG rows are planned by their own
-// region, so an account whose pointer is already gone still has them deleted:
+// other status. Regional ACCESSKEY# rows are planned by their own region, so an account whose pointer is already gone still has them deleted:
 // a key minted between an earlier run's scan and its pointer removal is picked
 // up by the next run.
 //
@@ -30,10 +28,9 @@
 // once. Every other stage allows every region the script knows.
 //
 // Credentials: table names come from `sst state export`, and every AWS call
-// uses your ambient credentials, as in orgs-beta.ts and rag-access.ts, so
-// confirm they target the right account first. Applying needs a role that can
-// write UserInfoTable and RagIndexerTable, delete SSM parameters, and call
-// s3vectors:GetVectorBucket and s3vectors:DeleteIndex.
+// uses your ambient credentials, as in orgs-beta.ts, so confirm they target
+// the right account first. Applying needs a role that can write UserInfoTable
+// and delete SSM parameters.
 //
 // The run scans, prints the plan, and asks for confirmation: type `yes` to
 // apply. `--yes` skips the prompt, `--dry-run` prints the plan and exits
@@ -60,7 +57,6 @@
 
 import { parseArgs } from 'node:util';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { S3VectorsClient } from '@aws-sdk/client-s3vectors';
 import { SSMClient } from '@aws-sdk/client-ssm';
 import {
   ORCHESTRATOR_ID_BY_REGION,
@@ -93,9 +89,6 @@ try {
 
 const orchestratorId = orchestratorIdForRegion(region)!;
 
-// Keep in sync with the RagVectorBucket name in sst.config.ts.
-const vectorBucket = `filone-${stage}-rag-vectors`;
-
 const backupPath =
   args.backup ??
   `region-backup-${stage}-${region}-${new Date().toISOString().replaceAll(':', '-')}.json`;
@@ -103,11 +96,7 @@ const backupPath =
 requireAwsProfile();
 
 const resources = exportStageState(stage);
-const tables = resolveStageTables(
-  stage,
-  { userInfo: '::UserInfoTableTable', ragIndexer: '::RagIndexerTableTable' },
-  resources,
-);
+const tables = resolveStageTables(stage, { userInfo: '::UserInfoTableTable' }, resources);
 assertStageResources(stage, tables);
 
 // From the table's ARN: a personal stage lives wherever AWS_REGION pointed when
@@ -118,8 +107,7 @@ console.log(
   `${dryRun ? 'DRY-RUN — ' : ''}Un-provisioning region ${region} (orchestrator "${orchestratorId}", attribute ${orchestratorId}TenantId)`,
 );
 console.log(`  stage=${stage} awsRegion=${awsRegion}`);
-console.log(`  UserInfoTable=${tables.userInfo} RagIndexerTable=${tables.ragIndexer}`);
-console.log(`  vector bucket=${vectorBucket}`);
+console.log(`  UserInfoTable=${tables.userInfo}`);
 console.log('');
 
 await runRegionReset(
@@ -129,10 +117,8 @@ await runRegionReset(
     orchestratorId,
     awsRegion,
     tables,
-    vectorBucket,
     dynamo: new DynamoDBClient({ region: awsRegion }),
     ssm: new SSMClient({ region: awsRegion }),
-    s3vectors: new S3VectorsClient({ region: awsRegion }),
   },
   {
     backupPath,

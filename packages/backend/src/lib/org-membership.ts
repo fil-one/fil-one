@@ -16,10 +16,9 @@ import type { OrgProfileSummary } from './org-profile.ts';
  * - `ORG#{orgId}` / `MEMBER#{userId}` — the authoritative membership: role,
  *   when and how the member joined.
  * - `USER#{userId}` / `MEMBERSHIP#{orgId}` — the inverse item that answers
- *   "which orgs does this user belong to" without an index, the same idiom as
- *   `RAGKEYHASH#…/LOOKUP`. Written in the same transaction as the canonical
- *   row on create, delete, and every role change, so the two can never
- *   disagree about a role.
+ *   "which orgs does this user belong to" without an index. Written in the
+ *   same transaction as the canonical row on create, delete, and every role
+ *   change, so the two can never disagree about a role.
  * - `ORG#{orgId}` / `META` — org-level counters owned by this module, starting
  *   with `ownerCount`, the last-Owner invariant. It sits beside the rows it
  *   counts so every owner-set transaction is single-table.

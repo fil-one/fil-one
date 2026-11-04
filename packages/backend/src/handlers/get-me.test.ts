@@ -151,15 +151,6 @@ describe('GET /api/me handler', () => {
         },
       });
 
-    // Default: the test user's email is not on the RAG allowlist.
-    ddbMock
-      .on(GetItemCommand, {
-        TableName: 'UserInfoTable',
-        Key: { pk: { S: `ALLOWLIST#${MOCK_EMAIL}` }, sk: { S: 'RAG' } },
-        ConsistentRead: true,
-      })
-      .resolves({ Item: undefined });
-
     // Default: nobody is in the organizations beta. Matched on the sort key
     // alone, because both grant rows are read on every call and a test that
     // moves the caller's email or active org would otherwise leave one of them
@@ -202,7 +193,6 @@ describe('GET /api/me handler', () => {
         email: MOCK_EMAIL,
         mfaEnrollments: [],
         connectionType: 'auth0',
-        ragAccess: false,
         ...ownerTail('Example Corp'),
       }),
     });
@@ -285,7 +275,6 @@ describe('GET /api/me handler', () => {
         email: MOCK_EMAIL,
         mfaEnrollments: [],
         connectionType: 'auth0',
-        ragAccess: false,
         ...ownerTail('Example Corp'),
       }),
     });
@@ -311,7 +300,6 @@ describe('GET /api/me handler', () => {
         email: MOCK_EMAIL,
         mfaEnrollments: [],
         connectionType: 'auth0',
-        ragAccess: false,
         ...ownerTail(''),
       }),
     });
@@ -363,7 +351,6 @@ describe('GET /api/me handler', () => {
         ],
         passkeys: [],
         connectionType: 'auth0',
-        ragAccess: false,
         ...ownerTail('Example Corp'),
       }),
     });
@@ -400,7 +387,6 @@ describe('GET /api/me handler', () => {
           },
         ],
         connectionType: 'auth0',
-        ragAccess: false,
         ...ownerTail('Example Corp'),
       }),
     });
@@ -442,7 +428,6 @@ describe('GET /api/me handler', () => {
         mfaEnrollments: [],
         passkeys: [],
         connectionType: 'google-oauth2',
-        ragAccess: false,
         ...ownerTail('Example Corp'),
       }),
     });
@@ -630,78 +615,6 @@ describe('GET /api/me handler', () => {
         },
       ]);
       consoleError.mockRestore();
-    });
-  });
-
-  describe('ragAccess', () => {
-    function parseBody(result: unknown): { ragAccess: boolean } {
-      return JSON.parse((result as { body: string }).body);
-    }
-
-    it('is true for @fil.org emails (no allowlist lookup needed)', async () => {
-      mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: 'alice@fil.org', email_verified: true },
-      });
-      profileResolves();
-
-      const result = await handler(authenticatedEvent(), buildContext());
-
-      expect(parseBody(result).ragAccess).toBe(true);
-    });
-
-    it('is true for allowlisted emails', async () => {
-      mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: 'bob@example.com', email_verified: true },
-      });
-      profileResolves();
-      ddbMock
-        .on(GetItemCommand, {
-          TableName: 'UserInfoTable',
-          Key: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
-          ConsistentRead: true,
-        })
-        .resolves({ Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } } });
-
-      const result = await handler(authenticatedEvent(), buildContext());
-
-      expect(parseBody(result).ragAccess).toBe(true);
-    });
-
-    it('is false for neither @fil.org nor allowlisted', async () => {
-      mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: 'eve@example.com', email_verified: true },
-      });
-      profileResolves();
-      ddbMock
-        .on(GetItemCommand, {
-          TableName: 'UserInfoTable',
-          Key: { pk: { S: 'ALLOWLIST#eve@example.com' }, sk: { S: 'RAG' } },
-          ConsistentRead: true,
-        })
-        .resolves({ Item: undefined });
-
-      const result = await handler(authenticatedEvent(), buildContext());
-
-      expect(parseBody(result).ragAccess).toBe(false);
-    });
-
-    it('is false when the email is unverified, without an allowlist lookup', async () => {
-      mockJwtVerify.mockResolvedValue({
-        payload: { sub: MOCK_SUB, email: 'bob@example.com', email_verified: false },
-      });
-      profileResolves();
-      // Allowlist row exists, but an unverified email must never be granted access.
-      ddbMock
-        .on(GetItemCommand, {
-          TableName: 'UserInfoTable',
-          Key: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } },
-          ConsistentRead: true,
-        })
-        .resolves({ Item: { pk: { S: 'ALLOWLIST#bob@example.com' }, sk: { S: 'RAG' } } });
-
-      const result = await handler(authenticatedEvent(), buildContext());
-
-      expect(parseBody(result).ragAccess).toBe(false);
     });
   });
 

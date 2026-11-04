@@ -7,13 +7,11 @@ import { OrgKeys } from './org-membership.ts';
 /**
  * The organizations beta flag, which gates one thing: creating an invitation.
  *
- * Every verified `@fil.org` address holds it, as it holds RAG access. For
- * anyone else it is data-driven, so granting it is a row rather than a redeploy —
- * the mechanism `middleware/rag-access.ts` explicitly invites reusing, with
- * `ORGS_BETA` as the sort key beside that file's `RAG`. Two rows can grant it:
+ * Every verified `@fil.org` address holds it. For anyone else it is
+ * data-driven, so granting it is a row rather than a redeploy. Two rows can
+ * grant it:
  *
- * - `ALLOWLIST#{lowercased-email}` / `ORGS_BETA` — one person, the shape the RAG
- *   flag already uses.
+ * - `ALLOWLIST#{lowercased-email}` / `ORGS_BETA` — one person.
  * - `ORG#{orgId}` / `ORGS_BETA` — a whole organization at once, which is the
  *   entity an enterprise beta actually wants: FilOne learns an employee's email
  *   only at their first login, so enumerating them up front is not possible.
@@ -44,8 +42,7 @@ export const ALLOWLIST_PK_PREFIX = 'ALLOWLIST#';
  * somebody performs and then immediately tries.
  *
  * An unverified or absent email contributes nothing: the address a session claims
- * without verifying it is not an identity we grant anything on, exactly as the
- * RAG gate treats it. The org row still applies, so an enterprise beta does not
+ * without verifying it is not an identity we grant anything on. The org row still applies, so an enterprise beta does not
  * depend on every member having verified an address.
  */
 export async function hasOrgsBetaAccess({

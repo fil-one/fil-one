@@ -28,8 +28,7 @@ export function seedPermissions(
     emailVerified: true,
     email: 'user@example.com',
     mfaEnrollments: [],
-    ragAccess: true,
-    // On by default, like `ragAccess` above: a test about a gated surface should
+    // On by default: a test about a gated surface should
     // not have to switch the feature on before it can render the thing it is
     // about. The surface tests override it.
     orgsBeta: true,

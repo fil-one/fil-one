@@ -190,38 +190,6 @@ describe('authorize', () => {
       // that was assembled wrong must not page the person reading that alarm.
       expect(emittedMetrics()).toStrictEqual([]);
     });
-
-    it('counts a revoked key creator apart from an unconverted account', () => {
-      // The runbook reads NotAMemberDenialCount as a lockout to investigate.
-      // A key whose creator left the org is the design working as intended, so
-      // it gets its own metric rather than inflating that one.
-      const event = buildEvent({
-        userInfo: {
-          userId: USER_ID,
-          orgId: ORG_ID,
-          membership: NO_MEMBERSHIP,
-          apiKeySession: true,
-        },
-      });
-
-      expectErrorResponse(requireMembership(event), 403, NOT_A_MEMBER_BODY);
-      expect(emittedMetrics()).toStrictEqual([
-        {
-          _aws: {
-            Timestamp: expect.any(Number),
-            CloudWatchMetrics: [
-              {
-                Namespace: 'FilOne',
-                Dimensions: [['route']],
-                Metrics: [{ Name: 'RevokedKeyCreatorDenialCount', Unit: 'Count' }],
-              },
-            ],
-          },
-          route: 'GET /test',
-          RevokedKeyCreatorDenialCount: 1,
-        },
-      ]);
-    });
   });
 
   describe('requireOrgMembershipMiddleware', () => {

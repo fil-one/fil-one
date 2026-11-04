@@ -176,7 +176,7 @@ describe('orgNotDeletingCheck', () => {
 
 describe('sendDeletionGuardedWrite', () => {
   const callerItem: TransactWriteItem = {
-    Put: { TableName: 'UserInfoTable', Item: { pk: { S: 'ORG#org-1' }, sk: { S: 'RAGKEY#1' } } },
+    Put: { TableName: 'UserInfoTable', Item: { pk: { S: 'ORG#org-1' }, sk: { S: 'ACCESSKEY#1' } } },
   };
 
   function cancelledWith(codes: string[]) {

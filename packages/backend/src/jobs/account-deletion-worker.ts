@@ -1,16 +1,11 @@
 import {
   ConditionalCheckFailedException,
-  DeleteItemCommand,
   GetItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
-import {
-  deleteAuth0User,
-  getAuth0UserEmail,
-  getAuth0UserPicture,
-} from '../lib/auth0-management.ts';
+import { deleteAuth0User, getAuth0UserPicture } from '../lib/auth0-management.ts';
 import { deleteReplacedAvatar } from '../lib/avatar-storage.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import {
@@ -20,7 +15,6 @@ import {
   type DeletionRecord,
 } from '../lib/deletion-record.ts';
 import { resolveDeletionTargets } from '../lib/deletion-targets.ts';
-import { ragAllowlistKey } from '../middleware/rag-access.ts';
 import { scrubOrgRecords } from '../lib/deletion-scrub.ts';
 import { deleteReplacedOrgLogo } from '../lib/org-logo-storage.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
@@ -140,18 +134,12 @@ async function deleteTenants(orgId: string, tenantIds: Record<string, string>): 
 }
 
 /**
- * Three actions per member whose account this deletion ends, in a fixed order:
- * read the email, revoke the grant it keys, then delete the user. The allowlist
- * row cannot be deleted afterwards — Auth0 is the only place that address is
- * stored.
- *
- * A 404 on the lookup skips the row for that member, which is safe because the
- * in-step ordering means the user is only gone once a previous pass finished the
- * removal. Deleting an already-deleted user likewise 404s and counts as success.
+ * Delete the Auth0 user of each member whose account this deletion ends.
+ * Deleting an already-deleted user 404s and counts as success.
  *
  * A member with another membership, one who was invited into this org, and one
- * whose memberships the census could not read all keep their login and their RAG
- * grant: the org is going away, their account is not. `resolveDeletionTargets`
+ * whose memberships the census could not read all keep their login: the org is
+ * going away, their account is not. `resolveDeletionTargets`
  * decides that per member, and the reasons it decided on are logged here.
  */
 async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
@@ -163,8 +151,6 @@ async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
       console.log(`${LOG} account kept`, { sub, keptReasons });
       continue;
     }
-    const email = await getAuth0UserEmail(sub);
-    if (email) await revokeRagAllowlist(email);
     // Auth0 holds the only record of which avatar is theirs, so it is read and
     // deleted before the user is. A saved avatar is claimed, so the bucket's
     // expiry rule never removes it, and it would stay publicly readable. A
@@ -182,16 +168,6 @@ async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
 async function deleteOrgLogo(orgId: string): Promise<void> {
   const profile = await getOrgProfile(orgId, { consistentRead: true });
   await deleteReplacedOrgLogo(profile?.logoUrl?.S, { rethrow: true });
-}
-
-/** Presence of the row is the grant, so deleting it revokes the grant. */
-async function revokeRagAllowlist(email: string): Promise<void> {
-  await getDynamoClient().send(
-    new DeleteItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: ragAllowlistKey(email),
-    }),
-  );
 }
 
 async function markDone(orgId: string): Promise<void> {

@@ -33,28 +33,11 @@ describe('ROUTE_MANIFEST', () => {
     expect(misdeclared).toStrictEqual([]);
   });
 
-  it('gives the cookie fallback a requirement on bearer routes and nowhere else', () => {
-    // A bearer token carries its own authority; the cookie caller on the same
-    // route is an ordinary console user and needs a permission.
-    const withCookieGate = entries
-      .filter((route) => route.cookieRequires !== undefined)
-      .map((route) => route.handler);
-    expect(withCookieGate).toStrictEqual(['query-bucket']);
-
-    const bearerWithoutCookieGate = entries
-      .filter((route) => route.category === 'bearer' && route.cookieRequires === undefined)
-      .map((route) => route.handler);
-    expect(bearerWithoutCookieGate).toStrictEqual([]);
-  });
-
   it('requires only declared permissions or the in-registry markers', () => {
     const allowed = new Set<string>([...PERMISSIONS, 'self', 'in-handler', 'invite-token']);
     for (const route of entries) {
       if (route.requires !== undefined) {
         expect(allowed.has(route.requires)).toBe(true);
-      }
-      if (route.cookieRequires !== undefined) {
-        expect(new Set<string>(PERMISSIONS).has(route.cookieRequires)).toBe(true);
       }
     }
   });
@@ -65,24 +48,17 @@ describe('ROUTE_MANIFEST', () => {
 
     expect(byCategory('public')).toStrictEqual(['auth-login', 'auth-callback', 'auth-logout']);
     expect(byCategory('webhook')).toStrictEqual(['stripe-webhook']);
-    expect(byCategory('bearer')).toStrictEqual(['query-bucket']);
   });
 
   it('checks the routes whose requirement depends on the request in their handlers', () => {
-    // presign serves seven operations through one route, and
-    // set-bucket-rag-enablement creates or discards an index depending on the
-    // flag. create-org and presign-org-logo create an org (or its logo) the
-    // caller holds no role in yet, so there is no membership for a permission
-    // to check. None of the four has a permission the chain could name.
+    // presign serves seven operations through one route. create-org and
+    // presign-org-logo create an org (or its logo) the caller holds no role in
+    // yet, so there is no membership for a permission to check. None of the
+    // three has a permission the chain could name.
     const inHandler = entries
       .filter((route) => route.requires === 'in-handler')
       .map((route) => route.handler);
-    expect(inHandler.sort()).toStrictEqual([
-      'create-org',
-      'presign',
-      'presign-org-logo',
-      'set-bucket-rag-enablement',
-    ]);
+    expect(inHandler.sort()).toStrictEqual(['create-org', 'presign', 'presign-org-logo']);
   });
 
   it('names a declared permission alongside every in-handler cap', () => {

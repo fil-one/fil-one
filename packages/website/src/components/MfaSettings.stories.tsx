@@ -24,7 +24,6 @@ const me: MeResponse = {
   passkeys: [],
   orgsBeta: true,
   billingActive: true,
-  ragAccess: false,
   userId: 'user-1',
   role: OrgRole.Owner,
   permissions: ROLE_PERMISSIONS[OrgRole.Owner],

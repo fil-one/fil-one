@@ -13,7 +13,6 @@ const BASE_ME: MeResponse = {
   name: 'Ada Lovelace',
   email: 'ada@example.com',
   mfaEnrollments: [],
-  ragAccess: false,
   orgsBeta: false,
   billingActive: true,
 };

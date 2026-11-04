@@ -31,16 +31,6 @@ from a sender identity shared with Auth0's own mail. Today every account that
 can reach the route is a named, hand-admitted beta org, which is what makes this
 wait. It should land before `ORGS_BETA` widens.
 
-### Check the creator's permission on the RAG bearer path
-
-`packages/backend/src/middleware/rag-query-auth.ts:146` — the bearer branch
-calls `requireMembership()`, which accepts any row that exists.
-`resolveMembership()` deliberately returns a row with zero permissions when the
-role is unrecognized, and the cookie path then denies it through
-`requirePermission()`. The bearer path does not, so a key whose creator holds a
-corrupt or partially converted role still reaches the query handler. Check
-`buckets.read` here so both paths fail closed on the same data.
-
 ### Run the body-dependent permission checks before the subscription guard
 
 `subscriptionGuardMiddleware` short-circuits in its `before` hook, so a
@@ -319,15 +309,6 @@ Nothing reads audit events yet, which is why this waited. The M2 viewer has to
 filter on `ttl` at read; the decision it needs first is whether the 90 days
 bounds what the table stores or only what the viewer shows, because a retention
 claim about stored data needs a sweep behind it, not a TTL.
-
-### Restrict phased audit events to vendor-backed keys
-
-`packages/shared/src/audit.ts:266` — the type grants `intent` and `completion`
-phases on the strength of the event being `key.created` or `key.deleted`, even
-when `details.keyKind` is `rag`. A pure-DynamoDB RAG mutation could then put its
-intent outside the mutation transaction and lose the atomic guarantee the phased
-types exist to enforce. Nothing does today: every RAG mutation commits through
-`commitAudited` single-phase. Discriminate the phases by key kind.
 
 ### Give profiles that predate the email stamp an address
 

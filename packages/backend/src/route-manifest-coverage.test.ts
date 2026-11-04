@@ -37,8 +37,8 @@ import {
  * caller's role must carry. Each claim below is checked by invoking that
  * route's own Middy chain and reading the answer off the response: the
  * permission-gated routes refuse every role the capability matrix refuses, the
- * body-dependent routes refuse a caller with no membership row, the RAG query
- * route gates its cookie caller, and the self-service routes serve a caller
+ * body-dependent routes refuse a caller with no membership row, and the
+ * self-service routes serve a caller
  * whose missing membership row is the very thing they exist to repair.
  *
  * Nothing here reads a handler's source. Matching `authorize(` in a file proves
@@ -61,10 +61,6 @@ process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
 
 const ORG_ID = 'org-1';
 const USER_ID = '00000000-0000-4000-8000-000000000001';
-/** Not a foundation address, so the RAG gate's answer hinges on the allowlist. */
-const OUTSIDER_EMAIL = 'outsider@example.com';
-/** The refusal `ragAccessMiddleware` writes, verbatim. */
-const RAG_REFUSAL = 'You do not have access to this feature.';
 /** The refusal `csrfMiddleware` writes, verbatim. */
 const CSRF_REFUSAL = 'CSRF validation failed';
 /** Matched between cookie and header on every request that carries one. */
@@ -84,10 +80,7 @@ const verifiedAmr: string[] = [];
  * same way; the suite that needs to reach past it names a moment ago.
  */
 let verifiedAuthTime: number | null = null;
-/**
- * A foundation address, which the RAG feature flag admits without a lookup, and
- * the caller every case that is not about that flag arrives as.
- */
+/** A foundation address, which the organizations beta admits without a lookup. */
 const CALLER_EMAIL = 'caller@fil.org';
 
 // The `sst` mock answers the resource reads a handler module makes while it is
@@ -108,8 +101,6 @@ vi.mock('sst', () =>
     ForgeManagementApiToken: { value: 'test-forge-token' },
     ForgeDevManagementApiToken: { value: 'test-forge-dev-token' },
     FthManagementApiToken: { value: 'test-fth-token' },
-    RagIndexerTable: { name: 'RagIndexerTable' },
-    RagVectorBucket: { name: 'RagVectorBucket' },
     SendGridApiKey: { value: 'test-sendgrid-key' },
     StripePriceId: { value: 'price_test_fake' },
     StripePublishableKey: { value: 'pk_test_fake' },
@@ -147,8 +138,7 @@ const stubbedRows = new Map<string, Record<string, unknown>>();
  *
  * The in-handler routes need it: their permission check is the handler's own
  * work and runs after the guard, so reaching it means getting past billing
- * first. The RAG gate sits after the guard on every chain carrying it and needs
- * the same.
+ * first.
  */
 function withActiveSubscription(): void {
   beforeEach(() => {
@@ -172,9 +162,7 @@ function withActiveSubscription(): void {
 // Most gates below refuse their caller before the subscription guard reads
 // billing, so the 403s are also the proof of the ordering: a chain that
 // installed its gate after the guard would answer 500 from the rejected read
-// instead of the 403 each case asserts. The RAG gate is the exception — it sits
-// after the guard on every chain carrying it — and its suite stubs the billing
-// row so the request reaches the gate it is about.
+// instead of the 403 each case asserts.
 //
 // Every other table answers an empty item, which is what the self-service
 // routes need: they are meant to run, and a route that runs has to reach the
@@ -217,12 +205,10 @@ async function invokeRoute(
   route: RouteManifestEntry,
   {
     membership,
-    email = CALLER_EMAIL,
     csrf = true,
     request = {},
   }: {
     membership: OrgMembership | typeof NO_MEMBERSHIP;
-    email?: string;
     csrf?: boolean;
     request?: RouteRequest;
   },
@@ -232,7 +218,7 @@ async function invokeRoute(
   const event = buildEvent({
     ...eventProps,
     method: route.method,
-    userInfo: { userId: USER_ID, orgId: ORG_ID, membership, email },
+    userInfo: { userId: USER_ID, orgId: ORG_ID, membership, email: CALLER_EMAIL },
     ...(csrf ? { cookies: [`${CSRF_COOKIE_NAME}=${CSRF_TOKEN}`] } : {}),
   });
   // Assigned rather than passed: the shared builder takes no path parameters,
@@ -273,10 +259,6 @@ function errorBody(result: APIGatewayProxyStructuredResultV2): {
 
 /** The `code` an error response carries, or undefined when it carries none. */
 const errorCode = (result: APIGatewayProxyStructuredResultV2) => errorBody(result).code;
-
-/** The RAG gate's own refusal, told apart from every other 403 by its message. */
-const ragRefused = (result: APIGatewayProxyStructuredResultV2) =>
-  result.statusCode === 403 && errorBody(result).message === RAG_REFUSAL;
 
 const byRequirement = (requires: RouteManifestEntry['requires']) =>
   ROUTE_MANIFEST.filter(
@@ -445,18 +427,6 @@ const IN_HANDLER_PROBES: {
     request: presignRequest(op),
   })),
   {
-    handler: 'set-bucket-rag-enablement',
-    asks: 'indexing on',
-    permission: 'buckets.create',
-    request: { body: JSON.stringify({ enabled: true }), pathParameters: { name: BUCKET } },
-  },
-  {
-    handler: 'set-bucket-rag-enablement',
-    asks: 'indexing off',
-    permission: 'buckets.delete',
-    request: { body: JSON.stringify({ enabled: false }), pathParameters: { name: BUCKET } },
-  },
-  {
     handler: 'create-access-key',
     asks: 'a new key',
     permission: 'keys.create',
@@ -526,9 +496,9 @@ describe('what the in-handler routes enforce', () => {
   }
 
   /**
-   * The two contrasts that prove the branch rather than the gate. A route
-   * reading its body and then checking one fixed permission would pass every
-   * case above; it fails these.
+   * The contrast that proves the branch rather than the gate. A route reading
+   * its body and then checking one fixed permission would pass every case
+   * above; it fails this one.
    */
   it('lets a ReadOnly caller presign a read but not a write', async () => {
     const readOnly = membershipFor(ORG_ID, USER_ID, OrgRole.ReadOnly);
@@ -553,31 +523,8 @@ describe('what the in-handler routes enforce', () => {
     expect(write.statusCode).toBe(403);
     expect(errorCode(write)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
   });
-
-  it('lets a Member turn bucket indexing on but not off', async () => {
-    const member = membershipFor(ORG_ID, USER_ID, OrgRole.Member);
-    const on = await invokeRoute(routeFor('set-bucket-rag-enablement'), {
-      membership: member,
-      request: { body: JSON.stringify({ enabled: true }), pathParameters: { name: BUCKET } },
-    });
-    const off = await invokeRoute(routeFor('set-bucket-rag-enablement'), {
-      membership: member,
-      request: { body: JSON.stringify({ enabled: false }), pathParameters: { name: BUCKET } },
-    });
-
-    expect(errorCode(on)).not.toBe(ApiErrorCode.FORBIDDEN_ROLE);
-    expect(off.statusCode).toBe(403);
-    expect(errorCode(off)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
-  });
 });
 
-/**
- * The RAG query route takes two kinds of caller. The bearer token carries its
- * own authority; a caller arriving with a cookie session instead is an ordinary
- * console user, gated on the manifest's `cookieRequires` for the route. These
- * cases drive the cookie path — no `Authorization` header — so the requirement
- * the manifest declares is the one the response reflects.
- */
 /**
  * The cap a route applies on top of its declared permission.
  *
@@ -908,34 +855,6 @@ describe('the invitation route asks for a token instead of a role', () => {
   );
 });
 
-describe('the cookie caller on a bearer route', () => {
-  quietDenialOutput();
-
-  for (const route of ROUTE_MANIFEST.filter((entry) => entry.category === 'bearer')) {
-    describe(`${route.handler} (${route.cookieRequires})`, () => {
-      const refused = route.cookieRequires ? rolesRefused(route.cookieRequires) : [];
-
-      if (refused.length > 0) {
-        it.each(refused)('refuses %s', async (role) => {
-          const result = await invokeRoute(route, {
-            membership: membershipFor(ORG_ID, USER_ID, role),
-          });
-
-          expect(result.statusCode).toBe(403);
-          expect(errorCode(result)).toBe(ApiErrorCode.FORBIDDEN_ROLE);
-        });
-      }
-
-      it('refuses a caller with no membership row', async () => {
-        const result = await invokeRoute(route, { membership: NO_MEMBERSHIP });
-
-        expect(result.statusCode).toBe(403);
-        expect(errorCode(result)).toBe(ApiErrorCode.NOT_A_MEMBER);
-      });
-    });
-  }
-});
-
 /**
  * A cookie is sent by the browser whether or not the page asking for it is
  * ours, so every route that changes something behind a cookie session takes a
@@ -944,9 +863,8 @@ describe('the cookie caller on a bearer route', () => {
  * out.
  *
  * The scope is the cookie session. The Stripe webhook authenticates by the
- * provider's request signature and the RAG query route by its bearer token;
- * neither is a credential a browser attaches on its own, and neither route
- * carries the middleware.
+ * provider's request signature, which is not a credential a browser attaches on
+ * its own, and the route does not carry the middleware.
  */
 describe('every mutating session route refuses a request with no CSRF token', () => {
   quietDenialOutput();
@@ -973,67 +891,6 @@ describe('every mutating session route refuses a request with no CSRF token', ()
 
     expect(result.statusCode).toBe(403);
     expect(errorBody(result).message).toBe(CSRF_REFUSAL);
-  });
-});
-
-/**
- * RAG ships behind a per-email allowlist while it is in early access, and the
- * manifest says which routes that gate sits on. It is not the role gate: a
- * caller holding every permission the route asks for is still refused without a
- * row, so these routes owe a denial no permission check produces. The gate is
- * the real `ragAccessMiddleware`, running against a stubbed allowlist read —
- * the one thing about it a test can supply.
- *
- * The unmarked routes are checked too, from the other side: a manifest entry
- * that quietly gained the middleware without gaining the flag would show up as
- * a route refusing a caller the manifest says nothing about.
- */
-describe('the RAG allowlist gates the routes the manifest marks', () => {
-  quietDenialOutput();
-
-  const gated = ROUTE_MANIFEST.filter((route) => route.ragAllowlisted);
-  const ungated = ROUTE_MANIFEST.filter(
-    (route) =>
-      !route.ragAllowlisted && (route.category === 'authenticated' || route.category === 'bearer'),
-  );
-
-  // The gate runs after the subscription guard on every chain that carries it,
-  // so the request only reaches it once the guard has a record to pass on.
-  withActiveSubscription();
-
-  /** The allowlist row an operator writes to onboard one customer. */
-  function allowlist(email: string): void {
-    stubbedRows.set(
-      rowKey('UserInfoTable', `ALLOWLIST#${email}`, 'RAG'),
-      marshall({ pk: `ALLOWLIST#${email}`, sk: 'RAG' }),
-    );
-  }
-
-  it.each(named(gated))(
-    '%s refuses a caller who is neither foundation nor allowlisted',
-    async (_handler, route) => {
-      const result = await invokeRoute(route, { membership: owner(), email: OUTSIDER_EMAIL });
-
-      expect(result.statusCode).toBe(403);
-      expect(errorBody(result).message).toBe(RAG_REFUSAL);
-    },
-  );
-
-  // What the allowlisted caller then gets is the route's own business, and the
-  // route's own tests say what it is. The claim here is only that the gate is
-  // no longer what stops them.
-  it.each(named(gated))('%s lets an allowlisted caller past the gate', async (_handler, route) => {
-    allowlist(OUTSIDER_EMAIL);
-
-    const result = await invokeRoute(route, { membership: owner(), email: OUTSIDER_EMAIL });
-
-    expect(ragRefused(result)).toBe(false);
-  });
-
-  it.each(named(ungated))('%s is not behind the gate', async (_handler, route) => {
-    const result = await invokeRoute(route, { membership: owner(), email: OUTSIDER_EMAIL });
-
-    expect(ragRefused(result)).toBe(false);
   });
 });
 

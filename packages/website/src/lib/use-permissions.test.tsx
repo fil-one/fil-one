@@ -24,7 +24,6 @@ function meWith(role: OrgRole | undefined): MeResponse {
     nameConfirmed: true,
     emailVerified: true,
     mfaEnrollments: [],
-    ragAccess: false,
     orgsBeta: false,
     billingActive: true,
     userId: 'user-1',

@@ -19,7 +19,6 @@
     "@filone/aurora-backoffice-client": "workspace:*",
     "@filone/aurora-portal-client": "workspace:*",
     "@filone/orchestrator-client": "workspace:*",
-    "@filone/rag-shared": "workspace:*",
     "@filone/shared": "workspace:*",
     "@middy/core": "^7.9.2",
     "@middy/http-header-normalizer": "^7.9.2",

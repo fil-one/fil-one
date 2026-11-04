@@ -340,25 +340,6 @@ export {
 } from './api/bulk-delete.ts';
 
 export {
-  QueryBucketSchema,
-  QUERY_DEFAULT_TOP_K,
-  QUERY_MAX_TOP_K,
-  SUPPORTED_COMPLETION_MODELS,
-  SUPPORTED_COMPLETION_MODEL_IDS,
-  SetBucketRagEnabledSchema,
-} from './api/rag.ts';
-
-export type {
-  QueryBucketRequest,
-  QueryBucketResponse,
-  CompletionModel,
-  BucketRagStatus,
-  BucketRagSyncState,
-  SetBucketRagEnabledRequest,
-  BucketRagEnablementResponse,
-} from './api/rag.ts';
-
-export {
   ACCESS_KEY_PERMISSIONS,
   ACCESS_KEY_BUCKET_SCOPES,
   OBJECT_PERMISSIONS,
@@ -401,23 +382,6 @@ export type {
   DeleteAccessKeyRequest,
   CreatePrincipalAccessKeyRequest,
 } from './api/access-keys.ts';
-
-export {
-  RAG_KEY_TOKEN_PREFIX,
-  RAG_KEY_DISPLAY_PREFIX_LENGTH,
-  RAG_KEY_MAX_BUCKETS,
-  RAG_KEY_BUCKET_SCOPES,
-  RagKeyBucketRefSchema,
-  CreateRagApiKeySchema,
-} from './api/rag-api-keys.ts';
-export type {
-  RagKeyBucketScope,
-  RagKeyBucketRef,
-  RagApiKey,
-  ListRagApiKeysResponse,
-  CreateRagApiKeyRequest,
-  CreateRagApiKeyResponse,
-} from './api/rag-api-keys.ts';
 
 export { ACTIVITY_ACTION_LABELS, getActivityActionLabel } from './api/dashboard.ts';
 

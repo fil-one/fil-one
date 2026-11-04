@@ -132,7 +132,6 @@ function renderPage(role: OrgRole = OrgRole.Owner) {
     orgName: 'Acme',
     emailVerified: true,
     mfaEnrollments: [],
-    ragAccess: true,
     userId: 'user-1',
     role,
     permissions: ROLE_PERMISSIONS[role],
