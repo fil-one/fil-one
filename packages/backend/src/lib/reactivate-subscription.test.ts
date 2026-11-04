@@ -115,20 +115,49 @@ describe('createOrUpdateSubscription', () => {
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
   });
 
-  it('pays the open invoices of the named subscription with the new card when it is past due', async () => {
+  it('pays the open invoices of the named subscription oldest first when it is past due', async () => {
     mockSubscriptionsRetrieve
       .mockResolvedValueOnce(stripeSubscription('sub_named', 'past_due'))
       .mockResolvedValueOnce(stripeSubscription('sub_named', 'active'));
+    // Stripe lists invoices newest first.
     mockInvoicesList.mockImplementation(async ({ status }: { status: string }) => ({
-      data: status === 'open' ? [{ id: 'in_open_1' }, { id: 'in_open_2' }] : [],
+      data: status === 'open' ? [{ id: 'in_newest' }, { id: 'in_oldest' }] : [],
     }));
 
     const result = await reactivate(buildRecord());
 
     expect(result).toMatchObject({ ok: true, value: { id: 'sub_named', status: 'active' } });
-    expect(writes()).toStrictEqual(['update:sub_named', 'pay:in_open_1', 'pay:in_open_2']);
-    expect(mockInvoicesPay).toHaveBeenCalledWith('in_open_1', { payment_method: 'pm_new' });
-    expect(mockInvoicesList).toHaveBeenCalledWith({ subscription: 'sub_named', status: 'open' });
+    expect(writes()).toStrictEqual(['update:sub_named', 'pay:in_oldest', 'pay:in_newest']);
+    expect(mockInvoicesPay).toHaveBeenCalledWith('in_oldest', { payment_method: 'pm_new' });
+    expect(mockInvoicesList).toHaveBeenCalledWith({
+      subscription: 'sub_named',
+      status: 'open',
+      limit: 100,
+    });
+  });
+
+  it('pays the open invoices on every page of the list', async () => {
+    mockSubscriptionsRetrieve
+      .mockResolvedValueOnce(stripeSubscription('sub_named', 'past_due'))
+      .mockResolvedValueOnce(stripeSubscription('sub_named', 'active'));
+    mockInvoicesList.mockImplementation(
+      async ({ status, starting_after }: { status: string; starting_after?: string }) => {
+        if (status !== 'open') return { data: [], has_more: false };
+        return starting_after
+          ? { data: [{ id: 'in_1' }], has_more: false }
+          : { data: [{ id: 'in_3' }, { id: 'in_2' }], has_more: true };
+      },
+    );
+
+    await reactivate(buildRecord());
+
+    expect(writes()).toStrictEqual(['update:sub_named', 'pay:in_1', 'pay:in_2', 'pay:in_3']);
+    expect(mockInvoicesList).toHaveBeenCalledWith({
+      subscription: 'sub_named',
+      status: 'open',
+      limit: 100,
+      starting_after: 'in_2',
+    });
   });
 
   it('finalizes the draft invoices before paying when the named subscription is unpaid', async () => {
@@ -145,16 +174,23 @@ describe('createOrUpdateSubscription', () => {
     expect(mockInvoicesFinalize).toHaveBeenCalledWith('in_draft', { auto_advance: true });
   });
 
-  it('returns the still-past-due subscription when the new card is declined', async () => {
-    mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription('sub_named', 'past_due'));
-    mockInvoicesList.mockResolvedValue({ data: [{ id: 'in_open' }] });
+  it('refuses with 402 and pays nothing newer when the new card is declined on an open invoice', async () => {
+    // Paying the newest invoice alone can return the subscription to active,
+    // which must not hide an older invoice the card failed to pay.
+    mockSubscriptionsRetrieve
+      .mockResolvedValueOnce(stripeSubscription('sub_named', 'past_due'))
+      .mockResolvedValue(stripeSubscription('sub_named', 'active'));
+    mockInvoicesList.mockImplementation(async ({ status }: { status: string }) => ({
+      data: status === 'open' ? [{ id: 'in_newest' }, { id: 'in_oldest' }] : [],
+    }));
     mockInvoicesPay.mockRejectedValue(
       Object.assign(new Error('Your card was declined.'), { type: 'StripeCardError' }),
     );
 
     const result = await reactivate(buildRecord());
 
-    expect(result).toMatchObject({ ok: true, value: { id: 'sub_named', status: 'past_due' } });
+    expect(result).toMatchObject({ ok: false, refusal: { statusCode: 402 } });
+    expect(writes()).toStrictEqual(['update:sub_named', 'pay:in_oldest']);
   });
 
   it('resumes the named subscription with the new card when Stripe reports it paused', async () => {
