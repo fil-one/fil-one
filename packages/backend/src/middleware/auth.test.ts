@@ -540,6 +540,39 @@ describe('authMiddleware', () => {
       });
     });
 
+    // An invitation replaced the tombstone, and the console reads /me straight
+    // after: a replica that has not seen the write still holds the old stamp.
+    it('lets in an account that just rejoined when a stale read still shows its tombstone', async () => {
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { email: MOCK_EMAIL, email_verified: true },
+      });
+      ddbMock.on(GetItemCommand).callsFake((input) => {
+        if (input.Key.pk?.S !== `SUB#${MOCK_SUB}`) return {};
+        return {
+          Item: input.ConsistentRead
+            ? { userId: { S: MOCK_USER_ID }, orgId: { S: MOCK_ORG_ID } }
+            : {
+                userId: { S: 'any-deleted-user' },
+                orgId: { S: 'any-deleted-org' },
+                deletedAt: { S: '2026-01-01T00:00:00.000Z' },
+              },
+        };
+      });
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({ cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`] }),
+      );
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(request.event)).toMatchObject({
+        userId: MOCK_USER_ID,
+        orgId: MOCK_ORG_ID,
+      });
+    });
+
     describe('on a route that lets a deleted account start over', () => {
       it('hands back the rotated cookies when it answers that the org is being deleted', async () => {
         mockJwtVerify

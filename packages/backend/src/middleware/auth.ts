@@ -5,7 +5,7 @@ import type {
   APIGatewayProxyStructuredResultV2,
   Context,
 } from 'aws-lambda';
-import { GetItemCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
 import { Resource } from 'sst';
 import type {
@@ -439,6 +439,30 @@ interface IdentityClaims {
 }
 
 /**
+ * The caller's identity row. Read eventually consistent on every request, and a
+ * tombstone read again consistently before it is believed: an invitation
+ * replaces the tombstone of an account that rejoins, and the console reads
+ * `/me` straight after, where a stale copy would answer 410.
+ */
+async function readIdentityRow(
+  tableName: string,
+  sub: string,
+): Promise<Record<string, AttributeValue> | undefined> {
+  const read = async (consistent: boolean) => {
+    const { Item } = await getDynamoClient().send(
+      new GetItemCommand({
+        TableName: tableName,
+        Key: { pk: { S: `SUB#${sub}` }, sk: { S: 'IDENTITY' } },
+        ...(consistent ? { ConsistentRead: true } : {}),
+      }),
+    );
+    return Item;
+  };
+  const row = await read(false);
+  return isIdentityTombstoned(row) ? await read(true) : row;
+}
+
+/**
  * The caller's account, created here on their first request. With
  * `deferAccountCreation` the account is not created: the route creates it
  * itself, and this returns what it needs to.
@@ -450,26 +474,17 @@ async function resolveUserAndOrg({
   const { sub, email, emailVerified, name } = claims;
   const tableName = Resource.UserInfoTable.name;
 
-  // Look up existing mapping
-  const result = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: tableName,
-      Key: {
-        pk: { S: `SUB#${sub}` },
-        sk: { S: 'IDENTITY' },
-      },
-    }),
-  );
+  const identityRow = await readIdentityRow(tableName, sub);
 
   // Before the userId/orgId branch, so a stamped row can never be read as a new signup.
-  if (isIdentityTombstoned(result.Item)) {
+  if (isIdentityTombstoned(identityRow)) {
     if (!deferAccountCreation) throw new AccountDeletedError();
-    return resolveRejoiningAccount(result.Item, claims);
+    return resolveRejoiningAccount(identityRow, claims);
   }
 
-  if (result.Item?.userId?.S && result.Item?.orgId?.S) {
-    const userId = result.Item.userId.S;
-    const orgId = result.Item.orgId.S;
+  if (identityRow?.userId?.S && identityRow?.orgId?.S) {
+    const userId = identityRow.userId.S;
+    const orgId = identityRow.orgId.S;
 
     // The session fence. On the org profile, so the confirm transaction stays three
     // items at any org size. Ahead of the backfill: a deleted org must not trigger it.
@@ -498,8 +513,8 @@ async function resolveUserAndOrg({
       email,
       emailVerified,
       name,
-      stampedEmail: result.Item.profileEmail?.S,
-      stampedName: result.Item.profileName?.S,
+      stampedEmail: identityRow.profileEmail?.S,
+      stampedName: identityRow.profileName?.S,
     });
     return { userId, orgId, email };
   }
