@@ -216,6 +216,8 @@ export type ObjectPreviewCardProps = {
   region: S3Region;
   objectKey: string;
   versionId?: string;
+  /** Changes whenever the contents do, so the text preview never shows an overwritten file. */
+  etag?: string;
   sizeBytes: number;
   contentType?: string;
   onDownload: () => void;
@@ -236,6 +238,7 @@ export function ObjectPreviewCard({
   region,
   objectKey,
   versionId,
+  etag,
   sizeBytes,
   contentType,
   onDownload,
@@ -262,7 +265,9 @@ export function ObjectPreviewCard({
   });
 
   const textQuery = useQuery({
-    queryKey: [...queryKeys.objectPreviewUrl(bucketName, objectKey, versionId), 'text'],
+    // Without a version ID the key alone names whatever is latest, so the ETag
+    // tells a cached body from the contents of a file overwritten since
+    queryKey: [...queryKeys.objectPreviewUrl(bucketName, objectKey, versionId), 'text', etag],
     enabled: kind === 'text' && urlQuery.data !== undefined,
     staleTime: PREVIEW_URL_STALE_TIME,
     // `enabled` holds this back until the URL has arrived

@@ -30,6 +30,10 @@ const TEXT_CONTENT_TYPES = new Set([
   'application/toml',
 ]);
 
+// Content types that say nothing about what an object holds, so its file
+// extension decides how to preview it
+const GENERIC_CONTENT_TYPES = new Set(['', 'application/octet-stream', 'binary/octet-stream']);
+
 // The extensions a browser-uploaded object is likely to carry with a generic
 // content type (`application/octet-stream`, or none at all)
 const EXTENSION_KINDS: Record<string, PreviewKind> = {
@@ -105,9 +109,10 @@ export function shortenFileName(name: string, maxLength = 32): string {
  * How to preview an object, from its content type, or from its file extension
  * when the content type says nothing useful.
  */
-export function getPreviewKind(key: string, contentType?: string): PreviewKind | null {
-  const fromType = contentType ? getKindFromContentType(contentType) : null;
-  if (fromType) return fromType;
+export function getPreviewKind(key: string, contentType = ''): PreviewKind | null {
+  const mime = contentType.split(';')[0].trim().toLowerCase();
+  // A specific type is authoritative: a PDF named `.txt` is still a PDF
+  if (!GENERIC_CONTENT_TYPES.has(mime)) return getKindFromContentType(contentType);
   const extension = getObjectFileName(key).split('.').at(-1)?.toLowerCase();
   return extension ? (EXTENSION_KINDS[extension] ?? null) : null;
 }

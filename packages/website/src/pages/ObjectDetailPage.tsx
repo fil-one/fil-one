@@ -21,7 +21,11 @@ import type {
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
 import { getFolderPrefixes } from '../lib/object-preview.js';
-import { getVersionState, useObjectVersions } from '../lib/object-versions.js';
+import {
+  getVersionState,
+  hasReadableLatestAfterDeleting,
+  useObjectVersions,
+} from '../lib/object-versions.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
@@ -153,11 +157,12 @@ function useObjectMetadata({ bucketName, region, objectKey, versionId }: ObjectD
  * What Delete will do, which depends on what it targets. A version named in the
  * URL is removed for good and the rest stay. Without one, a versioned bucket
  * keeps every version and hides the object behind a delete marker, so calling
- * that permanent, as this dialog used to, was wrong.
+ * that permanent, as this dialog used to, was wrong. `isVersioned` is undefined
+ * while the history is unknown, and the copy then claims neither outcome.
  */
 function getDeleteCopy(
   versionId: string | undefined,
-  isVersioned: boolean,
+  isVersioned: boolean | undefined,
 ): { title: string; description: string; confirmLabel: string } {
   if (versionId) {
     return {
@@ -165,6 +170,14 @@ function getDeleteCopy(
       description:
         'This version will be permanently deleted. Other versions of the object stay in its history.',
       confirmLabel: 'Delete version',
+    };
+  }
+  if (isVersioned === undefined) {
+    return {
+      title: 'Delete object',
+      description:
+        'If the bucket keeps versions, the object will be hidden behind a delete marker and its earlier versions stay in its history. If not, it will be permanently deleted.',
+      confirmLabel: 'Delete object',
     };
   }
   if (isVersioned) {
@@ -199,7 +212,8 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
   const navigate = useNavigate();
   const { data: metadata, isPending, isError, error } = useObjectMetadata(props);
   const bucketQuery = useQuery(bucketQueryOptions(bucketName, region));
-  const { data: versions = [] } = useObjectVersions(bucketName, region, objectKey);
+  const versionsQuery = useObjectVersions(bucketName, region, objectKey);
+  const versions = versionsQuery.data ?? [];
   const versionState = getVersionState(versions, versionId);
 
   const mayDelete = useHasPermission('objects.delete');
@@ -218,12 +232,13 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
       search: { region, ...(parentPrefix && { prefix: parentPrefix }) },
     });
 
-  // Deleting one version of several leaves the object, so the page goes to what
-  // is now its latest; anything else leaves nothing here to show
+  // Deleting one version can leave the object readable, and the page then goes
+  // to what is now its latest. Anything else, including a delete marker left on
+  // top, leaves nothing here to show.
   const afterDelete = () => {
     void queryClient.invalidateQueries({ queryKey: ['objects', bucketName, region] });
     void queryClient.invalidateQueries({ queryKey: ['object-metadata', bucketName, objectKey] });
-    if (versionId && versions.length > 1) {
+    if (versionId && hasReadableLatestAfterDeleting(versions, versionId)) {
       void navigate({
         to: '/buckets/$bucketName/objects',
         params: { bucketName },
@@ -236,7 +251,10 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
 
   const objectActions = useObjectActions({ bucketName, region, onDeleted: afterDelete });
   const download = () => void objectActions.downloadObject(objectKey, versionId);
-  const deleteCopy = getDeleteCopy(versionId, versionState.isVersioned);
+  const deleteCopy = getDeleteCopy(
+    versionId,
+    versionsQuery.data ? versionState.isVersioned : undefined,
+  );
 
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-6 px-5 pt-6 pb-12 sm:px-8 lg:px-10 lg:pt-10 xl:px-0">
@@ -280,6 +298,7 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
                 region={region}
                 objectKey={objectKey}
                 versionId={versionId}
+                etag={metadata.etag}
                 sizeBytes={metadata.sizeBytes}
                 contentType={metadata.contentType}
                 onDownload={download}
@@ -289,12 +308,19 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
                 versionId={versionState.shownVersionId}
                 objectLockEnabled={bucketQuery.data?.bucket.objectLockEnabled ?? false}
               />
-              <VersionHistoryCard
-                versions={versions}
-                currentVersionId={versionState.shown?.versionId ?? versionId}
-                bucketName={bucketName}
-                region={region}
-              />
+              {versionsQuery.isError && !versionsQuery.data ? (
+                <Alert
+                  variant="red"
+                  description="Failed to load version history. Reload the page to try again."
+                />
+              ) : (
+                <VersionHistoryCard
+                  versions={versions}
+                  currentVersionId={versionState.shown?.versionId ?? versionId}
+                  bucketName={bucketName}
+                  region={region}
+                />
+              )}
             </>
           )}
         </div>

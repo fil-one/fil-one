@@ -37,6 +37,17 @@ describe('getPreviewKind', () => {
     expect(getPreviewKind('any-file.zip', 'application/zip')).toBeNull();
   });
 
+  it.each(['application/pdf', 'application/zip'])(
+    'offers no preview for %s even when the key has a previewable extension',
+    (contentType) => {
+      expect(getPreviewKind('any-file.txt', contentType)).toBeNull();
+    },
+  );
+
+  it('falls back to the extension for the legacy generic type binary/octet-stream', () => {
+    expect(getPreviewKind('any-file.png', 'binary/octet-stream')).toBe('image');
+  });
+
   it('offers no preview for a key without an extension or a useful type', () => {
     expect(getPreviewKind('any-folder/README')).toBeNull();
   });

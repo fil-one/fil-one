@@ -51,6 +51,28 @@ export function getVersionState(versions: S3ObjectVersion[], versionId?: string)
   };
 }
 
+/**
+ * The history with S3's own ID, "null", put back on the entries that have it.
+ * The listing parser reads "null" as no ID, which suits the bucket table, but
+ * the oldest version of an object uploaded before versioning was turned on has
+ * that ID, and a request needs it to reach that version rather than the latest.
+ */
+export function restoreNullVersionIds(versions: S3ObjectVersion[]): S3ObjectVersion[] {
+  return versions.map((v) => (v.versionId ? v : { ...v, versionId: UNVERSIONED_ID }));
+}
+
+/**
+ * Whether the object can still be opened once `deletedVersionId` is gone: the
+ * newest entry left is a version, not a delete marker. `versions` is newest first.
+ */
+export function hasReadableLatestAfterDeleting(
+  versions: S3ObjectVersion[],
+  deletedVersionId: string,
+): boolean {
+  const newestLeft = versions.find((v) => v.versionId !== deletedVersionId);
+  return newestLeft !== undefined && !newestLeft.isDeleteMarker;
+}
+
 /** This key's entries from the bucket page's listing, when the user came from there. */
 function getCachedVersions(
   bucketName: string,
@@ -60,7 +82,8 @@ function getCachedVersions(
   const listing = queryClient.getQueryData<ListObjectVersionsResponse>(
     queryKeys.objects(bucketName, region),
   );
-  return listing?.versions.filter((v) => v.key === objectKey);
+  const entries = listing?.versions.filter((v) => v.key === objectKey);
+  return entries && restoreNullVersionIds(entries);
 }
 
 /**
@@ -84,7 +107,7 @@ export function useObjectVersions(bucketName: string, region: S3Region, objectKe
       ]);
       const response = await executePresignedUrl(items[0].url, items[0].method);
       const { versions } = parseListObjectVersionsResponse(await response.text());
-      return versions.filter((v) => v.key === objectKey);
+      return restoreNullVersionIds(versions.filter((v) => v.key === objectKey));
     },
   });
 }

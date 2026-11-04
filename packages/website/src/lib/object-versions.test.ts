@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { S3ObjectVersion } from '@filone/shared';
 
-import { getVersionState } from './object-versions.js';
+import {
+  getVersionState,
+  hasReadableLatestAfterDeleting,
+  restoreNullVersionIds,
+} from './object-versions.js';
 
 function version(overrides: Partial<S3ObjectVersion>): S3ObjectVersion {
   return {
@@ -65,5 +69,41 @@ describe('getVersionState', () => {
       shown: undefined,
       isOlder: false,
     });
+  });
+});
+
+describe('restoreNullVersionIds', () => {
+  it('gives an entry without an ID the S3 ID "null"', () => {
+    // The listing parser reads S3's "null" ID as no ID
+    const nullVersion = version({ versionId: '' });
+    expect(restoreNullVersionIds([latest, nullVersion])).toStrictEqual([
+      latest,
+      { ...nullVersion, versionId: 'null' },
+    ]);
+  });
+});
+
+describe('hasReadableLatestAfterDeleting', () => {
+  const marker = version({ versionId: 'v-marker', isLatest: true, isDeleteMarker: true });
+
+  it('reports the object readable when a version is newest after the delete', () => {
+    expect(hasReadableLatestAfterDeleting([latest, older], 'v-older')).toBe(true);
+  });
+
+  it('reports the object readable when deleting the latest leaves an older version on top', () => {
+    expect(hasReadableLatestAfterDeleting([latest, older], 'v-latest')).toBe(true);
+  });
+
+  it('reports the object unreadable when a delete marker is newest after the delete', () => {
+    expect(hasReadableLatestAfterDeleting([marker, older], 'v-older')).toBe(false);
+  });
+
+  it('reports the object unreadable when deleting the latest leaves a delete marker on top', () => {
+    const olderMarker = version({ versionId: 'v-older-marker', isDeleteMarker: true });
+    expect(hasReadableLatestAfterDeleting([latest, olderMarker, older], 'v-latest')).toBe(false);
+  });
+
+  it('reports the object unreadable when the deleted version was the only entry', () => {
+    expect(hasReadableLatestAfterDeleting([latest], 'v-latest')).toBe(false);
   });
 });
