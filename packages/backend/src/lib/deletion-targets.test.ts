@@ -414,6 +414,25 @@ describe('resolveDeletionTargets', () => {
       expect(members[0]!.needsFloorOrg).toBeUndefined();
     });
 
+    it('is a floor org for a survivor whose only other org is being deleted too', async () => {
+      stubMembers({
+        orgTable: [memberRow('user-1', { source: 'invitation' })],
+        memberships: { 'user-1': [inverseItem('user-1', ORG), inverseItem('user-1', OTHER_ORG)] },
+      });
+      ddbMock.on(GetItemCommand).callsFake((input) => {
+        const pk: string = input.Key.pk?.S ?? '';
+        if (pk === `ORG#${OTHER_ORG}`)
+          return { Item: marshall({ pk, sk: 'PROFILE', deleting: true }) };
+        if (pk === 'USER#user-1') return { Item: marshall({ sub: 'auth0|one' }) };
+        return { Item: undefined };
+      });
+
+      const { members } = await resolveDeletionTargets(ORG);
+
+      expect(members[0]!).toMatchObject({ deleteIdentity: false, needsFloorOrg: true });
+      expect(members[0]!.homeOrgId).toBeUndefined();
+    });
+
     // The row that will not decode may be the org they would have moved to.
     it('is not a floor org while one of the survivor’s membership rows will not decode', async () => {
       stubMembers({

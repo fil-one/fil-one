@@ -10,6 +10,7 @@ import {
   type OrgMembershipRecord,
   type OrgMembershipSource,
 } from './org-membership.ts';
+import { isOrgDeleting } from './org-profile.ts';
 import { getProvisionedRegions } from './region-helpers.ts';
 
 const LOG = '[deletion-targets]';
@@ -176,10 +177,11 @@ async function resolveMember(orgId: string, row: MemberRow): Promise<DeletionMem
   const others = listing.memberships.filter((m) => m.orgId !== orgId);
   const keptReasons = censusMember(orgId, row, others, listing.undecodable);
   const deleteIdentity = keptReasons.length === 0;
-  const homeOrgId = deleteIdentity ? undefined : chooseHomeOrg(others);
+  const destinations = deleteIdentity ? [] : await findLiveOrgs(others);
+  const homeOrgId = chooseHomeOrg(destinations);
   // Kept with nowhere to go. Only once every membership row decoded: one that
   // did not may be the org they would have moved to.
-  const needsFloorOrg = !deleteIdentity && others.length === 0 && listing.undecodable === 0;
+  const needsFloorOrg = !deleteIdentity && destinations.length === 0 && listing.undecodable === 0;
   return {
     userId: row.userId,
     sub,
@@ -188,6 +190,19 @@ async function resolveMember(orgId: string, row: MemberRow): Promise<DeletionMem
     deleteIdentity,
     ...(deleteIdentity ? {} : { keptReasons }),
   };
+}
+
+/**
+ * The memberships whose org is not being deleted. A survivor moved onto one
+ * that is would be left, once its teardown removes the membership, homed in a
+ * deleted org with nowhere else to go. Consistent reads, because two orgs
+ * deleted together is the case this exists to catch.
+ */
+async function findLiveOrgs(memberships: OrgMembershipRecord[]): Promise<OrgMembershipRecord[]> {
+  const deleting = await Promise.all(
+    memberships.map((membership) => isOrgDeleting(membership.orgId, { consistent: true })),
+  );
+  return memberships.filter((_, index) => !deleting[index]);
 }
 
 /**

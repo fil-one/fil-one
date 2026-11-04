@@ -3,6 +3,8 @@ import {
   DeleteItemCommand,
   QueryCommand,
   ScanCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
   UpdateItemCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
@@ -22,6 +24,7 @@ import { collectPages } from './ddb-paging.ts';
 import { RAGKeys } from './dynamo-records.ts';
 import { cancelledLabels } from './membership-changes.ts';
 import { OrgKeys } from './org-membership.ts';
+import { isGuardRejection, orgNotDeletingCheck } from './org-profile.ts';
 import type { DeletionMember } from './deletion-record.ts';
 import { readHomeOrgPointers, readUserProfile } from './user-profile.ts';
 import { RagApiKeyKeys } from './rag-api-keys.ts';
@@ -289,11 +292,19 @@ export async function moveSurvivingMembers(
  * Both writes are conditioned on the row still naming the deleting org, so a
  * re-drive after the move lands on a row that no longer matches and changes
  * nothing.
+ *
+ * Each write is also fenced on the destination not being deleted. The census
+ * skipped orgs that were deleting when it read them, but a deletion confirmed
+ * since would leave the member homed in an org about to go. When the identity's
+ * move finds that, the member gets a floor org instead. A profile that loses
+ * the race after its identity moved is left for that org's own pass, which
+ * finds the identity naming it.
  */
 async function repointHomeOrg(orgId: string, member: DeletionMember): Promise<void> {
   const { homeOrgId } = member;
   if (!homeOrgId) return;
-  await repointRow({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }, orgId, homeOrgId);
+  const identity = await repointRow({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }, orgId, homeOrgId);
+  if (identity === 'destination-deleting') return await moveToFloorOrg(orgId, member);
   await repointRow({ pk: `USER#${member.userId}`, sk: 'PROFILE' }, orgId, homeOrgId);
 }
 
@@ -301,20 +312,38 @@ async function repointRow(
   key: Record<string, string>,
   deletingOrgId: string,
   homeOrgId: string,
-): Promise<void> {
+): Promise<'moved' | 'unchanged' | 'destination-deleting'> {
   try {
     await getDynamoClient().send(
-      new UpdateItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: marshall(key),
-        UpdateExpression: 'SET orgId = :home',
-        ConditionExpression: 'attribute_exists(pk) AND orgId = :deleting',
-        ExpressionAttributeValues: marshall({ ':home': homeOrgId, ':deleting': deletingOrgId }),
+      new TransactWriteItemsCommand({
+        TransactItems: [
+          orgNotDeletingCheck(homeOrgId),
+          {
+            Update: {
+              TableName: Resource.UserInfoTable.name,
+              Key: marshall(key),
+              UpdateExpression: 'SET orgId = :home',
+              ConditionExpression: 'attribute_exists(pk) AND orgId = :deleting',
+              ExpressionAttributeValues: marshall({
+                ':home': homeOrgId,
+                ':deleting': deletingOrgId,
+              }),
+            },
+          },
+        ],
       }),
     );
+    return 'moved';
   } catch (err) {
+    if (isGuardRejection(err)) return 'destination-deleting';
     // The row is gone or already moved. Either way there is nothing to do.
-    if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    if (
+      err instanceof TransactionCanceledException &&
+      err.CancellationReasons?.[1]?.Code === 'ConditionalCheckFailed'
+    ) {
+      return 'unchanged';
+    }
+    throw err;
   }
 }
 

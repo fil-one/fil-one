@@ -73,15 +73,26 @@ function scrubOf(key: string) {
     .args[0].input;
 }
 
-/** Every UpdateItem that moves a row's orgId, as `pk/sk -> orgId`. */
+/** Every survivor repoint the move sent, as `pk/sk -> orgId`. */
 function repoints(): string[] {
   return ddbMock
-    .commandCalls(UpdateItemCommand)
-    .filter((call) => call.args[0].input.UpdateExpression === 'SET orgId = :home')
-    .map((call) => {
-      const { Key, ExpressionAttributeValues } = call.args[0].input;
+    .commandCalls(TransactWriteItemsCommand)
+    .flatMap((call) => call.args[0].input.TransactItems ?? [])
+    .flatMap((item) => (item.Update?.UpdateExpression === 'SET orgId = :home' ? [item.Update] : []))
+    .map(({ Key, ExpressionAttributeValues }) => {
       return `${Key!.pk!.S}/${Key!.sk!.S} -> ${ExpressionAttributeValues![':home']!.S}`;
     });
+}
+
+/** A repoint transaction cancelled at `index`: 0 is the destination's fence, 1 the row. */
+function repointCancelledAt(index: 0 | 1) {
+  const reasons = [{ Code: 'None' }, { Code: 'None' }];
+  reasons[index] = { Code: 'ConditionalCheckFailed' };
+  return new TransactionCanceledException({
+    message: 'cancelled',
+    $metadata: {},
+    CancellationReasons: reasons,
+  });
 }
 
 /** Every command the scrub sent, in order, with its name and its input. */
@@ -615,30 +626,60 @@ describe('scrubOrgRecords', () => {
         });
       });
 
-      it('conditions the move on the row still naming the deleting org', async () => {
+      it('conditions the move on the row still naming the deleting org, and on the destination not being deleted', async () => {
         await moveSurvivingMembers(ORG, [
           { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
         ]);
 
-        const move = ddbMock
-          .commandCalls(UpdateItemCommand)
-          .find((call) => call.args[0].input.UpdateExpression === 'SET orgId = :home')!
-          .args[0].input;
-        expect(move.ConditionExpression).toBe('attribute_exists(pk) AND orgId = :deleting');
-        expect(move.ExpressionAttributeValues![':deleting']).toEqual({ S: ORG });
+        const [fence, move] =
+          ddbMock.commandCalls(TransactWriteItemsCommand)[0]!.args[0].input.TransactItems!;
+        expect(fence).toMatchObject({
+          ConditionCheck: {
+            Key: { pk: { S: `ORG#${OTHER_ORG}` }, sk: { S: 'PROFILE' } },
+            ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+          },
+        });
+        expect(move!.Update).toMatchObject({
+          ConditionExpression: 'attribute_exists(pk) AND orgId = :deleting',
+          ExpressionAttributeValues: { ':deleting': { S: ORG } },
+        });
       });
 
       // The second pass finds rows that already moved, so the condition loses.
       it('is a no-op on a re-drive', async () => {
-        ddbMock
-          .on(UpdateItemCommand, { UpdateExpression: 'SET orgId = :home' })
-          .rejects(new ConditionalCheckFailedException({ $metadata: {}, message: 'moved' }));
+        ddbMock.on(TransactWriteItemsCommand).rejects(repointCancelledAt(1));
 
         await expect(
           moveSurvivingMembers(ORG, [
             { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
           ]),
         ).resolves.toBeUndefined();
+        expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(2);
+      });
+
+      // Confirmed after the census read it as live: two orgs deleted together.
+      it('moves the survivor onto a floor org when the org chosen for them is being deleted by the time they move', async () => {
+        ddbMock.on(GetItemCommand).resolves({
+          Item: { sub: { S: 'auth0|one' }, orgId: { S: ORG } },
+        });
+        ddbMock.on(TransactWriteItemsCommand).rejectsOnce(repointCancelledAt(0)).resolves({});
+
+        await moveSurvivingMembers(ORG, [
+          { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
+        ]);
+
+        expect(repoints()).toEqual([`SUB#auth0|one/IDENTITY -> ${OTHER_ORG}`]);
+        const floorOrg =
+          ddbMock.commandCalls(TransactWriteItemsCommand)[1]!.args[0].input.TransactItems!;
+        expect(floorOrg).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              Put: expect.objectContaining({
+                Item: expect.objectContaining({ floorOrg: { BOOL: true } }),
+              }),
+            }),
+          ]),
+        );
       });
 
       // Nowhere to send them: the account survives, pointing at a deleted org.
