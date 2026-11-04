@@ -4,7 +4,7 @@
 // queueing a job and the worker again before each run, so access revoked after
 // the job was queued stops it.
 
-import { BulkDeleteScope, supportsIamMethods, type PolicyAction } from '@filone/shared';
+import { BulkDeleteScope, type PolicyAction } from '@filone/shared';
 
 import type { BucketVersioningStatus } from './s3-bucket-operations.ts';
 import { orchestratorSupportsIamMethods } from './service-orchestrator-ids.ts';
