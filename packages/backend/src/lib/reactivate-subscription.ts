@@ -191,7 +191,8 @@ async function createSubscription({
   promotionCodeId,
 }: CreateOrUpdateSubscriptionParams): Promise<Result<Stripe.Subscription>> {
   const customer = record.stripeCustomerId!;
-  const stray = await findLiveSubscription(stripe, customer);
+  const existing = await listSubscriptions(stripe, customer);
+  const stray = existing.find((subscription) => LIVE_STATUSES.has(subscription.status));
   if (stray) {
     console.error(
       '[activate-subscription] Customer has a live subscription the row does not name',
@@ -213,6 +214,13 @@ async function createSubscription({
         })
         .build(),
     );
+  }
+
+  // An earlier activation whose first payment needed authentication leaves an
+  // incomplete subscription behind. Completing it after this create would bill
+  // the org twice, so it goes first.
+  for (const incomplete of existing.filter(({ status }) => status === 'incomplete')) {
+    await stripe.subscriptions.cancel(incomplete.id);
   }
 
   // Keyed by everything the create sends that can differ, so a double submit
@@ -245,12 +253,9 @@ async function createSubscription({
   );
 }
 
-async function findLiveSubscription(
-  stripe: Stripe,
-  customer: string,
-): Promise<Stripe.Subscription | undefined> {
+async function listSubscriptions(stripe: Stripe, customer: string): Promise<Stripe.Subscription[]> {
   // One customer per org holds a handful of subscriptions at most, so one page
   // covers them.
   const { data } = await stripe.subscriptions.list({ customer, status: 'all', limit: 100 });
-  return data.find((subscription) => LIVE_STATUSES.has(subscription.status));
+  return data;
 }
