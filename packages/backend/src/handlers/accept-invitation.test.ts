@@ -1208,6 +1208,24 @@ describe('POST /api/invitations/accept handler', () => {
       },
     );
 
+    // No record under the org the tombstone names: there is no deletion that will
+    // ever finish, so "try again in a few minutes" would be answered forever.
+    it('refuses as a deleted account, and writes nothing, when no deletion record exists for its org', async () => {
+      stubDeletedAccount('DONE');
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `ORG#${DELETED_ORG_ID}` }, sk: { S: 'DELETION' } },
+        })
+        .resolves({});
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 410 });
+      expect(body(result)).toMatchObject({ code: ApiErrorCode.ACCOUNT_DELETED });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+    });
+
     it('answers that the deletion is still running, and writes nothing, until it finishes', async () => {
       stubDeletedAccount('PENDING');
 

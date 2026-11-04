@@ -418,9 +418,11 @@ async function resolveRejoiningAccount(
   // A row naming no org has no deletion to wait for, and none to prove finished.
   if (!deletedOrgId) throw new AccountDeletedError();
   // The scrub stamps the identity before the teardown's last steps run, so the
-  // stamp alone does not say the deletion has finished.
+  // stamp alone does not say the deletion has finished. With no record at all
+  // there is nothing that will finish, so waiting would never end.
   const deletion = await readDeletionRecord(deletedOrgId);
-  if (deletion?.status !== DELETION_STATUS.done) {
+  if (!deletion) throw new AccountDeletedError();
+  if (deletion.status !== DELETION_STATUS.done) {
     throw new AccountDeletionInProgressError('account');
   }
   if (!canRejoin(deletion)) throw new AccountDeletedError();
