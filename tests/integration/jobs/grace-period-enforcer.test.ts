@@ -206,3 +206,38 @@ describe('the Stripe subscription behind an expired grace period', () => {
     });
   });
 });
+
+// =============================================================================
+// 5. A trial past its end that never reached the console
+// =============================================================================
+describe('a trial past its end that never reached the console', () => {
+  const userId = `enforcer-trial-${crypto.randomUUID().slice(0, 8)}`;
+  const orgId = `org-trial-${crypto.randomUUID().slice(0, 8)}`;
+  const trialEndsAt = pastDate(1);
+
+  beforeAll(async () => {
+    // An org that only uses its S3 keys: nothing moved the row into grace.
+    await seedOrgProfile(orgId, 'e7da8138-c669-4cc0-82ef-253e534be11c');
+    await seedBillingRecord(userId, 'cus_fake_trial', SubscriptionStatus.Trialing, {
+      orgId: { S: orgId },
+      trialEndsAt: { S: trialEndsAt },
+    });
+  });
+
+  afterAll(async () => {
+    await deleteBillingRecord(userId, orgId);
+    await deleteOrgProfile(orgId);
+  });
+
+  it('moves the row into grace ending 7 days after the trial', async () => {
+    const result = await invokeEnforcer();
+
+    expect(result.functionError).toBeUndefined();
+    expect(await getBillingRecord(userId, orgId)).toMatchObject({
+      subscriptionStatus: { S: SubscriptionStatus.GracePeriod },
+      gracePeriodEndsAt: {
+        S: new Date(new Date(trialEndsAt).getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    });
+  });
+});
