@@ -250,6 +250,11 @@ export function DashboardPage() {
                   {pricingLine(billing.subscription)} · no egress fees
                 </p>
               )}
+              {billing.subscription.planId === PlanId.Manual && (
+                <p className="mt-0.5 text-meta text-zinc-500">
+                  {pricingLine(billing.subscription)}
+                </p>
+              )}
             </div>
             <div>
               {isTrialing || isInactive ? (

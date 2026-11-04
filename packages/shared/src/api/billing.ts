@@ -85,8 +85,8 @@ export interface Subscription {
    * named it). Absent when Stripe could not be reached and nothing was cached,
    * and for an account with no subscription at all.
    *
-   * Reported rather than inferred from `planId`: `planId` has three values and
-   * a negotiated quote is none of them, so a console reading the enum would
+   * Reported rather than inferred from `planId`: a quote negotiated in Stripe
+   * is none of `planId`'s values, so a console reading the enum would
    * call every paying customer "Pay as you go" — including the ones on a
    * contract that says otherwise.
    */
