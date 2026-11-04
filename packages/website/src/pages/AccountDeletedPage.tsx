@@ -24,8 +24,8 @@ export function AccountDeletedPage() {
           </p>
           <p className="text-sm text-zinc-500">
             Thanks for trying Fil One. You can close this page, or head back to{' '}
-            <Link href="https://fil.one" variant="accent">
-              fil.one
+            <Link href="https://www.filone.com" variant="accent">
+              filone.com
             </Link>
             .
           </p>
