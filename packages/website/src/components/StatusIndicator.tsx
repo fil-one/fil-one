@@ -107,7 +107,7 @@ export function StatusIndicator({ variant }: StatusIndicatorProps) {
       rel="noopener noreferrer"
       data-testid="system-status"
       className={clsx(
-        'group flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-zinc-100 focus-visible:brand-outline',
+        'group flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-zinc-100 focus-visible:brand-outline',
         textColorStyles[display.color],
       )}
     >

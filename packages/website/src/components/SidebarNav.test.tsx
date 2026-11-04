@@ -131,8 +131,13 @@ const UNIQUE_TESTIDS = [
   'nav-dashboard',
   'nav-buckets',
   'nav-api-keys',
+  'nav-members',
+  'nav-billing',
+  'nav-audit',
   'org-switcher-button',
   'user-menu-button',
+  'sidebar-docs-link',
+  'sidebar-support-link',
 ];
 
 describe('SidebarNav e2e selector uniqueness (desktop + drawer mounted)', () => {
@@ -169,6 +174,38 @@ describe('SidebarNav footer', () => {
     expect(within(desktop).queryByRole('button', { name: 'Report a bug' })).not.toBeInTheDocument();
     expect(within(drawer).getByTestId('status-indicator')).toBeInTheDocument();
     expect(within(drawer).getByRole('button', { name: 'Report a bug' })).toBeInTheDocument();
+  });
+
+  // Both copies carry them: the drawer has no user menu, so it is the only
+  // place a phone reaches them.
+  it.each([0, 1])('links to Documentation and Support from sidebar copy %i', (index) => {
+    const { container } = renderBothSidebars();
+    const copy = container.querySelectorAll('nav')[index];
+
+    expect(within(copy).getByRole('link', { name: 'Support' })).toHaveAttribute('href', '/support');
+    expect(within(copy).getByRole('link', { name: 'Documentation' })).toBeInTheDocument();
+  });
+
+  it('closes the drawer when Support is followed', () => {
+    const onClose = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner, ORG_ME);
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <SidebarNav
+            collapsed={false}
+            onClose={onClose}
+            showUserProfile={false}
+            showTestIds={false}
+          />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('link', { name: 'Support' }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('opens the bug-report dialog from the drawer', async () => {
@@ -215,11 +252,52 @@ describe('SidebarNav — the API Keys entry', () => {
   });
 });
 
+describe('SidebarNav, the Organization group', () => {
+  const ORG_LINK_TESTIDS = ['nav-members', 'nav-billing', 'nav-audit'];
+
+  function renderedOrgLinks(container: HTMLElement): string[] {
+    return ORG_LINK_TESTIDS.filter((testId) =>
+      container.querySelector(`[data-testid="${testId}"]`),
+    );
+  }
+
+  it.each([
+    [OrgRole.Owner, ['nav-members', 'nav-billing', 'nav-audit']],
+    [OrgRole.Admin, ['nav-members', 'nav-billing', 'nav-audit']],
+    [OrgRole.Member, ['nav-members']],
+    [OrgRole.ReadOnly, ['nav-members']],
+  ])('links %s only to the org pages its permissions open', (role, expected) => {
+    const { container } = renderBothSidebars(role);
+
+    expect(renderedOrgLinks(container)).toStrictEqual(expected);
+  });
+
+  it('leaves out Members and Audit log for an org outside the organizations beta', () => {
+    const { container } = renderBothSidebars(OrgRole.Owner, { orgsBeta: false });
+
+    expect(renderedOrgLinks(container)).toStrictEqual(['nav-billing']);
+  });
+
+  it('leaves out the group label when the caller can open none of its pages', () => {
+    // ReadOnly holds `members.read` only, and Members is beta-only.
+    renderBothSidebars(OrgRole.ReadOnly, { orgsBeta: false });
+
+    expect(screen.queryByText('Organization')).not.toBeInTheDocument();
+  });
+});
+
 describe('SidebarNav — the billing-blocked gate', () => {
   it('omits every page link and the inactive-plan banner, but keeps the org switcher and user menu', () => {
     renderOneSidebar({ overrides: { billingActive: false } });
 
-    for (const testId of ['nav-dashboard', 'nav-buckets', 'nav-api-keys']) {
+    for (const testId of [
+      'nav-dashboard',
+      'nav-buckets',
+      'nav-api-keys',
+      'nav-members',
+      'nav-billing',
+      'nav-audit',
+    ]) {
       expect(screen.queryByTestId(testId)).not.toBeInTheDocument();
     }
     expect(screen.queryByTestId('sidebar-choose-plan-button')).not.toBeInTheDocument();

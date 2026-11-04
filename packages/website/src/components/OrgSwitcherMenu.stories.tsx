@@ -53,7 +53,7 @@ const meta: Meta<typeof OrgSwitcherMenu> = {
       { orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner },
       { orgId: ORG_B, orgName: 'Globex', role: OrgRole.Member },
     ]),
-    // `Edit organization`/`Members`/`Billing` render through `BaseLink`, which
+    // `Edit organization` renders through `BaseLink`, which
     // needs a mounted router — same memory-router stand-in `SidebarNav`'s own
     // stories use.
     (Story) => {
