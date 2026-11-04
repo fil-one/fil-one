@@ -20,7 +20,9 @@ describe('A trial that ends without a card', () => {
   const cleanups: (() => Promise<unknown>)[] = [];
 
   afterAll(async () => {
-    for (const cleanup of cleanups) await cleanup();
+    // Newest first: the row and org profile go before the Stripe customer, whose
+    // deletion starts an account teardown that would otherwise find the org.
+    for (const cleanup of cleanups.reverse()) await cleanup();
   });
 
   it('keeps the Stripe trial running until the grace period after the trial ends', async () => {
