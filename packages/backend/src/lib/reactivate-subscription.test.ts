@@ -9,6 +9,7 @@ const mockSubscriptionsUpdate = vi.fn();
 const mockSubscriptionsCreate = vi.fn();
 const mockSubscriptionsList = vi.fn();
 const mockSubscriptionsResume = vi.fn();
+const mockSubscriptionsCancel = vi.fn();
 const mockInvoicesList = vi.fn();
 const mockInvoicesFinalize = vi.fn();
 const mockInvoicesPay = vi.fn();
@@ -22,6 +23,7 @@ const stripe = {
     create: mockSubscriptionsCreate,
     list: mockSubscriptionsList,
     resume: mockSubscriptionsResume,
+    cancel: mockSubscriptionsCancel,
   },
   invoices: {
     list: mockInvoicesList,
@@ -65,6 +67,7 @@ function writes(): string[] {
     ['update', mockSubscriptionsUpdate],
     ['create', mockSubscriptionsCreate],
     ['resume', mockSubscriptionsResume],
+    ['cancel', mockSubscriptionsCancel],
     ['finalize', mockInvoicesFinalize],
     ['pay', mockInvoicesPay],
   ];
@@ -297,6 +300,33 @@ describe('createOrUpdateSubscription', () => {
       expect(result).toMatchObject({ ok: true, value: { id: 'sub_created' } });
     },
   );
+
+  it('cancels an incomplete subscription before creating, so it cannot be completed later', async () => {
+    // An earlier activation whose first payment needed authentication leaves
+    // one behind; completing it after this create would bill the org twice.
+    mockSubscriptionsList.mockResolvedValue({
+      data: [stripeSubscription('sub_incomplete', 'incomplete')],
+    });
+
+    const result = await reactivate(buildRecord({ subscriptionId: undefined }));
+
+    expect(result).toMatchObject({ ok: true, value: { id: 'sub_created' } });
+    expect(writes()).toStrictEqual(['cancel:sub_incomplete', 'create:new']);
+  });
+
+  it('cancels nothing when it refuses a create beside a live subscription', async () => {
+    mockSubscriptionsList.mockResolvedValue({
+      data: [
+        stripeSubscription('sub_incomplete', 'incomplete'),
+        stripeSubscription('sub_stray', 'active'),
+      ],
+    });
+
+    const result = await reactivate(buildRecord({ subscriptionId: undefined }));
+
+    expect(result).toMatchObject({ ok: false, refusal: { statusCode: 409 } });
+    expect(writes()).toStrictEqual([]);
+  });
 
   it('applies the discount on its own update before the payment when the subscription is past due', async () => {
     mockSubscriptionsRetrieve
