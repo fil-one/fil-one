@@ -540,6 +540,48 @@ describe('authMiddleware', () => {
       });
     });
 
+    describe('on a route that lets a deleted account start over', () => {
+      it('hands back the rotated cookies when it answers that the org is being deleted', async () => {
+        mockJwtVerify
+          .mockRejectedValueOnce(new Error('token expired'))
+          .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            access_token: 'new-access-token',
+            id_token: 'new-id-token',
+            refresh_token: 'new-refresh-token',
+          }),
+        });
+        ddbMock
+          .on(GetItemCommand, { Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } } })
+          .resolves({ Item: { userId: { S: MOCK_USER_ID }, orgId: { S: MOCK_ORG_ID } } });
+        ddbMock
+          .on(GetItemCommand, { Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } } })
+          .resolves({ Item: { deleting: { BOOL: true } } });
+
+        const { before } = authMiddleware({
+          requireVerifiedEmail: false,
+          deferAccountCreation: true,
+        });
+        const request = buildMiddyRequest(
+          buildEvent({
+            cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
+          }),
+        );
+
+        const result = (await before(request)) as APIGatewayProxyStructuredResultV2;
+
+        expect(result).toMatchObject({
+          statusCode: 409,
+          cookies: expect.arrayContaining([
+            expect.stringContaining('hs_refresh_token=new-refresh-token'),
+          ]),
+        });
+      });
+    });
+
     it('extracts name and picture from ID token claims', async () => {
       const existingUserId = 'existing-user-uuid';
       const existingOrgId = 'existing-org-uuid';

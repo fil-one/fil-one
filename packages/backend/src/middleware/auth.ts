@@ -821,8 +821,10 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
     try {
       return await authenticate(request);
     } catch (err) {
+      // The caller is told to retry, so a refresh this request already spent has
+      // to reach them, or the retry presents the rotated-out token.
       if (err instanceof AccountDeletionInProgressError) {
-        return accountDeletionInProgressResponse(err.deleting);
+        return withRefreshedCookies(request, accountDeletionInProgressResponse(err.deleting));
       }
       if (err instanceof AccountDeletedError) return accountDeletedResponse();
       throw err;
