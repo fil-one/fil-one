@@ -43,7 +43,7 @@ export async function createOrUpdateSubscription(
     : undefined;
 
   if (subscription && LIVE_STATUSES.has(subscription.status)) {
-    return proceed(await updateLiveSubscription(params, subscription));
+    return updateLiveSubscription(params, subscription);
   }
   return createSubscription(params);
 }
@@ -63,7 +63,7 @@ async function retrieveIfExists(
 async function updateLiveSubscription(
   { stripe, paymentMethodId, promotionCodeId }: CreateOrUpdateSubscriptionParams,
   subscription: Stripe.Subscription,
-): Promise<Stripe.Subscription> {
+): Promise<Result<Stripe.Subscription>> {
   const { id } = subscription;
   const discountFollows = promotionCodeId !== undefined;
   const settlesAfter = subscription.status !== 'active';
@@ -86,15 +86,27 @@ async function updateLiveSubscription(
 
   switch (subscription.status) {
     case 'trialing':
-      return stripe.subscriptions.update(id, { trial_end: 'now', expand: EXPAND });
+      return proceed(await stripe.subscriptions.update(id, { trial_end: 'now', expand: EXPAND }));
     case 'past_due':
     case 'unpaid':
-      await settleOpenInvoices(stripe, subscription, paymentMethodId);
-      return stripe.subscriptions.retrieve(id, { expand: EXPAND });
+      if (!(await settleOpenInvoices(stripe, subscription, paymentMethodId))) {
+        return refuse(
+          new ResponseBuilder()
+            .status(402)
+            .body({
+              message:
+                'Your card was declined for an outstanding invoice. Please try another card.',
+            })
+            .build(),
+        );
+      }
+      return proceed(await stripe.subscriptions.retrieve(id, { expand: EXPAND }));
     case 'paused':
-      return resumeSubscription(stripe, id);
+      return proceed(await resumeSubscription(stripe, id));
     default:
-      return discountFollows ? stripe.subscriptions.retrieve(id, { expand: EXPAND }) : attached;
+      return proceed(
+        discountFollows ? await stripe.subscriptions.retrieve(id, { expand: EXPAND }) : attached,
+      );
   }
 }
 
@@ -118,32 +130,55 @@ async function resumeSubscription(stripe: Stripe, id: string): Promise<Stripe.Su
 }
 
 /**
- * Pays what the subscription owes with the new card, which is what returns it
- * to `active`. An `unpaid` subscription has stopped advancing its invoices, so
- * its drafts are finalized first. A declined card leaves the subscription as it
- * was; the caller sees its status and answers 402.
+ * Pays what the subscription owes with the new card, oldest invoice first,
+ * which is what returns it to `active`. An `unpaid` subscription has stopped
+ * advancing its invoices, so its drafts are finalized first. False on a
+ * declined card: paying a newer invoice alone can return the subscription to
+ * `active`, so its status cannot tell the caller an older one went unpaid.
  */
 async function settleOpenInvoices(
   stripe: Stripe,
   subscription: Stripe.Subscription,
   paymentMethodId: string,
-): Promise<void> {
+): Promise<boolean> {
   // Invoice ids are typed optional for preview invoices; a listed invoice always has one.
   if (subscription.status === 'unpaid') {
-    const drafts = await stripe.invoices.list({ subscription: subscription.id, status: 'draft' });
-    for (const draft of drafts.data) {
+    for (const draft of await listInvoices(stripe, subscription.id, 'draft')) {
       await stripe.invoices.finalizeInvoice(draft.id!, { auto_advance: true });
     }
   }
-  const open = await stripe.invoices.list({ subscription: subscription.id, status: 'open' });
-  for (const invoice of open.data) {
+  // Stripe lists newest first.
+  const open = (await listInvoices(stripe, subscription.id, 'open')).reverse();
+  for (const invoice of open) {
     try {
       await stripe.invoices.pay(invoice.id!, { payment_method: paymentMethodId });
     } catch (err) {
       if ((err as { type?: string }).type !== 'StripeCardError') throw err;
-      return;
+      return false;
     }
   }
+  return true;
+}
+
+/** Every invoice of the subscription in `status`, across pages, newest first. */
+async function listInvoices(
+  stripe: Stripe,
+  subscription: string,
+  status: 'draft' | 'open',
+): Promise<Stripe.Invoice[]> {
+  const invoices: Stripe.Invoice[] = [];
+  let startingAfter: string | undefined;
+  do {
+    const page = await stripe.invoices.list({
+      subscription,
+      status,
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    invoices.push(...page.data);
+    startingAfter = page.has_more ? page.data.at(-1)?.id : undefined;
+  } while (startingAfter);
+  return invoices;
 }
 
 async function createSubscription({
