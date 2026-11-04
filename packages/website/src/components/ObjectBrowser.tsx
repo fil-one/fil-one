@@ -203,6 +203,18 @@ function EmptyBucketState({
 // Object table
 // ---------------------------------------------------------------------------
 
+/** Names the scope the header checkbox selects, which a search narrows to its matches. */
+export function getSelectAllLabel({
+  searching,
+  listingTruncated,
+}: {
+  searching: boolean;
+  listingTruncated: boolean;
+}): string {
+  if (searching) return 'Select all matching objects';
+  return listingTruncated ? 'Select all loaded objects' : 'Select all objects';
+}
+
 function ObjectTable({
   entries,
   latestVersions,
@@ -214,6 +226,7 @@ function ObjectTable({
   selection,
   rowSelection,
   shownIds,
+  searching,
   listingTruncated,
   sort,
 }: {
@@ -228,6 +241,7 @@ function ObjectTable({
   rowSelection: RowSelection;
   /** Selection ids the header checkbox covers: what the table shows, search applied. */
   shownIds: string[];
+  searching: boolean;
   listingTruncated: boolean;
   /** Absent below the controls threshold, which leaves the heads plain and inert. */
   sort?: { value: ObjectSort; onChange: (sort: ObjectSort) => void };
@@ -249,7 +263,7 @@ function ObjectTable({
             <Table.SelectHead
               checked={allSelected}
               onChange={() => selection.setMany(shownIds, !allSelected)}
-              label={listingTruncated ? 'Select all loaded objects' : 'Select all objects'}
+              label={getSelectAllLabel({ searching, listingTruncated })}
             />
           )}
           <Table.Head {...sortProps('name')}>Name</Table.Head>
@@ -494,6 +508,7 @@ export function ObjectBrowser({
           selection={selection}
           rowSelection={rowSelection}
           shownIds={view.shownIds}
+          searching={view.searching}
           listingTruncated={listingTruncated}
           sort={view.sort}
         />

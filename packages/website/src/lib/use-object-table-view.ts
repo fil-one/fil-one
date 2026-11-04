@@ -23,6 +23,18 @@ export function useObjectTableView(versions: S3ObjectVersion[], currentPrefix: s
 
   const groups = groupVersionsByKey(versions);
   const showControls = shouldShowObjectControls(groups.length);
+  // When the bucket drops below the threshold the controls disappear, so drop
+  // their state too: the table falls back to the default view, and a later
+  // upload past the threshold shows fresh controls rather than an old filter.
+  // Setting state during render makes React re-render before committing.
+  const [hadControls, setHadControls] = useState(showControls);
+  if (showControls !== hadControls) {
+    setHadControls(showControls);
+    if (!showControls) {
+      setQuery('');
+      setSort(DEFAULT_OBJECT_SORT);
+    }
+  }
   const searching = showControls && query.trim() !== '';
   const entries = sortEntries(
     searching
