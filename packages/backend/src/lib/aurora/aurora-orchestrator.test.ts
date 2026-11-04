@@ -172,6 +172,7 @@ describe('auroraOrchestrator', () => {
       mockCreateAuroraBucket.mockResolvedValue(undefined);
 
       await auroraOrchestrator.createBucket('aurora-t-1', {
+        region: S3Region.EuWest1,
         bucketName: 'my-bucket',
         versioning: true,
         lock: true,
@@ -191,7 +192,10 @@ describe('auroraOrchestrator', () => {
       mockCreateAuroraBucket.mockRejectedValue(new BucketAlreadyExistsError('dup'));
 
       await expect(
-        auroraOrchestrator.createBucket('aurora-t-1', { bucketName: 'dup' }),
+        auroraOrchestrator.createBucket('aurora-t-1', {
+          region: S3Region.EuWest1,
+          bucketName: 'dup',
+        }),
       ).rejects.toBeInstanceOf(BucketAlreadyExistsError);
     });
 
@@ -199,7 +203,10 @@ describe('auroraOrchestrator', () => {
       mockCreateAuroraBucket.mockRejectedValue(new Error('upstream 500'));
 
       await expect(
-        auroraOrchestrator.createBucket('aurora-t-1', { bucketName: 'b' }),
+        auroraOrchestrator.createBucket('aurora-t-1', {
+          region: S3Region.EuWest1,
+          bucketName: 'b',
+        }),
       ).rejects.toThrow('upstream 500');
     });
   });
@@ -208,7 +215,10 @@ describe('auroraOrchestrator', () => {
     it('delegates to deleteAuroraBucket with the tenantId and bucketName', async () => {
       mockDeleteAuroraBucket.mockResolvedValue(undefined);
 
-      await auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket');
+      await auroraOrchestrator.deleteBucket('aurora-t-1', {
+        region: S3Region.EuWest1,
+        bucketName: 'my-bucket',
+      });
 
       expect(mockDeleteAuroraBucket).toHaveBeenCalledWith({
         tenantId: 'aurora-t-1',
@@ -220,16 +230,22 @@ describe('auroraOrchestrator', () => {
       mockDeleteAuroraBucket.mockResolvedValue(undefined);
 
       await expect(
-        auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket'),
+        auroraOrchestrator.deleteBucket('aurora-t-1', {
+          region: S3Region.EuWest1,
+          bucketName: 'my-bucket',
+        }),
       ).resolves.toBeUndefined();
     });
 
     it('propagates errors from the Aurora portal unchanged', async () => {
       mockDeleteAuroraBucket.mockRejectedValue(new Error('upstream 500'));
 
-      await expect(auroraOrchestrator.deleteBucket('aurora-t-1', 'my-bucket')).rejects.toThrow(
-        'upstream 500',
-      );
+      await expect(
+        auroraOrchestrator.deleteBucket('aurora-t-1', {
+          region: S3Region.EuWest1,
+          bucketName: 'my-bucket',
+        }),
+      ).rejects.toThrow('upstream 500');
     });
   });
 
@@ -435,7 +451,10 @@ describe('auroraOrchestrator', () => {
         response: { status: 200 },
       });
 
-      await auroraOrchestrator.getBucket('aurora-t-1', 'b');
+      await auroraOrchestrator.getBucket('aurora-t-1', {
+        region: S3Region.EuWest1,
+        bucketName: 'b',
+      });
 
       expect(mockPortalGetBucketInfo).toHaveBeenCalledWith({
         client: 'instrumented-portal-client',
@@ -461,7 +480,10 @@ describe('auroraOrchestrator', () => {
         response: { status: 200 },
       });
 
-      const result = await auroraOrchestrator.getBucket('aurora-t-1', 'b');
+      const result = await auroraOrchestrator.getBucket('aurora-t-1', {
+        region: S3Region.EuWest1,
+        bucketName: 'b',
+      });
 
       expect(result).toEqual({
         bucketName: 'b',
@@ -485,7 +507,10 @@ describe('auroraOrchestrator', () => {
         response: { status: 200 },
       });
 
-      const result = await auroraOrchestrator.getBucket('aurora-t-1', 'b');
+      const result = await auroraOrchestrator.getBucket('aurora-t-1', {
+        region: S3Region.EuWest1,
+        bucketName: 'b',
+      });
 
       expect(result?.defaultRetention).toBeUndefined();
     });
@@ -498,7 +523,10 @@ describe('auroraOrchestrator', () => {
         response: { status: 404 },
       });
 
-      const result = await auroraOrchestrator.getBucket('aurora-t-1', 'missing');
+      const result = await auroraOrchestrator.getBucket('aurora-t-1', {
+        region: S3Region.EuWest1,
+        bucketName: 'missing',
+      });
 
       expect(result).toBeNull();
     });
@@ -511,9 +539,9 @@ describe('auroraOrchestrator', () => {
         response: { status: 500 },
       });
 
-      await expect(auroraOrchestrator.getBucket('aurora-t-1', 'b')).rejects.toThrow(
-        /Failed to get bucket "b" from Aurora for tenant aurora-t-1/,
-      );
+      await expect(
+        auroraOrchestrator.getBucket('aurora-t-1', { region: S3Region.EuWest1, bucketName: 'b' }),
+      ).rejects.toThrow(/Failed to get bucket "b" from Aurora for tenant aurora-t-1/);
     });
 
     it('throws when Aurora returns success but no createdAt', async () => {
@@ -524,9 +552,9 @@ describe('auroraOrchestrator', () => {
         response: { status: 200 },
       });
 
-      await expect(auroraOrchestrator.getBucket('aurora-t-1', 'b')).rejects.toThrow(
-        /Aurora returned incomplete data/,
-      );
+      await expect(
+        auroraOrchestrator.getBucket('aurora-t-1', { region: S3Region.EuWest1, bucketName: 'b' }),
+      ).rejects.toThrow(/Aurora returned incomplete data/);
     });
   });
 
@@ -700,7 +728,7 @@ describe('auroraOrchestrator', () => {
         secretAccessKey: 'SK',
       });
 
-      const ctx = await auroraOrchestrator.getS3ClientContext('aurora-t-1');
+      const ctx = await auroraOrchestrator.getS3ClientContext('aurora-t-1', S3Region.EuWest1);
 
       expect(ctx).toEqual({
         endpointUrl: expect.stringContaining('aur.lu'),
@@ -996,7 +1024,11 @@ describe('auroraOrchestrator signal forwarding', () => {
       name: 'createBucket',
       run: () => {
         mockCreateAuroraBucket.mockResolvedValue(undefined);
-        return auroraOrchestrator.createBucket('t', { bucketName: 'b' }, { signal });
+        return auroraOrchestrator.createBucket(
+          't',
+          { region: S3Region.EuWest1, bucketName: 'b' },
+          { signal },
+        );
       },
       mocks: [mockCreateAuroraBucket],
     },
@@ -1004,7 +1036,11 @@ describe('auroraOrchestrator signal forwarding', () => {
       name: 'deleteBucket',
       run: () => {
         mockDeleteAuroraBucket.mockResolvedValue(undefined);
-        return auroraOrchestrator.deleteBucket('t', 'b', { signal });
+        return auroraOrchestrator.deleteBucket(
+          't',
+          { region: S3Region.EuWest1, bucketName: 'b' },
+          { signal },
+        );
       },
       mocks: [mockDeleteAuroraBucket],
     },
@@ -1020,7 +1056,12 @@ describe('auroraOrchestrator signal forwarding', () => {
       name: 'getBucket',
       run: () => {
         mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
-        return auroraOrchestrator.getBucket('t', 'b', undefined, { signal });
+        return auroraOrchestrator.getBucket(
+          't',
+          { region: S3Region.EuWest1, bucketName: 'b' },
+          undefined,
+          { signal },
+        );
       },
       mocks: [mockPortalGetBucketInfo],
     },
@@ -1129,7 +1170,12 @@ describe('auroraOrchestrator signal forwarding', () => {
     },
     getBucket: () => {
       mockPortalGetBucketInfo.mockResolvedValue(bucketInfo);
-      return auroraOrchestrator.getBucket('t', 'b', undefined, { signal });
+      return auroraOrchestrator.getBucket(
+        't',
+        { region: S3Region.EuWest1, bucketName: 'b' },
+        undefined,
+        { signal },
+      );
     },
   };
 
@@ -1140,4 +1186,34 @@ describe('auroraOrchestrator signal forwarding', () => {
       expect(mockCreatePortalClient).toHaveBeenCalledWith('t', { signal });
     });
   }
+});
+
+describe('region assertions', () => {
+  // Aurora serves eu-west-1 and nothing else. A call naming another region is a
+  // routing bug upstream, and acting on it would reach the wrong gateway.
+  const wrong = S3Region.UsEast1;
+
+  it('refuses a createBucket naming a region it does not serve', async () => {
+    await expect(
+      auroraOrchestrator.createBucket('aurora-t-1', { region: wrong, bucketName: 'b' }),
+    ).rejects.toThrow(/does not serve region "us-east-1"/);
+  });
+
+  it('refuses a deleteBucket naming a region it does not serve', async () => {
+    await expect(
+      auroraOrchestrator.deleteBucket('aurora-t-1', { region: wrong, bucketName: 'b' }),
+    ).rejects.toThrow(/does not serve region "us-east-1"/);
+  });
+
+  it('refuses a getBucket naming a region it does not serve', async () => {
+    await expect(
+      auroraOrchestrator.getBucket('aurora-t-1', { region: wrong, bucketName: 'b' }),
+    ).rejects.toThrow(/does not serve region "us-east-1"/);
+  });
+
+  it('refuses an S3 context for a region it does not serve', async () => {
+    await expect(auroraOrchestrator.getS3ClientContext('aurora-t-1', wrong)).rejects.toThrow(
+      /does not serve region "us-east-1"/,
+    );
+  });
 });

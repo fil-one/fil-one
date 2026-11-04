@@ -174,7 +174,9 @@ async function runPages(
   onProgress: (job: BulkDeleteJobRecord) => void,
 ): Promise<RunOutcome> {
   const tenant = await resolveTenant(initial);
-  const s3 = createS3Client(await tenant.orchestrator.getS3ClientContext(tenant.tenantId));
+  const s3 = createS3Client(
+    await tenant.orchestrator.getS3ClientContext(tenant.tenantId, initial.region),
+  );
   let job = initial;
 
   // A job's bucket doesn't change mid-run, so its versioning is read once per

@@ -14,6 +14,8 @@
 // the FTH region.
 
 import { createHash } from 'node:crypto';
+import type { BucketRef } from '../bucket-orchestrator.ts';
+import { assertServesRegion } from '../service-orchestrator-ids.ts';
 import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
@@ -180,8 +182,10 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
 
   async getS3ClientContext(
     tenantId: string,
+    region: S3Region,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<S3ClientContext> {
+    assertServesRegion(this, region);
     const stage = process.env.FILONE_STAGE!;
     const credentials = await getConsoleS3Credentials(
       {
@@ -206,7 +210,8 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
     args: CreateBucketArgs,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    assertServesRegion(this, args.region);
+    const ctx = await this.getS3ClientContext(tenantId, this.regions[0], requestOptions);
     const s3 = createS3Client(ctx);
     await s3CreateBucket(
       s3,
@@ -248,10 +253,11 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
 
   async deleteBucket(
     tenantId: string,
-    bucketName: string,
+    { region, bucketName }: BucketRef,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    assertServesRegion(this, region);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     await s3DeleteBucket(s3, bucketName, requestOptions);
   }
@@ -265,7 +271,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
     // call per bucket, an N+1 nobody wants to pay just to render a list. Neither
     // is returned here; getBucket loads both for the one bucket the detail page
     // actually needs them for.
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, this.regions[0], requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
 
@@ -280,11 +286,12 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
 
   async getBucket(
     tenantId: string,
-    bucketName: string,
+    { region, bucketName }: BucketRef,
     _memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null> {
-    const ctx = await this.getS3ClientContext(tenantId, requestOptions);
+    assertServesRegion(this, region);
+    const ctx = await this.getS3ClientContext(tenantId, region, requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
     const match = buckets.find((b) => b.name === bucketName);
@@ -472,7 +479,12 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
     // the bucket. A snapshot miss alone can't distinguish "not owned" from
     // "owned but absent from the current breakdown" (e.g. an empty bucket), so
     // confirm existence before reading metrics.
-    const bucket = await this.getBucket(tenantId, bucketName, undefined, requestOptions);
+    const bucket = await this.getBucket(
+      tenantId,
+      { region: this.regions[0], bucketName },
+      undefined,
+      requestOptions,
+    );
     if (!bucket) throw new BucketNotFoundError(bucketName);
 
     // FTH has no per-bucket time series; the current-snapshot `by_bucket`
