@@ -88,6 +88,7 @@ describe('account-state-test-helper', () => {
     { state: 'disabled', subscriptionStatus: 'canceled' },
     { state: 'paid_grace_period', subscriptionStatus: 'grace_period' },
     { state: 'trial_grace_period', subscriptionStatus: 'grace_period' },
+    { state: 'manual', subscriptionStatus: 'manual' },
   ] satisfies Array<{ state: AccountState; subscriptionStatus: string }>)(
     'writes $subscriptionStatus to the org row for state $state',
     async ({ state, subscriptionStatus }) => {
@@ -112,6 +113,7 @@ describe('account-state-test-helper', () => {
     { state: 'disabled', liveStatus: 'active', tenantStatus: 'disabled' },
     { state: 'paid_grace_period', liveStatus: 'active', tenantStatus: 'write-locked' },
     { state: 'trial_grace_period', liveStatus: 'active', tenantStatus: 'write-locked' },
+    { state: 'manual', liveStatus: 'write-locked', tenantStatus: 'active' },
   ] satisfies Array<{ state: AccountState; liveStatus: TenantStatus; tenantStatus: TenantStatus }>)(
     'sets the tenants to $tenantStatus for state $state',
     async ({ state, liveStatus, tenantStatus }) => {
@@ -131,6 +133,7 @@ describe('account-state-test-helper', () => {
     { state: 'disabled', removed: ['gracePeriodEndsAt', 'canceledAt', 'lastPaymentFailedAt'] },
     { state: 'paid_grace_period', removed: ['lastPaymentFailedAt'] },
     { state: 'trial_grace_period', removed: ['canceledAt', 'lastPaymentFailedAt'] },
+    { state: 'manual', removed: ['gracePeriodEndsAt', 'canceledAt', 'lastPaymentFailedAt'] },
   ] satisfies Array<{ state: AccountState; removed: string[] }>)(
     'removes the state-specific attributes state $state does not set',
     async ({ state, removed }) => {

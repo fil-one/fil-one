@@ -299,6 +299,14 @@ describe('statusBadge', () => {
     }
   });
 
+  it('reads an org billed manually as active and in good standing', () => {
+    expect(statusBadge(SubscriptionStatus.Manual)).toStrictEqual({
+      label: 'Active',
+      tone: 'green',
+      dot: true,
+    });
+  });
+
   it('reads past due as a payment problem, not as a cancellation', () => {
     expect(statusBadge(SubscriptionStatus.PastDue)).toEqual({
       label: 'Payment failed',

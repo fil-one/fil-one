@@ -127,6 +127,16 @@ export function accountDeletedResponse(): APIGatewayProxyStructuredResultV2 {
     .build();
 }
 
+export function billedManuallyResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'This organization is billed under an agreement. Contact your account team.',
+      code: ApiErrorCode.BILLED_MANUALLY,
+    })
+    .build();
+}
+
 export function imageUploadRateLimitedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(429)
