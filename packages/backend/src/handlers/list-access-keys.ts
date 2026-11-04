@@ -2,7 +2,8 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
-import { getEffectiveActions, isSupportedRegion, supportsIamMethods } from '@filone/shared';
+import { getEffectiveActions, isSupportedRegion } from '@filone/shared';
+import { orchestratorSupportsIamMethods } from '../lib/service-orchestrator-ids.ts';
 import { getAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
@@ -63,7 +64,7 @@ async function filterKeysWithBucketAccess(
       ? getOrchestratorForRegion(region)
       : undefined;
   // No `iam` region to ask, so no bucket policy can give a principal-bound key access.
-  if (!orchestrator || !supportsIamMethods(orchestrator.region))
+  if (!orchestrator || !orchestratorSupportsIamMethods(orchestrator))
     return keys.filter((key) => key.type !== 'principal');
   const iam = orchestrator as ServiceOrchestrator;
   // Uses `isTenantReady`: a list must not create a tenant.

@@ -4,7 +4,8 @@
 // recorded here. A region that refuses throws; the caller answers 502 and the
 // user sends the same request again.
 
-import { supportsIamMethods, type S3Region } from '@filone/shared';
+import type { S3Region } from '@filone/shared';
+import { orchestratorSupportsIamMethods } from './service-orchestrator-ids.ts';
 import { IamRegionRefusedError } from './errors.ts';
 import { getOrgProfile } from './org-profile.ts';
 import type { OrgProfileItem } from './org-profile.ts';
@@ -16,7 +17,7 @@ function getReadyIamOrchestrators(
   orgProfile: OrgProfileItem | undefined,
 ): Array<{ orchestrator: ServiceOrchestrator; tenantId: string }> {
   return getAvailableOrchestrators().flatMap((candidate) => {
-    if (!supportsIamMethods(candidate.region)) return [];
+    if (!orchestratorSupportsIamMethods(candidate)) return [];
     const orchestrator = candidate as ServiceOrchestrator;
     const tenantId = orchestrator.isTenantReady(orgProfile);
     return tenantId ? [{ orchestrator, tenantId }] : [];
@@ -39,17 +40,19 @@ async function onEveryReadyIamRegion(
   outcomes.forEach((outcome, index) => {
     // SAFETY: regions and outcomes have the same size. An index of an item
     // inside outcomes always points to an item inside regions.
-    const { region } = regions[index]!.orchestrator;
+    const { id, regions: served } = regions[index]!.orchestrator;
     if (outcome.status === 'fulfilled') {
-      succeeded.push(region);
+      succeeded.push(...served);
       return;
     }
     console.error(`[member-principals] Could not ${action} a member's principal`, {
-      region,
+      orchestratorId: id,
       userId,
       error: outcome.reason,
     });
-    failed.push(region);
+    // The principal lives on the network, so a refusal is a refusal in every
+    // region it serves.
+    failed.push(...served);
   });
   if (failed.length > 0) throw new IamRegionRefusedError(action, failed, succeeded);
 }
@@ -66,8 +69,7 @@ export async function registerMemberPrincipal({
   orgId: string;
   userId: string;
 }): Promise<void> {
-  if (!getAvailableOrchestrators().some((orchestrator) => supportsIamMethods(orchestrator.region)))
-    return;
+  if (!getAvailableOrchestrators().some(orchestratorSupportsIamMethods)) return;
   const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   await onEveryReadyIamRegion('register', orgProfile, userId, (orchestrator, tenantId) =>
     orchestrator.syncMember(tenantId, userId),

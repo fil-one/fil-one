@@ -203,7 +203,7 @@ async function fetchSamplesByBucket({
   } catch (err) {
     console.error('[get-usage-trends] Failed to fetch usage metrics', {
       tenantId,
-      region: orchestrator.region,
+      orchestratorId: orchestrator.id,
       err,
     });
     return { storage: new Map(), egress: new Map(), ok: false };

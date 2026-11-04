@@ -17,6 +17,7 @@
 // production at import time.
 
 import { getS3Endpoint, S3Region } from '@filone/shared';
+import type { NonEmptyArray } from '@filone/shared';
 import { FilOneOrchestrator } from '../orchestrator/orchestrator.ts';
 import type { ServiceOrchestrator } from '../service-orchestrator.ts';
 
@@ -30,24 +31,23 @@ export interface ForgeManagementApi {
  * @param id The unique identifier for the Forge orchestrator. It should have
  *           the format `^[a-z][a-zA-Z0-9_]*$`.
  * @param region The S3 region the orchestrator will manage.
- * @param api The Hilt endpoint and bearer token of the Forge network hosting
- *            the region.
- * @param s3 Overrides of the region's S3 endpoint (default getS3Endpoint()) and
- *           of the endpoint presigned URLs carry.
- * @returns The orchestrator for the specified Forge region.
+ * @param api The Hilt endpoint and bearer token of the Forge network.
+ * @param s3 Overrides of the S3 endpoint (default getS3Endpoint()) and of the
+ *           endpoint presigned URLs carry.
+ * @returns The orchestrator for the Forge network.
  */
 export function createForgeOrchestrator(
   id: string,
-  region: S3Region,
+  regions: NonEmptyArray<S3Region>,
   api: ForgeManagementApi,
   s3: { endpointUrl?: string; presignEndpointUrl?: string } = {},
 ): ServiceOrchestrator {
   const stage = process.env.FILONE_STAGE!;
   return new FilOneOrchestrator({
     id,
-    region,
+    regions,
     stage,
-    s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(region, stage),
+    s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(regions[0], stage),
     s3PresignEndpointUrl: s3.presignEndpointUrl,
     api,
   });
