@@ -304,15 +304,22 @@ async function repointHomeOrg(orgId: string, member: DeletionMember): Promise<vo
   const { homeOrgId } = member;
   if (!homeOrgId) return;
   const identity = await repointRow({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }, orgId, homeOrgId);
-  if (identity === 'destination-deleting') return await moveToFloorOrg(orgId, member);
+  if (identity.reason === 'destination-deleting') return await moveToFloorOrg(orgId, member);
   await repointRow({ pk: `USER#${member.userId}`, sk: 'PROFILE' }, orgId, homeOrgId);
+}
+
+/** Whether a repoint wrote the row, and when it did not, why. */
+interface RepointOutcome {
+  moved: boolean;
+  /** `row-already-moved` covers a missing row too: either way there is nothing to do. */
+  reason?: 'destination-deleting' | 'row-already-moved';
 }
 
 async function repointRow(
   key: Record<string, string>,
   deletingOrgId: string,
   homeOrgId: string,
-): Promise<'moved' | 'unchanged' | 'destination-deleting'> {
+): Promise<RepointOutcome> {
   try {
     await getDynamoClient().send(
       new TransactWriteItemsCommand({
@@ -333,15 +340,14 @@ async function repointRow(
         ],
       }),
     );
-    return 'moved';
+    return { moved: true };
   } catch (err) {
-    if (isGuardRejection(err)) return 'destination-deleting';
-    // The row is gone or already moved. Either way there is nothing to do.
+    if (isGuardRejection(err)) return { moved: false, reason: 'destination-deleting' };
     if (
       err instanceof TransactionCanceledException &&
       err.CancellationReasons?.[1]?.Code === 'ConditionalCheckFailed'
     ) {
-      return 'unchanged';
+      return { moved: false, reason: 'row-already-moved' };
     }
     throw err;
   }
