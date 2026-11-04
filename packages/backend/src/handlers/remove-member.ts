@@ -2,18 +2,17 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { Resource } from 'sst';
 import { NO_ROLE, OrgRole } from '@filone/shared';
 import type { AccessKeySummary, ErrorResponse, RemoveMemberResponse } from '@filone/shared';
 import { AuditSubjects, auditPut, userActor } from '../lib/audit.ts';
-import { prepareFloorOrg, repointHomeOrg } from '../lib/account-creation.ts';
-import type { FloorOrgPreparation } from '../lib/account-creation.ts';
+import { planHomeOrgMove } from '../lib/home-org-move.ts';
+import type { HomeOrgMovePlan } from '../lib/home-org-move.ts';
 import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
 import { removeMemberPrincipal } from '../lib/member-principals.ts';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
 import { reviewKeysForRoleChange } from '../lib/member-keys.ts';
 import { requireManageableMember } from '../lib/manageable-member.ts';
-import { getOrgProfile, isOrgDeleting, orgNotDeletingCheck } from '../lib/org-profile.ts';
+import { getOrgProfile } from '../lib/org-profile.ts';
 import { proceed, refuse } from '../lib/result.ts';
 import type { Result } from '../lib/result.ts';
 import type { OrgProfileItem } from '../lib/org-profile.ts';
@@ -30,14 +29,9 @@ import {
   membershipDeleteItems,
   ownerCountItem,
 } from '../lib/membership-changes.ts';
-import {
-  listMemberships,
-  OrgKeys,
-  readOwnerCount,
-  resolveMembership,
-} from '../lib/org-membership.ts';
-import type { OrgMembership, OrgMembershipRecord } from '../lib/org-membership.ts';
-import { readHomeOrgPointers, readUserProfile } from '../lib/user-profile.ts';
+import { readOwnerCount, resolveMembership } from '../lib/org-membership.ts';
+import type { OrgMembership } from '../lib/org-membership.ts';
+import { readUserProfile } from '../lib/user-profile.ts';
 import {
   ResponseBuilder,
   badRequestResponse,
@@ -160,8 +154,8 @@ export async function baseHandler(
       userId: targetUserId,
       ...(targetEmail ? { emailNorm: normalizeInviteEmail(targetEmail) } : {}),
     }),
-    prepareFloorOrgIfLastMembership({
-      targetUserId,
+    planHomeOrgMove({
+      userId: targetUserId,
       orgId,
       name: targetProfile?.name,
       email: targetProfile?.email,
@@ -399,7 +393,7 @@ function removalTransaction({
   fromRole: OrgRole;
   wasOwner: boolean;
   invitations: InvitationRecord[];
-  lastMembership: LastMembershipPlan;
+  lastMembership: HomeOrgMovePlan;
 }): { items: TransactWriteItem[]; failure: Omit<RemovalFailure, 'keysRevoked'> } {
   const floorOrgItems = floorOrg ? [...floorOrg.items, auditPut(floorOrg.event)] : [];
   return {
@@ -438,124 +432,6 @@ interface RemovalFailure {
    * and an answer that mentions only the membership hides that.
    */
   keysRevoked: AccessKeySummary[];
-}
-
-/**
- * What stops this removal leaving the account with no org at all: a floor org
- * to create alongside it when this is the last membership, or otherwise a
- * check that one of the others is still there when the removal commits.
- *
- * The check is what makes the count below safe to act on. Two removals of the
- * same account at once (leaving one org while an admin removes them from the
- * other) each count two memberships and each skip the floor org; without it
- * both would commit and the account would be left in no org. With it, the
- * second to commit finds the membership the first removed, cancels, and a
- * retry counts again.
- *
- * The check comes with a repoint of each home-org pointer that names the org
- * being left, onto the org that remains.
- *
- * An org being deleted does not count as one that remains. Its membership rows
- * outlive most of its teardown, but a home moved onto it stays fenced once the
- * teardown is done, with nothing left to move it again. So the remaining org is
- * one that is not deleting, checked again when the removal commits, and an
- * account whose other orgs are all deleting gets a floor org like one with
- * none.
- *
- * Neither, when this is the last membership but nothing here can name the row
- * that needs repointing.
- *
- * `listMemberships` is read fresh rather than reused from anywhere else: it is
- * the strongly-consistent count of every org this account belongs to right
- * now, and the removal about to happen is not among them yet.
- */
-async function prepareFloorOrgIfLastMembership({
-  targetUserId,
-  orgId,
-  name,
-  email,
-}: {
-  targetUserId: string;
-  orgId: string;
-  name?: string;
-  email?: string;
-}): Promise<LastMembershipPlan> {
-  const memberships = await listMemberships(targetUserId);
-  const remaining = await findLiveOrg(
-    memberships.filter((membership) => membership.orgId !== orgId),
-  );
-
-  // Throws on a failed read rather than answering "no sub": this runs before
-  // any key is revoked or row written, so a read error stops the removal here
-  // instead of letting it leave the account with no org at all, or homed in
-  // an org it no longer belongs to.
-  const { sub, profileOrgId, identityOrgId } = await readHomeOrgPointers(targetUserId);
-
-  if (remaining) {
-    return {
-      remainingItems: [
-        membershipStandsCheck(targetUserId, remaining.orgId),
-        orgNotDeletingCheck(remaining.orgId),
-        ...(profileOrgId === orgId
-          ? [repointHomeOrg({ pk: `USER#${targetUserId}`, sk: 'PROFILE' }, remaining.orgId, orgId)]
-          : []),
-        ...(sub && identityOrgId === orgId
-          ? [repointHomeOrg({ pk: `SUB#${sub}`, sk: 'IDENTITY' }, remaining.orgId, orgId)]
-          : []),
-      ],
-    };
-  }
-
-  if (!sub) {
-    console.error(
-      '[remove-member] Removed member has no sub on their profile, leaving them without an org',
-      { targetUserId, orgId },
-    );
-    return {};
-  }
-
-  const floorOrg = await prepareFloorOrg({
-    userId: targetUserId,
-    sub,
-    homeOrgIds: { profile: profileOrgId, identity: identityOrgId },
-    name,
-    email,
-  });
-  return { floorOrg };
-}
-
-/**
- * What keeps the removed account somewhere to log in to: a floor org when this
- * is its last membership, or otherwise the items that hold it in the org that
- * remains.
- */
-interface LastMembershipPlan {
-  floorOrg?: FloorOrgPreparation;
-  remainingItems?: TransactWriteItem[];
-}
-
-/**
- * The first of `memberships` whose org is not being deleted. Consistent reads,
- * because a deletion confirmed moments ago is the case this exists to catch.
- */
-async function findLiveOrg(
-  memberships: OrgMembershipRecord[],
-): Promise<OrgMembershipRecord | undefined> {
-  for (const membership of memberships) {
-    if (!(await isOrgDeleting(membership.orgId, { consistent: true }))) return membership;
-  }
-  return undefined;
-}
-
-/** A condition that the account's membership of `orgId` still stands. */
-function membershipStandsCheck(userId: string, orgId: string): TransactWriteItem {
-  return {
-    ConditionCheck: {
-      TableName: Resource.OrgTable.name,
-      Key: { pk: { S: OrgKeys.userPk(userId) }, sk: { S: OrgKeys.membershipSk(orgId) } },
-      ConditionExpression: 'attribute_exists(pk)',
-    },
-  };
 }
 
 async function removalFailureResponse(

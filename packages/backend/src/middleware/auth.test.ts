@@ -10,6 +10,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   GetItemCommand,
+  QueryCommand,
   TransactionCanceledException,
   TransactWriteItemsCommand,
   UpdateItemCommand,
@@ -537,6 +538,77 @@ describe('authMiddleware', () => {
         );
         expect(consoleError).toHaveBeenCalled();
         consoleError.mockRestore();
+      });
+    });
+
+    describe('an account homed in an org whose deletion has finished', () => {
+      const STRANDED_IN = 'any-deleted-org';
+
+      /**
+       * Homed before deletions moved their survivors: the org is fenced for good,
+       * its teardown is done, and nothing will move the account off it.
+       */
+      function stubStrandedAccount(otherMemberships: string[] = []) {
+        mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+          payload: { email: MOCK_EMAIL, email_verified: true },
+        });
+        ddbMock.on(GetItemCommand).callsFake((input) => {
+          const pk: string = input.Key.pk?.S ?? '';
+          const sk: string = input.Key.sk?.S ?? '';
+          if (pk === `SUB#${MOCK_SUB}`) {
+            return { Item: { userId: { S: MOCK_USER_ID }, orgId: { S: STRANDED_IN } } };
+          }
+          if (pk === `ORG#${STRANDED_IN}` && sk === 'PROFILE') {
+            return { Item: { pk: { S: pk }, deleting: { BOOL: true } } };
+          }
+          if (pk === `ORG#${STRANDED_IN}` && sk === 'DELETION') {
+            return { Item: { status: { S: 'DONE' }, trigger: { S: 'USER_REQUEST' } } };
+          }
+          if (pk === `USER#${MOCK_USER_ID}` && sk === 'PROFILE') {
+            return { Item: { sub: { S: MOCK_SUB }, orgId: { S: STRANDED_IN } } };
+          }
+          return {};
+        });
+        ddbMock.on(QueryCommand).resolves({
+          Items: otherMemberships.map((orgId) => ({
+            pk: { S: `USER#${MOCK_USER_ID}` },
+            sk: { S: `MEMBERSHIP#${orgId}` },
+            role: { S: OrgRole.Member },
+            joinedAt: { S: '2026-01-01T00:00:00.000Z' },
+          })),
+        });
+        ddbMock.on(TransactWriteItemsCommand).resolves({});
+      }
+
+      function sessionRequest() {
+        return buildMiddyRequest(
+          buildEvent({ cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`] }),
+        );
+      }
+
+      it('moves the account onto a floor org and lets the request through', async () => {
+        stubStrandedAccount();
+        const request = sessionRequest();
+
+        const result = await authMiddleware().before(request);
+
+        expect(result).toBeUndefined();
+        const items =
+          ddbMock.commandCalls(TransactWriteItemsCommand)[0]!.args[0].input.TransactItems!;
+        const floorOrgId = items
+          .find((item) => item.Put?.Item?.floorOrg?.BOOL)!
+          .Put!.Item!.pk!.S!.slice('ORG#'.length);
+        expect(getUserInfoFromEvent(request.event)).toMatchObject({ orgId: floorOrgId });
+      });
+
+      it('moves the account onto another org it still belongs to', async () => {
+        stubStrandedAccount(['any-live-org']);
+        const request = sessionRequest();
+
+        const result = await authMiddleware().before(request);
+
+        expect(result).toBeUndefined();
+        expect(getUserInfoFromEvent(request.event)).toMatchObject({ orgId: 'any-live-org' });
       });
     });
 

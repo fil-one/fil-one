@@ -112,6 +112,7 @@ import {
 import { DELETION_STATUS } from '../lib/deletion-record.ts';
 import type { TombstonedIdentityRow } from '../lib/identity-tombstone.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
+import { moveHomeOffDeletedOrg } from '../lib/home-org-move.ts';
 
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
@@ -471,6 +472,36 @@ async function readIdentityRow(
 }
 
 /**
+ * The org the account lives in, through the session fence. The fence is on the
+ * org profile, so the confirm transaction stays three items at any org size.
+ *
+ * While the org's deletion runs, the request is refused. A route that lets a
+ * deleted account start over says when it can: the identity is stamped only
+ * later in the same teardown, and a member who survives it is moved off the org
+ * at the start of the pass. Once the deletion has finished, an account still
+ * homed there was left behind by a deletion from before survivors were moved,
+ * and is moved now.
+ */
+async function resolveHomeOrg({
+  userId,
+  orgId,
+  deferAccountCreation,
+}: {
+  userId: string;
+  orgId: string;
+  deferAccountCreation: boolean;
+}): Promise<string> {
+  if (!(await isOrgDeleting(orgId))) return orgId;
+  const deletion = await readDeletionRecord(orgId);
+  if (deletion?.status === DELETION_STATUS.done) {
+    return await moveHomeOffDeletedOrg({ userId, orgId });
+  }
+  throw deferAccountCreation
+    ? new AccountDeletionInProgressError('organization')
+    : new AccountDeletedError();
+}
+
+/**
  * The caller's account, created here on their first request. With
  * `deferAccountCreation` the account is not created: the route creates it
  * itself, and this returns what it needs to.
@@ -492,18 +523,12 @@ async function resolveUserAndOrg({
 
   if (identityRow?.userId?.S && identityRow?.orgId?.S) {
     const userId = identityRow.userId.S;
-    const orgId = identityRow.orgId.S;
-
-    // The session fence. On the org profile, so the confirm transaction stays three
-    // items at any org size. Ahead of the backfill: a deleted org must not trigger it.
-    // A route that lets a deleted account start over says when it can: the
-    // identity is stamped only later in the same teardown, and a member who
-    // survives the teardown is moved off the org at its end.
-    if (await isOrgDeleting(orgId)) {
-      throw deferAccountCreation
-        ? new AccountDeletionInProgressError('organization')
-        : new AccountDeletedError();
-    }
+    // Ahead of the backfill: a deleted org must not trigger it.
+    const orgId = await resolveHomeOrg({
+      userId,
+      orgId: identityRow.orgId.S,
+      deferAccountCreation,
+    });
 
     if (!email) {
       console.error(
