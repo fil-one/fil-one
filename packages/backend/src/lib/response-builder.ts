@@ -131,7 +131,7 @@ export function billedManuallyResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(409)
     .body<ErrorResponse>({
-      message: 'This organization is billed under an agreement. Contact your account team.',
+      message: 'This organization is billed manually. Contact customer support.',
       code: ApiErrorCode.BILLED_MANUALLY,
     })
     .build();
