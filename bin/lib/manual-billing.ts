@@ -107,14 +107,11 @@ function expectedStatus(from: string | undefined): {
   condition: string;
   values: Record<string, AttributeValue>;
 } {
-  // attribute_exists(pk) keeps the write from creating a row deleted since the read.
+  // attribute_exists(pk) keeps the write from creating a row deleted since the
+  // read, and attribute_not_exists(deletedAt) from changing one that account
+  // teardown has scrubbed, the fence the runtime writers apply.
+  const fence = 'attribute_exists(pk) AND attribute_not_exists(deletedAt)';
   return from
-    ? {
-        condition: 'attribute_exists(pk) AND subscriptionStatus = :from',
-        values: { ':from': { S: from } },
-      }
-    : {
-        condition: 'attribute_exists(pk) AND attribute_not_exists(subscriptionStatus)',
-        values: {},
-      };
+    ? { condition: `${fence} AND subscriptionStatus = :from`, values: { ':from': { S: from } } }
+    : { condition: `${fence} AND attribute_not_exists(subscriptionStatus)`, values: {} };
 }

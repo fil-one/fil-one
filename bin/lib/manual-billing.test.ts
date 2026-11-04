@@ -20,7 +20,8 @@ describe('planManualBilling, setting manual billing', () => {
           UpdateExpression:
             'SET subscriptionStatus = :to, updatedAt = :now ' +
             'REMOVE gracePeriodEndsAt, canceledAt, lastPaymentFailedAt',
-          ConditionExpression: 'attribute_exists(pk) AND subscriptionStatus = :from',
+          ConditionExpression:
+            'attribute_exists(pk) AND attribute_not_exists(deletedAt) AND subscriptionStatus = :from',
           ExpressionAttributeValues: {
             ':to': { S: SubscriptionStatus.Manual },
             ':from': { S: SubscriptionStatus.Trialing },
@@ -41,12 +42,36 @@ describe('planManualBilling, setting manual billing', () => {
       ok: true,
       value: {
         update: {
-          ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(subscriptionStatus)',
+          ConditionExpression:
+            'attribute_exists(pk) AND attribute_not_exists(deletedAt) AND attribute_not_exists(subscriptionStatus)',
         },
       },
     });
     expect(plan.ok && plan.value.update.ExpressionAttributeValues).not.toHaveProperty(':from');
   });
+
+  it.each(['set', 'revert'] as const)(
+    'refuses, on %s, a row that account teardown has scrubbed',
+    (mode) => {
+      const plan = planManualBilling({
+        mode,
+        row: {
+          subscriptionStatus:
+            mode === 'set' ? SubscriptionStatus.Active : SubscriptionStatus.Manual,
+        },
+        now: NOW,
+      });
+
+      expect(plan).toMatchObject({
+        ok: true,
+        value: {
+          update: {
+            ConditionExpression: expect.stringContaining('attribute_not_exists(deletedAt)'),
+          },
+        },
+      });
+    },
+  );
 
   it('refuses an org with no billing row', () => {
     expect(planManualBilling({ mode: 'set', row: undefined, now: NOW })).toStrictEqual({
@@ -97,7 +122,8 @@ describe('planManualBilling, reverting manual billing', () => {
         update: {
           UpdateExpression:
             'SET subscriptionStatus = :to, canceledAt = :now, gracePeriodEndsAt = :grace, updatedAt = :now',
-          ConditionExpression: 'attribute_exists(pk) AND subscriptionStatus = :from',
+          ConditionExpression:
+            'attribute_exists(pk) AND attribute_not_exists(deletedAt) AND subscriptionStatus = :from',
           ExpressionAttributeValues: {
             ':to': { S: SubscriptionStatus.GracePeriod },
             ':from': { S: SubscriptionStatus.Manual },

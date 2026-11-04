@@ -101,7 +101,9 @@ try {
   await dynamo.send(new UpdateItemCommand({ TableName: tables.BillingTable, Key: key, ...update }));
 } catch (err) {
   if (err instanceof ConditionalCheckFailedException) {
-    console.error('Refused: the row changed since it was read. Nothing was written; run again.');
+    console.error(
+      'Refused: the row changed since it was read, or account teardown has scrubbed it. Nothing was written.',
+    );
     process.exit(1);
   }
   throw err;
