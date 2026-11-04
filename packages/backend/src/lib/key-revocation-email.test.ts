@@ -21,7 +21,7 @@ function key(over: Partial<AccessKeySummary> = {}): AccessKeySummary {
     id: 'any-key-id',
     keyName: 'any-key',
     accessKeyIdSuffix: 'AB12',
-    region: S3Region.EuWest1,
+    regions: [S3Region.EuWest1],
     createdAt: '2026-09-01T12:00:00.000Z',
     reason: 'exceeds_role',
     excess: [],
