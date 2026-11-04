@@ -24,14 +24,9 @@ import { inviteeAccountRows } from '../lib/account-creation.ts';
 import { readLiveAccountUserId } from '../lib/identity-tombstone.ts';
 import { registerMemberPrincipal } from '../lib/member-principals.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
-import {
-  OrgDeletingError,
-  isGuardRejection,
-  orgNotDeletingCheck,
-  resolveOrgSummary,
-} from '../lib/org-profile.ts';
+import { isGuardRejection, orgNotDeletingCheck, resolveOrgSummary } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
-import { ResponseBuilder } from '../lib/response-builder.ts';
+import { accountDeletionInProgressResponse, ResponseBuilder } from '../lib/response-builder.ts';
 import type { AccountCreatingEvent, PendingAccount } from '../lib/user-context.ts';
 import { getUserInfo, isPendingAccountEvent } from '../lib/user-context.ts';
 import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
@@ -152,7 +147,6 @@ export async function baseHandler(
       sub,
       userId,
       verifiedEmail,
-      accepterOrgId,
     });
   }
 
@@ -345,7 +339,6 @@ async function acceptFailureResponse(
     sub,
     userId,
     verifiedEmail,
-    accepterOrgId,
   }: AcceptContext & {
     /** Finds the account another request created, when this one lost that race. */
     sub: string;
@@ -359,10 +352,10 @@ async function acceptFailureResponse(
   const failed = cancelledLabels(err, labels);
   if (failed.length === 0) throw err;
 
-  // The accepter's own org is going away, so the answer is about their account
-  // rather than about the invitation: the same one their next request would get
-  // once the session fence's read catches up.
-  if (failed.includes('accepterOrg')) throw new OrgDeletingError(accepterOrgId!);
+  // The accepter's own org started deleting after the session fence read it.
+  // The answer is the one that read would have given a moment later, and it says
+  // the org is going, not the account: a member may well survive it.
+  if (failed.includes('accepterOrg')) return accountDeletionInProgressResponse('organization');
 
   // The account this request was creating exists already: another tab signed
   // in first, or a deleted account's row changed. When that account is in the
@@ -423,8 +416,6 @@ interface AcceptContext {
   invitation: InvitationRecord;
   userId: string;
   verifiedEmail: string;
-  /** The accepter's own org, when the transaction fenced it. */
-  accepterOrgId?: string;
 }
 
 /**

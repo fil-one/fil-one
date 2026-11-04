@@ -456,16 +456,18 @@ describe('POST /api/invitations/accept handler', () => {
     ).toHaveLength(1);
   });
 
-  it('answers account-deleted when the accepter’s own org is being torn down', async () => {
+  // The org, not the account, and not the invitation: a member may survive the
+  // deletion, and the same answer the session fence gives once its read catches up.
+  it('answers that the organization is being deleted when the accepter’s org starts deletion during the accept', async () => {
     stubAccepterProfile(PERSONAL_ORG_ID);
     ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 8));
 
     const result = await handler(acceptEvent(), buildContext());
 
-    // Their account, not the invitation: the answer their next request gets
-    // once the session fence's read catches up.
-    expect(result).toMatchObject({ statusCode: 410 });
-    expect(body(result).code).toBe(ApiErrorCode.ACCOUNT_DELETED);
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(body(result)).toStrictEqual({
+      message: 'Your organization is being deleted. Try again in a few minutes.',
+    });
   });
 
   it('carries the fence even when the caller is already a member', async () => {
