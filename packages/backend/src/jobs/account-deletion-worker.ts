@@ -1,10 +1,9 @@
 import {
   ConditionalCheckFailedException,
   DeleteItemCommand,
-  GetItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
-import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import {
   deleteAuth0User,
@@ -13,13 +12,8 @@ import {
 } from '../lib/auth0-management.ts';
 import { deleteReplacedAvatar } from '../lib/avatar-storage.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
-import { isIdentityReplaced } from '../lib/identity-tombstone.ts';
-import {
-  deletionRecordKey,
-  DELETION_STATUS,
-  type DeletionMember,
-  type DeletionRecord,
-} from '../lib/deletion-record.ts';
+import { isIdentityReplaced, readDeletionRecord } from '../lib/identity-tombstone.ts';
+import { deletionRecordKey, DELETION_STATUS, type DeletionMember } from '../lib/deletion-record.ts';
 import { resolveDeletionTargets } from '../lib/deletion-targets.ts';
 import { ragAllowlistKey } from '../middleware/rag-access.ts';
 import { moveSurvivingMembers, scrubOrgRecords } from '../lib/deletion-scrub.ts';
@@ -72,18 +66,6 @@ export async function handler(event: AccountDeletionWorkerPayload): Promise<void
 
   await markDone(orgId);
   console.log(`${LOG} teardown complete`, { orgId, attempt: record.attempts + 1 });
-}
-
-/** Consistent: a stale read right after confirm misses the record entirely. */
-async function readDeletionRecord(orgId: string): Promise<DeletionRecord | undefined> {
-  const { Item } = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: deletionRecordKey(orgId),
-      ConsistentRead: true,
-    }),
-  );
-  return Item ? (unmarshall(Item) as DeletionRecord) : undefined;
 }
 
 /**

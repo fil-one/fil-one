@@ -1,8 +1,9 @@
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
+import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
-import { DELETION_STATUS, DELETION_TRIGGER, deletionRecordKey } from './deletion-record.ts';
+import { DELETION_TRIGGER, deletionRecordKey, type DeletionRecord } from './deletion-record.ts';
 
 /**
  * A deleted user's `SUB#{sub}/IDENTITY` row is kept, because
@@ -60,19 +61,11 @@ export class AccountDeletionInProgressError extends AccountDeletedError {
 export type DeletionInProgress = 'account' | 'organization';
 
 /**
- * Whether an account deleted with `orgId` may come back through an invitation:
- * `wait` while the teardown runs, `refuse` when the person did not ask for the
- * deletion themselves, `rejoin` otherwise.
- *
- * The scrub stamps the identity row before the teardown's last steps run, so a
- * tombstone alone does not say the account is gone. Consistent, because the
- * worker marks the record done moments before a caller may come back.
- *
- * Only a user's own request lets them back. Every other trigger is a decision
- * made about the account, such as the Stripe customer deletion that answers
- * trial abuse, and a trigger added later stays refused until it is let in here.
+ * The deletion record of `orgId`. Consistent: a stale read right after confirm
+ * misses the record, and the worker marks it done moments before a deleted
+ * account may come back.
  */
-export async function decideRejoinAfterDeletion(orgId: string): Promise<RejoinDecision> {
+export async function readDeletionRecord(orgId: string): Promise<DeletionRecord | undefined> {
   const { Item } = await getDynamoClient().send(
     new GetItemCommand({
       TableName: Resource.UserInfoTable.name,
@@ -80,11 +73,19 @@ export async function decideRejoinAfterDeletion(orgId: string): Promise<RejoinDe
       ConsistentRead: true,
     }),
   );
-  if (Item?.status?.S !== DELETION_STATUS.done) return 'wait';
-  return Item.trigger?.S === DELETION_TRIGGER.userRequest ? 'rejoin' : 'refuse';
+  return Item ? (unmarshall(Item) as DeletionRecord) : undefined;
 }
 
-export type RejoinDecision = 'rejoin' | 'wait' | 'refuse';
+/**
+ * Whether an account this deletion ended may come back through an invitation,
+ * once the deletion has finished. Only a user's own request lets them back.
+ * Every other trigger is a decision made about the account, such as the Stripe
+ * customer deletion that answers trial abuse, and a trigger added later stays
+ * refused until it is let in here.
+ */
+export function canRejoin(record: DeletionRecord): boolean {
+  return record.trigger === DELETION_TRIGGER.userRequest;
+}
 
 /**
  * The userId of the account `sub` holds now, or undefined when it holds none or

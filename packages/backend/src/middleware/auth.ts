@@ -105,9 +105,11 @@ import { CSRF_COOKIE_NAME } from '@filone/shared';
 import {
   AccountDeletedError,
   AccountDeletionInProgressError,
-  decideRejoinAfterDeletion,
+  canRejoin,
   isIdentityTombstoned,
+  readDeletionRecord,
 } from '../lib/identity-tombstone.ts';
+import { DELETION_STATUS } from '../lib/deletion-record.ts';
 import type { TombstonedIdentityRow } from '../lib/identity-tombstone.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 
@@ -415,9 +417,13 @@ async function resolveRejoiningAccount(
   const deletedOrgId = identityRow.orgId?.S;
   // A row naming no org has no deletion to wait for, and none to prove finished.
   if (!deletedOrgId) throw new AccountDeletedError();
-  const decision = await decideRejoinAfterDeletion(deletedOrgId);
-  if (decision === 'wait') throw new AccountDeletionInProgressError('account');
-  if (decision === 'refuse') throw new AccountDeletedError();
+  // The scrub stamps the identity before the teardown's last steps run, so the
+  // stamp alone does not say the deletion has finished.
+  const deletion = await readDeletionRecord(deletedOrgId);
+  if (deletion?.status !== DELETION_STATUS.done) {
+    throw new AccountDeletionInProgressError('account');
+  }
+  if (!canRejoin(deletion)) throw new AccountDeletedError();
   return { kind: 'rejoining', deletedAt: identityRow.deletedAt.S, ...pendingAccountFields(claims) };
 }
 
