@@ -104,7 +104,8 @@ export interface BillingFlows {
   /** Puts a different card on file instead of reusing the saved one. */
   useDifferentCard: () => void;
   selectPayAsYouGo: () => Promise<void>;
-  paymentSucceeded: () => void;
+  /** Closes the card form, naming the promo code the subscription started with. */
+  paymentSucceeded: (promotionCode?: string) => void;
   refreshSetupIntent: () => Promise<string>;
   /**
    * Opens Stripe's customer portal. Everything about the subscription itself
@@ -234,10 +235,14 @@ export function useBillingFlows(
     return cs;
   }
 
-  function paymentSucceeded() {
+  function paymentSucceeded(promotionCode?: string) {
     dialogs.setPaymentOpen(false);
     setClientSecret('');
-    toast.success('Subscription activated!');
+    toast.success(
+      promotionCode
+        ? `Subscription activated with promo code ${promotionCode}`
+        : 'Subscription activated!',
+    );
     refreshBilling();
   }
 

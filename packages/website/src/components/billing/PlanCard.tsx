@@ -1,11 +1,11 @@
-import { ArrowSquareOutIcon } from '@phosphor-icons/react/dist/ssr';
+import { ArrowSquareOutIcon, TagIcon } from '@phosphor-icons/react/dist/ssr';
 import { SubscriptionStatus } from '@filone/shared';
 import type { Subscription } from '@filone/shared';
 
 import { Badge } from '../Badge';
 import { Button } from '../Button';
 import { Card } from '../Card';
-import { planMetaLine, planTitle, statusBadge } from '../../lib/billing-view.js';
+import { discountLabel, planMetaLine, planTitle, statusBadge } from '../../lib/billing-view.js';
 
 export type PlanCardProps = {
   subscription: Subscription;
@@ -126,6 +126,35 @@ export function PlanCard({ subscription, mayManage, onManage, onChoosePlan }: Pl
         <p className="text-xs text-zinc-500 tabular-nums" data-testid="plan-meta">
           {planMetaLine(subscription)}
         </p>
+
+        {/* A footer of its own, below a hairline: a discount is not a third
+            fact about the plan but something applied to it, and as one more
+            grey line under the rate it read as small print. The code goes in a
+            pill, since it is the word the customer typed and will look for;
+            the terms stay plain beside it. Brand blue rather than green, so it
+            does not compete with the status pill above. */}
+        {subscription.discounts && subscription.discounts.length > 0 && (
+          // 20px on each side of the hairline: `pt-5` matches the card's own
+          // `p-5` below the pill, and `mt-4` plus the column's 4px gap gives
+          // the same above it.
+          <ul className="mt-4 flex flex-col gap-2 border-t border-zinc-200 pt-5">
+            {subscription.discounts.map((discount, index) => (
+              <li
+                key={index}
+                className="flex flex-wrap items-center gap-x-2 gap-y-1"
+                data-testid="plan-discount"
+              >
+                <Badge color="blue" size="sm" weight="medium">
+                  <TagIcon size={12} weight="fill" aria-hidden />
+                  {discount.promotionCode ?? 'Discount'}
+                </Badge>
+                <span className="text-xs text-zinc-600 tabular-nums">
+                  {discountLabel(discount)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </Card>
   );

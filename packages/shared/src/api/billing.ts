@@ -1,17 +1,28 @@
 import { z } from 'zod';
 
+const PromotionCodeSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9-]{3,40}$/, 'Promo code must be 3–40 letters, digits, or hyphens.');
+
 export const ActivateSubscriptionRequestSchema = z
   .object({
     useSavedPaymentMethod: z.boolean().default(false),
-    promotionCode: z
-      .string()
-      .trim()
-      .regex(/^[A-Za-z0-9-]{3,40}$/, 'Promo code must be 3–40 letters, digits, or hyphens.')
-      .optional(),
+    promotionCode: PromotionCodeSchema.optional(),
   })
   .strict();
 
 export type ActivateSubscriptionRequest = z.input<typeof ActivateSubscriptionRequestSchema>;
+
+export const CheckPromotionCodeRequestSchema = z
+  .object({ promotionCode: PromotionCodeSchema })
+  .strict();
+
+export type CheckPromotionCodeRequest = z.input<typeof CheckPromotionCodeRequestSchema>;
+
+export interface CheckPromotionCodeResponse {
+  discount: SubscriptionDiscount;
+}
 
 export const PlanId = {
   FreeTrial: 'free_trial',
@@ -101,7 +112,44 @@ export interface Subscription {
    * it is not something this endpoint can know.
    */
   pricePerTbCents?: number;
+  /**
+   * The discounts Stripe applies to this subscription's invoices, in the order
+   * it applies them: a promo code entered when the card was added, or a coupon
+   * set in Stripe. Absent when there are none, and when Stripe could not be
+   * reached (nothing about a discount is cached).
+   */
+  discounts?: SubscriptionDiscount[];
 }
+
+/** What every discount carries, whichever way it takes money off. */
+interface DiscountTerms {
+  /** The promo code the customer entered. Absent for a coupon applied in Stripe. */
+  promotionCode?: string;
+  /**
+   * How long it applies: to the next invoice only, for `durationInMonths`
+   * months, or for as long as the subscription runs.
+   */
+  duration: 'once' | 'repeating' | 'forever';
+  durationInMonths?: number;
+  /**
+   * The date a discount on a subscription stops applying. Absent on a code
+   * checked before it is applied, which has no start to count from yet.
+   */
+  endsAt?: string;
+}
+
+export interface PercentOffDiscount extends DiscountTerms {
+  /** Taken off each invoice's subtotal, from 0 to 100. */
+  percentOff: number;
+}
+
+export interface AmountOffDiscount extends DiscountTerms {
+  /** Taken off each invoice's subtotal, never below zero. */
+  amountOffCents: number;
+}
+
+/** A Stripe coupon takes off a percentage or a fixed amount, never both. */
+export type SubscriptionDiscount = PercentOffDiscount | AmountOffDiscount;
 
 export interface PaymentMethod {
   id: string;

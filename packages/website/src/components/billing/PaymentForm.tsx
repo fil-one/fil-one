@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { ShieldCheckIcon, CreditCardIcon } from '@phosphor-icons/react/dist/ssr';
+import { CheckCircleIcon, CreditCardIcon, ShieldCheckIcon } from '@phosphor-icons/react/dist/ssr';
 import {
   CardNumberElement,
   CardExpiryElement,
@@ -13,7 +13,8 @@ import type {
   StripeCardNumberElement,
   StripeCardNumberElementChangeEvent,
 } from '@stripe/stripe-js';
-import { ActivateSubscriptionRequestSchema } from '@filone/shared';
+import { ActivateSubscriptionRequestSchema, CheckPromotionCodeRequestSchema } from '@filone/shared';
+import type { SubscriptionDiscount } from '@filone/shared';
 
 import { ModalBody, ModalHeader } from '../Modal/index.js';
 import { Button } from '../Button.js';
@@ -21,13 +22,15 @@ import { FormField } from '../FormField.js';
 import { Input } from '../Input.js';
 import { Label } from '../Label.js';
 
-import { activateSubscription } from '../../lib/api.js';
+import { activateSubscription, checkPromotionCode } from '../../lib/api.js';
+import { discountLabel } from '../../lib/billing-view.js';
 
 export type PaymentFormProps = {
   initialClientSecret: string;
   onClose: () => void;
   onBack: () => void;
-  onSuccess: () => void;
+  /** Called with the promo code the subscription started with, when there was one. */
+  onSuccess: (promotionCode?: string) => void;
   onRefreshSetupIntent: () => Promise<string>;
 };
 
@@ -153,7 +156,7 @@ export function PaymentForm({
     // Card setup confirmed — activate subscription via API
     try {
       await activateSubscription(parsed.data);
-      onSuccess();
+      onSuccess(parsed.data.promotionCode);
     } catch (err) {
       setError((err as Error).message || 'Failed to activate subscription.');
     } finally {
@@ -167,11 +170,15 @@ export function PaymentForm({
       <ModalBody>
         <p className="text-sm text-zinc-600 mb-4">Pay as you go: $5.99/TB/month</p>
 
-        {/* Security banner */}
+        {/* Security banner. The icon in the console's usual inline style,
+            regular weight in grey: a filled brand-blue shield was the one
+            icon in the modal shouting. One line at the modal's full width;
+            where it wraps, `text-balance` splits it into two even lines
+            rather than leaving one word on a line of its own. */}
         <div className="flex items-center gap-2.5 rounded-lg bg-zinc-50 p-2.5 mb-4">
-          <ShieldCheckIcon size={16} className="text-brand-600 flex-shrink-0" weight="fill" />
-          <span className="text-ui text-zinc-600">
-            Your payment information is encrypted and secure
+          <ShieldCheckIcon size={16} className="flex-shrink-0 text-zinc-500" aria-hidden />
+          <span className="text-ui text-balance text-zinc-600">
+            Payment information is encrypted and secure
           </span>
         </div>
 
@@ -203,20 +210,7 @@ export function PaymentForm({
             </div>
           </div>
 
-          {/* Promo code (optional) */}
-          <FormField label="Promo code" optional htmlFor="promotion-code">
-            <Input
-              id="promotion-code"
-              type="text"
-              value={promotionCode}
-              onChange={setPromotionCode}
-              placeholder="Add promo code"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
-              maxLength={40}
-            />
-          </FormField>
+          <PromotionCodeField value={promotionCode} onChange={setPromotionCode} />
 
           {/* Error */}
           {error && <p className="text-sm text-red-500">{error}</p>}
@@ -249,5 +243,118 @@ export function PaymentForm({
         </div>
       </ModalBody>
     </form>
+  );
+}
+
+/**
+ * The optional promo code, with an Apply button that asks Stripe what the code
+ * takes off, so the discount is confirmed before the card is charged. A code
+ * typed and never applied is still checked by activation.
+ */
+function PromotionCodeField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // What the code in the field takes off, once Stripe has confirmed it. Cleared
+  // whenever the field changes, so it never describes a code no longer there.
+  const [appliedDiscount, setAppliedDiscount] = useState<SubscriptionDiscount | null>(null);
+  // Counts edits and checks, so a check that resolves after the field changed
+  // knows its answer describes a code no longer there and drops it.
+  const checkGeneration = useRef(0);
+
+  function handleChange(next: string) {
+    checkGeneration.current += 1;
+    onChange(next);
+    setError(null);
+    setAppliedDiscount(null);
+    setChecking(false);
+  }
+
+  async function apply() {
+    const parsed = CheckPromotionCodeRequestSchema.safeParse({ promotionCode: value });
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Enter a promo code.');
+      return;
+    }
+
+    const generation = ++checkGeneration.current;
+    setChecking(true);
+    setError(null);
+    try {
+      const { discount } = await checkPromotionCode(parsed.data);
+      if (generation === checkGeneration.current) setAppliedDiscount(discount);
+    } catch (err) {
+      if (generation === checkGeneration.current) {
+        setError((err as Error).message || 'Could not check this promo code.');
+      }
+    } finally {
+      if (generation === checkGeneration.current) setChecking(false);
+    }
+  }
+
+  /** Enter applies the code instead of submitting the form and starting the subscription. */
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (value.trim() && !appliedDiscount) void apply();
+  }
+
+  return (
+    <FormField label="Promo code" optional htmlFor="promotion-code" error={error}>
+      <div className="flex items-center gap-2">
+        <Input
+          id="promotion-code"
+          type="text"
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          invalid={Boolean(error)}
+          placeholder="Add promo code"
+          autoCapitalize="characters"
+          autoCorrect="off"
+          spellCheck={false}
+          maxLength={40}
+          className="min-w-0 flex-1"
+        />
+        {appliedDiscount ? (
+          <Button type="button" variant="ghost" size="md" onClick={() => handleChange('')}>
+            Remove
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="md"
+            disabled={!value.trim()}
+            loading={checking}
+            loadingLabel="Checking promo code"
+            onClick={() => void apply()}
+          >
+            Apply
+          </Button>
+        )}
+      </div>
+      {appliedDiscount && (
+        <p
+          className="flex items-start gap-1.5 text-xs text-zinc-600"
+          data-testid="applied-discount"
+          role="status"
+        >
+          {/* A box one line tall, so the icon stays on the first line when the text wraps. */}
+          <span className="flex h-4 flex-shrink-0 items-center">
+            <CheckCircleIcon size={14} className="text-brand-600" weight="fill" />
+          </span>
+          <span>
+            {appliedDiscount.promotionCode ?? value.trim()} applied:{' '}
+            {discountLabel(appliedDiscount)}
+          </span>
+        </p>
+      )}
+    </FormField>
   );
 }

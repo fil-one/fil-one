@@ -193,6 +193,7 @@ const CACHED_GRANDFATHERED_PRICE = {
 function stripeSubscription(price?: Record<string, unknown>, overrides: object = {}) {
   return {
     default_payment_method: null,
+    discounts: [],
     ...(price ? { items: { data: [{ price }] } } : {}),
     ...overrides,
   };
@@ -1142,7 +1143,97 @@ describe('get-billing baseHandler', () => {
     await baseHandler(buildEvent({ userInfo: USER_INFO }));
 
     expect(mockSubscriptionsRetrieve).toHaveBeenCalledWith('sub_456', {
-      expand: ['default_payment_method', 'items.data.price.tiers', 'items.data.price.product'],
+      expand: [
+        'default_payment_method',
+        'items.data.price.tiers',
+        'items.data.price.product',
+        'discounts.source.coupon',
+        'discounts.promotion_code',
+      ],
+    });
+  });
+
+  describe('discounts', () => {
+    /** A subscription discount as Stripe returns it with the coupon and code expanded. */
+    function stripeDiscount({
+      coupon,
+      promotionCode = null,
+      end = null,
+    }: {
+      coupon: Record<string, unknown> | string;
+      promotionCode?: Record<string, unknown> | null;
+      end?: number | null;
+    }) {
+      return {
+        id: 'di_any',
+        object: 'discount',
+        source: { type: 'coupon', coupon },
+        promotion_code: promotionCode,
+        start: 1790000000,
+        end,
+      };
+    }
+
+    function coupon(overrides: Record<string, unknown>) {
+      return {
+        id: 'any-coupon',
+        object: 'coupon',
+        percent_off: null,
+        amount_off: null,
+        duration: 'forever',
+        duration_in_months: null,
+        ...overrides,
+      };
+    }
+
+    async function reportedDiscounts(discounts: unknown[]) {
+      ddbMock.on(GetItemCommand).resolves(activeRecordWith({ stripePrice: CACHED_TIERED_PRICE }));
+      mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription(TIERED_PRICE, { discounts }));
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+      return JSON.parse(String(result.body)).subscription.discounts;
+    }
+
+    it('reports a promo code discount with its percentage and end date', async () => {
+      const discounts = await reportedDiscounts([
+        stripeDiscount({
+          coupon: coupon({ percent_off: 20, duration: 'repeating', duration_in_months: 3 }),
+          promotionCode: { id: 'promo_any', object: 'promotion_code', code: 'ANY-CODE' },
+          end: 1797776000,
+        }),
+      ]);
+
+      expect(discounts).toStrictEqual([
+        {
+          promotionCode: 'ANY-CODE',
+          duration: 'repeating',
+          durationInMonths: 3,
+          endsAt: new Date(1797776000 * 1000).toISOString(),
+          percentOff: 20,
+        },
+      ]);
+    });
+
+    it('reports a fixed-amount coupon applied in Stripe without a promo code', async () => {
+      const discounts = await reportedDiscounts([
+        stripeDiscount({ coupon: coupon({ amount_off: 1000, duration: 'once' }) }),
+      ]);
+
+      expect(discounts).toStrictEqual([{ duration: 'once', amountOffCents: 1000 }]);
+    });
+
+    it('omits discounts when the subscription carries none', async () => {
+      expect(await reportedDiscounts([])).toBeUndefined();
+    });
+
+    it.each([
+      ['the discount itself was not expanded', 'di_unexpanded'],
+      ['its coupon was not expanded', stripeDiscount({ coupon: 'any-coupon' })],
+      [
+        'its coupon has a duration the console cannot word',
+        stripeDiscount({ coupon: coupon({ percent_off: 20, duration: 'any-future-kind' }) }),
+      ],
+    ])('leaves out a discount when %s', async (_case, discount) => {
+      expect(await reportedDiscounts([discount])).toBeUndefined();
     });
   });
 

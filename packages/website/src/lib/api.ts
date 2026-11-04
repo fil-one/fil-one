@@ -749,6 +749,8 @@ import type {
   BillingInfo,
   CreateSetupIntentResponse,
   ActivateSubscriptionRequest,
+  CheckPromotionCodeRequest,
+  CheckPromotionCodeResponse,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
   ListInvoicesResponse,
@@ -768,6 +770,15 @@ export function activateSubscription(
   return apiRequest<ActivateSubscriptionResponse>('/billing/activate', {
     method: 'POST',
     body: JSON.stringify(opts),
+  });
+}
+
+export function checkPromotionCode(
+  body: CheckPromotionCodeRequest,
+): Promise<CheckPromotionCodeResponse> {
+  return apiRequest<CheckPromotionCodeResponse>('/billing/promotion-code', {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 }
 
