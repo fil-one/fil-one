@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { ApiErrorCode } from '@filone/shared';
 import type { AcceptInvitationResponse } from '@filone/shared';
 
 import { InvitationOutcome } from '../components/InvitationOutcome';
 import type { InvitationOutcomeProps } from '../components/InvitationOutcome';
 import { switchToOrg } from '../lib/active-org.js';
-import { errorCodeOf, errorStatusOf, getMe, logout } from '../lib/api.js';
+import { errorCodeOf, errorStatusOf, getMe, logout, sessionEmailOf } from '../lib/api.js';
 import { cacheInviteToken } from '../lib/invite-token.js';
 import { acceptInvitation } from '../lib/members-api.js';
-import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
 
 /** What the one call this page makes has come back with, if it has. */
 type Outcome =
@@ -35,34 +33,6 @@ type Outcome =
  */
 export function AcceptInvitationPage({ token }: { token: string | null }) {
   const [outcome, setOutcome] = useState<Outcome>({ status: 'accepting' });
-
-  // The signed-in address, for the one refusal that is about which account this
-  // is. Asked only once the accept has been refused, so it never races the call
-  // it exists to explain: two requests in flight together over an expired
-  // session both answer 401, and whichever lands first starts the navigation to
-  // login. If that is `/me`, the accept fetch is cancelled by the unload and
-  // rejects as a `TypeError` carrying no status, so the re-stash below never
-  // runs and the post-login visit has nothing to redeem. Waiting also drops a
-  // request from the path that works.
-  //
-  // `skipOrgReconcile` because the recovery `/me` normally performs is a page
-  // reload, and this page is holding a single-use token in memory. A tab left
-  // pointing at an org the caller has since left would reload mid-accept and
-  // come back with nothing to redeem.
-  //
-  // Only for the email mismatch, the one refusal that shows the address. A
-  // caller with no account yet has no `/me` to read: it would create the
-  // personal org the accept is there to avoid, or, for a deleted account,
-  // navigate to `/account-deleted` over the refusal it was meant to explain.
-  const { data: me } = useQuery({
-    queryKey: queryKeys.me,
-    queryFn: () => getMe({ skipOrgReconcile: true }),
-    staleTime: ME_STALE_TIME,
-    enabled:
-      token !== null &&
-      outcome.status === 'refused' &&
-      errorCodeOf(outcome.error) === ApiErrorCode.INVITE_EMAIL_MISMATCH,
-  });
 
   // Once. React runs effects twice in development's strict mode, and the token
   // is single-use: a second attempt would spend the invitation the first one is
@@ -103,7 +73,9 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
       status={statusOf(token, outcome)}
       result={outcome.status === 'accepted' ? outcome.result : undefined}
       error={outcome.status === 'refused' ? outcome.error : undefined}
-      sessionEmail={me?.email}
+      // From the refusal itself: a refused caller may have no account `/me` can
+      // read, or a deleted one it would answer 410 for.
+      sessionEmail={outcome.status === 'refused' ? sessionEmailOf(outcome.error) : undefined}
       onContinue={switchToOrg}
       onLogOut={logout}
     />
@@ -116,8 +88,11 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
  * sends the new member to `/verify-email` as soon as they continue.
  *
  * Only after the accept has answered, so it never races the call that spends
- * the token. `skipOrgReconcile` for the reason the query above gives. A failure
- * is not the accept's: the membership stands, and the worst it costs is that
+ * the token: two requests in flight over an expired session both answer 401,
+ * and if `/me` landed first its navigation to login would cancel the accept.
+ * `skipOrgReconcile` because the recovery `/me` normally performs is a page
+ * reload, which would drop the outcome this page is about to show. A failure is
+ * not the accept's: the membership stands, and the worst it costs is that
  * detour.
  */
 async function refreshSessionClaims(): Promise<void> {

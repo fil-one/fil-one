@@ -636,6 +636,21 @@ describe('POST /api/invitations/accept handler', () => {
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
   });
 
+  // The page names the signed-in address from this answer. Reading `/me` for it
+  // would answer 410 to a deleted account and leave the refusal unexplained.
+  it('names the address the session signed in with when it refuses a mismatch', async () => {
+    stubInvitation({ emailNorm: 'someone.else@example.com' });
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(body(result)).toStrictEqual({
+      message:
+        'This invitation was sent to a different email address than the one you signed in with.',
+      code: ApiErrorCode.INVITE_EMAIL_MISMATCH,
+      sessionEmail: EMAIL,
+    });
+  });
+
   it('matches the invited address regardless of case', async () => {
     mockJwtVerify.mockResolvedValue({
       payload: { sub: MOCK_SUB, email: 'INVITEE@EXAMPLE.COM', email_verified: true },

@@ -107,6 +107,7 @@ export type {
   CreateInvitationResponse,
   InvitationStatus,
   InvitationSummary,
+  InviteEmailMismatchResponse,
   ListInvitationsResponse,
 } from './api/invitations.ts';
 

@@ -3,7 +3,11 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { AcceptInvitationSchema, ApiErrorCode, OrgRole } from '@filone/shared';
-import type { AcceptInvitationResponse, ErrorResponse } from '@filone/shared';
+import type {
+  AcceptInvitationResponse,
+  ErrorResponse,
+  InviteEmailMismatchResponse,
+} from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
 import { getAuth0UserEmail, markAuth0EmailVerified } from '../lib/auth0-management.ts';
 import {
@@ -102,7 +106,7 @@ export async function baseHandler(
   if (!invitation || !isInvitationUsable(invitation)) return notFoundResponse();
 
   if (!email || normalizeInviteEmail(email) !== invitation.emailNorm) {
-    return emailMismatchResponse();
+    return emailMismatchResponse(email ?? undefined);
   }
 
   // An account this request creates has no membership and no org of its own yet.
@@ -188,7 +192,7 @@ async function verifyInvitedAddress({
   try {
     const heldEmail = await getAuth0UserEmail(sub);
     if (!heldEmail || normalizeInviteEmail(heldEmail) !== emailNorm) {
-      return emailMismatchResponse();
+      return emailMismatchResponse(heldEmail);
     }
     await markAuth0EmailVerified(sub);
     return undefined;
@@ -531,14 +535,20 @@ function notFoundResponse(): APIGatewayProxyStructuredResultV2 {
  * an authenticated session, so this is not a token-probing oracle — and under
  * SSO it is the difference between a debuggable "you are signed in with the
  * wrong account" and an opaque dead link.
+ *
+ * `sessionEmail` is the caller's own address, so naming it tells them nothing
+ * about anyone else.
  */
-function emailMismatchResponse(): APIGatewayProxyStructuredResultV2 {
+function emailMismatchResponse(
+  sessionEmail: string | undefined,
+): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(403)
-    .body<ErrorResponse>({
+    .body<InviteEmailMismatchResponse>({
       message:
         'This invitation was sent to a different email address than the one you signed in with.',
       code: ApiErrorCode.INVITE_EMAIL_MISMATCH,
+      ...(sessionEmail ? { sessionEmail } : {}),
     })
     .build();
 }
