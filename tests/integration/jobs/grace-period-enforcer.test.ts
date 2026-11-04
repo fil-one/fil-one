@@ -140,7 +140,9 @@ describe('the Stripe subscription behind an expired grace period', () => {
   const cleanups: (() => Promise<unknown>)[] = [];
 
   afterAll(async () => {
-    for (const cleanup of cleanups) await cleanup();
+    // Newest first: the row and org profile go before the Stripe customer, whose
+    // deletion starts an account teardown that would otherwise find the org.
+    for (const cleanup of cleanups.reverse()) await cleanup();
   });
 
   /** An org whose expired grace row names `subscriptionId`, seeded once Stripe's own events for it landed. */
