@@ -211,12 +211,15 @@ async function queryEngine(args: {
   }
   // A bucket whose owner turned indexing off keeps its dataset on the engine,
   // so only an active row lets a query reach it.
-  if ((await getOwnedBucketEnablement(orgId, region, bucketName))?.status !== 'active') {
+  const enablement = await getOwnedBucketEnablement(orgId, region, bucketName);
+  if (enablement?.status !== 'active') {
     return new ResponseBuilder()
       .status(409)
       .body<ErrorResponse>({
         message:
-          'This bucket has not been indexed yet. Queries become available after the first indexing pass completes.',
+          enablement?.status === 'disabled'
+            ? 'Indexing is turned off for this bucket. Turn it back on to query the bucket.'
+            : 'This bucket has not been indexed yet. Queries become available after the first indexing pass completes.',
         code: ApiErrorCode.BUCKET_NOT_INDEXED,
       })
       .build();

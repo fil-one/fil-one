@@ -884,6 +884,19 @@ describe('query-bucket on a Forge region (Bucket Intelligence engine)', () => {
     expect(engine.query).not.toHaveBeenCalled();
   });
 
+  it('tells the caller indexing is turned off, not to wait for a pass, for a disabled bucket', async () => {
+    mockGetEnablement.mockResolvedValue({
+      ...FORGE_ENABLEMENT,
+      status: 'disabled',
+    });
+
+    const result = await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
+
+    expect(JSON.parse(result.body!).message).toBe(
+      'Indexing is turned off for this bucket. Turn it back on to query the bucket.',
+    );
+  });
+
   it('returns 409 BUCKET_NOT_INDEXED when the engine has no dataset yet', async () => {
     engine.query.mockRejectedValue(
       new RagEngineRequestError('no dataset', 409, { code: 'NOT_INDEXED' }),
