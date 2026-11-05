@@ -6,14 +6,16 @@ import type { RagEngineSyncState, RagEngineTarget } from '@filone/shared';
 import { resolveContentType } from './content-type.ts';
 import { readEngineState, writeEngineState, type EngineState } from './engine-state.ts';
 import type { EngineContext } from './engine-context.ts';
-import { errorLogFields, summarizeError } from './errors.ts';
+import { EngineError, errorLogFields, summarizeError } from './errors.ts';
 import {
   connectDataset,
   deleteObjectRows,
   finalizeDataset,
+  hasUnindexedRows,
   missingIndexes,
   openCommittedTable,
   readIndexedObjects,
+  schemaDimension,
   tagSyncVersion,
   writeChunks,
   type ChunkRow,
@@ -154,6 +156,16 @@ async function chunkObject(
   try {
     const text = await extractText(bytes, type);
     const chunks = chunk(text);
+    const max = run.ctx.config.maxChunksPerObject;
+    if (chunks.length > max) {
+      run.ctx.log('warn', 'object_truncated', {
+        bucket: run.target.bucketName,
+        objectKey: object.key,
+        chunks: chunks.length,
+        indexedChunks: max,
+      });
+      return chunks.slice(0, max);
+    }
     return chunks.length > 0 ? chunks : undefined;
   } catch (error) {
     run.ctx.log('warn', 'extract_failed', {
@@ -276,14 +288,14 @@ async function loadDataset(run: SyncRun): Promise<Dataset> {
 
 /**
  * Build missing indexes, compact, and tag the finished version. A sync with no
- * changes still does this when an index is missing: an earlier sync stopped
- * between its data commits and its index commits.
+ * changes still does this when an index is missing or leaves rows out: an
+ * earlier sync stopped between its data commits and its index commits.
  */
 async function finishDataset(run: SyncRun, table: lancedb.Table, changed: boolean, at: Date) {
   const options = { vectorIndexMinRows: run.ctx.config.vectorIndexMinRows };
   if (!changed) {
     const missing = await missingIndexes(table, options);
-    if (!missing.text && !missing.vector) return;
+    if (!missing.text && !missing.vector && !(await hasUnindexedRows(table))) return;
   }
   await finalizeDataset(table, options);
   try {
@@ -308,6 +320,27 @@ async function saveState(run: SyncRun, dataset: Dataset, changed: boolean, at: D
   if (stateChanged || (stale && dataset.table)) {
     await writeEngineState(run.s3, run.companion, engineState);
   }
+}
+
+/**
+ * Record the embedding model the dataset was built with. A sync that finished
+ * the dataset but failed to write its state leaves no record; the retry
+ * embeds nothing, and since the dataset is current, the model is this one.
+ */
+async function recordEmbedding(
+  run: SyncRun,
+  engineState: EngineState,
+  table: lancedb.Table | undefined,
+  dimension: number | undefined,
+): Promise<void> {
+  const model = run.ctx.embedder.model;
+  if (dimension) {
+    engineState.embedding = { model, dimension };
+    return;
+  }
+  if (engineState.embedding || !table) return;
+  const width = await schemaDimension(table);
+  if (width > 0) engineState.embedding = { model, dimension: width };
 }
 
 async function reconcile(run: SyncRun): Promise<void> {
@@ -341,7 +374,7 @@ async function reconcile(run: SyncRun): Promise<void> {
   for (const key of Object.keys(engineState.skipped)) {
     if (!present.has(key)) delete engineState.skipped[key];
   }
-  if (dimension) engineState.embedding = { model: ctx.embedder.model, dimension };
+  await recordEmbedding(run, engineState, writer.table, dimension);
   await saveState(run, dataset, changed, syncedAt);
   ctx.log('info', 'sync_done', {
     bucket: run.target.bucketName,
@@ -358,6 +391,8 @@ async function reconcile(run: SyncRun): Promise<void> {
 export class SyncManager {
   readonly #ctx: EngineContext;
   readonly #states = new Map<string, TargetSyncState>();
+  /** Drops running per companion bucket; no sync may start while one runs. */
+  readonly #drops = new Map<string, number>();
 
   constructor(ctx: EngineContext) {
     this.#ctx = ctx;
@@ -372,6 +407,9 @@ export class SyncManager {
     const companion = companionBucketName(target.orgId, target.region, target.bucketName);
     const existing = this.#states.get(companion);
     if (existing?.running) return existing;
+    if (this.#drops.has(companion)) {
+      throw new EngineError(409, 'DROP_IN_PROGRESS', 'The index for this bucket is being deleted');
+    }
 
     const state: TargetSyncState = {
       syncState: 'syncing',
@@ -419,6 +457,22 @@ export class SyncManager {
       await state.running;
     }
     this.#states.delete(companion);
+  }
+
+  /**
+   * Stop any running sync, then run `drop` with no sync able to start until it
+   * settles, so a sync cannot recreate the dataset while it is being deleted.
+   */
+  async whileDropping<T>(companion: string, drop: () => Promise<T>): Promise<T> {
+    this.#drops.set(companion, (this.#drops.get(companion) ?? 0) + 1);
+    try {
+      await this.cancel(companion);
+      return await drop();
+    } finally {
+      const left = (this.#drops.get(companion) ?? 1) - 1;
+      if (left > 0) this.#drops.set(companion, left);
+      else this.#drops.delete(companion);
+    }
   }
 
   /** Wait for every running sync (tests and shutdown). */

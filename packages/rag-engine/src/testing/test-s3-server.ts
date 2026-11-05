@@ -50,6 +50,12 @@ export interface TestS3ServerOptions {
   rejectConditionalWrites?: boolean;
   /** When set, requests signed with another access key id get 403. */
   accessKeyId?: string;
+  /** Runs before each request is served; the request waits for it to settle. */
+  beforeRequest?: (request: {
+    method: string;
+    bucket: string;
+    key: string;
+  }) => Promise<void> | void;
 }
 
 interface RequestContext {
@@ -393,18 +399,22 @@ export async function startTestS3Server(options: TestS3ServerOptions): Promise<T
     req.on('end', () => {
       const body = Buffer.concat(chunks);
       stats.bytesIn += body.length;
-      dispatch({
-        req,
-        res,
-        bucket,
-        key,
-        query: url.searchParams,
-        body,
-        target: path.join(root, bucket, key),
-        bucketDir: path.join(root, bucket),
-        stats,
-        options,
-      });
+      const serve = () =>
+        dispatch({
+          req,
+          res,
+          bucket,
+          key,
+          query: url.searchParams,
+          body,
+          target: path.join(root, bucket, key),
+          bucketDir: path.join(root, bucket),
+          stats,
+          options,
+        });
+      const hook = options.beforeRequest;
+      if (!hook) return serve();
+      void Promise.resolve(hook({ method: req.method ?? 'GET', bucket, key })).then(serve);
     });
   });
 

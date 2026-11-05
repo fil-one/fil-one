@@ -98,6 +98,7 @@ has no token positions), `500 INTERNAL`.
 | `ENGINE_VECTOR_INDEX_MIN_ROWS`      | `256`                                                  |                                                     |
 | `ENGINE_FLUSH_ROWS`                 | `1500`                                                 |                                                     |
 | `ENGINE_MAX_OBJECT_BYTES`           | `67108864`                                             | Larger objects are skipped                          |
+| `ENGINE_MAX_CHUNKS_PER_OBJECT`      | `4000`                                                 | Text past this many chunks per object is left out   |
 
 With no answer provider, queries return citations and an empty `answer`.
 

@@ -9,9 +9,16 @@ import type {
 
 import { ANSWER_TIMEOUT_MS } from './answer.ts';
 import type { EngineContext } from './engine-context.ts';
+import { readEngineState } from './engine-state.ts';
 import { EngineError, errorLogFields } from './errors.ts';
 import { TEXT_COLUMN, VECTOR_COLUMN, VersionNotFoundError, openTable } from './lance-store.ts';
-import { TABLE_NAME, companionBucketName, datasetUri, storageFor } from './storage.ts';
+import {
+  TABLE_NAME,
+  companionBucketName,
+  createS3Client,
+  datasetUri,
+  storageFor,
+} from './storage.ts';
 
 const RESULT_COLUMNS = ['objectKey', 'chunkIndex', 'text'];
 
@@ -132,6 +139,35 @@ async function openForQuery(
   return table;
 }
 
+/**
+ * Refuse a vector or hybrid search when the index was built with another
+ * embedding model than the engine now runs: the query vector would not be
+ * comparable with the stored ones. The next sync rebuilds the index with the
+ * current model. A dataset with no recorded model predates the record and is
+ * searched as before.
+ */
+async function assertSameEmbeddingModel(
+  ctx: EngineContext,
+  request: RagEngineQueryRequest,
+  companion: string,
+): Promise<void> {
+  if (request.searchMode === 'fulltext') return;
+  const s3 = createS3Client(storageFor(request.target, ctx.config.s3EndpointOverrides));
+  let model: string | undefined;
+  try {
+    model = (await readEngineState(s3, companion)).embedding?.model;
+  } finally {
+    s3.destroy();
+  }
+  if (model && model !== ctx.embedder.model) {
+    throw new EngineError(
+      409,
+      'EMBEDDING_MODEL_CHANGED',
+      `This index was built with embedding model ${model}; sync the bucket to rebuild it with ${ctx.embedder.model}, or use full-text search`,
+    );
+  }
+}
+
 async function runSearch(
   search: lancedb.VectorQuery | lancedb.Query,
   mode: RagSearchMode,
@@ -185,9 +221,11 @@ async function answerOrEmpty(
   const timeoutMs = ctx.config.answerTimeoutMs ?? ANSWER_TIMEOUT_MS;
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
-  const timedOut = new Promise<'timeout'>((resolve) => {
+  // A symbol, so no text the provider returns can be mistaken for the deadline.
+  const timeout = Symbol('timeout');
+  const timedOut = new Promise<typeof timeout>((resolve) => {
     timer = setTimeout(() => {
-      resolve('timeout');
+      resolve(timeout);
       controller.abort();
     }, timeoutMs);
   });
@@ -196,7 +234,7 @@ async function answerOrEmpty(
       ctx.answer!.answer(question, citations, controller.signal),
       timedOut,
     ]);
-    if (result !== 'timeout') return result;
+    if (result !== timeout) return result;
     ctx.log('warn', 'answer_timeout', { model: ctx.answer?.model, timeoutMs });
     return '';
   } catch (error) {
@@ -219,6 +257,7 @@ export async function runQuery(
   const { target, searchMode } = request;
   const companion = companionBucketName(target.orgId, target.region, target.bucketName);
   const table = await openForQuery(ctx, request, companion);
+  await assertSameEmbeddingModel(ctx, request, companion);
 
   const embedStart = performance.now();
   const embedding =

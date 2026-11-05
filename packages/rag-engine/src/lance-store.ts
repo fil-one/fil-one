@@ -320,6 +320,24 @@ export async function pruneSyncTags(table: lancedb.Table, keep: number): Promise
   for (const name of names.slice(keep)) await tags.delete(name);
 }
 
+/** Vector width from the table schema; 0 when the schema has no vector column. */
+export async function schemaDimension(table: lancedb.Table): Promise<number> {
+  const field = (await table.schema()).fields.find((f) => f.name === VECTOR_COLUMN);
+  const size = (field?.type as { listSize?: number } | undefined)?.listSize;
+  return typeof size === 'number' ? size : 0;
+}
+
+/**
+ * Whether any index leaves rows out: a sync that committed rows and stopped
+ * before `finalizeDataset` folded them in.
+ */
+export async function hasUnindexedRows(table: lancedb.Table): Promise<boolean> {
+  for (const index of await table.listIndices()) {
+    if (((await table.indexStats(index.name))?.numUnindexedRows ?? 0) > 0) return true;
+  }
+  return false;
+}
+
 /** Indexes on the table at its checked-out version, with coverage. */
 export async function describeIndexes(table: lancedb.Table): Promise<RagEngineIndexInfo[]> {
   const indexes = await table.listIndices();

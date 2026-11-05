@@ -29,7 +29,8 @@ export const DIMENSION = 64;
  * behaves sensibly without a model.
  */
 export class FakeEmbedder implements Embedder {
-  readonly model = 'fake-bow-64';
+  /** Writable so a test can stand in for an operator changing `EMBEDDING_MODEL`. */
+  model = 'fake-bow-64';
   calls = 0;
   /** Delay per call, to keep a sync running while a test looks at it. */
   delayMs = 0;
@@ -69,6 +70,8 @@ export class FakeAnswerProvider implements AnswerProvider {
   hang: 'until-aborted' | 'forever' | undefined;
   /** The signal each call received. */
   readonly signals: (AbortSignal | undefined)[] = [];
+  /** When set, `answer` resolves with this text. */
+  reply: string | undefined;
 
   answer(question: string, passages: AnswerPassage[], signal?: AbortSignal): Promise<string> {
     this.questions.push({ question, passages });
@@ -80,6 +83,7 @@ export class FakeAnswerProvider implements AnswerProvider {
         signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
       });
     }
+    if (this.reply !== undefined) return Promise.resolve(this.reply);
     return Promise.resolve(`Answer citing [1] from ${passages[0]?.objectKey ?? 'nothing'}`);
   }
 }
@@ -140,6 +144,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
       vectorIndexMinRows: 1_000_000,
       flushRows: 1500,
       maxObjectBytes: 1024 * 1024,
+      maxChunksPerObject: 4000,
       ...options.config,
       s3EndpointOverrides: options.config?.s3EndpointOverrides ?? {},
     },

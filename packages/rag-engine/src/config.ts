@@ -47,6 +47,11 @@ export interface EngineConfig {
   flushRows: number;
   /** Source objects larger than this are skipped. */
   maxObjectBytes: number;
+  /**
+   * Chunks indexed per object; text past them is left out. Bounds the memory
+   * one large text object takes, since its vectors are held until committed.
+   */
+  maxChunksPerObject: number;
 }
 
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-5-5';
@@ -146,5 +151,6 @@ export function loadConfig(env: Env = process.env): EngineConfig {
     vectorIndexMinRows: intFrom(env, 'ENGINE_VECTOR_INDEX_MIN_ROWS', 256),
     flushRows: intFrom(env, 'ENGINE_FLUSH_ROWS', 1500),
     maxObjectBytes: intFrom(env, 'ENGINE_MAX_OBJECT_BYTES', 64 * 1024 * 1024),
+    maxChunksPerObject: intFrom(env, 'ENGINE_MAX_CHUNKS_PER_OBJECT', 4000),
   };
 }

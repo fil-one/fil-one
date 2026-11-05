@@ -8,7 +8,7 @@ import type {
 
 import { readEngineState, type EngineState } from './engine-state.ts';
 import type { EngineContext } from './engine-context.ts';
-import { VECTOR_COLUMN, describeIndexes, openTable, readIndexedObjects } from './lance-store.ts';
+import { describeIndexes, openTable, readIndexedObjects, schemaDimension } from './lance-store.ts';
 import {
   TABLE_NAME,
   companionBucketName,
@@ -17,13 +17,6 @@ import {
   storageFor,
 } from './storage.ts';
 import type { SyncManager, TargetSyncState } from './sync.ts';
-
-/** Vector width from the table schema, for datasets with no engine state yet. */
-async function schemaDimension(table: lancedb.Table): Promise<number> {
-  const field = (await table.schema()).fields.find((f) => f.name === VECTOR_COLUMN);
-  const size = (field?.type as { listSize?: number } | undefined)?.listSize;
-  return typeof size === 'number' ? size : 0;
-}
 
 async function datasetInfo(
   table: lancedb.Table,

@@ -68,18 +68,19 @@ function targetOf(body: unknown): RagEngineTarget {
 
 async function drop(ctx: EngineContext, syncs: SyncManager, target: RagEngineTarget) {
   const companion = companionBucketName(target.orgId, target.region, target.bucketName);
-  await syncs.cancel(companion);
-  const storage = storageFor(target, ctx.config.s3EndpointOverrides);
-  const dropped = await dropTable(storage, companion);
-  const s3 = createS3Client(storage);
-  try {
-    await deleteObject(s3, companion, STATE_KEY);
-    await tryDeleteBucket(s3, companion);
-  } finally {
-    s3.destroy();
-  }
-  const response: RagEngineDropResponse = { dropped };
-  return response;
+  return syncs.whileDropping(companion, async () => {
+    const storage = storageFor(target, ctx.config.s3EndpointOverrides);
+    const dropped = await dropTable(storage, companion);
+    const s3 = createS3Client(storage);
+    try {
+      await deleteObject(s3, companion, STATE_KEY);
+      await tryDeleteBucket(s3, companion);
+    } finally {
+      s3.destroy();
+    }
+    const response: RagEngineDropResponse = { dropped };
+    return response;
+  });
 }
 
 /**

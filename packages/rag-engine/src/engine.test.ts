@@ -12,7 +12,7 @@ import * as lancedb from '@lancedb/lancedb';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { connectDataset } from './lance-store.ts';
-import { TABLE_NAME, companionBucketName, storageFor } from './storage.ts';
+import { STATE_KEY, TABLE_NAME, companionBucketName, storageFor } from './storage.ts';
 import { startHarness, type Harness } from './testing/harness.ts';
 
 const DOCS = {
@@ -278,6 +278,73 @@ describe('sync', () => {
     expect(t.s3.stats.refused.some((r) => r.includes('conditional PUT'))).toBe(true);
   });
 
+  it('records the embedding model when a retry finds the dataset already complete', async () => {
+    const t = await harness();
+    seed(t);
+    await t.syncAndWait();
+    const companion = companionBucketName('org-1', 'us-east-9', 'docs');
+    const stateFile = path.join(t.root, companion, STATE_KEY);
+    // The first sync committed and finished the dataset but never wrote its state.
+    fs.rmSync(stateFile);
+
+    await t.syncAndWait();
+    expect(JSON.parse(fs.readFileSync(stateFile, 'utf8'))).toMatchObject({
+      embedding: { model: 'fake-bow-64', dimension: 64 },
+    });
+  });
+
+  it('brings indexes up to date and tags the version when a retry finds committed rows outside them', async () => {
+    const t = await harness();
+    seed(t);
+    await t.syncAndWait();
+    const companion = companionBucketName('org-1', 'us-east-9', 'docs');
+    const db = await connectDataset(storageFor(t.target), companion);
+    const table = await db.openTable(TABLE_NAME);
+    // A commit from a sync that failed before it finalized: same object and
+    // ETag, so the retry sees nothing to index.
+    const [row] = (await table.query().where("objectKey = 'space/mars.txt'").toArray()) as {
+      objectKey: string;
+      etag: string;
+      objectSize: bigint;
+      text: string;
+      vector: Iterable<number>;
+    }[];
+    await table.add([
+      {
+        objectKey: row!.objectKey,
+        etag: row!.etag,
+        objectSize: row!.objectSize,
+        chunkIndex: 1,
+        text: row!.text,
+        vector: Array.from(row!.vector),
+      },
+    ]);
+    const before = (await t.call<RagEngineStatus>('/v1/status', { target: t.target })).body;
+    expect(before.dataset?.indexes.map((i) => i.unindexedRows)).toEqual([1]);
+    const tagsBefore = (
+      await t.call<RagEngineVersionsResponse>('/v1/versions', { target: t.target })
+    ).body.versions.filter((v) => v.tags?.some((tag) => tag.startsWith('sync-'))).length;
+
+    const status = await t.syncAndWait();
+    expect(status.dataset?.indexes.map((i) => i.unindexedRows)).toEqual([0]);
+    const tagsAfter = (
+      await t.call<RagEngineVersionsResponse>('/v1/versions', { target: t.target })
+    ).body.versions.filter((v) => v.tags?.some((tag) => tag.startsWith('sync-'))).length;
+    expect(tagsAfter).toBe(tagsBefore + 1);
+  });
+
+  it('indexes at most maxChunksPerObject chunks of one object', async () => {
+    const t = await harness({ config: { maxChunksPerObject: 3 } });
+    const words = Array.from({ length: 2000 }, (_, i) => `word${i}`).join(' ');
+    t.putSource('big.txt', words);
+    const status = await t.syncAndWait();
+    expect(status.dataset?.rows).toBe(3);
+    expect(t.logs.find((l) => l.event === 'object_truncated')?.fields).toMatchObject({
+      objectKey: 'big.txt',
+      indexedChunks: 3,
+    });
+  });
+
   it('reports progress while a sync runs', async () => {
     const t = await harness();
     seed(t);
@@ -381,6 +448,44 @@ describe('query', () => {
       answer: 'fake-answer',
     });
     expect(result.body.sources[0]).toBe('space/mars.txt');
+  });
+
+  it.each(['vector', 'hybrid'] as const)(
+    'refuses %s search on an index built with another embedding model',
+    async (searchMode) => {
+      const t = await harness();
+      seed(t);
+      await t.syncAndWait();
+      t.embedder.model = 'fake-bow-64-other';
+      const result = await query(t, { query: 'planet', searchMode });
+      expect(result).toMatchObject({
+        status: 409,
+        body: { error: { code: 'EMBEDDING_MODEL_CHANGED' } },
+      });
+    },
+  );
+
+  it('still serves full-text search on an index built with another embedding model', async () => {
+    const t = await harness();
+    seed(t);
+    await t.syncAndWait();
+    t.embedder.model = 'fake-bow-64-other';
+    const result = await query(t, { query: 'iron oxide', searchMode: 'fulltext' });
+    expect(result.status).toBe(200);
+    expect(result.body.citations[0]?.objectKey).toBe('space/mars.txt');
+  });
+
+  it('returns an answer whose whole text is "timeout"', async () => {
+    const t = await harness();
+    seed(t);
+    await t.syncAndWait();
+    t.answer.reply = 'timeout';
+    const result = await t.call<RagEngineQueryResponse>('/v1/query', {
+      target: t.target,
+      query: 'iron oxide',
+      searchMode: 'fulltext',
+    });
+    expect(result.body.answer).toBe('timeout');
   });
 
   it('queries a past version (time travel)', async () => {
@@ -610,6 +715,31 @@ describe('drop', () => {
       target: t.target,
     });
     expect(again.body).toEqual({ dropped: false });
+  });
+
+  it('refuses a sync that arrives while a drop is running', async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached: () => void = () => {};
+    const reachedStateDelete = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const t = await harness();
+    seed(t);
+    await t.syncAndWait();
+    t.s3.options.beforeRequest = ({ method, key }) => {
+      if (method !== 'DELETE' || key !== STATE_KEY) return;
+      reached();
+      return held;
+    };
+    const dropping = t.call<{ dropped: boolean }>('/v1/drop', { target: t.target });
+    await reachedStateDelete;
+    const sync = await t.call('/v1/sync', { target: t.target });
+    release();
+    expect(sync).toMatchObject({ status: 409, body: { error: { code: 'DROP_IN_PROGRESS' } } });
+    expect((await dropping).body).toEqual({ dropped: true });
   });
 
   it('drops a never-indexed bucket without listing it', async () => {
