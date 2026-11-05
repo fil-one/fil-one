@@ -11,6 +11,12 @@ export type ToggleConfirmModalProps = {
   open: boolean;
   onClose: () => void;
   onConfirm: () => void;
+  /**
+   * The bucket is in a Forge region, where indexing runs on the Forge engine:
+   * it starts on confirm rather than on the 6-hourly schedule, and the index is
+   * a Lance dataset in the customer's own Forge storage.
+   */
+  engine?: boolean;
 };
 
 /**
@@ -48,6 +54,19 @@ const INDEXING_FACTS: { label: string; value: React.ReactNode }[] = [
   },
 ];
 
+/** The same facts for an engine-backed (Forge) bucket. */
+const ENGINE_INDEXING_FACTS: { label: string; value: React.ReactNode }[] = [
+  {
+    label: 'Ready in',
+    value: 'Indexing starts as soon as you confirm. Progress shows in the bucket drawer.',
+  },
+  {
+    label: 'Stored in',
+    value: 'A Lance dataset in your own Forge storage, in the same region as the bucket.',
+  },
+  INDEXING_FACTS[1]!,
+];
+
 export function ToggleConfirmModal({
   enabled,
   bucketName,
@@ -55,7 +74,9 @@ export function ToggleConfirmModal({
   open,
   onClose,
   onConfirm,
+  engine = false,
 }: ToggleConfirmModalProps) {
+  const facts = engine ? ENGINE_INDEXING_FACTS : INDEXING_FACTS;
   return (
     <Modal open={open} onClose={onClose} size="sm" testId="toggle-confirm-modal">
       <ModalHeader
@@ -82,7 +103,7 @@ export function ToggleConfirmModal({
                 follows the light/dark section variants in globals.css, and so the
                 label column clears WCAG AA (zinc-400 is only 2.56:1 on white). */}
             <dl className="divide-y divide-(--color-border-muted) border-y border-(--color-border-muted)">
-              {INDEXING_FACTS.map((fact) => (
+              {facts.map((fact) => (
                 <div key={fact.label} className="flex gap-4 py-2.5 text-sm leading-relaxed">
                   <dt className="w-20 flex-shrink-0 text-(--color-paragraph-text-subtle)">
                     {fact.label}
