@@ -8,7 +8,12 @@ import type {
   S3Region,
   SortDirection,
 } from '@filone/shared';
-import { BUCKET_SORT_KEYS, listBucketsUnavailableMessage, SORT_DIRECTIONS } from '@filone/shared';
+import {
+  BUCKET_SORT_KEYS,
+  isRagCompanionBucket,
+  listBucketsUnavailableMessage,
+  SORT_DIRECTIONS,
+} from '@filone/shared';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
 import { getScopedMemberId } from '../lib/member-scope.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
@@ -72,7 +77,9 @@ export async function baseHandler(
   const unavailableRegions: S3Region[] = [];
   settled.forEach((result, index) => {
     if (result.status === 'fulfilled') {
-      buckets.push(...result.value);
+      // Bucket Intelligence keeps its Lance datasets in companion buckets on
+      // Forge storage; they hold no user data and are not the user's to manage.
+      buckets.push(...result.value.filter((bucket) => !isRagCompanionBucket(bucket.bucketName)));
       return;
     }
     const { orchestrator, tenantId } = ready[index];

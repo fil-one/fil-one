@@ -154,6 +154,9 @@ export const queryKeys = {
   ragBucketEnabled: ['rag-bucket-enabled'] as const,
   ragBucketEnabledFor: (bucketName: string, region: S3Region) =>
     ['rag-bucket-enabled', bucketName, region] as const,
+  // Engine-backed (Forge) buckets: dataset status + version history.
+  ragBucketEngineFor: (bucketName: string, region: S3Region) =>
+    ['rag-bucket-engine', bucketName, region] as const,
   // RAG API keys (query-endpoint bearer tokens) — distinct from `accessKeys`.
   ragApiKeys: ['rag-api-keys'] as const,
   // Never fetched — only ever `setQueryData`'d by `switchToOrg` and read by

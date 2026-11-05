@@ -8,7 +8,7 @@ import { SubscriptionStatus } from '@filone/shared';
  * `lapsed`, so every other value is an exit.
  */
 export const HubSpotLifecycleStatus = {
-  /** Card charged; the deletion sequence excludes this value. */
+  /** Card charged, or billed by hand; the deletion sequence excludes this value. */
   Paying: 'paying',
   /** Free trial, no payment taken yet. */
   Trialing: 'trialing',
@@ -39,6 +39,7 @@ export function fromInternalStatus(
 ): HubSpotLifecycleStatus {
   switch (status) {
     case SubscriptionStatus.Active:
+    case SubscriptionStatus.Manual:
       return HubSpotLifecycleStatus.Paying;
     case SubscriptionStatus.Trialing:
       return HubSpotLifecycleStatus.Trialing;

@@ -32,6 +32,7 @@ export function useCanShareObjects(): boolean {
   return (
     !mayReadBilling ||
     status === SubscriptionStatus.Active ||
+    status === SubscriptionStatus.Manual ||
     status === SubscriptionStatus.PastDue ||
     status === SubscriptionStatus.GracePeriod
   );

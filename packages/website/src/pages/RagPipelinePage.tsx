@@ -4,6 +4,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import {
   S3Region,
   formatBytes,
+  usesRagEngine,
   type Bucket,
   type BucketRagEnablementResponse,
 } from '@filone/shared';
@@ -218,12 +219,17 @@ function NotAvailable() {
  * on error would leave the row reading "Failed" until a manual reload, so it keeps
  * polling at the slow interval even once `lastSyncedAt` exists.
  */
-export function enablementPollInterval(query: {
-  state: { data?: BucketRagEnablementResponse };
-}): number | false {
+export function enablementPollInterval(
+  query: {
+    state: { data?: BucketRagEnablementResponse };
+  },
+  region?: S3Region,
+): number | false {
   const data = query.state.data;
   if (!data?.enabled) return false;
-  if (data.syncState === 'syncing') return 30_000;
+  // Engine-backed (Forge) runs start on demand and finish in minutes, so the
+  // row follows them closely; scheduled runs take far longer.
+  if (data.syncState === 'syncing') return region && usesRagEngine(region) ? 3_000 : 30_000;
   if (data.syncState === 'error') return 120_000;
   if (!data.lastSyncedAt) return 120_000;
   return false;
@@ -268,7 +274,8 @@ export function RagPipelinePage() {
       queryKey: queryKeys.ragBucketEnabledFor(b.bucketName, b.region as S3Region),
       queryFn: () => getBucketRagEnabled(b.bucketName, b.region as S3Region),
       enabled: ragAccess,
-      refetchInterval: enablementPollInterval,
+      refetchInterval: (query: { state: { data?: BucketRagEnablementResponse } }) =>
+        enablementPollInterval(query, b.region as S3Region),
     })),
   });
 

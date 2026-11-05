@@ -3,13 +3,25 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { Resource } from 'sst';
 import type { ErrorResponse, QueryBucketResponse } from '@filone/shared';
-import { ApiErrorCode, QueryBucketSchema, S3Region, isSupportedRegion } from '@filone/shared';
+import {
+  ApiErrorCode,
+  QueryBucketSchema,
+  S3Region,
+  isSupportedRegion,
+  usesRagEngine,
+} from '@filone/shared';
 import { S3VectorsStore, complete, embed } from '@filone/rag-shared';
 import type { VectorQueryResult } from '@filone/rag-shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.ts';
 import { RAGKeys } from '../lib/dynamo-records.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
+import {
+  getRagEngineClient,
+  ragEngineErrorResponse,
+  ragEngineTarget,
+} from '../lib/rag-engine-client.ts';
+import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
@@ -18,6 +30,7 @@ import {
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { getScopedMemberId } from '../lib/member-scope.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { ragAccessMiddleware } from '../middleware/rag-access.ts';
@@ -79,7 +92,7 @@ export async function baseHandler(
       .body<ErrorResponse>({ message: parsed.error.issues[0].message })
       .build();
   }
-  const { query, top_k, model } = parsed.data;
+  const { query, top_k, model, search_mode, version } = parsed.data;
 
   const { orgId, userId, membership, apiKeySession } = getUserInfo(event);
 
@@ -105,6 +118,22 @@ export async function baseHandler(
       .status(404)
       .body<ErrorResponse>({ message: 'Bucket not found' })
       .build();
+  }
+
+  if (usesRagEngine(region)) {
+    return queryEngine({
+      orchestrator,
+      tenantId,
+      orgId,
+      region,
+      bucketName,
+      query,
+      topK: top_k,
+      searchMode: search_mode,
+      version,
+      objectKey: event.queryStringParameters?.objectKey,
+      deadline: getRequestDeadline(event),
+    });
   }
 
   // A bucket that has never completed its first indexing pass has nothing to
@@ -147,6 +176,83 @@ export async function baseHandler(
     .status(200)
     .body<QueryBucketResponse>({ answer, sources: sourcesFromChunks(chunks) })
     .build();
+}
+
+/**
+ * Forge regions: the engine on the Forge appliance retrieves from the bucket's
+ * Lance dataset and writes the grounded answer. The bucket must have been
+ * enabled; whether it has been indexed yet is the engine's answer (409 below).
+ * `model` names a Bedrock model and does not apply here.
+ */
+async function queryEngine(args: {
+  orchestrator: RegionOrchestrator;
+  tenantId: string;
+  orgId: string;
+  region: S3Region;
+  bucketName: string;
+  query: string;
+  topK: number;
+  searchMode: 'vector' | 'fulltext' | 'hybrid' | undefined;
+  version: number | undefined;
+  objectKey: string | undefined;
+  /** Aborts before the Lambda timeout, so a stalled engine still gets the 502 below. */
+  deadline: AbortSignal;
+}): Promise<APIGatewayProxyStructuredResultV2> {
+  const { orchestrator, tenantId, orgId, region, bucketName } = args;
+  // The engine searches the whole bucket; it has no per-object filter, so a
+  // scoped query is refused rather than answered from every object.
+  if (args.objectKey !== undefined) {
+    return new ResponseBuilder()
+      .status(400)
+      .body<ErrorResponse>({
+        message: 'Queries scoped to one object are not available for buckets in Forge regions.',
+      })
+      .build();
+  }
+  // A bucket whose owner turned indexing off keeps its dataset on the engine,
+  // so only an active row lets a query reach it.
+  const enablement = await getOwnedBucketEnablement(orgId, region, bucketName);
+  if (enablement?.status !== 'active') {
+    return new ResponseBuilder()
+      .status(409)
+      .body<ErrorResponse>({
+        message:
+          enablement?.status === 'disabled'
+            ? 'Indexing is turned off for this bucket. Turn it back on to query the bucket.'
+            : 'This bucket has not been indexed yet. Queries become available after the first indexing pass completes.',
+        code: ApiErrorCode.BUCKET_NOT_INDEXED,
+      })
+      .build();
+  }
+
+  try {
+    const client = getRagEngineClient();
+    const target = await ragEngineTarget(orchestrator, tenantId, { orgId, region, bucketName });
+    const result = await client.query(
+      {
+        target,
+        query: args.query,
+        topK: args.topK,
+        searchMode: args.searchMode ?? 'vector',
+        ...(args.version ? { version: args.version } : {}),
+        answer: true,
+      },
+      { signal: args.deadline },
+    );
+    const answer =
+      result.citations.length === 0 && !result.answer.trim() ? NO_RELEVANT_CONTENT : result.answer;
+    return new ResponseBuilder()
+      .status(200)
+      .body<QueryBucketResponse>({
+        answer,
+        sources: result.sources,
+        citations: result.citations,
+        trace: result.trace,
+      })
+      .build();
+  } catch (error) {
+    return ragEngineErrorResponse(error);
+  }
 }
 
 /**
@@ -243,6 +349,7 @@ function sourcesFromChunks(chunks: VectorQueryResult[]): string[] {
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   // Cookie session OR RAG API key bearer token — see ragQueryAuthMiddleware.
   // The bearer token carries its own authority; the cookie caller is gated on

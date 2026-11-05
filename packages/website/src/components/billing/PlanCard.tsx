@@ -77,7 +77,10 @@ export function PlanCard({ subscription, mayManage, onManage, onChoosePlan }: Pl
           {/* A running subscription is managed in Stripe; one that is not needs
               a plan picked before there is anything to manage. Only one of the
               two is ever the next step, so only one is offered. */}
+          {/* A manually billed plan is changed through the account team, and
+              neither Stripe nor the plan chooser has anything to offer it. */}
           {mayManage &&
+            subscription.status !== SubscriptionStatus.Manual &&
             (running ? (
               <Button
                 id="billing-manage-plan-button"
