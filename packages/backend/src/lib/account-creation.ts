@@ -8,7 +8,6 @@ import { OrgKeys } from './org-membership.ts';
 import type { OrgMembership } from './org-membership.ts';
 import type { PendingAccount } from './user-context.ts';
 import { OrgSetupStatus } from './org-setup-status.ts';
-import { ORGS_BETA_SK } from './orgs-beta.ts';
 import { deriveOrgName } from './suggest-org-name.ts';
 
 /**
@@ -80,9 +79,6 @@ export async function createNewUserAndOrg({
  * `source: 'manual'` on both the membership row and the audit event, distinct
  * from `'signup'`: this org did not come with the account, the account asked
  * for it.
- *
- * Only the organizations beta may create one, so the new org is let into the
- * beta with it: every org its creator holds then has the same members surface.
  */
 export async function createAdditionalOrg({
   userId,
@@ -99,15 +95,7 @@ export async function createAdditionalOrg({
   const now = new Date().toISOString();
 
   await commitAudited({
-    items: [
-      ...orgRows({ orgId, orgName, userId, now, source: 'manual', nameConfirmed: true, logoUrl }),
-      {
-        Put: {
-          TableName: Resource.UserInfoTable.name,
-          Item: { pk: { S: OrgKeys.orgPk(orgId) }, sk: { S: ORGS_BETA_SK } },
-        },
-      },
-    ],
+    items: orgRows({ orgId, orgName, userId, now, source: 'manual', nameConfirmed: true, logoUrl }),
     event: auditEvent({
       type: 'org.created',
       actor: userActor({ userId, email }),

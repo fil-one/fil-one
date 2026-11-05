@@ -58,7 +58,6 @@ const ME: MeResponse = {
   name: 'User',
   mfaEnrollments: [],
   ragAccess: true,
-  orgsBeta: true,
   billingActive: true,
 };
 

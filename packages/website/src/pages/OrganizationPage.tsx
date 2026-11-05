@@ -151,9 +151,6 @@ export function OrganizationPage({ tab }: { tab?: OrganizationTabId } = {}) {
       headingId="members-heading"
       description="People with access to this organization."
       action={
-        // `mayInvite` covers the beta flag as well as the permission, so an org
-        // outside the beta is not offered a dialog its first submit would be
-        // refused.
         scope.mayInvite && hasInvitationsTab ? (
           <Button
             variant="primary"
