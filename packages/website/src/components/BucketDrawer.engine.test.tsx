@@ -221,6 +221,22 @@ describe('BucketDrawer — Forge (engine-backed) bucket', () => {
     expect(screen.queryByTestId('rag-dataset-panel')).not.toBeInTheDocument();
   });
 
+  it('keeps asking disabled when a finished run found nothing to index', async () => {
+    // A run over a bucket with no supported files (or none with text) records
+    // lastSyncedAt but creates no dataset, so every question would fail.
+    mockGetEngine.mockResolvedValue({
+      ...engineEmpty,
+      status: { ...engineEmpty.status, lastSyncedAt: '2026-11-03T14:06:12Z' },
+    });
+    renderDrawer({ ...forgeBucket, filesIndexed: 0, indexSize: 0 });
+    expect(await screen.findByTestId('bucket-drawer-no-dataset')).toHaveTextContent(
+      'No supported files with text were found in this bucket.',
+    );
+    expect(screen.getByRole('textbox', { name: 'Ask a question' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Ask' })).toBeDisabled();
+    expect(screen.queryByTestId('bucket-drawer-not-indexed')).not.toBeInTheDocument();
+  });
+
   it('hides Index now from a read-only member', async () => {
     renderDrawer(forgeBucket, OrgRole.ReadOnly);
     expect(await screen.findByTestId('rag-dataset-panel')).toBeInTheDocument();

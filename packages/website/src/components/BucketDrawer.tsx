@@ -76,6 +76,10 @@ export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: Buc
   // The engine reads its own dataset, so while the drawer is open its numbers
   // are fresher than the row's enablement poll.
   const bucket = engine.isEngine ? withEngineStatus(rowBucket, engine.data) : rowBucket;
+  // A finished run over a bucket with no supported files, or none with text,
+  // records lastSyncedAt but creates no dataset, so there is nothing to ask.
+  const noDataset =
+    engine.isEngine && !!engine.data?.status.lastSyncedAt && !engine.data.status.dataset;
 
   const queryMutation = useMutation({
     mutationFn: ({ query, ...options }: AskVariables) =>
@@ -145,6 +149,7 @@ export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: Buc
             onAsk={handleAsk}
             queryMutation={queryMutation}
             canSync={engine.canSync}
+            noDataset={noDataset}
             controls={
               engine.isEngine ? (
                 <RagSearchControls
@@ -153,7 +158,7 @@ export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: Buc
                   version={version}
                   onVersionChange={setVersion}
                   versions={versions}
-                  disabled={!bucket.lastSyncedAt}
+                  disabled={!bucket.lastSyncedAt || noDataset}
                 />
               ) : null
             }
@@ -291,6 +296,8 @@ type AskSectionProps = {
   controls?: React.ReactNode;
   /** Whether the viewer can start an engine run, so the copy only names Index now when they have it. */
   canSync?: boolean;
+  /** Engine-backed buckets: a run finished but found nothing to index. */
+  noDataset?: boolean;
 };
 
 /**
@@ -310,9 +317,11 @@ function AskSection({
   queryMutation,
   controls,
   canSync,
+  noDataset,
 }: AskSectionProps) {
   const { isPending, isError, error, data: result } = queryMutation;
   const notYetIndexed = !bucket.lastSyncedAt;
+  const cannotAsk = notYetIndexed || !!noDataset;
   const engine = usesRagEngine(bucket.region);
 
   return (
@@ -325,7 +334,11 @@ function AskSection({
         <Input
           aria-label="Ask a question"
           placeholder={
-            notYetIndexed ? 'Waiting for the first indexing pass…' : `Ask about ${bucket.name}…`
+            notYetIndexed
+              ? 'Waiting for the first indexing pass…'
+              : noDataset
+                ? 'Nothing indexed to ask about'
+                : `Ask about ${bucket.name}…`
           }
           value={input}
           onChange={onInputChange}
@@ -340,20 +353,20 @@ function AskSection({
               event.key === 'Enter' &&
               !event.nativeEvent.isComposing &&
               event.nativeEvent.keyCode !== 229 &&
-              !notYetIndexed &&
+              !cannotAsk &&
               input.trim()
             ) {
               onAsk();
             }
           }}
-          disabled={notYetIndexed}
+          disabled={cannotAsk}
           className="flex-1"
         />
         <Button
           data-testid="bucket-drawer-ask-submit"
           variant="primary"
           size="sm"
-          disabled={notYetIndexed || !input.trim()}
+          disabled={cannotAsk || !input.trim()}
           onClick={onAsk}
         >
           Ask
@@ -366,6 +379,13 @@ function AskSection({
               ? 'You can ask questions once the first indexing run has finished. Start one with Index now.'
               : 'You can ask questions once the first indexing run has finished.'
             : 'You can ask questions once the first indexing pass has completed, which can take up to 6 hours.'}
+        </p>
+      )}
+      {!notYetIndexed && noDataset && (
+        <p data-testid="bucket-drawer-no-dataset" className="mt-2 text-xs text-zinc-500">
+          {canSync
+            ? 'No supported files with text were found in this bucket. Add documents, then run Index now.'
+            : 'No supported files with text were found in this bucket.'}
         </p>
       )}
       <QueryAnswer
