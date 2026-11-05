@@ -565,36 +565,38 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     });
   }
 
-  async getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null> {
+  async getBucketPolicy(
+    tenantId: string,
+    { region, bucketName }: BucketRef,
+  ): Promise<StoredBucketPolicy | null> {
     // The S3 document matches `BucketPolicy` in `@filone/shared`.
-    return s3GetBucketPolicy(await this.getTenantS3Client(tenantId), bucketName);
+    return s3GetBucketPolicy(await this.getTenantS3Client(tenantId, region), bucketName);
   }
 
   async putBucketPolicy(
     tenantId: string,
-    bucketName: string,
+    { region, bucketName }: BucketRef,
     policy: BucketPolicy,
     precondition?: PolicyPrecondition,
   ): Promise<{ etag: string }> {
-    const s3 = await this.getTenantS3Client(tenantId);
+    const s3 = await this.getTenantS3Client(tenantId, region);
     return withWriteRetry(() => s3PutBucketPolicy(s3, bucketName, policy, precondition));
   }
 
   async deleteBucketPolicy(
     tenantId: string,
-    bucketName: string,
+    { region, bucketName }: BucketRef,
     precondition?: IfMatchPrecondition,
   ): Promise<void> {
-    const s3 = await this.getTenantS3Client(tenantId);
+    const s3 = await this.getTenantS3Client(tenantId, region);
     await withWriteRetry(() => s3DeleteBucketPolicy(s3, bucketName, precondition));
   }
 
   /**
-   * An S3 client signing as the tenant's console key. Policy reads and writes
-   * are control-plane calls the gateway answers the same at every region of the
-   * network, so any of them will do.
+   * An S3 client signing as the tenant's console key, bound to the region the
+   * bucket is served by. Only that region's gateway knows the bucket.
    */
-  private async getTenantS3Client(tenantId: string) {
-    return createS3Client(await this.getS3ClientContext(tenantId, this.regions[0]));
+  private async getTenantS3Client(tenantId: string, region: S3Region) {
+    return createS3Client(await this.getS3ClientContext(tenantId, region));
   }
 }
