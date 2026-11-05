@@ -7,6 +7,7 @@ import {
   PutItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
+import { ApiErrorCode, SubscriptionStatus } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Mocks — baseHandler is tested directly, so no auth/csrf middleware needed.
@@ -69,6 +70,23 @@ describe('create-setup-intent baseHandler', () => {
     vi.clearAllMocks();
     mockCustomersCreate.mockResolvedValue({ id: 'cus_test_123' });
     mockSetupIntentsCreate.mockResolvedValue({ client_secret: 'seti_test_secret_abc' });
+  });
+
+  it('refuses with 409 BILLED_MANUALLY without touching Stripe when the org is billed manually', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      subscriptionItem(ORG_KEY, {
+        stripeCustomerId: { S: 'cus_any' },
+        subscriptionStatus: { S: SubscriptionStatus.Manual },
+      }),
+    );
+
+    const result = await baseHandler(setupIntentEvent());
+
+    expect(result).toMatchObject({
+      statusCode: 409,
+      body: expect.stringContaining(ApiErrorCode.BILLED_MANUALLY),
+    });
+    expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
   });
 
   it('persists only the Stripe customer mapping and never grants a trial (first-time)', async () => {

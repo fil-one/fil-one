@@ -67,18 +67,22 @@ export const Route = createRoute({
  * Where an unnamed org the account has nowhere else to be sends it, if
  * anywhere. `AppWithOrgGuard` applies it too: a `/me` refetch that lands on the
  * floor org remounts the outlet without rerunning `beforeLoad`.
+ *
+ * Only for a caller who may rename the org. An account created by an invitation
+ * belongs to the inviting org alone, and that org is somebody else's to name.
  */
 function namingRedirect(me: MeResponse): '/left-organization' | '/create-organization' | undefined {
   if (me.nameConfirmed !== false || !isOnlyMembership(me)) return undefined;
+  if (!me.permissions?.includes('org.rename')) return undefined;
   return me.floorOrg ? '/left-organization' : '/create-organization';
 }
 
 /**
  * Whether the org `/me` answered for is the only one the account belongs to.
  *
- * Every account has an unnamed personal org from signup, including one that
- * signed up through an invitation and only ever works in the team org. A new
- * tab resolves to that personal org (the tab has not chosen one yet), so
+ * Accounts that signed up before an invitation could create one hold an
+ * unnamed personal org, including those that only ever work in a team org. A
+ * new tab resolves to that personal org (the tab has not chosen one yet), so
  * asking for a name whenever it is unnamed would stop that person on every
  * fresh tab to name an org they never asked for. The naming step is for an
  * account with nowhere else to be: a brand-new signup.

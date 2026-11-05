@@ -14,7 +14,11 @@ import { getSubscription } from '../lib/subscription-store.ts';
 import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
 import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
-import { accountDeletedResponse, ResponseBuilder } from '../lib/response-builder.ts';
+import {
+  accountDeletedResponse,
+  billedManuallyResponse,
+  ResponseBuilder,
+} from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -62,6 +66,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
       .body({ message: 'No billing record found. Please set up a payment method first.' })
       .build();
   }
+
+  if (record.subscriptionStatus === SubscriptionStatus.Manual) return billedManuallyResponse();
 
   if (!stripeCustomerId) {
     return new ResponseBuilder()

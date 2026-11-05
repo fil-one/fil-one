@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ApiErrorCode, ErrorResponse } from './coreInterfaces.ts';
 import { OrgRole } from './org.ts';
 
 /**
@@ -146,4 +147,15 @@ export interface AcceptInvitationResponse {
   role: OrgRole;
   /** The caller was already a member, so accepting changed only the invitation. */
   alreadyMember: boolean;
+}
+
+/**
+ * The 403 an accept answers when the invitation was sent to another address.
+ * It names the address the session signed in with, so the accept page can show
+ * it without reading `/me`, which refuses a deleted account's session.
+ */
+export interface InviteEmailMismatchResponse extends ErrorResponse {
+  code: typeof ApiErrorCode.INVITE_EMAIL_MISMATCH;
+  /** Absent when the session's token carries no address. */
+  sessionEmail?: string;
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { OrgRole } from '@filone/shared';
+import { OrgRole, S3Region } from '@filone/shared';
 import { seedPermissions } from '../lib/test-permissions.js';
 import {
   createMemoryHistory,
@@ -465,5 +465,11 @@ describe('enablementPollInterval', () => {
     expect(
       interval({ enabled: true, syncState: 'idle', lastSyncedAt: '2026-01-01T00:00:00Z' }),
     ).toBe(false);
+  });
+
+  it('follows an engine-backed (Forge) run closely, since it starts on demand', () => {
+    const data = { enabled: true, syncState: 'syncing' } as BucketRagEnablementResponse;
+    expect(enablementPollInterval({ state: { data } }, S3Region.EuCentral3)).toBe(3_000);
+    expect(enablementPollInterval({ state: { data } }, S3Region.UsEast1)).toBe(30_000);
   });
 });
