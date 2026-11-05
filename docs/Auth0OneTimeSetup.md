@@ -84,11 +84,11 @@ Note this concerns _replacing_ the custom domain. Adding a second login domain l
 
 **4a. Console alias login domains (FIL-897, FIL-1376):**
 
-The console is also served from alias hostnames (`PROD_CONSOLE_ALIAS_HOSTS` in `packages/shared/src/constants.ts`): `app.filone.ai`, an unlisted demo alias for use when `fil.one` is blocklisted, and `app.filone.com`, the domain the console is moving to.
+The console's canonical host is `app.filone.com`, and it is also served from alias hostnames (`PROD_CONSOLE_ALIAS_HOSTS` in `packages/shared/src/constants.ts`): `app.filone.ai`, an unlisted demo alias for use when `fil.one` is blocklisted, and `app.fil.one`, the previous canonical host, which keeps serving until it redirects.
 
 The demo alias has no custom auth domain of its own, because a second Auth0 custom domain requires an Enterprise plan, so it authenticates against the tenant's own domain (`fil-one.us.auth0.com`). The consequences below apply to it.
 
-`app.filone.com` authenticates against `auth.fil.one`, like `app.fil.one`, so existing passkeys keep working there and login stays branded. Login itself moves to `auth.filone.com` later (FIL-1542).
+`app.filone.com` and `app.fil.one` both authenticate against `auth.fil.one`, so existing passkeys keep working on either host and login stays branded. Login itself moves to `auth.filone.com` later (FIL-1542).
 
 Worth knowing while you are in this file: `filone.ai` is also the domain this tenant sends from (`no-reply@filone.ai`, set as `default_from_address` by the same setup Lambda). Serving a login page under it couples the alias's web reputation to the deliverability of every verification, password-reset and MFA email. That was an accepted trade in FIL-897, taken because the zone already existed and needed no registration or delegation — but if the alias is ever reported for phishing, check mail deliverability, not just the console.
 

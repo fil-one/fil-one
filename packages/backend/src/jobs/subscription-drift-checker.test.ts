@@ -122,6 +122,22 @@ describe('subscription-drift-checker', () => {
     errorSpy.mockRestore();
   });
 
+  it('checks manually billed orgs too, since their tenants should be active', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [] });
+
+    await handler();
+
+    expect(ddbMock.commandCalls(ScanCommand)[0].args[0].input).toMatchObject({
+      FilterExpression: expect.stringContaining(
+        '(subscriptionStatus = :active OR subscriptionStatus = :manual)',
+      ),
+      ExpressionAttributeValues: expect.objectContaining({
+        ':active': { S: 'active' },
+        ':manual': { S: 'manual' },
+      }),
+    });
+  });
+
   it('emits zero counters when billing table is empty', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [] });
 

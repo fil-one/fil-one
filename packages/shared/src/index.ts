@@ -298,6 +298,7 @@ export {
   RETENTION_MAX_YEARS,
   CreateBucketSchema,
   listBucketsUnavailableMessage,
+  isRagCompanionBucket,
 } from './api/buckets.ts';
 
 export type { RetentionMode, RetentionDurationType } from './api/buckets.ts';
@@ -358,6 +359,34 @@ export type {
   SetBucketRagEnabledRequest,
   BucketRagEnablementResponse,
 } from './api/rag.ts';
+
+export {
+  RAG_ENGINE_REGIONS,
+  usesRagEngine,
+  RAG_COMPANION_BUCKET_PREFIX,
+  RAG_SEARCH_MODES,
+  RAG_ENGINE_API_VERSION,
+  RagEngineTargetSchema,
+  RagEngineTargetRequestSchema,
+  RagEngineQueryRequestSchema,
+} from './api/rag-engine.ts';
+
+export type {
+  RagSearchMode,
+  RagEngineTarget,
+  RagEngineTargetRequest,
+  RagEngineQueryRequest,
+  RagEngineIndexInfo,
+  RagEngineDatasetInfo,
+  RagEngineSyncState,
+  RagEngineStatus,
+  RagEngineVersion,
+  RagEngineVersionsResponse,
+  RagCitation,
+  RagQueryTrace,
+  RagEngineQueryResponse,
+  BucketRagEngineResponse,
+} from './api/rag-engine.ts';
 
 export {
   ACCESS_KEY_PERMISSIONS,

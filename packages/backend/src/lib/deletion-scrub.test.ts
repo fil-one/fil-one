@@ -321,6 +321,23 @@ describe('scrubOrgRecords', () => {
       );
     });
 
+    // The engine dropped the Lance dataset before the tenants went. A Forge
+    // bucket indexed by the S3 Vectors pipeline before the engine existed may
+    // still hold an index, so its drop runs too (it ignores a missing index).
+    it.each([S3Region.EuCentral3, S3Region.UsEast9])(
+      'purges the rows and any S3 Vectors index of a %s bucket',
+      async (region) => {
+        const forgePk = `BUCKET#${ORG}#${region}#docs`;
+        ddbMock.on(ScanCommand).resolves({ Items: [marshall({ pk: forgePk })] });
+
+        await scrubOrgRecords(ORG, MEMBERS);
+
+        expect(deletedKeys()).toContain(`RagIndexerTable:${forgePk}/RAG`);
+        expect(mockClearCheckpoint).toHaveBeenCalledWith(ORG, region, 'docs');
+        expect(mockDropIndex).toHaveBeenCalledWith(ORG, region, 'docs');
+      },
+    );
+
     it('purges a bucket known only from its checkpoint row, exactly once', async () => {
       ddbMock.on(ScanCommand).resolves({
         Items: [

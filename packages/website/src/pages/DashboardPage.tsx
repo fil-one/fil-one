@@ -33,6 +33,7 @@ function statusBadgeProps(status: SubscriptionStatus): { label: string; color: B
     case SubscriptionStatus.Trialing:
       return { label: 'Trial', color: 'blue' };
     case SubscriptionStatus.Active:
+    case SubscriptionStatus.Manual:
       return { label: 'Active', color: 'green' };
     case SubscriptionStatus.PastDue:
       return { label: 'Past Due', color: 'amber' };
@@ -247,6 +248,11 @@ export function DashboardPage() {
               {isPayAsYouGo && billing && (
                 <p className="mt-0.5 text-meta text-zinc-500">
                   {pricingLine(billing.subscription)} · no egress fees
+                </p>
+              )}
+              {billing.subscription.planId === PlanId.Manual && (
+                <p className="mt-0.5 text-meta text-zinc-500">
+                  {pricingLine(billing.subscription)}
                 </p>
               )}
             </div>

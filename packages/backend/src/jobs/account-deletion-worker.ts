@@ -20,6 +20,7 @@ import { moveSurvivingMembers, scrubOrgRecords } from '../lib/deletion-scrub.ts'
 import { deleteReplacedOrgLogo } from '../lib/org-logo-storage.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { tearDownStripe } from '../lib/deletion-stripe-teardown.ts';
+import { dropRagEngineDatasets } from '../lib/rag-engine-teardown.ts';
 import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
 
 const LOG = '[account-deletion-worker]';
@@ -59,6 +60,9 @@ export async function handler(event: AccountDeletionWorkerPayload): Promise<void
   // it destroys the rows the earlier steps read, and a failed pass leaves the most
   // context for troubleshooting behind it.
   await tearDownAuth0(members);
+  // Before Stripe, which starts by disabling the tenants: the engine reaches
+  // Forge storage with the tenant's key, and a disabled tenant refuses it.
+  await dropRagEngineDatasets(orgId, tenantIds ?? {});
   await tearDownStripe(orgId, members);
   await deleteTenants(orgId, tenantIds);
   await deleteOrgLogo(orgId);

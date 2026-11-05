@@ -2,6 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
 import type { UsageResponse, TenantStatus } from '@filone/shared';
+import { isRagCompanionBucket } from '@filone/shared';
 import { countAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
@@ -171,7 +172,8 @@ async function fetchRegionUsage(
     storageBytes: latestStorage?.bytesUsed ?? 0,
     objectCount: latestStorage?.objectCount ?? 0,
     egressBytes,
-    bucketCount: buckets.length,
+    // Match the bucket list, which hides Bucket Intelligence companion buckets.
+    bucketCount: buckets.filter((bucket) => !isRagCompanionBucket(bucket.bucketName)).length,
     info,
   };
 }
