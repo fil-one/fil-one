@@ -376,7 +376,7 @@ export const auroraOrchestrator = {
     // Portal client resolves the bucket (404 -> null otherwise).
     const bucket = await auroraOrchestrator.getBucket(
       tenantId,
-      { region: auroraOrchestrator.regions[0]!, bucketName },
+      { region: auroraOrchestrator.regions[0], bucketName },
       undefined,
       opts,
     );
