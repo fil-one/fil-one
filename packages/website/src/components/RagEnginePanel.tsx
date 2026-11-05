@@ -86,7 +86,10 @@ export function RagEngineSyncStrip({
           indeterminate={percent === undefined}
         />
       )}
-      {!busy && <SyncStripErrors status={status} error={error} />}
+      {/* A failed request shows even mid-run: a poll that fails leaves the last
+          status (still syncing) cached, and the frozen progress needs a reason.
+          The engine's record of a failed run is stale once a new run starts. */}
+      <SyncStripErrors status={busy ? undefined : status} error={error} />
     </div>
   );
 }

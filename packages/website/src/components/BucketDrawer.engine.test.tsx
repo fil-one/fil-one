@@ -228,6 +228,39 @@ describe('BucketDrawer — Forge (engine-backed) bucket', () => {
   });
 });
 
+describe('BucketDrawer — Forge asks during a run', () => {
+  it('asks the last finished sync while a run is writing a newer version', async () => {
+    // A run in flight has committed v15 and v16, but only v14 is a finished sync.
+    mockGetEngine.mockResolvedValue({
+      ...engineSyncing,
+      versions: [
+        { version: 16, timestamp: '2026-11-04T10:00:09Z' },
+        { version: 15, timestamp: '2026-11-04T10:00:03Z' },
+        { version: 14, timestamp: '2026-11-03T14:06:12Z', tags: ['sync-20261103T140612.000Z'] },
+        { version: 13, timestamp: '2026-11-03T09:00:44Z', tags: ['sync-20261103T090044.000Z'] },
+      ],
+    });
+    renderDrawer();
+    expect(await screen.findByTestId('rag-engine-sync-progress-label')).toBeInTheDocument();
+    const options = within(screen.getByLabelText('Dataset version')).getAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual([
+      'Latest (v14)',
+      expect.stringMatching(/^v13 · /),
+    ]);
+
+    fireEvent.change(screen.getByPlaceholderText('Ask about acme-handbook…'), {
+      target: { value: 'q' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
+    await waitFor(() =>
+      expect(mockQueryBucket).toHaveBeenCalledWith('acme-handbook', 'eu-central-3', 'q', {
+        searchMode: 'hybrid',
+        version: 14,
+      }),
+    );
+  });
+});
+
 describe('BucketDrawer — Forge engine failures and transitions', () => {
   it('shows why Index now failed, and clears it on the next click', async () => {
     mockSync
@@ -267,6 +300,20 @@ describe('BucketDrawer — Forge engine failures and transitions', () => {
     expect(await screen.findByTestId('rag-engine-sync-button')).toHaveTextContent('Index now');
     await waitFor(() => expect(mockGetEngine).toHaveBeenCalled());
     expect(screen.queryByTestId('rag-engine-request-error')).not.toBeInTheDocument();
+  });
+
+  it('says the engine is unreachable when a poll fails during a run', async () => {
+    mockGetEngine
+      .mockResolvedValueOnce(engineSyncing)
+      .mockRejectedValue(apiError('Bad gateway', 502));
+    const { client } = renderDrawer();
+    expect(await screen.findByTestId('rag-engine-sync-progress-label')).toBeInTheDocument();
+
+    // The failed poll leaves the last status (still syncing) in the cache.
+    await client.refetchQueries({ queryKey: ['rag-bucket-engine'] });
+    expect(await screen.findByTestId('rag-engine-request-error')).toHaveTextContent(
+      "Couldn't reach the indexing engine. Bad gateway",
+    );
   });
 
   it('tells the row behind the drawer that a run started', async () => {
