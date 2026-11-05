@@ -4,8 +4,11 @@ import {
   ConditionalCheckFailedException,
   DeleteItemCommand,
   DynamoDBClient,
+  GetItemCommand,
   QueryCommand,
   ScanCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
@@ -40,7 +43,7 @@ vi.mock('../jobs/rag-indexer-manifest.ts', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { scrubOrgRecords } from './deletion-scrub.ts';
+import { moveSurvivingMembers, scrubOrgRecords } from './deletion-scrub.ts';
 import type { DeletionMember } from './deletion-record.ts';
 
 const ORG = 'org-1';
@@ -70,15 +73,26 @@ function scrubOf(key: string) {
     .args[0].input;
 }
 
-/** Every UpdateItem that moves a row's orgId, as `pk/sk -> orgId`. */
+/** Every survivor repoint the move sent, as `pk/sk -> orgId`. */
 function repoints(): string[] {
   return ddbMock
-    .commandCalls(UpdateItemCommand)
-    .filter((call) => call.args[0].input.UpdateExpression === 'SET orgId = :home')
-    .map((call) => {
-      const { Key, ExpressionAttributeValues } = call.args[0].input;
+    .commandCalls(TransactWriteItemsCommand)
+    .flatMap((call) => call.args[0].input.TransactItems ?? [])
+    .flatMap((item) => (item.Update?.UpdateExpression === 'SET orgId = :home' ? [item.Update] : []))
+    .map(({ Key, ExpressionAttributeValues }) => {
       return `${Key!.pk!.S}/${Key!.sk!.S} -> ${ExpressionAttributeValues![':home']!.S}`;
     });
+}
+
+/** A repoint transaction cancelled at `index`: 0 is the destination's fence, 1 the row. */
+function repointCancelledAt(index: 0 | 1) {
+  const reasons = [{ Code: 'None' }, { Code: 'None' }];
+  reasons[index] = { Code: 'ConditionalCheckFailed' };
+  return new TransactionCanceledException({
+    message: 'cancelled',
+    $metadata: {},
+    CancellationReasons: reasons,
+  });
 }
 
 /** Every command the scrub sent, in order, with its name and its input. */
@@ -197,6 +211,18 @@ describe('scrubOrgRecords', () => {
     expect(scrubOf('UserInfoTable:SUB#auth0|one/IDENTITY').UpdateExpression).toBe(
       'SET deletedAt = if_not_exists(deletedAt, :now)',
     );
+  });
+
+  // An overlapping pass finishes and marks the deletion done; an invitation then
+  // replaces the identity with a new userId under the same sub. This pass's
+  // stamp must not land on that new account.
+  it('stamps the identity row only while it still names the deleted userId', async () => {
+    await scrubOrgRecords(ORG, MEMBERS);
+
+    expect(scrubOf('UserInfoTable:SUB#auth0|one/IDENTITY')).toMatchObject({
+      ConditionExpression: 'userId = :userId',
+      ExpressionAttributeValues: { ':userId': { S: 'user-1' } },
+    });
   });
 
   it('stamps every row that survives, and deletes only the avatar rate limit rows', async () => {
@@ -479,73 +505,212 @@ describe('scrubOrgRecords', () => {
       expect(deletedKeys()).toContain(`OrgTable:USER#user-1/MEMBERSHIP#${ORG}`);
     });
 
-    // Both rows name the org auth fences every request on, before any X-Org-Id
-    // is read. Left naming this one, the survivor is refused forever.
-    it('re-points the survivor at the org they still belong to', async () => {
-      await scrubOrgRecords(ORG, [
-        { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
-        ...KEPT.slice(1),
-      ]);
-
-      expect(repoints()).toEqual([
-        `SUB#auth0|one/IDENTITY -> ${OTHER_ORG}`,
-        `USER#user-1/PROFILE -> ${OTHER_ORG}`,
-      ]);
-    });
-
-    it('conditions the move on the row still naming the deleting org', async () => {
+    // The move runs at the start of the pass, so the scrub at its end leaves
+    // survivors' home rows as it finds them.
+    it('leaves moving a survivor to the start of the pass', async () => {
       await scrubOrgRecords(ORG, [
         { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
       ]);
 
-      const move = ddbMock
-        .commandCalls(UpdateItemCommand)
-        .find((call) => call.args[0].input.UpdateExpression === 'SET orgId = :home')!.args[0].input;
-      expect(move.ConditionExpression).toBe('attribute_exists(pk) AND orgId = :deleting');
-      expect(move.ExpressionAttributeValues![':deleting']).toEqual({ S: ORG });
+      expect(repoints()).toEqual([]);
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
     });
 
-    // The second pass finds rows that already moved, so the condition loses.
-    it('is a no-op on a re-drive', async () => {
-      ddbMock
-        .on(UpdateItemCommand, { UpdateExpression: 'SET orgId = :home' })
-        .rejects(new ConditionalCheckFailedException({ $metadata: {}, message: 'moved' }));
-
-      await expect(
-        scrubOrgRecords(ORG, [
+    describe('moving off the org at the start of the pass', () => {
+      // Both rows name the org auth fences every request on, before any X-Org-Id
+      // is read. Left naming this one, the survivor is refused forever.
+      it('re-points the survivor at the org they still belong to', async () => {
+        await moveSurvivingMembers(ORG, [
           { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
-        ]),
-      ).resolves.toBeUndefined();
-      expect(scrubbedKeys()).toContain(`UserInfoTable:ORG#${ORG}/MEMBER#user-1`);
-    });
+          ...KEPT.slice(1),
+        ]);
 
-    // Nowhere to send them: the account survives, pointing at a deleted org.
-    it('leaves the rows alone when the member has no other org', async () => {
-      await scrubOrgRecords(ORG, KEPT);
+        expect(repoints()).toEqual([
+          `SUB#auth0|one/IDENTITY -> ${OTHER_ORG}`,
+          `USER#user-1/PROFILE -> ${OTHER_ORG}`,
+        ]);
+      });
 
-      expect(repoints()).toEqual([]);
-    });
+      describe('with no other org to move to', () => {
+        const STRANDED: DeletionMember[] = [
+          { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, needsFloorOrg: true },
+        ];
 
-    it('leaves the rows of a member whose account is ending alone', async () => {
-      await scrubOrgRecords(ORG, MEMBERS);
+        /** The org each of the member's two home rows names when the move reads them. */
+        function stubHome({ profile, identity }: { profile?: string; identity?: string }) {
+          ddbMock
+            .on(GetItemCommand, {
+              TableName: 'UserInfoTable',
+              Key: { pk: { S: 'USER#user-1' }, sk: { S: 'PROFILE' } },
+            })
+            .resolves({
+              Item: { sub: { S: 'auth0|one' }, ...(profile ? { orgId: { S: profile } } : {}) },
+            });
+          ddbMock
+            .on(GetItemCommand, {
+              TableName: 'UserInfoTable',
+              Key: { pk: { S: 'SUB#auth0|one' }, sk: { S: 'IDENTITY' } },
+            })
+            .resolves({ Item: identity ? { orgId: { S: identity } } : {} });
+        }
 
-      expect(repoints()).toEqual([]);
-    });
+        function repointCancelled() {
+          return new TransactionCanceledException({
+            message: 'cancelled',
+            $metadata: {},
+            CancellationReasons: [{ Code: 'None' }, { Code: 'ConditionalCheckFailed' }],
+          });
+        }
 
-    // The membership rows are what a re-drive resolves its members from, so the
-    // move has to land before they are destroyed.
-    it('moves the survivor before the membership rows are destroyed', async () => {
-      await scrubOrgRecords(ORG, [
-        { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
-      ]);
+        function floorOrgItems() {
+          const calls = ddbMock.commandCalls(TransactWriteItemsCommand);
+          expect(calls).toHaveLength(1);
+          return calls[0]!.args[0].input.TransactItems!;
+        }
 
-      const calls = callOrder();
-      const moved = calls.findIndex((c) => c.input.UpdateExpression === 'SET orgId = :home');
-      const destroyed = calls.findIndex(
-        (c) => c.name === 'DeleteItemCommand' && c.input.TableName === 'OrgTable',
-      );
-      expect(moved).toBeGreaterThanOrEqual(0);
-      expect(destroyed).toBeGreaterThan(moved);
+        it('moves them onto a floor org of their own, while their home still names the deleting org', async () => {
+          stubHome({ profile: ORG, identity: ORG });
+
+          await moveSurvivingMembers(ORG, STRANDED);
+
+          const items = floorOrgItems();
+          const profile = items.find((item) => item.Put?.Item?.sk?.S === 'PROFILE')!.Put!.Item!;
+          const floorOrgId = profile.pk!.S!.slice('ORG#'.length);
+          expect(profile).toMatchObject({ floorOrg: { BOOL: true } });
+          expect(
+            items.find((item) => item.Update?.Key?.pk?.S === 'SUB#auth0|one')?.Update,
+          ).toMatchObject({
+            ConditionExpression: 'attribute_exists(pk) AND orgId = :expected',
+            ExpressionAttributeValues: { ':orgId': { S: floorOrgId }, ':expected': { S: ORG } },
+          });
+          expect(
+            items.find((item) => item.Update?.Key?.pk?.S === 'USER#user-1')?.Update,
+          ).toMatchObject({
+            ExpressionAttributeValues: { ':orgId': { S: floorOrgId }, ':expected': { S: ORG } },
+          });
+        });
+
+        it('moves a profile that names another org along with the identity', async () => {
+          stubHome({ profile: 'any-stale-org', identity: ORG });
+
+          await moveSurvivingMembers(ORG, STRANDED);
+
+          expect(
+            floorOrgItems().find((item) => item.Update?.Key?.pk?.S === 'USER#user-1')?.Update,
+          ).toMatchObject({ ExpressionAttributeValues: { ':expected': { S: 'any-stale-org' } } });
+        });
+
+        // A re-drive, or an overlapping pass that moved them first.
+        it('writes nothing, quietly, when their home has moved already', async () => {
+          stubHome({ profile: ORG, identity: 'any-floor-org' });
+          ddbMock.on(TransactWriteItemsCommand).rejects(repointCancelled());
+          const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+          await expect(moveSurvivingMembers(ORG, STRANDED)).resolves.toBeUndefined();
+          expect(error).not.toHaveBeenCalled();
+        });
+
+        it('logs an error when the move failed and their home still names the deleting org', async () => {
+          stubHome({ profile: ORG, identity: ORG });
+          ddbMock.on(TransactWriteItemsCommand).rejects(repointCancelled());
+          const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+          await moveSurvivingMembers(ORG, STRANDED);
+
+          expect(error).toHaveBeenCalledWith(
+            expect.stringContaining('Floor org not written'),
+            expect.objectContaining({ orgId: ORG, userId: 'user-1' }),
+          );
+        });
+
+        it('fails the pass, to be retried, when their profile cannot be read', async () => {
+          ddbMock
+            .on(GetItemCommand, {
+              TableName: 'UserInfoTable',
+              Key: { pk: { S: 'USER#user-1' }, sk: { S: 'PROFILE' } },
+            })
+            .rejects(new Error('any-read-failure'));
+
+          await expect(moveSurvivingMembers(ORG, STRANDED)).rejects.toThrow('any-read-failure');
+          expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+        });
+
+        it('fails the pass, to be retried, when the floor org cannot be written', async () => {
+          stubHome({ profile: ORG, identity: ORG });
+          ddbMock.on(TransactWriteItemsCommand).rejects(new Error('any-throttle'));
+
+          await expect(moveSurvivingMembers(ORG, STRANDED)).rejects.toThrow('any-throttle');
+        });
+      });
+
+      it('conditions the move on the row still naming the deleting org, and on the destination not being deleted', async () => {
+        await moveSurvivingMembers(ORG, [
+          { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
+        ]);
+
+        const [fence, move] =
+          ddbMock.commandCalls(TransactWriteItemsCommand)[0]!.args[0].input.TransactItems!;
+        expect(fence).toMatchObject({
+          ConditionCheck: {
+            Key: { pk: { S: `ORG#${OTHER_ORG}` }, sk: { S: 'PROFILE' } },
+            ConditionExpression: 'attribute_exists(pk) AND attribute_not_exists(deleting)',
+          },
+        });
+        expect(move!.Update).toMatchObject({
+          ConditionExpression: 'attribute_exists(pk) AND orgId = :deleting',
+          ExpressionAttributeValues: { ':deleting': { S: ORG } },
+        });
+      });
+
+      // The second pass finds rows that already moved, so the condition loses.
+      it('is a no-op on a re-drive', async () => {
+        ddbMock.on(TransactWriteItemsCommand).rejects(repointCancelledAt(1));
+
+        await expect(
+          moveSurvivingMembers(ORG, [
+            { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
+          ]),
+        ).resolves.toBeUndefined();
+        expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(2);
+      });
+
+      // Confirmed after the census read it as live: two orgs deleted together.
+      it('moves the survivor onto a floor org when the org chosen for them is being deleted by the time they move', async () => {
+        ddbMock.on(GetItemCommand).resolves({
+          Item: { sub: { S: 'auth0|one' }, orgId: { S: ORG } },
+        });
+        ddbMock.on(TransactWriteItemsCommand).rejectsOnce(repointCancelledAt(0)).resolves({});
+
+        await moveSurvivingMembers(ORG, [
+          { userId: 'user-1', sub: 'auth0|one', deleteIdentity: false, homeOrgId: OTHER_ORG },
+        ]);
+
+        expect(repoints()).toEqual([`SUB#auth0|one/IDENTITY -> ${OTHER_ORG}`]);
+        const floorOrg =
+          ddbMock.commandCalls(TransactWriteItemsCommand)[1]!.args[0].input.TransactItems!;
+        expect(floorOrg).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              Put: expect.objectContaining({
+                Item: expect.objectContaining({ floorOrg: { BOOL: true } }),
+              }),
+            }),
+          ]),
+        );
+      });
+
+      // Nowhere to send them: the account survives, pointing at a deleted org.
+      it('leaves the rows alone when the member has no other org', async () => {
+        await moveSurvivingMembers(ORG, KEPT);
+
+        expect(repoints()).toEqual([]);
+      });
+
+      it('leaves the rows of a member whose account is ending alone', async () => {
+        await moveSurvivingMembers(ORG, MEMBERS);
+
+        expect(repoints()).toEqual([]);
+      });
     });
 
     // Every deletion fences the org's own row, whoever the members are.

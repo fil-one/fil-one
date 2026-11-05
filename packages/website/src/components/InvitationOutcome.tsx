@@ -94,12 +94,31 @@ function Refused({
   error,
   sessionEmail,
   onLogOut,
+  onRetry,
 }: {
   error: unknown;
   sessionEmail?: string;
   onLogOut: () => void;
+  onRetry: () => void;
 }) {
   const code = errorCodeOf(error);
+
+  if (code === ApiErrorCode.DELETION_IN_PROGRESS) {
+    return (
+      <Panel
+        title="This invitation is on hold"
+        icon={WarningIcon}
+        iconColor="amber"
+        testId="accept-deletion-in-progress"
+        takeFocus
+      >
+        <p>{errorMessageOf(error, 'A deletion is still running. Try again in a few minutes.')}</p>
+        <Button variant="primary" onClick={onRetry}>
+          Try again
+        </Button>
+      </Panel>
+    );
+  }
 
   if (code === ApiErrorCode.INVITE_EMAIL_MISMATCH) {
     return (
@@ -224,6 +243,8 @@ export type InvitationOutcomeProps = {
   sessionEmail?: string;
   onContinue: (orgId: string) => void;
   onLogOut: () => void;
+  /** Redeem the same token again, after a refusal that left the invitation pending. */
+  onRetry: () => void;
 };
 
 /**
@@ -240,13 +261,14 @@ export function InvitationOutcome({
   sessionEmail,
   onContinue,
   onLogOut,
+  onRetry,
 }: InvitationOutcomeProps) {
   return (
     <div
       aria-live="polite"
       className="flex min-h-screen items-center justify-center bg-zinc-50 px-6"
     >
-      {panelFor({ status, result, error, sessionEmail, onContinue, onLogOut })}
+      {panelFor({ status, result, error, sessionEmail, onContinue, onLogOut, onRetry })}
     </div>
   );
 }
@@ -258,6 +280,7 @@ function panelFor({
   sessionEmail,
   onContinue,
   onLogOut,
+  onRetry,
 }: InvitationOutcomeProps) {
   if (status === 'no-token') {
     return (
@@ -280,7 +303,9 @@ function panelFor({
   }
 
   if (status === 'refused') {
-    return <Refused error={error} sessionEmail={sessionEmail} onLogOut={onLogOut} />;
+    return (
+      <Refused error={error} sessionEmail={sessionEmail} onLogOut={onLogOut} onRetry={onRetry} />
+    );
   }
 
   return (

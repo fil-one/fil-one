@@ -16,6 +16,7 @@ vi.mock('sst', () => ({
 const order: string[] = [];
 const mockTearDownStripe = vi.fn(async (..._args: unknown[]) => void order.push('stripe'));
 const mockScrub = vi.fn(async () => void order.push('scrub'));
+const mockMoveSurvivors = vi.fn(async () => void order.push('move-survivors'));
 const mockDeleteAuth0User = vi.fn(async (sub: string) => void order.push(`auth0:${sub}`));
 const mockGetAuth0UserEmail = vi.fn(async (sub: string) => {
   order.push(`email:${sub}`);
@@ -43,7 +44,10 @@ const mockResolveTargets = vi.fn(async () => ({
 vi.mock('../lib/deletion-stripe-teardown.ts', () => ({
   tearDownStripe: (...args: unknown[]) => mockTearDownStripe(...args),
 }));
-vi.mock('../lib/deletion-scrub.ts', () => ({ scrubOrgRecords: () => mockScrub() }));
+vi.mock('../lib/deletion-scrub.ts', () => ({
+  moveSurvivingMembers: () => mockMoveSurvivors(),
+  scrubOrgRecords: () => mockScrub(),
+}));
 const mockDropRagEngineDatasets = vi.fn(
   async (_orgId: string, _tenantIds: Record<string, string>) => void order.push('rag-engine'),
 );
@@ -112,12 +116,15 @@ describe('account-deletion-worker', () => {
     mockGetAvailableOrchestrators.mockReturnValue([orchestrator('fth')]);
   });
 
-  // Auth0 first because it holds the only copy of the email keying ALLOWLIST#, and
-  // the scrub last because it destroys the rows the earlier steps read.
-  it('runs Auth0, Stripe, tenants and the scrub in that order', async () => {
+  // Survivors first, so they are refused as deleted accounts for as little of the
+  // pass as possible. Auth0 next because it holds the only copy of the email
+  // keying ALLOWLIST#, and the scrub last because it destroys the rows the
+  // earlier steps read.
+  it('moves survivors, then runs Auth0, Stripe, tenants and the scrub in that order', async () => {
     await handler({ orgId: ORG });
 
     expect(order).toEqual([
+      'move-survivors',
       'email:auth0|one',
       'picture:auth0|one',
       `avatar:${AVATAR_URL}`,
@@ -166,11 +173,16 @@ describe('account-deletion-worker', () => {
 
     // Erasure must not finish with a public image left behind; a retry re-deletes.
     it.each([
-      ['avatar', mockDeleteReplacedAvatar, ['email:auth0|one', 'picture:auth0|one']],
+      [
+        'avatar',
+        mockDeleteReplacedAvatar,
+        ['move-survivors', 'email:auth0|one', 'picture:auth0|one'],
+      ],
       [
         'logo',
         mockDeleteReplacedOrgLogo,
         [
+          'move-survivors',
           'email:auth0|one',
           'picture:auth0|one',
           `avatar:${AVATAR_URL}`,
@@ -194,6 +206,19 @@ describe('account-deletion-worker', () => {
 
   // The teardown takes the same census the Auth0 step ran on, though it reads
   // only the org row today.
+  // An overlapping pass finished, and an invitation made a new account under the
+  // same sub. This pass's census predates it.
+  it('leaves Auth0 alone for an identity that now belongs to a new account', async () => {
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: 'SUB#auth0|one' }, sk: { S: 'IDENTITY' } } })
+      .resolves({ Item: { userId: { S: 'any-new-user-id' } } });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await handler({ orgId: ORG });
+
+    expect(order.filter((step) => step.endsWith('auth0|one'))).toStrictEqual([]);
+  });
+
   it('passes the resolved members to the Stripe teardown', async () => {
     await handler({ orgId: ORG });
 

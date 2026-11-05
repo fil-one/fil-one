@@ -3,7 +3,11 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { AcceptInvitationSchema, ApiErrorCode, OrgRole } from '@filone/shared';
-import type { AcceptInvitationResponse, ErrorResponse } from '@filone/shared';
+import type {
+  AcceptInvitationResponse,
+  ErrorResponse,
+  InviteEmailMismatchResponse,
+} from '@filone/shared';
 import { AuditSubjects, auditEvent, commitAudited, userActor } from '../lib/audit.ts';
 import { getAuth0UserEmail, markAuth0EmailVerified } from '../lib/auth0-management.ts';
 import {
@@ -19,18 +23,16 @@ import {
   membershipRows,
   ownerCountItem,
 } from '../lib/membership-changes.ts';
+import type { LabelledItems } from '../lib/membership-changes.ts';
+import { inviteeAccountRows } from '../lib/account-creation.ts';
+import { readLiveAccountUserId } from '../lib/identity-tombstone.ts';
 import { registerMemberPrincipal } from '../lib/member-principals.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
-import {
-  OrgDeletingError,
-  isGuardRejection,
-  orgNotDeletingCheck,
-  resolveOrgSummary,
-} from '../lib/org-profile.ts';
+import { isGuardRejection, orgNotDeletingCheck, resolveOrgSummary } from '../lib/org-profile.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
-import { ResponseBuilder } from '../lib/response-builder.ts';
-import type { AuthenticatedEvent } from '../lib/user-context.ts';
-import { getUserInfo } from '../lib/user-context.ts';
+import { accountDeletionInProgressResponse, ResponseBuilder } from '../lib/response-builder.ts';
+import type { AccountCreationEvent, PendingAccount } from '../lib/user-context.ts';
+import { getUserInfo, isPendingAccountEvent } from '../lib/user-context.ts';
 import { readUserProfile, rememberVerifiedEmail } from '../lib/user-profile.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
@@ -55,8 +57,9 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * What the request never touches is as load-bearing as what it does. No
  * entitlement row, no Stripe call, no billing read: an invitation must not
  * create a trial, must not resurrect suppressed eligibility, and must not burn
- * the invitee's own claim, which stays available for their personal org (ADR §4,
- * §5). Those three are pinned by tests in the billing chain; the test here is
+ * the invitee's own claim, which stays available for an org of their own (ADR §4,
+ * §5): one they create, or the one an account made before the invitation came
+ * with. Those three are pinned by tests in the billing chain; the test here is
  * simply that this path makes no such call.
  *
  * Everything else lands in one transaction:
@@ -65,6 +68,12 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  *   fence every guarded writer carries, as item 0,
  * - the same fence on the ACCEPTER's own org, when it is a different one: their
  *   deletion is what would end their identity while this membership is written,
+ * - for a caller with no account yet, the account itself: identity and user
+ *   profile, both naming the inviting org. The console sends an invitee here
+ *   before any other request, so their first login creates no personal org,
+ *   and the account never exists apart from the membership it was made for. A
+ *   deleted account whose deletion has finished comes back the same way, under
+ *   a new userId,
  * - the membership row and its inverse item,
  * - the invitation marked accepted, conditional on it still being pending,
  * - the token lookup deleted, which is what makes the token single-use,
@@ -79,9 +88,13 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * only two moments the control plane learns a verified address.
  */
 export async function baseHandler(
-  event: AuthenticatedEvent,
+  event: AccountCreationEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { sub, userId, email, emailVerified } = getUserInfo(event);
+  const caller = isPendingAccountEvent(event)
+    ? event.requestContext.pendingAccount
+    : getUserInfo(event);
+  const pendingAccount = 'kind' in caller ? caller : undefined;
+  const { sub, userId, email, emailVerified } = caller;
 
   const parsed = parseJsonBody(event.body, AcceptInvitationSchema);
   if ('error' in parsed) return parsed.error;
@@ -93,13 +106,16 @@ export async function baseHandler(
   if (!invitation || !isInvitationUsable(invitation)) return notFoundResponse();
 
   if (!email || normalizeInviteEmail(email) !== invitation.emailNorm) {
-    return emailMismatchResponse();
+    return emailMismatchResponse(email ?? undefined);
   }
 
-  const [existing, accepterOrgId] = await Promise.all([
-    resolveMembership(invitation.orgId, userId),
-    accepterOrgFence(userId, invitation.orgId),
-  ]);
+  // An account this request creates has no membership and no org of its own yet.
+  const [existing, accepterOrgId] = pendingAccount
+    ? [undefined, undefined]
+    : await Promise.all([
+        resolveMembership(invitation.orgId, userId),
+        accepterOrgFence(userId, invitation.orgId),
+      ]);
 
   const verificationFailure = await verifyInvitedAddress({
     sub,
@@ -110,21 +126,18 @@ export async function baseHandler(
   if (verificationFailure) return verificationFailure;
   const verifiedEmail = email;
 
-  const items = existing ? [] : joinItems(invitation, userId);
-  const labels = existing ? [] : joinLabels(invitation);
+  const { items, labels } = acceptItems({
+    invitation,
+    userId,
+    verifiedEmail,
+    alreadyMember: Boolean(existing),
+    accepterOrgId,
+    pendingAccount,
+  });
 
   try {
     await commitAudited({
-      // The fence is item 0, where `isGuardRejection` reads it, and it rides
-      // both shapes of the transaction. An org resolving its teardown targets
-      // must gain no member, and an invitation into it is no longer usable even
-      // for somebody who is already inside.
-      items: [
-        orgNotDeletingCheck(invitation.orgId),
-        ...(accepterOrgId ? [orgNotDeletingCheck(accepterOrgId)] : []),
-        ...items,
-        ...retireInvitationItems(invitation, 'accepted'),
-      ],
+      items,
       event: acceptedEvent({
         invitation,
         userId,
@@ -133,11 +146,12 @@ export async function baseHandler(
       }),
     });
   } catch (err) {
-    return await acceptFailureResponse(
-      err,
-      ['org', ...(accepterOrgId ? ['accepterOrg'] : []), ...labels, 'invitation', 'token'],
-      { invitation, userId, verifiedEmail, accepterOrgId },
-    );
+    return await acceptInvitationFailureResponse(err, labels, {
+      invitation,
+      sub,
+      userId,
+      verifiedEmail,
+    });
   }
 
   // The member is in the org before they become a principal on each region
@@ -178,7 +192,7 @@ async function verifyInvitedAddress({
   try {
     const heldEmail = await getAuth0UserEmail(sub);
     if (!heldEmail || normalizeInviteEmail(heldEmail) !== emailNorm) {
-      return emailMismatchResponse();
+      return emailMismatchResponse(heldEmail);
     }
     await markAuth0EmailVerified(sub);
     return undefined;
@@ -189,6 +203,56 @@ async function verifyInvitedAddress({
     });
     return emailVerificationFailedResponse();
   }
+}
+
+/**
+ * The acceptance's transaction, each item beside the label a cancellation names
+ * it by.
+ *
+ * The fence is item 0, where `isGuardRejection` reads it, and it rides every
+ * shape of the transaction. An org resolving its teardown targets must gain no
+ * member, and an invitation into it is no longer usable even for somebody who is
+ * already inside.
+ */
+function acceptItems({
+  invitation,
+  userId,
+  verifiedEmail,
+  alreadyMember,
+  accepterOrgId,
+  pendingAccount,
+}: {
+  invitation: InvitationRecord;
+  userId: string;
+  verifiedEmail: string;
+  alreadyMember: boolean;
+  accepterOrgId?: string;
+  /** The account this acceptance creates, written beside the membership it is for. */
+  pendingAccount?: PendingAccount;
+}): LabelledItems {
+  return {
+    items: [
+      orgNotDeletingCheck(invitation.orgId),
+      ...(accepterOrgId ? [orgNotDeletingCheck(accepterOrgId)] : []),
+      ...(pendingAccount
+        ? inviteeAccountRows({
+            account: pendingAccount,
+            orgId: invitation.orgId,
+            email: verifiedEmail,
+          })
+        : []),
+      ...(alreadyMember ? [] : joinItems(invitation, userId)),
+      ...retireInvitationItems(invitation, 'accepted'),
+    ],
+    labels: [
+      'org',
+      ...(accepterOrgId ? ['accepterOrg'] : []),
+      ...(pendingAccount ? ['identity', 'profile'] : []),
+      ...(alreadyMember ? [] : joinLabels(invitation)),
+      'invitation',
+      'token',
+    ],
+  };
 }
 
 /**
@@ -271,10 +335,18 @@ function acceptedEvent({
  * case arriving by another route, so it re-reads and answers success rather than
  * telling somebody who is now a member that their invitation failed.
  */
-async function acceptFailureResponse(
+async function acceptInvitationFailureResponse(
   err: unknown,
   labels: string[],
-  { invitation, userId, verifiedEmail, accepterOrgId }: AcceptContext,
+  {
+    invitation,
+    sub,
+    userId,
+    verifiedEmail,
+  }: AcceptContext & {
+    /** Finds the account another request created, when this one lost that race. */
+    sub: string;
+  },
 ): Promise<APIGatewayProxyStructuredResultV2> {
   // The deletion fence, read at its own index. The answer is the one a revoked
   // invitation gets, and it says nothing about the org: a stale link should not
@@ -284,21 +356,27 @@ async function acceptFailureResponse(
   const failed = cancelledLabels(err, labels);
   if (failed.length === 0) throw err;
 
-  // The accepter's own org is going away, so the answer is about their account
-  // rather than about the invitation: the same one their next request would get
-  // once the session fence's read catches up.
-  if (failed.includes('accepterOrg')) throw new OrgDeletingError(accepterOrgId!);
+  // The accepter's own org started deleting after the session fence read it.
+  // The answer is the one that read would have given a moment later, and it says
+  // the org is going, not the account: a member may well survive it.
+  if (failed.includes('accepterOrg')) return accountDeletionInProgressResponse('organization');
+
+  // The account this request was creating exists already: another tab signed
+  // in first, or a deleted account's row changed. When that account is in the
+  // org, most often because the other tab accepted this same invitation, the
+  // caller has what they came for. Otherwise the whole transaction cancelled,
+  // so the invitation is still pending and the link works again.
+  if (failed.includes('identity')) {
+    const accountUserId = await readLiveAccountUserId(sub);
+    const joined =
+      accountUserId &&
+      (await alreadyMemberResponse({ invitation, userId: accountUserId, verifiedEmail }));
+    return joined || accountChangedResponse();
+  }
 
   if (failed.includes('membership')) {
-    const existing = await resolveMembership(invitation.orgId, userId);
-    if (existing) {
-      // The whole transaction cancelled, so the invitation is still pending: the
-      // idempotent answer has to carry the retirement it promised, or a link the
-      // caller has already used stays live for a fortnight.
-      await retireAfterRace({ invitation, userId, verifiedEmail });
-      await rememberVerifiedEmail(userId, verifiedEmail);
-      return await acceptedResponse({ invitation, role: existing.role, alreadyMember: true });
-    }
+    const joined = await alreadyMemberResponse({ invitation, userId, verifiedEmail });
+    if (joined) return joined;
   }
 
   if (failed.includes('inviter')) return inviterAuthorityResponse();
@@ -318,12 +396,30 @@ async function acceptFailureResponse(
   return notFoundResponse();
 }
 
+/**
+ * The idempotent answer, for a caller who turns out to be in the org already,
+ * or undefined when they are not.
+ *
+ * The whole transaction cancelled, so the invitation may still be pending: the
+ * answer has to carry the retirement it promised, or a link the caller has
+ * already used stays live for a fortnight.
+ */
+async function alreadyMemberResponse({
+  invitation,
+  userId,
+  verifiedEmail,
+}: AcceptContext): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  const existing = await resolveMembership(invitation.orgId, userId);
+  if (!existing) return undefined;
+  await retireAfterRace({ invitation, userId, verifiedEmail });
+  await rememberVerifiedEmail(userId, verifiedEmail);
+  return await acceptedResponse({ invitation, role: existing.role, alreadyMember: true });
+}
+
 interface AcceptContext {
   invitation: InvitationRecord;
   userId: string;
   verifiedEmail: string;
-  /** The accepter's own org, when the transaction fenced it. */
-  accepterOrgId?: string;
 }
 
 /**
@@ -364,6 +460,10 @@ async function accepterOrgFence(
  * why the failure is logged rather than raised: the caller IS a member of the
  * org, which is what they asked for, and refusing them over the bookkeeping
  * would answer failure for a request that succeeded.
+ *
+ * A failed condition is expected, not an error: the request that won the race
+ * usually spent this same invitation, or a revoke did, so it is no longer
+ * pending. Only a failure that may leave it pending is logged as one.
  */
 async function retireAfterRace({
   invitation,
@@ -376,6 +476,13 @@ async function retireAfterRace({
       event: acceptedEvent({ invitation, userId, verifiedEmail, alreadyMember: true }),
     });
   } catch (err) {
+    if (cancelledLabels(err, []).length > 0) {
+      console.info('[accept-invitation] Invitation no longer pending, nothing to retire', {
+        orgId: invitation.orgId,
+        inviteId: invitation.inviteId,
+      });
+      return;
+    }
     console.error('[accept-invitation] Membership landed but the invitation stayed pending', {
       orgId: invitation.orgId,
       inviteId: invitation.inviteId,
@@ -428,14 +535,20 @@ function notFoundResponse(): APIGatewayProxyStructuredResultV2 {
  * an authenticated session, so this is not a token-probing oracle — and under
  * SSO it is the difference between a debuggable "you are signed in with the
  * wrong account" and an opaque dead link.
+ *
+ * `sessionEmail` is the caller's own address, so naming it tells them nothing
+ * about anyone else.
  */
-function emailMismatchResponse(): APIGatewayProxyStructuredResultV2 {
+function emailMismatchResponse(
+  sessionEmail: string | undefined,
+): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
     .status(403)
-    .body<ErrorResponse>({
+    .body<InviteEmailMismatchResponse>({
       message:
         'This invitation was sent to a different email address than the one you signed in with.',
       code: ApiErrorCode.INVITE_EMAIL_MISMATCH,
+      ...(sessionEmail ? { sessionEmail } : {}),
     })
     .build();
 }
@@ -446,6 +559,15 @@ function emailVerificationFailedResponse(): APIGatewayProxyStructuredResultV2 {
     .status(502)
     .body<ErrorResponse>({
       message: 'We could not confirm your email address. Please try again.',
+    })
+    .build();
+}
+
+function accountChangedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'Your account changed while we were setting it up. Open the invitation link again.',
     })
     .build();
 }
@@ -472,6 +594,6 @@ function ownerCountUnavailableResponse(): APIGatewayProxyStructuredResultV2 {
 export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   // The handler verifies the address itself, from the invitation reaching it.
-  .use(authMiddleware({ requireVerifiedEmail: false }))
+  .use(authMiddleware({ requireVerifiedEmail: false, deferAccountCreation: true }))
   .use(csrfMiddleware())
   .use(errorHandlerMiddleware());

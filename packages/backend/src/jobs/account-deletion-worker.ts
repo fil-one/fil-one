@@ -1,10 +1,9 @@
 import {
   ConditionalCheckFailedException,
   DeleteItemCommand,
-  GetItemCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
-import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import {
   deleteAuth0User,
@@ -13,15 +12,11 @@ import {
 } from '../lib/auth0-management.ts';
 import { deleteReplacedAvatar } from '../lib/avatar-storage.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
-import {
-  deletionRecordKey,
-  DELETION_STATUS,
-  type DeletionMember,
-  type DeletionRecord,
-} from '../lib/deletion-record.ts';
+import { isIdentityReplaced, readDeletionRecord } from '../lib/identity-tombstone.ts';
+import { deletionRecordKey, DELETION_STATUS, type DeletionMember } from '../lib/deletion-record.ts';
 import { resolveDeletionTargets } from '../lib/deletion-targets.ts';
 import { ragAllowlistKey } from '../middleware/rag-access.ts';
-import { scrubOrgRecords } from '../lib/deletion-scrub.ts';
+import { moveSurvivingMembers, scrubOrgRecords } from '../lib/deletion-scrub.ts';
 import { deleteReplacedOrgLogo } from '../lib/org-logo-storage.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { tearDownStripe } from '../lib/deletion-stripe-teardown.ts';
@@ -55,6 +50,10 @@ export async function handler(event: AccountDeletionWorkerPayload): Promise<void
 
   const { members, tenantIds } = await resolveDeletionTargets(orgId);
 
+  // Before any teardown: until a surviving member's home moves off this org,
+  // every request they make is refused as a deleted account.
+  await moveSurvivingMembers(orgId, members);
+
   // Auth0 first: it holds the only copy of the email that keys each ALLOWLIST# row.
   // Stripe before tenant deletion, because the usage report must land on a live
   // subscription and resolves the regions from the profile. The scrub goes last:
@@ -71,18 +70,6 @@ export async function handler(event: AccountDeletionWorkerPayload): Promise<void
 
   await markDone(orgId);
   console.log(`${LOG} teardown complete`, { orgId, attempt: record.attempts + 1 });
-}
-
-/** Consistent: a stale read right after confirm misses the record entirely. */
-async function readDeletionRecord(orgId: string): Promise<DeletionRecord | undefined> {
-  const { Item } = await getDynamoClient().send(
-    new GetItemCommand({
-      TableName: Resource.UserInfoTable.name,
-      Key: deletionRecordKey(orgId),
-      ConsistentRead: true,
-    }),
-  );
-  return Item ? (unmarshall(Item) as DeletionRecord) : undefined;
 }
 
 /**
@@ -159,12 +146,22 @@ async function deleteTenants(orgId: string, tenantIds: Record<string, string>): 
  * decides that per member, and the reasons it decided on are logged here.
  */
 async function tearDownAuth0(members: DeletionMember[]): Promise<void> {
-  for (const { sub, deleteIdentity, keptReasons } of members) {
+  for (const { sub, userId, deleteIdentity, keptReasons } of members) {
     if (!deleteIdentity) {
       // The census's own reasons, not one of them: an account is also kept when
       // the member was only ever invited here, and when a membership row could
       // not be decoded and the census failed closed.
       console.log(`${LOG} account kept`, { sub, keptReasons });
+      continue;
+    }
+    // An overlapping pass may have finished the deletion, and an invitation
+    // then made a new account under the same sub. Its Auth0 user, allowlist
+    // row and avatar are that account's now.
+    if (await isIdentityReplaced(sub, userId)) {
+      console.warn(`${LOG} identity now belongs to a new account, leaving Auth0 alone`, {
+        sub,
+        userId,
+      });
       continue;
     }
     const email = await getAuth0UserEmail(sub);
