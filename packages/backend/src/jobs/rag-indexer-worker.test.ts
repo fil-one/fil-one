@@ -699,6 +699,33 @@ describe('rag-indexer-worker on Forge regions (Bucket Intelligence engine)', () 
     expect(mockEngineSync.mock.calls.map(([target]) => target.bucketName)).toStrictEqual(['first']);
   });
 
+  it('starts engine syncs before an S3 Vectors backfill uses up the budget', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    const forge = makeOrchestrator('forge', S3Region.EuCentral3);
+    useRegions([provisioned(aurora, 'tenant-aurora'), provisioned(forge, 'tenant-forge')]);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // The eu-west-1 backfill works right up to the deadline, then checkpoints.
+    mockIndexBucket.mockImplementationOnce(async (_ctx, options) => {
+      vi.setSystemTime(options.deadlineEpochMs);
+      return { added: 0, updated: 0, removed: 0, failed: 0, completed: false };
+    });
+
+    try {
+      await handler(
+        payload([
+          { region: S3Region.EuWest1, bucketName: 'backfill' },
+          { region: S3Region.EuCentral3, bucketName: 'forge' },
+        ]),
+        contextWithRemaining(15 * 60 * 1000),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(mockIndexBucket).toHaveBeenCalledOnce();
+    expect(mockEngineSync.mock.calls.map(([target]) => target.bucketName)).toStrictEqual(['forge']);
+  });
+
   it('fails only the Forge region when the stage has no engine', async () => {
     engineState.configured = false;
     const aurora = makeOrchestrator('aurora', S3Region.EuWest1);

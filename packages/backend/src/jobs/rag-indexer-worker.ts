@@ -148,7 +148,13 @@ export async function handler(
   }
 }
 
-/** Group the payload's buckets into the list of bucket names to index per region. */
+/**
+ * Group the payload's buckets into the list of bucket names to index per
+ * region, engine regions first. An S3 Vectors backfill works right up to the
+ * deadline before it checkpoints, so an engine region walked after it would
+ * start no syncs until the backfill finished. An engine sync only starts
+ * background work, so engine regions take little of the budget.
+ */
 function groupBucketsByRegion(buckets: RagIndexerBucketRef[]): Map<S3Region, string[]> {
   const byRegion = new Map<S3Region, string[]>();
   for (const { region, bucketName } of buckets) {
@@ -156,7 +162,9 @@ function groupBucketsByRegion(buckets: RagIndexerBucketRef[]): Map<S3Region, str
     if (existing) existing.push(bucketName);
     else byRegion.set(region, [bucketName]);
   }
-  return byRegion;
+  return new Map(
+    [...byRegion].sort(([a], [b]) => Number(usesRagEngine(b)) - Number(usesRagEngine(a))),
+  );
 }
 
 /**
