@@ -214,6 +214,29 @@ describe('getRagEngineClient', () => {
     expect(ragEngineErrorResponse(error).statusCode).toBe(502);
   });
 
+  it('names the request deadline when the caller’s deadline stops a query', async () => {
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        }),
+    );
+    const deadline = new AbortController();
+
+    const pending = getRagEngineClient(CONFIG)
+      .query(
+        { target: TARGET, query: 'q', topK: 5, searchMode: 'vector', answer: true },
+        { signal: deadline.signal },
+      )
+      .catch((e: unknown) => e);
+    deadline.abort(new DOMException('deadline', 'TimeoutError'));
+    const error = await pending;
+
+    expect((error as Error).message).toBe(
+      'Bucket Intelligence engine did not answer /query before the request deadline',
+    );
+  });
+
   it('accepts an empty body from drop', async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
 

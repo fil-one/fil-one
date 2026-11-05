@@ -184,11 +184,8 @@ export function getRagEngineClient(config = getRagEngineConfig()): RagEngineClie
         signal: requestSignal(timeoutMs, deadline),
       });
     } catch (error) {
-      const timedOut = error instanceof Error && error.name === 'TimeoutError';
       throw new RagEngineRequestError(
-        timedOut
-          ? `Bucket Intelligence engine did not answer /${route} within ${timeoutMs} ms`
-          : `Bucket Intelligence engine is unreachable (/${route})`,
+        fetchFailureMessage(route, timeoutMs, error, deadline),
         undefined,
         { cause: error },
       );
@@ -232,6 +229,22 @@ export function getRagEngineClient(config = getRagEngineConfig()): RagEngineClie
 }
 
 /** Aborts at the request's own timeout, or at the caller's deadline when one comes first. */
+/** Names the limit that stopped a request: the caller's deadline or the client's own timeout. */
+function fetchFailureMessage(
+  route: string,
+  timeoutMs: number,
+  error: unknown,
+  deadline: AbortSignal | undefined,
+): string {
+  if (deadline?.aborted) {
+    return `Bucket Intelligence engine did not answer /${route} before the request deadline`;
+  }
+  if (error instanceof Error && error.name === 'TimeoutError') {
+    return `Bucket Intelligence engine did not answer /${route} within ${timeoutMs} ms`;
+  }
+  return `Bucket Intelligence engine is unreachable (/${route})`;
+}
+
 function requestSignal(timeoutMs: number, deadline: AbortSignal | undefined): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
   return deadline ? AbortSignal.any([timeout, deadline]) : timeout;
