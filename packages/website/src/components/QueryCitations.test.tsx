@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import {
   createMemoryHistory,
@@ -71,6 +71,37 @@ describe('QueryAnswer with engine citations', () => {
     const cards = screen.getAllByTestId('citation-card');
     expect(cards[1]).toHaveAttribute('data-active', 'true');
     expect(cards[0]).not.toHaveAttribute('data-active');
+  });
+
+  describe('scrolling the selected passage into view', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    });
+
+    function stubMotionPreference(reduce: boolean) {
+      vi.stubGlobal(
+        'matchMedia',
+        (query: string) =>
+          ({ matches: reduce && query === '(prefers-reduced-motion: reduce)' }) as MediaQueryList,
+      );
+      const scroll = vi.fn();
+      Element.prototype.scrollIntoView = scroll;
+      return scroll;
+    }
+
+    it.each([
+      { reduce: false, behavior: 'smooth' },
+      { reduce: true, behavior: 'auto' },
+    ])(
+      'scrolls with behavior $behavior when reduced motion is $reduce',
+      async ({ reduce, behavior }) => {
+        const scroll = stubMotionPreference(reduce);
+        renderAnswer(hybridAnswer);
+        fireEvent.click((await screen.findAllByTestId('citation-marker'))[1]!);
+        expect(scroll).toHaveBeenLastCalledWith({ block: 'nearest', behavior });
+      },
+    );
   });
 
   it('links each citation to the object in the bucket browser', async () => {

@@ -125,7 +125,12 @@ function CitationCard({
   const ref = useRef<HTMLLIElement>(null);
   useEffect(() => {
     // jsdom has no scrollIntoView; the optional call keeps tests honest without a stub.
-    if (active) ref.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    if (active) {
+      ref.current?.scrollIntoView?.({
+        block: 'nearest',
+        behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+      });
+    }
   }, [active]);
 
   return (
@@ -233,4 +238,9 @@ export function QueryTrace({ trace }: { trace: RagQueryTrace }) {
       </dl>
     </div>
   );
+}
+
+/** DESIGN.md rule 11: no movement under `prefers-reduced-motion`. jsdom has no `matchMedia`. */
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 }
