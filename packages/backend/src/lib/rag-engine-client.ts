@@ -143,7 +143,14 @@ export interface RagEngineClient {
   sync(target: RagEngineTarget): Promise<RagEngineStatus>;
   status(target: RagEngineTarget): Promise<RagEngineStatus>;
   versions(target: RagEngineTarget): Promise<RagEngineVersionsResponse>;
-  query(request: RagEngineQueryRequest): Promise<RagEngineQueryResponse>;
+  /**
+   * `signal` is the caller's request deadline: the query stops at whichever
+   * comes first, it or {@link RAG_ENGINE_QUERY_TIMEOUT_MS}.
+   */
+  query(
+    request: RagEngineQueryRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<RagEngineQueryResponse>;
   drop(target: RagEngineTarget): Promise<void>;
 }
 
@@ -155,7 +162,12 @@ export function getRagEngineClient(config = getRagEngineConfig()): RagEngineClie
   if (!config) throw new RagEngineNotConfiguredError();
   const { baseUrl, token } = config;
 
-  async function post<T>(route: string, body: unknown, timeoutMs: number): Promise<T> {
+  async function post<T>(
+    route: string,
+    body: unknown,
+    timeoutMs: number,
+    deadline?: AbortSignal,
+  ): Promise<T> {
     const url = `${baseUrl}/${RAG_ENGINE_API_VERSION}/${route}`;
     let response: Response;
     try {
@@ -166,7 +178,10 @@ export function getRagEngineClient(config = getRagEngineConfig()): RagEngineClie
           'content-type': 'application/json',
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
+        // Every body carries the tenant's Forge secret key, and fetch would
+        // replay it to whatever origin a 307/308 names: refuse redirects.
+        redirect: 'error',
+        signal: requestSignal(timeoutMs, deadline),
       });
     } catch (error) {
       const timedOut = error instanceof Error && error.name === 'TimeoutError';
@@ -208,11 +223,18 @@ export function getRagEngineClient(config = getRagEngineConfig()): RagEngineClie
     sync: (target) => post('sync', { target }, RAG_ENGINE_DEFAULT_TIMEOUT_MS),
     status: (target) => post('status', { target }, RAG_ENGINE_DEFAULT_TIMEOUT_MS),
     versions: (target) => post('versions', { target }, RAG_ENGINE_DEFAULT_TIMEOUT_MS),
-    query: (request) => post('query', request, RAG_ENGINE_QUERY_TIMEOUT_MS),
+    query: (request, options) =>
+      post('query', request, RAG_ENGINE_QUERY_TIMEOUT_MS, options?.signal),
     drop: async (target) => {
       await post('drop', { target }, RAG_ENGINE_DEFAULT_TIMEOUT_MS);
     },
   };
+}
+
+/** Aborts at the request's own timeout, or at the caller's deadline when one comes first. */
+function requestSignal(timeoutMs: number, deadline: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return deadline ? AbortSignal.any([timeout, deadline]) : timeout;
 }
 
 /** The error for a non-2xx engine answer, carrying the engine's code and message. */

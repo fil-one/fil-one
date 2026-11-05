@@ -161,6 +161,59 @@ describe('getRagEngineClient', () => {
     expect(JSON.parse(init.body)).toStrictEqual(request);
   });
 
+  it.each(['sync', 'status', 'versions', 'drop'] as const)(
+    '%s refuses redirects, so the tenant key is never replayed to another origin',
+    async (method) => {
+      fetchMock.mockResolvedValue(jsonResponse(200, engineStatus()));
+
+      await getRagEngineClient(CONFIG)[method](TARGET);
+
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'error' });
+    },
+  );
+
+  it('query refuses redirects, so the tenant key is never replayed to another origin', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { answer: '', citations: [], sources: [] }));
+
+    await getRagEngineClient(CONFIG).query({
+      target: TARGET,
+      query: 'q',
+      topK: 5,
+      searchMode: 'vector',
+      answer: true,
+    });
+
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'error' });
+  });
+
+  it('aborts a query when the caller’s deadline fires before the query timeout', async () => {
+    fetchMock.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        }),
+    );
+    const deadline = new AbortController();
+
+    const pending = getRagEngineClient(CONFIG)
+      .query(
+        {
+          target: TARGET,
+          query: 'q',
+          topK: 5,
+          searchMode: 'vector',
+          answer: true,
+        },
+        { signal: deadline.signal },
+      )
+      .catch((e: unknown) => e);
+    deadline.abort(new DOMException('deadline', 'TimeoutError'));
+    const error = await pending;
+
+    expect(error).toBeInstanceOf(RagEngineRequestError);
+    expect(ragEngineErrorResponse(error).statusCode).toBe(502);
+  });
+
   it('accepts an empty body from drop', async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
 
