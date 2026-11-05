@@ -28,6 +28,7 @@
     "test:storybook": "pnpm --filter @filone/website test:storybook",
     "test:e2e": "pnpm exec sst shell -- pnpm exec playwright test",
     "test:e2e:policies": "pnpm exec sst shell -- pnpm exec playwright test --project='policies-*'",
+    "test:e2e:multi-org": "pnpm exec sst shell -- pnpm exec playwright test --project='multi-org-*' --workers=1",
     "test:smoke": "pnpm exec playwright test --project=smoke-chromium",
     "test:integration": "pnpm exec sst shell -- pnpm --filter @filone/integration exec vitest run"
   },
