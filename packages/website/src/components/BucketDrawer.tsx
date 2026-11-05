@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ProhibitIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
 import {
   useMutation,
@@ -26,7 +26,7 @@ import {
 } from '../lib/rag-bucket-api.js';
 import { errorCodeOf } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
-import { ENGINE_SYNC_POLL_MS, isEngineStatus } from '../lib/rag-engine.js';
+import { ENGINE_SYNC_POLL_MS, getSearchableVersions, isEngineStatus } from '../lib/rag-engine.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { buildQueryCurl } from '../lib/rag-query-snippet.js';
 import { timeAgo } from '../lib/time.js';
@@ -66,7 +66,12 @@ export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: Buc
   const [searchMode, setSearchMode] = useState<RagSearchMode>('hybrid');
 
   const engine = useRagEngine(rowBucket);
-  const versions = engine.data?.versions ?? EMPTY_VERSIONS;
+  const syncing = engine.data?.status.syncState === 'syncing';
+  const allVersions = engine.data?.versions ?? EMPTY_VERSIONS;
+  const versions = useMemo(
+    () => getSearchableVersions(allVersions, syncing),
+    [allVersions, syncing],
+  );
   const [version, setVersion] = useDatasetVersion(versions);
   // The engine reads its own dataset, so while the drawer is open its numbers
   // are fresher than the row's enablement poll.
@@ -93,8 +98,11 @@ export function BucketDrawer({ bucket: rowBucket, onClose, onStopIndexing }: Buc
     if (!trimmed) return;
     setQuestion(trimmed);
     setInput('');
+    // Mid-run, the engine's own latest is a partial commit, so Latest is pinned
+    // to the newest version the picker offers: the last finished sync.
+    const askVersion = version ?? (syncing ? versions[0]?.version : undefined);
     queryMutation.mutate(
-      engine.isEngine ? { query: trimmed, searchMode, version } : { query: trimmed },
+      engine.isEngine ? { query: trimmed, searchMode, version: askVersion } : { query: trimmed },
     );
   }
 

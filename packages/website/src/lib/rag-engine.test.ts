@@ -7,6 +7,7 @@ import {
   formatDuration,
   formatIndexType,
   formatIo,
+  getSearchableVersions,
   isEngineStatus,
   objectBasename,
   parseCitedAnswer,
@@ -170,5 +171,40 @@ describe('formatIndexType', () => {
 
   it('says when full text had no index to use', () => {
     expect(formatIndexType('none')).toBe('No index');
+  });
+});
+
+describe('getSearchableVersions', () => {
+  const partial = { version: 3, timestamp: '2026-11-04T10:00:09Z' };
+  const finished = {
+    version: 2,
+    timestamp: '2026-11-04T09:00:00Z',
+    tags: ['sync-20261104T090000.000Z'],
+  };
+  const older = { version: 1, timestamp: '2026-11-03T09:00:00Z' };
+
+  it('drops versions newer than the last finished sync while a run is in flight', () => {
+    expect(getSearchableVersions([partial, finished, older], true)).toStrictEqual([
+      finished,
+      older,
+    ]);
+  });
+
+  it('keeps every version when no run is in flight', () => {
+    expect(getSearchableVersions([partial, finished, older], false)).toStrictEqual([
+      partial,
+      finished,
+      older,
+    ]);
+  });
+
+  it('keeps every version mid-run when no version carries a sync tag', () => {
+    // A named tag that is not a sync tag does not mark a finished run.
+    const named = { ...finished, tags: ['before-retention-update'] };
+    expect(getSearchableVersions([partial, named, older], true)).toStrictEqual([
+      partial,
+      named,
+      older,
+    ]);
   });
 });

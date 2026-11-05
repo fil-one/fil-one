@@ -2,6 +2,7 @@ import {
   formatBytes,
   type RagCitation,
   type RagEngineStatus,
+  type RagEngineVersion,
   type RagSearchMode,
 } from '@filone/shared';
 
@@ -193,4 +194,19 @@ export function buildLancePythonSnippet({
     'print(table.count_rows(), table.version)',
     'print(table.search("your search terms", query_type="fts").limit(5).to_list())',
   ].join('\n');
+}
+
+/**
+ * The versions a question can be asked of. While a run is in flight the engine
+ * commits partial versions ahead of the last finished sync (tagged `sync-…`),
+ * so those are dropped and Latest means the last finished sync. With no tagged
+ * version to anchor on, the list is returned as is.
+ */
+export function getSearchableVersions(
+  versions: RagEngineVersion[],
+  syncing: boolean,
+): RagEngineVersion[] {
+  if (!syncing) return versions;
+  const finished = versions.find((v) => v.tags?.some((tag) => tag.startsWith('sync-')));
+  return finished ? versions.filter((v) => v.version <= finished.version) : versions;
 }
