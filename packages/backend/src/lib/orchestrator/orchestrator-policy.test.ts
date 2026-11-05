@@ -52,11 +52,37 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+// A network serving two regions, so a call naming the second one proves the
+// client is built for the bucket's region rather than the network's first.
+// No s3EndpointUrl: one endpoint cannot stand for several regions.
+const twoRegionOrchestrator = new FilOneOrchestrator({
+  id: 'forge',
+  regions: [S3Region.UsEast9, S3Region.EuWest1],
+  stage: 'test',
+  api: { baseUrl: 'https://api.example.test', accessToken: 'partner-key' },
+});
+
+describe('the region a policy call is signed for', () => {
+  it("is the bucket's, not the first the network serves", async () => {
+    mockGetPolicy.mockResolvedValue(null);
+
+    await twoRegionOrchestrator.getBucketPolicy(tenantId, {
+      region: S3Region.EuWest1,
+      bucketName: 'photos',
+    });
+
+    const client = mockGetPolicy.mock.calls[0]![0] as { config: { region: () => Promise<string> } };
+    await expect(client.config.region()).resolves.toBe(S3Region.EuWest1);
+  });
+});
+
 describe('getBucketPolicy', () => {
   it('returns the policy and ETag the S3 read returned', async () => {
     mockGetPolicy.mockResolvedValue({ policy, etag: '"abc"' });
 
-    await expect(orchestrator.getBucketPolicy(tenantId, 'photos')).resolves.toStrictEqual({
+    await expect(
+      orchestrator.getBucketPolicy(tenantId, { region: S3Region.UsEast9, bucketName: 'photos' }),
+    ).resolves.toStrictEqual({
       policy,
       etag: '"abc"',
     });
@@ -65,7 +91,9 @@ describe('getBucketPolicy', () => {
 
   it('returns null when the bucket has no policy', async () => {
     mockGetPolicy.mockResolvedValue(null);
-    await expect(orchestrator.getBucketPolicy(tenantId, 'photos')).resolves.toBeNull();
+    await expect(
+      orchestrator.getBucketPolicy(tenantId, { region: S3Region.UsEast9, bucketName: 'photos' }),
+    ).resolves.toBeNull();
   });
 });
 
@@ -74,7 +102,12 @@ describe('putBucketPolicy', () => {
     mockPutPolicy.mockResolvedValue({ etag: '"v2"' });
 
     await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
+      orchestrator.putBucketPolicy(
+        tenantId,
+        { region: S3Region.UsEast9, bucketName: 'photos' },
+        policy,
+        { ifMatch: '"v1"' },
+      ),
     ).resolves.toStrictEqual({ etag: '"v2"' });
     expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy, {
       ifMatch: '"v1"',
@@ -85,7 +118,12 @@ describe('putBucketPolicy', () => {
     mockPutPolicy.mockResolvedValue({ etag: '"v1"' });
 
     await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifNoneMatch: '*' }),
+      orchestrator.putBucketPolicy(
+        tenantId,
+        { region: S3Region.UsEast9, bucketName: 'photos' },
+        policy,
+        { ifNoneMatch: '*' },
+      ),
     ).resolves.toStrictEqual({ etag: '"v1"' });
     expect(mockPutPolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', policy, {
       ifNoneMatch: '*',
@@ -102,7 +140,12 @@ describe('putBucketPolicy', () => {
     mockPutPolicy.mockRejectedValue(new PolicyPreconditionFailedError('photos'));
 
     await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"old"' }),
+      orchestrator.putBucketPolicy(
+        tenantId,
+        { region: S3Region.UsEast9, bucketName: 'photos' },
+        policy,
+        { ifMatch: '"old"' },
+      ),
     ).rejects.toBeInstanceOf(PolicyPreconditionFailedError);
     expect(mockPutPolicy).toHaveBeenCalledTimes(1);
   });
@@ -113,7 +156,12 @@ describe('putBucketPolicy', () => {
       .mockResolvedValueOnce({ etag: '"v2"' });
 
     await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
+      orchestrator.putBucketPolicy(
+        tenantId,
+        { region: S3Region.UsEast9, bucketName: 'photos' },
+        policy,
+        { ifMatch: '"v1"' },
+      ),
     ).resolves.toStrictEqual({ etag: '"v2"' });
     expect(mockPutPolicy).toHaveBeenCalledTimes(2);
   });
@@ -122,7 +170,12 @@ describe('putBucketPolicy', () => {
     mockPutPolicy.mockRejectedValue(new PolicyPublishError());
 
     await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
+      orchestrator.putBucketPolicy(
+        tenantId,
+        { region: S3Region.UsEast9, bucketName: 'photos' },
+        policy,
+        { ifMatch: '"v1"' },
+      ),
     ).rejects.toBeInstanceOf(PolicyPublishError);
     expect(mockPutPolicy).toHaveBeenCalledTimes(3);
   });
@@ -131,7 +184,12 @@ describe('putBucketPolicy', () => {
     mockPutPolicy.mockRejectedValue(new PolicyValidationError(`unknown principal "${BOB}"`));
 
     await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
+      orchestrator.putBucketPolicy(
+        tenantId,
+        { region: S3Region.UsEast9, bucketName: 'photos' },
+        policy,
+        { ifMatch: '"v1"' },
+      ),
     ).rejects.toMatchObject({
       name: 'PolicyValidationError',
       message: `unknown principal "${BOB}"`,
@@ -142,7 +200,12 @@ describe('putBucketPolicy', () => {
   it('throws PolicyConflictError when the lock timeout persists through every retry', async () => {
     mockPutPolicy.mockRejectedValue(new PolicyConflictError());
     await expect(
-      orchestrator.putBucketPolicy(tenantId, 'photos', policy, { ifMatch: '"v1"' }),
+      orchestrator.putBucketPolicy(
+        tenantId,
+        { region: S3Region.UsEast9, bucketName: 'photos' },
+        policy,
+        { ifMatch: '"v1"' },
+      ),
     ).rejects.toBeInstanceOf(PolicyConflictError);
     expect(mockPutPolicy).toHaveBeenCalledTimes(3);
   });
@@ -152,7 +215,11 @@ describe('deleteBucketPolicy', () => {
   it('passes the If-Match precondition to the S3 delete', async () => {
     mockDeletePolicy.mockResolvedValue(undefined);
     await expect(
-      orchestrator.deleteBucketPolicy(tenantId, 'photos', { ifMatch: '"v1"' }),
+      orchestrator.deleteBucketPolicy(
+        tenantId,
+        { region: S3Region.UsEast9, bucketName: 'photos' },
+        { ifMatch: '"v1"' },
+      ),
     ).resolves.toBeUndefined();
     expect(mockDeletePolicy).toHaveBeenCalledWith(expect.any(Object), 'photos', {
       ifMatch: '"v1"',

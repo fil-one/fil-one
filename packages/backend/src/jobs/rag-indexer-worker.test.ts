@@ -603,7 +603,7 @@ describe('rag-indexer-worker on Forge regions (Bucket Intelligence engine)', () 
 
     expect(mockIndexBucket).not.toHaveBeenCalled();
     expect(mockCreateS3Client).not.toHaveBeenCalled();
-    expect(forge.getS3ClientContext).toHaveBeenCalledWith('tenant-forge');
+    expect(forge.getS3ClientContext).toHaveBeenCalledWith('tenant-forge', S3Region.EuCentral3);
     expect(mockEngineSync.mock.calls.map(([target]) => target)).toStrictEqual([
       {
         orgId: 'org-1',
