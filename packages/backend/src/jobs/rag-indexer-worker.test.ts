@@ -674,6 +674,31 @@ describe('rag-indexer-worker on Forge regions (Bucket Intelligence engine)', () 
     expect(mockEngineSync).toHaveBeenCalledTimes(2);
   });
 
+  it('starts no further engine syncs once the invocation deadline has passed', async () => {
+    const forge = makeOrchestrator('forge', S3Region.EuCentral3);
+    useRegions([provisioned(forge, 'tenant-forge')]);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // The first sync takes past the deadline (one second after the 60 s headroom).
+    mockEngineSync.mockImplementationOnce(async () => {
+      vi.setSystemTime(Date.now() + 5_000);
+      return { syncState: 'syncing' };
+    });
+
+    try {
+      await handler(
+        payload([
+          { region: S3Region.EuCentral3, bucketName: 'first' },
+          { region: S3Region.EuCentral3, bucketName: 'second' },
+        ]),
+        contextWithRemaining(61_000),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(mockEngineSync.mock.calls.map(([target]) => target.bucketName)).toStrictEqual(['first']);
+  });
+
   it('fails only the Forge region when the stage has no engine', async () => {
     engineState.configured = false;
     const aurora = makeOrchestrator('aurora', S3Region.EuWest1);

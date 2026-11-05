@@ -276,7 +276,7 @@ async function indexRegion(args: IndexRegionArgs): Promise<RegionIndexStats> {
  * {@link indexRegion}. No engine on this stage fails the whole region.
  */
 async function syncRegionOnEngine(args: IndexRegionArgs): Promise<RegionIndexStats> {
-  const { orgId, region, tenantId, bucketNames } = args;
+  const { orgId, region, tenantId, bucketNames, deadlineEpochMs } = args;
 
   const client = getRagEngineClient();
   const orchestrator = getOrchestratorForRegion(region);
@@ -293,6 +293,16 @@ async function syncRegionOnEngine(args: IndexRegionArgs): Promise<RegionIndexSta
   for (const bucketName of bucketNames) {
     if (await isOrgDeletedOrDeleting(orgId)) {
       console.warn(`${LOG} Org deletion started mid-run, stopping`, { orgId, region });
+      break;
+    }
+    // A stalled engine holds each request to its timeout; stop before the
+    // Lambda timeout does. The next scheduled run starts every sync again.
+    if (Date.now() >= deadlineEpochMs) {
+      console.warn(`${LOG} Deadline reached, leaving the rest to the next run`, {
+        orgId,
+        region,
+        bucketsLeft: bucketNames.length - stats.bucketsIndexed - stats.bucketFailures,
+      });
       break;
     }
     try {
