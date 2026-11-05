@@ -122,8 +122,8 @@ describe('account-deletion-worker', () => {
       'picture:auth0|one',
       `avatar:${AVATAR_URL}`,
       'auth0:auth0|one',
-      'stripe',
       'rag-engine',
+      'stripe',
       'tenant:42',
       `logo:${LOGO_URL}`,
       'scrub',
@@ -137,6 +137,14 @@ describe('account-deletion-worker', () => {
 
     expect(mockDropRagEngineDatasets).toHaveBeenCalledWith(ORG, { fth: '42' });
     expect(order.indexOf('rag-engine')).toBeLessThan(order.indexOf('tenant:42'));
+  });
+
+  // Stripe's teardown starts by disabling the tenants, and a disabled tenant's
+  // key no longer reaches its storage.
+  it('drops the Forge Bucket Intelligence datasets before Stripe disables the tenants', async () => {
+    await handler({ orgId: ORG });
+
+    expect(order.indexOf('rag-engine')).toBeLessThan(order.indexOf('stripe'));
   });
 
   // A saved avatar or logo is claimed, so the bucket's expiry rule never
@@ -167,8 +175,8 @@ describe('account-deletion-worker', () => {
           'picture:auth0|one',
           `avatar:${AVATAR_URL}`,
           'auth0:auth0|one',
-          'stripe',
           'rag-engine',
+          'stripe',
           'tenant:42',
         ],
       ],

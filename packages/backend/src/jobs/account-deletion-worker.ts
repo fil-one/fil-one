@@ -61,9 +61,10 @@ export async function handler(event: AccountDeletionWorkerPayload): Promise<void
   // it destroys the rows the earlier steps read, and a failed pass leaves the most
   // context for troubleshooting behind it.
   await tearDownAuth0(members);
-  await tearDownStripe(orgId, members);
-  // Before the tenants: the engine reaches Forge storage with the tenant's key.
+  // Before Stripe, which starts by disabling the tenants: the engine reaches
+  // Forge storage with the tenant's key, and a disabled tenant refuses it.
   await dropRagEngineDatasets(orgId, tenantIds ?? {});
+  await tearDownStripe(orgId, members);
   await deleteTenants(orgId, tenantIds);
   await deleteOrgLogo(orgId);
   await scrubOrgRecords(orgId, members);

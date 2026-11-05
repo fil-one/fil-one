@@ -14,8 +14,8 @@ const LOG = '[rag-engine-teardown]';
  * Account deletion, Forge regions: ask the Bucket Intelligence engine to drop
  * each enabled bucket's Lance dataset and forget its sync state.
  *
- * Runs before the tenants are deleted, because the engine reaches the dataset
- * with the tenant's own Forge credentials. Best effort: deleting the tenant
+ * Runs before the tenants are disabled and deleted, because the engine reaches
+ * the dataset with the tenant's own Forge credentials. Best effort: deleting the tenant
  * removes its companion buckets with everything else it owns, so an engine that
  * is down is logged and never blocks the teardown. A stage with no engine
  * (production) returns at once, without reading the table.
@@ -44,11 +44,11 @@ export async function dropRagEngineDatasets(
     return;
   }
 
-  for (const { region, bucketName } of buckets) {
+  async function drop({ region, bucketName }: { region: S3Region; bucketName: string }) {
     try {
       const orchestrator = getOrchestratorForRegion(region);
       const tenantId = tenantIds[orchestrator.id];
-      if (!tenantId) continue;
+      if (!tenantId) return;
       await client.drop(
         await ragEngineTarget(orchestrator, tenantId, { orgId, region, bucketName }),
       );
@@ -61,7 +61,19 @@ export async function dropRagEngineDatasets(
       });
     }
   }
+
+  // Each drop can wait out the engine timeout when the engine is down, so the
+  // drops run DROP_CONCURRENCY at a time to keep that wait a small part of
+  // the deletion worker's budget.
+  const queue = [...buckets];
+  const runners = Array.from({ length: Math.min(DROP_CONCURRENCY, queue.length) }, async () => {
+    for (let next = queue.shift(); next; next = queue.shift()) await drop(next);
+  });
+  await Promise.all(runners);
 }
+
+/** Engine drops in flight at once during account deletion. */
+export const DROP_CONCURRENCY = 8;
 
 /** The org's RAG-enabled buckets (any status) in engine-backed regions. */
 async function engineBuckets(orgId: string): Promise<{ region: S3Region; bucketName: string }[]> {

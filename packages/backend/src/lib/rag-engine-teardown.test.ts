@@ -31,7 +31,7 @@ vi.mock('./rag-engine-client.ts', async () => {
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { dropRagEngineDatasets } from './rag-engine-teardown.ts';
+import { DROP_CONCURRENCY, dropRagEngineDatasets } from './rag-engine-teardown.ts';
 import { fakeOrchestrator } from '../test/fake-orchestrator.ts';
 import { expectedTarget, fakeRagEngine, type FakeRagEngine } from '../test/fake-rag-engine.ts';
 import { RagEngineRequestError } from './rag-engine-client.ts';
@@ -101,6 +101,24 @@ describe('dropRagEngineDatasets', () => {
     await expect(dropRagEngineDatasets(ORG, TENANTS)).resolves.toBeUndefined();
 
     expect(engine.drop).toHaveBeenCalledTimes(2);
+  });
+
+  it('runs drops concurrently, at most DROP_CONCURRENCY at a time', async () => {
+    const names = Array.from({ length: DROP_CONCURRENCY + 4 }, (_, i) => `b${i}`);
+    rows(...names.map((name) => `BUCKET#${ORG}#${S3Region.EuCentral3}#${name}`));
+    let inFlight = 0;
+    let peak = 0;
+    engine.drop.mockImplementation(async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+    });
+
+    await dropRagEngineDatasets(ORG, TENANTS);
+
+    expect(engine.drop).toHaveBeenCalledTimes(names.length);
+    expect(peak).toBe(DROP_CONCURRENCY);
   });
 
   it('leaves the datasets to tenant deletion when the stage has no engine', async () => {
