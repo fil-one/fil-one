@@ -326,7 +326,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
   ): Promise<BucketSummary[]> {
     // ListBuckets is account-wide at every gateway of the network, so any
     // region's endpoint returns the tenant's buckets in all of them.
-    const ctx = await this.getS3ClientContext(tenantId, this.regions[0]!, requestOptions);
+    const ctx = await this.getS3ClientContext(tenantId, this.regions[0], requestOptions);
     const s3 = createS3Client(ctx);
     const { buckets } = await s3ListBuckets(s3, requestOptions);
     // Versioning and object-lock both cost a call per bucket; neither is
@@ -595,6 +595,6 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
    * network, so any of them will do.
    */
   private async getTenantS3Client(tenantId: string) {
-    return createS3Client(await this.getS3ClientContext(tenantId, this.regions[0]!));
+    return createS3Client(await this.getS3ClientContext(tenantId, this.regions[0]));
   }
 }
