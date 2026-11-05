@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiErrorCode } from '@filone/shared';
 import type { AcceptInvitationResponse } from '@filone/shared';
 
@@ -29,19 +29,13 @@ type Outcome =
  * tears effects down and re-runs them — which detaches the mutation observer
  * from the request already in flight, so the answer arrives with nobody
  * listening and the page waits on a spinner that never resolves. State survives
- * that, and a single-use token cannot be retried into working again.
+ * that. The one retry the page offers is a click, after a refusal that spent
+ * nothing.
  */
 export function AcceptInvitationPage({ token }: { token: string | null }) {
   const [outcome, setOutcome] = useState<Outcome>({ status: 'accepting' });
 
-  // Once. React runs effects twice in development's strict mode, and the token
-  // is single-use: a second attempt would spend the invitation the first one is
-  // still redeeming and be answered "no longer valid".
-  const started = useRef(false);
-  useEffect(() => {
-    if (token === null || started.current) return;
-    started.current = true;
-
+  const redeem = useCallback((token: string) => {
     void acceptInvitation(token).then(
       async (result) => {
         await refreshSessionClaims();
@@ -66,7 +60,26 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
         setOutcome({ status: 'refused', error });
       },
     );
-  }, [token]);
+  }, []);
+
+  // Once. React runs effects twice in development's strict mode, and the token
+  // is single-use: a second attempt would spend the invitation the first one is
+  // still redeeming and be answered "no longer valid".
+  const started = useRef(false);
+  useEffect(() => {
+    if (token === null || started.current) return;
+    started.current = true;
+    redeem(token);
+  }, [token, redeem]);
+
+  // A deletion still running left the invitation pending, so the same token
+  // works once it finishes. Retried from here rather than stashed for a reload:
+  // a stashed token sends every console page back to this one until it is spent.
+  const retry = useCallback(() => {
+    if (token === null) return;
+    setOutcome({ status: 'accepting' });
+    redeem(token);
+  }, [token, redeem]);
 
   return (
     <InvitationOutcome
@@ -78,6 +91,7 @@ export function AcceptInvitationPage({ token }: { token: string | null }) {
       sessionEmail={outcome.status === 'refused' ? sessionEmailOf(outcome.error) : undefined}
       onContinue={switchToOrg}
       onLogOut={logout}
+      onRetry={retry}
     />
   );
 }

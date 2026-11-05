@@ -89,8 +89,16 @@ function apiError(
   return Object.assign(new Error(message), { status, code, ...extra });
 }
 
+const deletionInProgress = apiError(
+  'Your organization is being deleted. Try again in a few minutes.',
+  409,
+  ApiErrorCode.DELETION_IN_PROGRESS,
+);
+
 async function resetMocks() {
   vi.clearAllMocks();
+  // A queued answer a failed test never consumed must not reach the next one.
+  mockAccept.mockReset();
   // An answer one test gives `/me` must not reach the next one.
   const { getMe } = await import('../lib/api.js');
   vi.mocked(getMe).mockReset();
@@ -301,6 +309,30 @@ describe('AcceptInvitationPage', () => {
     // nothing left to redeem, the same loss a 401 bounce would leave behind.
     await waitFor(() => expect(hasPendingInviteToken()).toBe(true));
   });
+
+  it('offers to try again when a deletion still running refuses the accept', async () => {
+    mockAccept.mockRejectedValue(deletionInProgress);
+    renderPage();
+
+    const panel = await screen.findByTestId('accept-deletion-in-progress');
+    expect(panel).toHaveTextContent('Your organization is being deleted.');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('redeems the same token again when the caller tries again', async () => {
+    mockAccept.mockRejectedValueOnce(deletionInProgress).mockResolvedValueOnce({
+      orgId: 'org-9',
+      orgName: 'Acme',
+      role: OrgRole.Member,
+      alreadyMember: false,
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByTestId('accept-success')).toHaveTextContent('Welcome to Acme');
+    expect(mockAccept.mock.calls).toStrictEqual([[TOKEN], [TOKEN]]);
+  });
 });
 
 // `/me` is read only after a successful accept, to refresh the session's claims.
@@ -318,11 +350,7 @@ describe('AcceptInvitationPage reading /me', () => {
       }),
       'accept-mismatch',
     ],
-    [
-      'a deletion still running',
-      apiError('Your previous account is still being deleted. Try again in a few minutes.', 409),
-      'accept-failed',
-    ],
+    ['a deletion still running', deletionInProgress, 'accept-deletion-in-progress'],
   ])('does not read /me to explain %s', async (_label, error, panel) => {
     mockAccept.mockRejectedValue(error);
     const { getMe } = await import('../lib/api.js');

@@ -467,6 +467,7 @@ describe('POST /api/invitations/accept handler', () => {
     expect(result).toMatchObject({ statusCode: 409 });
     expect(body(result)).toStrictEqual({
       message: 'Your organization is being deleted. Try again in a few minutes.',
+      code: ApiErrorCode.DELETION_IN_PROGRESS,
     });
   });
 
@@ -1236,6 +1237,7 @@ describe('POST /api/invitations/accept handler', () => {
       expect(result).toMatchObject({ statusCode: 409 });
       expect(body(result)).toStrictEqual({
         message: 'Your previous account is still being deleted. Try again in a few minutes.',
+        code: ApiErrorCode.DELETION_IN_PROGRESS,
       });
       expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
     });
@@ -1256,6 +1258,7 @@ describe('POST /api/invitations/accept handler', () => {
       expect(result).toMatchObject({ statusCode: 409 });
       expect(body(result)).toStrictEqual({
         message: 'Your organization is being deleted. Try again in a few minutes.',
+        code: ApiErrorCode.DELETION_IN_PROGRESS,
       });
       expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
     });

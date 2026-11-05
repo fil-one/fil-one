@@ -129,9 +129,9 @@ export function accountDeletedResponse(): APIGatewayProxyStructuredResultV2 {
 }
 
 /**
- * 409 with no `ACCOUNT_DELETED` code: the console treats that code as a session
- * that has ended and leaves the page, while this caller can come back in once
- * the deletion finishes, and the page should say so.
+ * 409 with its own code rather than `ACCOUNT_DELETED`: the console treats that
+ * code as a session that has ended and leaves the page, while this caller can
+ * come back in once the deletion finishes, and the page offers to try again.
  */
 export function accountDeletionInProgressResponse(
   deleting: DeletionInProgress,
@@ -143,6 +143,7 @@ export function accountDeletionInProgressResponse(
         deleting === 'account'
           ? 'Your previous account is still being deleted. Try again in a few minutes.'
           : 'Your organization is being deleted. Try again in a few minutes.',
+      code: ApiErrorCode.DELETION_IN_PROGRESS,
     })
     .build();
 }
