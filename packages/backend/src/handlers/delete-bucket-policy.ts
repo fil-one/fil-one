@@ -52,7 +52,7 @@ export async function baseHandler(
   });
 
   try {
-    await orchestrator.deleteBucketPolicy(tenantId, bucketName, precondition);
+    await orchestrator.deleteBucketPolicy(tenantId, { region, bucketName }, precondition);
     await audit.complete({ outcome: 'succeeded' });
     return new ResponseBuilder().status(204).emptyBody().build();
   } catch (err) {
