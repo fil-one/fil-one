@@ -297,6 +297,7 @@ export {
   RETENTION_MAX_YEARS,
   CreateBucketSchema,
   listBucketsUnavailableMessage,
+  isRagCompanionBucket,
 } from './api/buckets.ts';
 
 export type { RetentionMode, RetentionDurationType } from './api/buckets.ts';

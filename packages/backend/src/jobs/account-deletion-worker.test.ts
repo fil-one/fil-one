@@ -44,6 +44,13 @@ vi.mock('../lib/deletion-stripe-teardown.ts', () => ({
   tearDownStripe: (...args: unknown[]) => mockTearDownStripe(...args),
 }));
 vi.mock('../lib/deletion-scrub.ts', () => ({ scrubOrgRecords: () => mockScrub() }));
+const mockDropRagEngineDatasets = vi.fn(
+  async (_orgId: string, _tenantIds: Record<string, string>) => void order.push('rag-engine'),
+);
+vi.mock('../lib/rag-engine-teardown.ts', () => ({
+  dropRagEngineDatasets: (orgId: string, tenantIds: Record<string, string>) =>
+    mockDropRagEngineDatasets(orgId, tenantIds),
+}));
 vi.mock('../lib/deletion-targets.ts', () => ({
   resolveDeletionTargets: () => mockResolveTargets(),
 }));
@@ -115,11 +122,29 @@ describe('account-deletion-worker', () => {
       'picture:auth0|one',
       `avatar:${AVATAR_URL}`,
       'auth0:auth0|one',
+      'rag-engine',
       'stripe',
       'tenant:42',
       `logo:${LOGO_URL}`,
       'scrub',
     ]);
+  });
+
+  // The engine reaches the Lance datasets with the tenant's Forge key, which
+  // the tenant deletion removes.
+  it('drops the Forge Bucket Intelligence datasets before deleting the tenants', async () => {
+    await handler({ orgId: ORG });
+
+    expect(mockDropRagEngineDatasets).toHaveBeenCalledWith(ORG, { fth: '42' });
+    expect(order.indexOf('rag-engine')).toBeLessThan(order.indexOf('tenant:42'));
+  });
+
+  // Stripe's teardown starts by disabling the tenants, and a disabled tenant's
+  // key no longer reaches its storage.
+  it('drops the Forge Bucket Intelligence datasets before Stripe disables the tenants', async () => {
+    await handler({ orgId: ORG });
+
+    expect(order.indexOf('rag-engine')).toBeLessThan(order.indexOf('stripe'));
   });
 
   // A saved avatar or logo is claimed, so the bucket's expiry rule never
@@ -150,6 +175,7 @@ describe('account-deletion-worker', () => {
           'picture:auth0|one',
           `avatar:${AVATAR_URL}`,
           'auth0:auth0|one',
+          'rag-engine',
           'stripe',
           'tenant:42',
         ],
