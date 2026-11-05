@@ -47,8 +47,15 @@ vi.mock('../lib/rag-engine-client.ts', async () => {
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './sync-bucket-rag.ts';
-import { buildEvent } from '../test/lambda-test-utilities.ts';
-import { fakeOrchestrator, type FakeOrchestrator } from '../test/fake-orchestrator.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import {
+  fakeOrchestrator,
+  stubMemberScopedGetBucket,
+  tenantFor,
+  type FakeOrchestrator,
+} from '../test/fake-orchestrator.ts';
+import { FakeIamOrchestrator } from '../test/fake-iam-orchestrator.ts';
+import { policyOf, statement } from '../test/policy-statements.ts';
 import {
   engineStatus,
   expectedTarget,
@@ -56,7 +63,7 @@ import {
   type FakeRagEngine,
 } from '../test/fake-rag-engine.ts';
 import { RAG_ENGINE_SYNC_FAILED_MESSAGE, RagEngineRequestError } from '../lib/rag-engine-client.ts';
-import { S3Region } from '@filone/shared';
+import { OrgRole, S3Region, type PolicyAction } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 
 const USER_INFO = {
@@ -196,5 +203,68 @@ describe('sync-bucket-rag baseHandler', () => {
     const result = await baseHandler(event(S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(502);
+  });
+});
+
+describe('sync-bucket-rag member scope on an iam region', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    engine = fakeRagEngine();
+    engineConfigured = true;
+    mockIsOrgDeleting.mockResolvedValue(false);
+    mockGetEnablement.mockResolvedValue({ orgId: 'org-1', status: 'active' });
+  });
+
+  /** An iam orchestrator whose policy on my-bucket grants the user `actions`. */
+  function useIamOrchestratorGrantingOnMyBucket(actions: PolicyAction[]): void {
+    const iam = new FakeIamOrchestrator();
+    iam.seedPrincipal(tenantFor('forge', 'org-1'), USER_INFO.userId);
+    iam.seedPolicy(
+      tenantFor('forge', 'org-1'),
+      'my-bucket',
+      policyOf(statement('my-bucket', 'Allow', [USER_INFO.userId], actions)),
+    );
+    orch = fakeOrchestrator('forge', {
+      bucket: BUCKET,
+      iam,
+      region: S3Region.EuCentral3,
+    });
+    stubMemberScopedGetBucket(orch, iam, BUCKET);
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+  }
+
+  function memberEvent(role: OrgRole): AuthenticatedEvent {
+    const e = buildEvent({
+      userInfo: {
+        ...USER_INFO,
+        membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role),
+      },
+      method: 'POST',
+      queryStringParameters: { region: S3Region.EuCentral3 },
+    });
+    e.pathParameters = { name: 'my-bucket' };
+    return e;
+  }
+
+  // The engine lists and reads every object with the tenant key.
+  it.each([
+    ['only s3:PutObject', ['s3:PutObject']],
+    ['s3:ListBucket but not s3:GetObject', ['s3:ListBucket']],
+    ['s3:GetObject but not s3:ListBucket', ['s3:GetObject']],
+  ] as const)('refuses a Member whose policy grants %s', async (_grant, actions) => {
+    useIamOrchestratorGrantingOnMyBucket([...actions]);
+
+    const result = await baseHandler(memberEvent(OrgRole.Member));
+
+    expect(result.statusCode).toBe(403);
+    expect(engine.sync).not.toHaveBeenCalled();
+  });
+
+  it('lets a Member whose policy grants listing and reading start a sync', async () => {
+    useIamOrchestratorGrantingOnMyBucket(['s3:ListBucket', 's3:GetObject']);
+
+    const result = await baseHandler(memberEvent(OrgRole.Member));
+
+    expect(result.statusCode).toBe(202);
   });
 });

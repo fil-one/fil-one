@@ -6,11 +6,11 @@ import {
   S3_REGION,
   SetBucketRagEnabledSchema,
   isSupportedRegion,
-  supportsIamMethods,
   usesRagEngine,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { RegionOrchestrator, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import { checkIndexingAccess } from '../lib/rag-indexing-access.ts';
 import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
@@ -67,31 +67,6 @@ function parseEnabledBody(
     };
   }
   return { enabled: parsed.data.enabled };
-}
-
-/**
- * Refuse to index a bucket for a scoped member whose policies grant neither
- * listing nor reading it: the indexer lists and reads the bucket with the
- * tenant's key, and the query path answers from that content. A region serving
- * service keys has no policies to consult.
- */
-async function checkIndexingAccess(
-  orchestrator: RegionOrchestrator,
-  tenantId: string,
-  bucketName: string,
-  memberId: string | undefined,
-): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  if (!memberId || !supportsIamMethods(orchestrator.region)) return undefined;
-  const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(
-    tenantId,
-    memberId,
-  );
-  const actions = access.find((entry) => entry.bucketName === bucketName)?.actions ?? [];
-  if (actions.includes('s3:ListBucket') && actions.includes('s3:GetObject')) return undefined;
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({ message: `Your access to ${bucketName} does not permit indexing it.` })
-    .build();
 }
 
 /**

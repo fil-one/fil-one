@@ -13,6 +13,7 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import { getBucketRagEnablement } from '../lib/bucket-rag-enablement.ts';
+import { checkIndexingAccess } from '../lib/rag-indexing-access.ts';
 import {
   browserSafeEngineStatus,
   getRagEngineClient,
@@ -60,18 +61,16 @@ export async function baseHandler(
   const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
-  if (
-    !(await orchestrator.getBucket(
-      tenantId,
-      bucketName,
-      getScopedMemberId(membership?.role, userId),
-    ))
-  ) {
+  const memberId = getScopedMemberId(membership?.role, userId);
+  if (!(await orchestrator.getBucket(tenantId, bucketName, memberId))) {
     return new ResponseBuilder()
       .status(404)
       .body<ErrorResponse>({ message: 'Bucket not found' })
       .build();
   }
+  // getBucket admits a member any policy names; a sync reads every object.
+  const refused = await checkIndexingAccess(orchestrator, tenantId, bucketName, memberId);
+  if (refused) return refused;
 
   const enablement = await getBucketRagEnablement(orgId, region, bucketName);
   if (!enablement || enablement.orgId !== orgId || enablement.status !== 'active') {
