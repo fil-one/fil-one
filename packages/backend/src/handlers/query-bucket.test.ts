@@ -787,13 +787,26 @@ describe('query-bucket on a Forge region (Bucket Intelligence engine)', () => {
       ),
     );
 
-    expect(engine.query).toHaveBeenCalledWith({
-      target: expectedTarget('forge', S3Region.EuCentral3, 'my-bucket'),
-      query: 'sky',
-      topK: 4,
-      searchMode: 'hybrid',
-      version: 3,
-      answer: true,
+    expect(engine.query).toHaveBeenCalledWith(
+      {
+        target: expectedTarget('forge', S3Region.EuCentral3, 'my-bucket'),
+        query: 'sky',
+        topK: 4,
+        searchMode: 'hybrid',
+        version: 3,
+        answer: true,
+      },
+      { signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it('passes the request deadline to the engine query', async () => {
+    const event = queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 });
+
+    await baseHandler(event);
+
+    expect(engine.query.mock.calls[0][1]).toStrictEqual({
+      signal: event.requestContext.deadline,
     });
   });
 
@@ -853,6 +866,21 @@ describe('query-bucket on a Forge region (Bucket Intelligence engine)', () => {
 
     expect(result.statusCode).toBe(409);
     expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.BUCKET_NOT_INDEXED);
+    expect(engine.query).not.toHaveBeenCalled();
+  });
+
+  it('returns 409 without querying the engine for a bucket whose indexing was turned off', async () => {
+    mockGetEnablement.mockResolvedValue({
+      ...FORGE_ENABLEMENT,
+      status: 'disabled',
+    });
+
+    const result = await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
+
+    expect(result.statusCode).toBe(409);
+    expect(JSON.parse(result.body!)).toMatchObject({
+      code: ApiErrorCode.BUCKET_NOT_INDEXED,
+    });
     expect(engine.query).not.toHaveBeenCalled();
   });
 

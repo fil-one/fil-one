@@ -30,6 +30,7 @@ import {
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { getScopedMemberId } from '../lib/member-scope.ts';
+import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import { ragQueryAuthMiddleware } from '../middleware/rag-query-auth.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { ragAccessMiddleware } from '../middleware/rag-access.ts';
@@ -131,6 +132,7 @@ export async function baseHandler(
       searchMode: search_mode,
       version,
       objectKey: event.queryStringParameters?.objectKey,
+      deadline: getRequestDeadline(event),
     });
   }
 
@@ -193,6 +195,8 @@ async function queryEngine(args: {
   searchMode: 'vector' | 'fulltext' | 'hybrid' | undefined;
   version: number | undefined;
   objectKey: string | undefined;
+  /** Aborts before the Lambda timeout, so a stalled engine still gets the 502 below. */
+  deadline: AbortSignal;
 }): Promise<APIGatewayProxyStructuredResultV2> {
   const { orchestrator, tenantId, orgId, region, bucketName } = args;
   // The engine searches the whole bucket; it has no per-object filter, so a
@@ -205,7 +209,9 @@ async function queryEngine(args: {
       })
       .build();
   }
-  if (!(await getOwnedBucketEnablement(orgId, region, bucketName))) {
+  // A bucket whose owner turned indexing off keeps its dataset on the engine,
+  // so only an active row lets a query reach it.
+  if ((await getOwnedBucketEnablement(orgId, region, bucketName))?.status !== 'active') {
     return new ResponseBuilder()
       .status(409)
       .body<ErrorResponse>({
@@ -219,14 +225,17 @@ async function queryEngine(args: {
   try {
     const client = getRagEngineClient();
     const target = await ragEngineTarget(orchestrator, tenantId, { orgId, region, bucketName });
-    const result = await client.query({
-      target,
-      query: args.query,
-      topK: args.topK,
-      searchMode: args.searchMode ?? 'vector',
-      ...(args.version ? { version: args.version } : {}),
-      answer: true,
-    });
+    const result = await client.query(
+      {
+        target,
+        query: args.query,
+        topK: args.topK,
+        searchMode: args.searchMode ?? 'vector',
+        ...(args.version ? { version: args.version } : {}),
+        answer: true,
+      },
+      { signal: args.deadline },
+    );
     const answer =
       result.citations.length === 0 && !result.answer.trim() ? NO_RELEVANT_CONTENT : result.answer;
     return new ResponseBuilder()
@@ -337,6 +346,7 @@ function sourcesFromChunks(chunks: VectorQueryResult[]): string[] {
 }
 
 export const handler = middy(baseHandler)
+  .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   // Cookie session OR RAG API key bearer token — see ragQueryAuthMiddleware.
   // The bearer token carries its own authority; the cookie caller is gated on
