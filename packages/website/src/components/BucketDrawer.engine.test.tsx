@@ -365,11 +365,17 @@ describe('BucketDrawer — Enter to ask', () => {
     await waitFor(() => expect(mockQueryBucket).toHaveBeenCalledTimes(1));
   });
 
-  it('ignores the Enter that confirms an IME candidate', async () => {
+  // Chrome and Firefox flag the committing Enter with isComposing. Safari fires
+  // compositionend first, so its committing Enter has isComposing false and
+  // the IME key code 229.
+  it.each([
+    ['Chrome and Firefox', { key: 'Enter', isComposing: true }],
+    ['Safari', { key: 'Enter', isComposing: false, keyCode: 229 }],
+  ])('ignores the Enter that confirms an IME candidate in %s', async (_browser, keyEvent) => {
     renderDrawer();
     const input = await screen.findByPlaceholderText('Ask about acme-handbook…');
     fireEvent.change(input, { target: { value: 'バックアップ' } });
-    fireEvent.keyDown(input, { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(input, keyEvent);
     // Asking clears the input at once; a composing Enter leaves it as typed.
     expect(input).toHaveValue('バックアップ');
     await new Promise((resolve) => setTimeout(resolve, 0));

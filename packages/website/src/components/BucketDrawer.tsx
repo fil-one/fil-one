@@ -331,12 +331,15 @@ function AskSection({
           onChange={onInputChange}
           // Enter-to-ask is part of the engine-backed drawer only; other regions
           // keep their existing behaviour. An Enter that confirms an IME
-          // candidate is not a submit.
+          // candidate is not a submit. Chrome and Firefox flag it with
+          // isComposing; Safari ends the composition first and reports the
+          // IME key code 229 instead.
           onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
             if (
               engine &&
               event.key === 'Enter' &&
               !event.nativeEvent.isComposing &&
+              event.nativeEvent.keyCode !== 229 &&
               !notYetIndexed &&
               input.trim()
             ) {
