@@ -65,6 +65,10 @@ export const RagEngineErrorCode = {
   NO_PHRASE_INDEX: 'NO_PHRASE_INDEX',
   /** Forge storage refused the tenant's key when the engine read the bucket. */
   S3_ACCESS_DENIED: 'S3_ACCESS_DENIED',
+  /** Vector or hybrid search on an index built with another embedding model. */
+  EMBEDDING_MODEL_CHANGED: 'EMBEDDING_MODEL_CHANGED',
+  /** A sync asked for while the bucket's dataset is being dropped. */
+  DROP_IN_PROGRESS: 'DROP_IN_PROGRESS',
 } as const;
 
 /** What the browser sees for a failed engine sync; the engine's own text goes to the log. */
@@ -309,7 +313,8 @@ export async function ragEngineTarget(
  * engine; 409 BUCKET_NOT_INDEXED when the engine has no dataset for the bucket
  * yet; 404 when the requested version is gone; 409 with the engine's message
  * when the version has no full-text index; 409 when the phrase index is being
- * rebuilt; 502 with an access message when Forge storage refused the tenant's
+ * rebuilt; 409 when the index was built with another embedding model or is
+ * being removed; 502 with an access message when Forge storage refused the tenant's
  * key; 502 for any other engine failure,
  * including a 404 from a wrong engine URL. Anything else is rethrown for the
  * error handler.
@@ -356,6 +361,21 @@ export function ragEngineErrorResponse(error: unknown): APIGatewayProxyStructure
           .body<ErrorResponse>({
             message:
               'The full-text index for this bucket is being rebuilt. Run Index now, then search again.',
+          })
+          .build();
+      case RagEngineErrorCode.EMBEDDING_MODEL_CHANGED:
+        return new ResponseBuilder()
+          .status(409)
+          .body<ErrorResponse>({
+            message:
+              'This index was built with a different embedding model. Run Index now to rebuild it, or use full-text search.',
+          })
+          .build();
+      case RagEngineErrorCode.DROP_IN_PROGRESS:
+        return new ResponseBuilder()
+          .status(409)
+          .body<ErrorResponse>({
+            message: "This bucket's index is being removed. Try again in a minute.",
           })
           .build();
       case RagEngineErrorCode.S3_ACCESS_DENIED:

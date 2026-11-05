@@ -384,6 +384,25 @@ describe('ragEngineErrorResponse', () => {
     expect(body.message).not.toContain('engine text');
   });
 
+  it('answers 409 saying the index needs a rebuild for EMBEDDING_MODEL_CHANGED', () => {
+    const response = ragEngineErrorResponse(engineError(409, 'EMBEDDING_MODEL_CHANGED'));
+    const body = JSON.parse(response.body as string);
+    expect(response.statusCode).toBe(409);
+    expect(body.code).toBeUndefined();
+    expect(body.message).toContain('different embedding model');
+    expect(body.message).toContain('Index now');
+    expect(body.message).not.toContain('engine text');
+  });
+
+  it('answers 409 saying the index is being removed for DROP_IN_PROGRESS', () => {
+    const response = ragEngineErrorResponse(engineError(409, 'DROP_IN_PROGRESS'));
+    const body = JSON.parse(response.body as string);
+    expect(response.statusCode).toBe(409);
+    expect(body.code).toBeUndefined();
+    expect(body.message).toContain('being removed');
+    expect(body.message).not.toContain('engine text');
+  });
+
   it('answers 502 saying the tenant key could not read the bucket for S3_ACCESS_DENIED', () => {
     const response = ragEngineErrorResponse(engineError(403, 'S3_ACCESS_DENIED'));
     const body = JSON.parse(response.body as string);
