@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "changes", "needs_verification", "manual_followups", "no_change_reason"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Short imperative summary of the docs change, under 70 characters, for example: Document the Expired status for access keys."
+    },
+    "changes": {
+      "type": "array",
+      "description": "One entry per file you edited or created.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "description"],
+        "properties": {
+          "file": { "type": "string", "description": "Path inside the docs repo." },
+          "description": {
+            "type": "string",
+            "description": "What changed in this file and which product code backs it."
+          }
+        }
+      }
+    },
+    "needs_verification": {
+      "type": "array",
+      "description": "Claims you wrote that the code alone cannot settle, such as behaviour in a specific region, a live config value, or the production state of a flag.",
+      "items": { "type": "string" }
+    },
+    "manual_followups": {
+      "type": "array",
+      "description": "Changes that are needed but that you may not make, such as a sidebars.js entry for a new page or a docusaurus.config.js meta tag.",
+      "items": { "type": "string" }
+    },
+    "no_change_reason": {
+      "type": "string",
+      "description": "When you edited nothing, why. Otherwise an empty string."
+    }
+  }
+}
