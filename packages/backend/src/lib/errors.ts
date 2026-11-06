@@ -67,6 +67,13 @@ export class AccessKeyValidationError extends Error {
   }
 }
 
+export class UnknownAccessKeyRegionError extends Error {
+  constructor(region: string, options?: ErrorOptions) {
+    super(`Access key stored against region "${region}", which is not a region we serve`, options);
+    this.name = 'UnknownAccessKeyRegionError';
+  }
+}
+
 export class NotImplementedError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
