@@ -4,7 +4,9 @@
 // module reads nothing at import and loads under plain node.
 
 import {
-  getAvailableRegions,
+  NETWORK_ID_BY_REGION,
+  networkIdForRegion,
+  regionsForNetwork,
   S3Region,
   supportsIamMethods,
   type StageLike,
@@ -18,19 +20,10 @@ import {
  * {@link S3Region} fail to compile until it has an entry here; the registry
  * test holds every built orchestrator's id to this map.
  */
-export const ORCHESTRATOR_ID_BY_REGION: Record<S3Region, string> = {
-  [S3Region.EuWest1]: 'aurora',
-  [S3Region.UsEast1]: 'fth',
-  [S3Region.EuCentral3]: 'forge',
-  [S3Region.UsEast9]: 'forgeDev',
-};
+export const ORCHESTRATOR_ID_BY_REGION = NETWORK_ID_BY_REGION;
 
 /** The orchestrator id behind a region, or undefined for a region the product does not know. */
-export function orchestratorIdForRegion(region: string): string | undefined {
-  return Object.values(S3Region).includes(region as S3Region)
-    ? ORCHESTRATOR_ID_BY_REGION[region as S3Region]
-    : undefined;
-}
+export const orchestratorIdForRegion = networkIdForRegion;
 
 /**
  * The regions an orchestrator serves on a stage, in {@link S3Region} order. An
@@ -40,7 +33,7 @@ export function orchestratorIdForRegion(region: string): string | undefined {
  * secret and builds nothing, so the console-facing key mapping can use it.
  */
 export function regionsForOrchestrator(id: string, stage: StageLike): S3Region[] {
-  return getAvailableRegions(stage).filter((region) => ORCHESTRATOR_ID_BY_REGION[region] === id);
+  return regionsForNetwork(id, stage);
 }
 
 /**
