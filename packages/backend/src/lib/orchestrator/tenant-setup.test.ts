@@ -210,6 +210,10 @@ describe('ensureTenantReady', () => {
         throwOnError: false,
       }),
     );
+    // The request carries no body: a tenant is not bound to a region. The
+    // assertion above matches on the fields it names, so it would pass with a
+    // body present; this is what holds the request to having none.
+    expect(mockPutTenant.mock.calls[0]?.[0]).not.toHaveProperty('body');
     expect(mockCreateAccessKey).toHaveBeenCalledWith(
       expect.objectContaining({
         client,
