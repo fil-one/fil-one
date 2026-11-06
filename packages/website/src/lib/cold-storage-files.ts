@@ -1,0 +1,307 @@
+// The cold storage model of FIL-1608, per file: which files a bucket's freeze
+// policies cover, when each one freezes, and what a restore or a "keep in
+// Standard" does to it. Pure functions over a bucket's record, so the rules
+// can be tested without the browser store that holds the record.
+
+import type { S3ObjectVersion } from '@filone/shared';
+
+export const MIN_TERM_DAYS = 90;
+export const WARM_MIN_DAYS = 14;
+export const MAX_RESTORE_DAYS = 365;
+/** Files below this size stay in Standard, as with AWS's lifecycle default. */
+export const MIN_FREEZE_FILE_BYTES = 128 * 1024;
+export const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How long a day and a restore wait last. The real flow freezes at a daily
+ * run and restores in about an hour; short waits shrink both so a demo can
+ * watch a freeze, a restore and a 2-week expiry happen.
+ */
+export interface Clock {
+  dayMs: number;
+  restoreWaitMs: number;
+}
+
+export const REAL_CLOCK: Clock = { dayMs: DAY_MS, restoreWaitMs: 60 * 60 * 1000 };
+export const SHORT_CLOCK: Clock = { dayMs: 10_000, restoreWaitMs: 10_000 };
+
+/** Freeze a bucket or a folder: every file under `prefix`, now and later. */
+export interface FolderFreezePolicy {
+  /** `''` for the whole bucket, else a folder such as `2025/`. */
+  prefix: string;
+  createdAt: number;
+}
+
+/** Freeze one file: the file named `key`, and any later upload under that name. */
+export interface FileFreezePolicy {
+  key: string;
+  createdAt: number;
+}
+
+export type FreezePolicy = FolderFreezePolicy | FileFreezePolicy;
+
+export function isFilePolicy(policy: FreezePolicy): policy is FileFreezePolicy {
+  return Object.hasOwn(policy, 'key');
+}
+
+export function isFolderPolicy(policy: FreezePolicy): policy is FolderFreezePolicy {
+  return !isFilePolicy(policy);
+}
+
+export function doesPolicyCover(policy: FreezePolicy, key: string): boolean {
+  return isFilePolicy(policy) ? policy.key === key : key.startsWith(policy.prefix);
+}
+
+/** A readable copy of one frozen file, tied to the version it was made from. */
+export interface FileRestore {
+  /** The restored version's last-modified time, so a newer upload drops the restore. */
+  lastModified: string;
+  readyAt: number;
+  expiresAt: number;
+}
+
+export interface BucketColdRecord {
+  policies: FreezePolicy[];
+  /** By file key. */
+  restores: Record<string, FileRestore>;
+  /** Files kept in Standard by a permanent restore, by key, with when. */
+  kept: Record<string, number>;
+  /** When "Freeze again" cleared a file's keep mark, by key: it freezes at the next run after. */
+  refrozen: Record<string, number>;
+}
+
+export const EMPTY_COLD_RECORD: BucketColdRecord = {
+  policies: [],
+  restores: {},
+  kept: {},
+  refrozen: {},
+};
+
+export interface StandardFile {
+  status: 'standard';
+  /** Covered by a freeze policy but under the 128 KB minimum. */
+  belowMinimum: boolean;
+}
+
+export interface KeptFile {
+  status: 'kept';
+}
+
+export interface ScheduledFile {
+  status: 'scheduled';
+  freezesAt: number;
+}
+
+interface FrozenTerm {
+  frozenAt: number;
+  termEndsAt: number;
+}
+
+export interface FrozenFile extends FrozenTerm {
+  status: 'frozen';
+}
+
+export interface RestoringFile extends FrozenTerm {
+  status: 'restoring';
+  readyAt: number;
+  expiresAt: number;
+}
+
+export interface RestoredFile extends FrozenTerm {
+  status: 'restored';
+  expiresAt: number;
+}
+
+export type FileColdState =
+  | StandardFile
+  | KeptFile
+  | ScheduledFile
+  | FrozenFile
+  | RestoringFile
+  | RestoredFile;
+
+/** A file with a frozen copy, whether or not a readable copy sits beside it. */
+export type ColdFile = FrozenFile | RestoringFile | RestoredFile;
+
+export function isColdFile(state: FileColdState): state is ColdFile {
+  return state.status === 'frozen' || state.status === 'restoring' || state.status === 'restored';
+}
+
+/** Frozen or still restoring: no readable copy yet, so download and share wait. */
+export function isLockedFile(state: FileColdState): boolean {
+  return state.status === 'frozen' || state.status === 'restoring';
+}
+
+const STANDARD: StandardFile = { status: 'standard', belowMinimum: false };
+
+/** The first daily run strictly after `timestamp`: midnight UTC in the real flow. */
+export function getNextRunAt(timestamp: number, clock: Clock): number {
+  return (Math.floor(timestamp / clock.dayMs) + 1) * clock.dayMs;
+}
+
+/** The oldest policy covering `key`, which decides when the file first froze. */
+export function findCoveringPolicy(
+  policies: FreezePolicy[],
+  key: string,
+): FreezePolicy | undefined {
+  return policies
+    .filter((policy) => doesPolicyCover(policy, key))
+    .reduce<FreezePolicy | undefined>(
+      (oldest, policy) => (oldest && oldest.createdAt <= policy.createdAt ? oldest : policy),
+      undefined,
+    );
+}
+
+/**
+ * Where one version of a file stands. Archives are flattened: only the latest
+ * version freezes, so an older version or a delete marker is always Standard.
+ * A file freezes at the first run after the latest of three moments: the
+ * policy's creation, the file's upload, and a "Freeze again".
+ */
+export function getFileColdState(
+  record: BucketColdRecord,
+  version: S3ObjectVersion,
+  now: number,
+  clock: Clock,
+): FileColdState {
+  if (!version.isLatest || version.isDeleteMarker) return STANDARD;
+  const policy = findCoveringPolicy(record.policies, version.key);
+  if (!policy) return STANDARD;
+  if (Object.hasOwn(record.kept, version.key)) return { status: 'kept' };
+  if (version.sizeBytes < MIN_FREEZE_FILE_BYTES) return { status: 'standard', belowMinimum: true };
+
+  const baseline = Math.max(
+    policy.createdAt,
+    Date.parse(version.lastModified),
+    record.refrozen[version.key] ?? 0,
+  );
+  const frozenAt = getNextRunAt(baseline, clock);
+  if (now < frozenAt) return { status: 'scheduled', freezesAt: frozenAt };
+
+  const term = { frozenAt, termEndsAt: frozenAt + MIN_TERM_DAYS * clock.dayMs };
+  const restore = record.restores[version.key];
+  if (!restore || restore.lastModified !== version.lastModified || now >= restore.expiresAt) {
+    return { ...term, status: 'frozen' };
+  }
+  return now < restore.readyAt
+    ? { ...term, status: 'restoring', readyAt: restore.readyAt, expiresAt: restore.expiresAt }
+    : { ...term, status: 'restored', expiresAt: restore.expiresAt };
+}
+
+/** RestoreObject's Days: a whole number from 1 to 365. */
+export function isValidRestoreDays(days: number): boolean {
+  return Number.isInteger(days) && days >= 1 && days <= MAX_RESTORE_DAYS;
+}
+
+/**
+ * The restore a request for `days` makes. The readable copy is kept, and
+ * billed, for at least 2 weeks, so its expiry always matches what is billed.
+ * Restoring a file that is already restored extends its copy, never shortening it.
+ */
+export function getRestoreAfterRequest(
+  existing: FileRestore | undefined,
+  request: { lastModified: string; days: number },
+  now: number,
+  clock: Clock,
+): FileRestore {
+  const keptMs = Math.max(request.days, WARM_MIN_DAYS) * clock.dayMs;
+  if (existing && existing.lastModified === request.lastModified && now < existing.expiresAt) {
+    const from = Math.max(now, existing.readyAt);
+    return { ...existing, expiresAt: Math.max(existing.expiresAt, from + keptMs) };
+  }
+  const readyAt = now + clock.restoreWaitMs;
+  return { lastModified: request.lastModified, readyAt, expiresAt: readyAt + keptMs };
+}
+
+export interface Tally {
+  files: number;
+  bytes: number;
+}
+
+/** What a bucket's listing holds, by where its bytes are billed. */
+export interface StorageBreakdown {
+  frozen: Tally;
+  /** Restoring and restored files: the frozen copy plus a readable one. */
+  restored: Tally;
+  scheduled: Tally;
+  /** Latest versions in Standard, kept files included. */
+  standard: Tally;
+  /** Noncurrent versions, which never freeze and bill as Standard until deleted. */
+  olderVersions: Tally;
+}
+
+function emptyTally(): Tally {
+  return { files: 0, bytes: 0 };
+}
+
+function getBreakdownSlot(
+  version: S3ObjectVersion,
+  state: FileColdState,
+): keyof StorageBreakdown | null {
+  if (version.isDeleteMarker) return null;
+  if (!version.isLatest) return 'olderVersions';
+  switch (state.status) {
+    case 'frozen':
+      return 'frozen';
+    case 'restoring':
+    case 'restored':
+      return 'restored';
+    case 'scheduled':
+      return 'scheduled';
+    default:
+      return 'standard';
+  }
+}
+
+export function getStorageBreakdown(
+  record: BucketColdRecord,
+  versions: S3ObjectVersion[],
+  now: number,
+  clock: Clock,
+): StorageBreakdown {
+  const breakdown: StorageBreakdown = {
+    frozen: emptyTally(),
+    restored: emptyTally(),
+    scheduled: emptyTally(),
+    standard: emptyTally(),
+    olderVersions: emptyTally(),
+  };
+  for (const version of versions) {
+    const slot = getBreakdownSlot(version, getFileColdState(record, version, now, clock));
+    if (!slot) continue;
+    breakdown[slot].files += 1;
+    breakdown[slot].bytes += version.sizeBytes;
+  }
+  return breakdown;
+}
+
+export interface ReplacedFile {
+  key: string;
+  state: ColdFile;
+}
+
+/**
+ * The files among `uploadKeys` whose upload replaces a frozen copy: those
+ * whose latest version is frozen, restoring or restored. Files still waiting
+ * for the daily run, kept in Standard or under 128 KB are Standard, so
+ * replacing them costs nothing extra.
+ */
+export function findReplacedColdFiles(
+  uploadKeys: string[],
+  versions: S3ObjectVersion[],
+  getState: (version: S3ObjectVersion) => FileColdState,
+): ReplacedFile[] {
+  const cold = new Map<string, ColdFile>();
+  for (const version of versions) {
+    const state = getState(version);
+    if (isColdFile(state)) cold.set(version.key, state);
+  }
+  return uploadKeys.flatMap((key) => {
+    const state = cold.get(key);
+    return state ? [{ key, state }] : [];
+  });
+}
+
+export function isInMinimumTerm(state: ColdFile, now: number): boolean {
+  return now < state.termEndsAt;
+}

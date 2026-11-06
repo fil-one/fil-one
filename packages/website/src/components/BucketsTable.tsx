@@ -5,6 +5,8 @@ import {
   FolderOpenIcon,
   LinkSimpleIcon,
   MagnifyingGlassIcon,
+  SnowflakeIcon,
+  ThermometerIcon,
   TrashIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
@@ -19,6 +21,7 @@ import { Tooltip } from './Tooltip';
 import { BucketsToolbar } from './BucketsToolbar';
 import { BucketActionMenu } from './BucketActionMenu';
 import { BucketStorageLine } from './BucketStorageLine';
+import { ColdStorageBadge } from './ColdStorageStatus';
 import { useToast } from './Toast';
 import { FILONE_STAGE } from '../env.js';
 import { useHasPermission } from '../lib/use-permissions.js';
@@ -31,6 +34,22 @@ import {
   type BucketSortKey,
   nextBucketSort,
 } from '../lib/bucket-table.js';
+import {
+  FREEZE_BLOCK_HINTS,
+  useBucketColdSummary,
+  useFreezeBlock,
+  useJustFroze,
+  type StorageFilter,
+} from '../lib/cold-storage-prototype.js';
+
+/** Opens the page's cold storage dialogs for one bucket (FIL-1608 prototype). */
+export type ColdStorageHandlers = {
+  onFreeze: (bucketName: string, region: S3Region) => void;
+  /** Loads the bucket's listing and opens the restore over every frozen file in it. */
+  onRestoreAll: (bucketName: string, region: S3Region) => void;
+  /** The toolbar's storage filter, omitted while no bucket is in cold storage. */
+  storageFilter?: { value: StorageFilter; onChange: (value: StorageFilter) => void };
+};
 
 /**
  * Columns dropped below `sm`. Four columns plus cell padding overflow a phone, and
@@ -52,6 +71,7 @@ type BucketsTableProps = {
   regions: string[];
   matchCount: number;
   totalCount: number;
+  coldStorage: ColdStorageHandlers;
 };
 
 export function BucketsTable({
@@ -65,6 +85,7 @@ export function BucketsTable({
   regions,
   matchCount,
   totalCount,
+  coldStorage,
 }: BucketsTableProps) {
   // Short lists are scannable as they are, so they keep plain, inert headers.
   const sortProps = (key: BucketSortKey) =>
@@ -84,6 +105,7 @@ export function BucketsTable({
           regions={regions}
           matchCount={matchCount}
           totalCount={totalCount}
+          storageFilter={coldStorage.storageFilter}
         />
       )}
 
@@ -97,7 +119,10 @@ export function BucketsTable({
           <Button
             id="buckets-clear-filters-button"
             variant="ghost"
-            onClick={() => onFiltersChange(EMPTY_BUCKET_FILTERS)}
+            onClick={() => {
+              onFiltersChange(EMPTY_BUCKET_FILTERS);
+              coldStorage.storageFilter?.onChange('all');
+            }}
           >
             Clear filters
           </Button>
@@ -120,7 +145,12 @@ export function BucketsTable({
           </Table.Header>
           <Table.Body>
             {buckets.map((bucket) => (
-              <BucketRow key={bucket.bucketName} bucket={bucket} onDelete={onDelete} />
+              <BucketRow
+                key={bucket.bucketName}
+                bucket={bucket}
+                onDelete={onDelete}
+                coldStorage={coldStorage}
+              />
             ))}
           </Table.Body>
         </Table>
@@ -137,12 +167,16 @@ function BucketRowActions({
   bucket,
   region,
   onDelete,
+  coldStorage,
 }: {
   bucket: Bucket;
-  region: string;
+  region: S3Region;
   onDelete: (name: string, region: string) => void;
+  coldStorage: ColdStorageHandlers;
 }) {
   const navigate = useNavigate();
+  const summary = useBucketColdSummary(bucket.bucketName, region);
+  const freezeBlock = useFreezeBlock();
   const { copy } = useCopyToClipboard();
   const { toast } = useToast();
   const mayDelete = useHasPermission('buckets.delete');
@@ -161,9 +195,34 @@ function BucketRowActions({
             void navigate({
               to: '/buckets/$bucketName',
               params: { bucketName: bucket.bucketName },
-              search: { region: region as S3Region },
+              search: { region },
             }),
         },
+        // Freezing is a rule over the bucket's files, so the item goes once the
+        // whole bucket has one. Restoring all files waits for the first daily
+        // run, before which nothing is frozen yet.
+        // A role that can't freeze never sees the item, like Delete below. The
+        // plan can change, so a trial sees it disabled with the reason.
+        ...(summary?.scope !== 'bucket' && freezeBlock !== 'role'
+          ? [
+              {
+                label: 'Freeze all files',
+                icon: SnowflakeIcon,
+                onSelect: () => coldStorage.onFreeze(bucket.bucketName, region),
+                disabled: freezeBlock !== null,
+                hint: freezeBlock ? FREEZE_BLOCK_HINTS[freezeBlock] : undefined,
+              },
+            ]
+          : []),
+        ...(summary && !summary.scheduled
+          ? [
+              {
+                label: 'Restore all files',
+                icon: ThermometerIcon,
+                onSelect: () => coldStorage.onRestoreAll(bucket.bucketName, region),
+              },
+            ]
+          : []),
         {
           label: 'Copy bucket name',
           icon: CopyIcon,
@@ -172,7 +231,7 @@ function BucketRowActions({
         {
           label: 'Copy S3 endpoint',
           icon: LinkSimpleIcon,
-          onSelect: () => copyValue('S3 endpoint', getS3Endpoint(region as S3Region, FILONE_STAGE)),
+          onSelect: () => copyValue('S3 endpoint', getS3Endpoint(region, FILONE_STAGE)),
         },
         // Deletion is `buckets.delete`: Owner and Admin only. The item is
         // absent for everyone else rather than disabled — a disabled Delete
@@ -192,17 +251,45 @@ function BucketRowActions({
   );
 }
 
+const FROZEN_ROW_CLASSES = [
+  'data-[cold-storage=frozen]:bg-(--color-row-frozen)',
+  'data-[cold-storage=frozen]:hover:bg-(--color-row-frozen-hover)',
+  'data-[cold-storage=frozen]:border-(--color-row-frozen-border)',
+  '[&:has(+tr[data-cold-storage=frozen])]:border-(--color-row-frozen-border)',
+].join(' ');
+
 function BucketRow({
   bucket,
   onDelete,
+  coldStorage,
 }: {
   bucket: Bucket;
   onDelete: (name: string, region: string) => void;
+  coldStorage: ColdStorageHandlers;
 }) {
-  const region = bucket.region ?? S3_REGION;
+  // The listing types region as a plain string; every bucket it returns is in a served region.
+  const region = (bucket.region ?? S3_REGION) as S3Region;
+  const summary = useBucketColdSummary(bucket.bucketName, region);
+  // The wash marks a bucket frozen as a whole, once its first daily run has passed.
+  const wholeBucketFrozen = summary?.scope === 'bucket' && !summary.scheduled;
+  const justFroze = useJustFroze(wholeBucketFrozen);
 
   return (
-    <Table.Row data-testid="bucket-row" data-bucket-name={bucket.bucketName}>
+    <Table.Row
+      data-testid="bucket-row"
+      data-bucket-name={bucket.bucketName}
+      // Cold storage prototype: a frozen bucket's row takes a cool wash, so it
+      // stands apart from the standard buckets around it before its pill is read.
+      // Keyed on the attribute rather than a plain class: the extra selector
+      // outranks Table.Row's own hover:bg-zinc-50, which Tailwind emits later
+      // and would otherwise turn a hovered frozen row grey. Both dividers take
+      // the wash's hue so the band has crisp edges; the one above belongs to
+      // the previous row, which `:has(+ …)` lets that row find out about.
+      data-cold-storage={wholeBucketFrozen ? 'frozen' : undefined}
+      // Plays the frost sweep in cold-storage.css once, as the bucket freezes.
+      data-freezing={justFroze || undefined}
+      className={FROZEN_ROW_CLASSES}
+    >
       {/* py-4 rather than the cell default: this is the only two-line cell, so it
           sets the row height, and 12px reads tight around a stacked pair. The
           other cells stay vertically centred against it. */}
@@ -235,16 +322,18 @@ function BucketRow({
               />
             </Tooltip>
           )}
+          {/* Cold storage prototype: only a bucket in cold storage says so. */}
+          {summary && <ColdStorageBadge summary={summary} />}
         </div>
         {/* The secondary line reserves its height in every state, so a row whose
             storage read fails doesn't sit shorter than its neighbours. */}
-        <div className="mt-1 flex min-h-4 items-center gap-1.5 text-xs text-zinc-500 tabular-nums">
+        <div className="mt-1 flex min-h-4 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-500 tabular-nums">
           {/* Region rides here below `sm`, where its column is hidden. */}
           <span className="flex items-center gap-1.5 sm:hidden">
             <RegionFlag region={region} />
             {region}
           </span>
-          <BucketStorageLine bucketName={bucket.bucketName} region={region as S3Region} />
+          <BucketStorageLine bucketName={bucket.bucketName} region={region} />
         </div>
       </Table.Cell>
       <Table.Cell className={`text-xs ${SECONDARY_COLUMN}`}>
@@ -261,7 +350,12 @@ function BucketRow({
         {formatDate(bucket.createdAt)}
       </Table.Cell>
       <Table.Cell className="text-right">
-        <BucketRowActions bucket={bucket} region={region} onDelete={onDelete} />
+        <BucketRowActions
+          bucket={bucket}
+          region={region}
+          onDelete={onDelete}
+          coldStorage={coldStorage}
+        />
       </Table.Cell>
     </Table.Row>
   );
