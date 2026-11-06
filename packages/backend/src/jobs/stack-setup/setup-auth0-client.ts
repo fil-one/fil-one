@@ -66,8 +66,8 @@ export async function setupAuth0Callbacks(
   const clientId = Resource.Auth0ClientId.value;
   const client = await getAuth0Client(domain, token, clientId);
 
-  // The same deployment answers on the canonical site URL and on each demo
-  // alias, and Auth0 matches callbacks and origins exactly (no wildcards for
+  // The same deployment answers on the canonical site URL and on each alias,
+  // and Auth0 matches callbacks and origins exactly (no wildcards for
   // https in production tenants), so every origin needs its own entry.
   const origins = [siteUrl, ...siteAliasUrls];
   const loginUrl = `${siteUrl}/login`;

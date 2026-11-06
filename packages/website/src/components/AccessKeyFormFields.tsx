@@ -95,7 +95,7 @@ export function AccessKeyFormFields({
           bucket list. */}
       {form.isOnIamRegion && canMintServiceKey && (
         <FormField label="What kind of key?">
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
             <RadioOption
               name="key-kind"
               value="principal"
@@ -112,7 +112,7 @@ export function AccessKeyFormFields({
               testId="access-key-type-service"
               checked={form.keyType === 'service'}
               onChange={() => form.setKeyType('service')}
-              description="Carries its own permissions and buckets. Bucket policies do not apply."
+              description="Has its own permissions. Ignores bucket policies."
             >
               Service key
             </RadioOption>
@@ -121,13 +121,16 @@ export function AccessKeyFormFields({
       )}
 
       {form.keyType === 'principal' ? (
-        <div data-testid="access-key-follows-bucket-policy">
-          <Alert
-            variant="blue"
-            assertive={false}
-            description="This key acts as you. What it can reach is decided by each bucket's policy."
-          />
-        </div>
+        // The Personal key option already says this when the choice is shown.
+        !canMintServiceKey && (
+          <div data-testid="access-key-follows-bucket-policy">
+            <Alert
+              variant="blue"
+              assertive={false}
+              description="This key acts as you. What it can reach is decided by each bucket's policy."
+            />
+          </div>
+        )
       ) : (
         <>
           {/* Permissions */}
@@ -164,7 +167,7 @@ export function AccessKeyFormFields({
       {/* Expiration */}
       <FormField
         label="When should it expire?"
-        description="Set an expiration date for added security"
+        description="Set an expiration date for added security."
       >
         <AccessKeyExpirationFields
           value={expiration}

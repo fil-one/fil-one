@@ -141,22 +141,23 @@ pnpm exec playwright install --with-deps
 
 #### Required env vars
 
-| Variable                                                          | Purpose                                               |
-| ----------------------------------------------------------------- | ----------------------------------------------------- |
-| `BASE_URL`                                                        | The deployed app URL (e.g. `https://staging.fil.one`) |
-| `E2E_PAID_EMAIL` / `E2E_PAID_PASSWORD` / `E2E_PAID_USER_ID`       | Paid test user (`_USER_ID` is the FilOne user id)     |
-| `E2E_UNPAID_EMAIL` / `E2E_UNPAID_PASSWORD` / `E2E_UNPAID_USER_ID` | Unpaid test user                                      |
-| `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`    | Trial test user                                       |
+| Variable                                                                | Purpose                                                                  |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `BASE_URL`                                                              | The deployed app URL (e.g. `https://staging.fil.one`)                    |
+| `E2E_PAID_EMAIL` / `E2E_PAID_PASSWORD` / `E2E_PAID_USER_ID`             | Paid test user (`_USER_ID` is the FilOne user id)                        |
+| `E2E_UNPAID_EMAIL` / `E2E_UNPAID_PASSWORD` / `E2E_UNPAID_USER_ID`       | Unpaid test user                                                         |
+| `E2E_TRIAL_EMAIL` / `E2E_TRIAL_PASSWORD` / `E2E_TRIAL_USER_ID`          | Trial test user                                                          |
+| `E2E_DISABLED_EMAIL` / `E2E_DISABLED_PASSWORD` / `E2E_DISABLED_USER_ID` | Disabled test user (see [Disabled test account](#disabled-test-account)) |
 
-In CI, all nine credential vars come from GitHub repository secrets (see [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)). Both workflows also configure AWS via OIDC (using `vars.AWS_ROLE_ARN`), so the setup can invoke the staging `AccountStateTestHelper` Lambda and the org specs can seed their DynamoDB rows. The E2E jobs in both workflows share the `e2e-staging` concurrency group, so only one Playwright run touches staging at a time. A nightly or manual run of `e2e-staging.yaml` skips itself while a push to main has reached `deploy-staging` and its post-deploy E2E job has not finished, because that job tests the same suite.
+In CI, all twelve credential vars come from GitHub repository secrets. The post-deploy run ([.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)) and the nightly run ([.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml)) both call [.github/workflows/e2e-suites.yaml](.github/workflows/e2e-suites.yaml), which holds the Playwright setup and also configures AWS via OIDC (using `vars.AWS_ROLE_ARN`), so the setup can invoke the staging `AccountStateTestHelper` Lambda and the org specs can seed their DynamoDB rows. Each suite (destructive with smoke, multi-org, policies) runs as its own job with its own accounts; each job runs Chromium, Firefox and WebKit one after another. A suite's jobs in both workflows share an `e2e-staging-<suite>` concurrency group, so only one run of a suite touches staging at a time. A nightly or manual run of `e2e-staging.yaml` skips itself while a push to main has reached `deploy-staging` and its post-deploy E2E jobs have not finished, because those jobs test the same suites.
 
 #### Seeded buckets per region
 
-The bucket/upload tests in `tests/e2e/destructive/buckets.spec.ts` run once per S3 region (`eu-west-1` and `us-east-1`, see `tests/e2e/destructive/regions.util.ts`) and reuse existing buckets rather than creating them (the account-wide bucket limit is 100 and buckets are not yet deletable). Each test account — paid, unpaid, and trial — must therefore have at least one bucket in **each** region on the target stage; otherwise the test fails with a `No <region> bucket found` error.
+The bucket/upload tests in `tests/e2e/destructive/buckets.spec.ts` run once per S3 region (`eu-west-1` and `us-east-1`, see `tests/e2e/destructive/regions.util.ts`) and reuse existing buckets rather than creating them (the account-wide bucket limit is 100 and buckets are not yet deletable). Each test account (paid, unpaid, trial and disabled) must therefore have at least one bucket in **each** region on the target stage; otherwise the test fails with a `No <region> bucket found` error.
 
-Seeding is automatic for all three accounts: the `seed-buckets` Playwright project ([tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts)) runs after `setup` and calls `ensureBucketInEachRegion` ([tests/e2e/destructive/buckets.util.ts](tests/e2e/destructive/buckets.util.ts)), which creates a bucket only for regions where the account has none. This keeps the suite working when a stage resets its storage layer and all buckets disappear; creation stays conditional so repeated runs do not leak buckets toward the 100-bucket limit.
+Seeding is automatic for all four accounts: the `destructive-seed-buckets` Playwright project ([tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts)) runs after `destructive-setup` and calls `ensureBucketInEachRegion` ([tests/e2e/destructive/buckets.util.ts](tests/e2e/destructive/buckets.util.ts)), which creates a bucket only for regions where the account has none. This keeps the suite working when a stage resets its storage layer and all buckets disappear; creation stays conditional so repeated runs do not leak buckets toward the 100-bucket limit.
 
-The **unpaid** account is `past_due`, and the subscription guard rejects write requests in that state with 403 `GRACE_PERIOD_WRITE_BLOCKED`. For that role the seeding step switches the account to the `paid` state (`setAccountState` in [tests/e2e/destructive/account-state.util.ts](tests/e2e/destructive/account-state.util.ts)), creates the missing buckets, then restores the `unpaid` state in a `finally` block — before any spec runs, so the dashboard and upload tests still see the write-blocked state.
+The **unpaid** account is `past_due`, and the subscription guard rejects write requests in that state with 403 `GRACE_PERIOD_WRITE_BLOCKED`. For that role the seeding step switches the account to the `paid` state (`setAccountState` in [tests/e2e/destructive/account-state.util.ts](tests/e2e/destructive/account-state.util.ts)), creates the missing buckets, then restores the `unpaid` state in a `finally` block — before any spec runs, so the dashboard and upload tests still see the write-blocked state. The **disabled** account takes the same detour from its `disabled` state.
 
 If the bucket list itself fails (`GET /api/buckets` returning a 5xx, e.g. when a stage's per-tenant S3 credentials in SSM have gone stale), the seeding step fails loudly with the status and response body rather than mistaking the error for an empty account — and because the browser projects depend on it, the whole run stops.
 
@@ -172,7 +173,8 @@ BASE_URL=https://staging.fil.one \
 E2E_PAID_EMAIL=...   E2E_PAID_PASSWORD=...   E2E_PAID_USER_ID=<uuid> \
 E2E_UNPAID_EMAIL=... E2E_UNPAID_PASSWORD=... E2E_UNPAID_USER_ID=<uuid> \
 E2E_TRIAL_EMAIL=...  E2E_TRIAL_PASSWORD=...  E2E_TRIAL_USER_ID=<uuid> \
-pnpm test:e2e --project=chromium
+E2E_DISABLED_EMAIL=... E2E_DISABLED_PASSWORD=... E2E_DISABLED_USER_ID=<uuid> \
+pnpm test:e2e --project=destructive-chromium
 ```
 
 Your local AWS credentials (e.g. via `aws sso login`) must be allowed to invoke the stage's `AccountStateTestHelper` Lambda (`lambda:InvokeFunction`) and to write the stage's DynamoDB tables, which the org specs seed directly.
@@ -216,19 +218,37 @@ The `.auth/` directory is gitignored — the JSON files are regenerated on every
 2. Add an entry to `STORAGE_STATE` in [tests/e2e/destructive/roles.util.ts](tests/e2e/destructive/roles.util.ts).
 3. Add the role to the `roles` array in [tests/e2e/destructive/auth.setup.ts](tests/e2e/destructive/auth.setup.ts) (with `email`, `password`, `userId`).
 4. Add `E2E_<ROLE>_EMAIL`, `E2E_<ROLE>_PASSWORD`, `E2E_<ROLE>_USER_ID` to `REQUIRED_CREDENTIAL_VARS` in the same file.
-5. Add the same three vars to the `env:` block in both [.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml), and provision the corresponding GitHub secrets.
+5. Add the same three vars to [.github/workflows/e2e-suites.yaml](.github/workflows/e2e-suites.yaml), under `on.workflow_call.secrets` and in the job's `env:` block, pass them under `secrets:` from both callers ([.github/workflows/e2e-staging.yaml](.github/workflows/e2e-staging.yaml) and [.github/workflows/test-staging.yaml](.github/workflows/test-staging.yaml)), and provision the corresponding GitHub secrets. `actionlint` reports a secret a caller forgot to pass.
 6. If the role needs a seeded bucket per region, add it to `SEED_PLAN` in [tests/e2e/destructive/buckets.setup.ts](tests/e2e/destructive/buckets.setup.ts), with `needsActiveSubscription: true` when its desired subscription state blocks writes.
+
+#### Disabled test account
+
+[tests/e2e/destructive/tenant-disable.spec.ts](tests/e2e/destructive/tenant-disable.spec.ts) checks that disabling an account cuts off the presigned URLs it already handed out (FIL-413). It runs on the `disabled` account, which rests in the `disabled` state: a canceled subscription and disabled tenants. Before its tests the spec switches the account to `paid`. In every region it then uploads an object, presigns a GET for it and checks that the URL serves the object. It switches the account to `disabled` afterwards. Each region gets two tests:
+
+- The URL minted before the disable must answer 403 within 60 s.
+- A new `POST /api/presign` for a GET must answer 403 `SUBSCRIPTION_CANCELED`.
+
+The account needs a one-time setup on each stage the suite runs against (staging only; the suite does not run against production, and the Lambda is not deployed there):
+
+1. Deploy the stage with the `AccountStateTestHelper` Lambda.
+2. Sign up on the stage's console with email and password, using a dedicated address, and verify the email. Only a verified email gets a trial.
+3. Log in once and open the dashboard. The first `GET /api/billing` claims the trial, which writes the org's `ORG#{orgId}/SUBSCRIPTION` row in the BillingTable; the Lambda refuses an org without one.
+4. In the same browser session, open `/api/org/members` on the stage's console (e.g. https://staging.fil.one/api/org/members). A new account is alone in its org, so the only member's `userId` is the account's FilOne user id. `bin/e2e-register-policy-users.ts` reads it the same way.
+5. Add the GitHub secrets `E2E_DISABLED_EMAIL`, `E2E_DISABLED_PASSWORD` and `E2E_DISABLED_USER_ID`. Do this before the spec lands on `main`: `auth.setup.ts` fails the whole run when any of them is missing, and the staging workflows run after every deploy.
+6. For local runs, export the same three variables or put them in `.env.e2e.local`.
+
+The first run seeds a bucket in every region (`destructive-seed-buckets`) and leaves the account disabled. A new account has no tenant in any region until its first bucket there, and a region still setting one up answers bucket creation with 503 "We are still setting up the region for you". If the first `destructive-seed-buckets` run fails that way, run it again.
 
 #### Multi-org suite
 
-`tests/e2e/multi-org` runs in its own `multi-org` Playwright project on three accounts of its own: owner, member and fresh. Its credentials are `E2E_ORG_{OWNER,MEMBER,FRESH}_{EMAIL,PASSWORD,AUTH0_ID}`, where `_AUTH0_ID` is the account's Auth0 `sub`. In CI they come from GitHub secrets like the credentials above. Locally, put them in `.env.e2e.local`, which `playwright.config.ts` loads. The accounts need verified emails, because the setup ([tests/e2e/multi-org/login.setup.ts](tests/e2e/multi-org/login.setup.ts)) names the owner's and member's home orgs and claims their trials, and a trial is only granted to a verified email. Both setup projects grant every E2E account the organizations beta (its `ALLOWLIST#{email}` row), which creating orgs, Members and the audit log require. Each spec resets the rows it seeds, so runs repeat cleanly.
+`tests/e2e/multi-org` runs in its own `multi-org-*` Playwright projects on three accounts of its own: owner, member and fresh. Its credentials are `E2E_ORG_{OWNER,MEMBER,FRESH}_{EMAIL,PASSWORD,AUTH0_ID}`, where `_AUTH0_ID` is the account's Auth0 `sub`. In CI they come from GitHub secrets like the credentials above. Locally, put them in `.env.e2e.local`, which `playwright.config.ts` loads. The accounts need verified emails, because the setup ([tests/e2e/multi-org/login.setup.ts](tests/e2e/multi-org/login.setup.ts)) names the owner's and member's home orgs and claims their trials, and a trial is only granted to a verified email. Each spec resets the rows it seeds, so runs repeat cleanly.
 
-Against staging it runs as part of `pnpm test:e2e`. Against a [local stack](#local-stack) whose console runs on a port other than 5173, keep `BASE_URL` at `https://localhost:5173`, the only origin Auth0 accepts, and set `E2E_ORIGIN_REWRITE` to the real origin. The fixture then reroutes the browser's requests there:
+Run it with `pnpm test:e2e:multi-org`, which runs every `multi-org-*` project one test at a time, as CI does. The three browsers share the suite's accounts, so a run without `--workers=1` lets one browser's specs reset the accounts under another's. `pnpm test:e2e` runs every project without that limit; against staging it is what CI runs, with one worker. Against a [local stack](#local-stack) whose console runs on a port other than 5173, keep `BASE_URL` at `https://localhost:5173`, the only origin Auth0 accepts, and set `E2E_ORIGIN_REWRITE` to the real origin. The fixture then reroutes the browser's requests there:
 
 ```bash
 eval "$(floci env)"; export LOCAL=true AWS_REGION=us-east-1
 BASE_URL=https://localhost:5173 E2E_ORIGIN_REWRITE=https://localhost:5185 \
-  pnpm exec sst shell --stage local-org -- pnpm exec playwright test --project=multi-org --workers=1
+  SST_STAGE=local-org pnpm test:e2e:multi-org
 ```
 
 ### Integration Tests

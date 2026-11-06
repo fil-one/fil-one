@@ -84,9 +84,10 @@ describe('AccessKeyFormFields — on a region serving the iam access model', () 
     expect(screen.queryByText('Which buckets can this key access?')).not.toBeInTheDocument();
   });
 
-  it("explains that a personal key follows each bucket's policy", async () => {
+  it('leaves out the personal key note when the key-type choice already explains it', async () => {
     renderForm(() => {});
-    expect(await screen.findByText(PERSONAL_KEY_NOTE)).toBeInTheDocument();
+    expect(await screen.findByText('What kind of key?')).toBeInTheDocument();
+    expect(screen.queryByText(PERSONAL_KEY_NOTE)).not.toBeInTheDocument();
   });
 
   it.each([OrgRole.Owner, OrgRole.Admin])(

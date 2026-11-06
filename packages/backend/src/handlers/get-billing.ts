@@ -52,6 +52,15 @@ export async function baseHandler(
     return inactiveResponse(billingRecord);
   }
 
+  // An org billed manually has no price, period or card here: its terms are in
+  // the agreement, and any Stripe ids on the row belong to the trial it left.
+  if (storedStatus === SubscriptionStatus.Manual) {
+    const response: BillingInfo = {
+      subscription: { planId: PlanId.Manual, status: SubscriptionStatus.Manual },
+    };
+    return new ResponseBuilder().status(200).body(response).build();
+  }
+
   // 3. Status but no Stripe customer (webhook-born or legacy records) → report
   // the stored status; there is no customer to look up, so no Stripe call.
   // The minimum still comes from the cached price snapshot when the record

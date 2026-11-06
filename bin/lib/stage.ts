@@ -13,14 +13,49 @@
 
 import { execFileSync } from 'node:child_process';
 
+/** One resource from `sst state export`, with the outputs the scripts read. */
+export interface StateResource {
+  type: string;
+  urn: string;
+  outputs?: { name?: string; arn?: string };
+}
+
 /**
- * Physical DynamoDB table names for a stage, read from `sst state export`.
+ * Every deployed resource of a stage, read from `sst state export`.
  *
  * Not `sst shell`: the shell cannot evaluate pulumi providers against
  * production, so a `Resource.*` binding only works on stages a dev machine can
  * fully resolve. Exported state is data, and works everywhere — the same
  * pattern as bin/rag-access.ts and bin/aurora-preview-url.ts. AWS calls then
  * use the caller's ambient credentials.
+ *
+ * The export takes several seconds, so a script that needs several resources
+ * runs it once and passes the result to the lookups below.
+ */
+export function exportStageState(stage: string): StateResource[] {
+  const json = execFileSync('pnpm', ['exec', 'sst', 'state', 'export', '--stage', stage], {
+    encoding: 'utf8',
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  return JSON.parse(json).latest?.resources ?? [];
+}
+
+/**
+ * The physical name of the resource of `type` whose URN ends with `urnSuffix`,
+ * or undefined when the stage has none.
+ */
+export function findResourceName(
+  resources: StateResource[],
+  type: string,
+  urnSuffix: string,
+): string | undefined {
+  return resources.find((resource) => resource.type === type && resource.urn.endsWith(urnSuffix))
+    ?.outputs?.name;
+}
+
+/**
+ * Physical DynamoDB table names for a stage.
  *
  * `tables` maps a label to its state URN suffix — SST names a table component's
  * pulumi resource `<LogicalName>Table`, so `UserInfoTable` is found by
@@ -29,29 +64,19 @@ import { execFileSync } from 'node:child_process';
 export function resolveStageTables<K extends string>(
   stage: string,
   tables: Record<K, string>,
+  resources: StateResource[] = exportStageState(stage),
 ): Record<K, string> {
-  const json = execFileSync('pnpm', ['exec', 'sst', 'state', 'export', '--stage', stage], {
-    encoding: 'utf8',
-    maxBuffer: 256 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-  const resources: Array<{ type: string; urn: string; outputs?: { name?: string } }> =
-    JSON.parse(json).latest?.resources ?? [];
-
   const resolved = {} as Record<K, string>;
   for (const [label, urnSuffix] of Object.entries(tables) as [K, string][]) {
-    const table = resources.find(
-      (resource) =>
-        resource.type === 'aws:dynamodb/table:Table' && resource.urn.endsWith(urnSuffix),
-    );
-    if (!table?.outputs?.name) {
+    const tableName = findResourceName(resources, 'aws:dynamodb/table:Table', urnSuffix);
+    if (!tableName) {
       console.error(
         `No ${label} (urn suffix "${urnSuffix}") in the exported state for stage "${stage}". ` +
           'Is the stage deployed, and does it contain the table?',
       );
       process.exit(1);
     }
-    resolved[label] = table.outputs.name;
+    resolved[label] = tableName;
   }
   return resolved;
 }

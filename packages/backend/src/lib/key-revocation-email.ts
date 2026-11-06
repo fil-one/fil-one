@@ -1,6 +1,12 @@
 import { formatRegion } from '@filone/shared';
 import type { OrgRole, AccessKeySummary } from '@filone/shared';
 import validator from 'validator';
+import {
+  EMAIL_COLORS,
+  EMAIL_MONO_FONT_STACK,
+  renderEmailLayout,
+  renderParagraph,
+} from './email-layout.ts';
 import { sendMail } from './mailer.ts';
 import type { OrgProfileItem } from './org-profile.ts';
 import { readUserProfile } from './user-profile.ts';
@@ -174,12 +180,37 @@ function buildTextBody(lines: BodyLines, keys: readonly AccessKeySummary[]): str
 
 function buildHtmlBody(lines: BodyLines, keys: readonly AccessKeySummary[]): string {
   const esc = validator.escape;
-  return [
-    `<p>${esc(lines.opening)}</p>`,
-    '<ul>',
-    ...keys.map((key) => `<li>${esc(describeKey(key))}</li>`),
-    '</ul>',
-    `<p>${esc(lines.cause)} ${esc(lines.changedBy)}</p>`,
-    `<p>${esc(lines.nextStep)}</p>`,
-  ].join('\n');
+  return renderEmailLayout({
+    heading: keys.length === 1 ? 'Your access key was revoked' : 'Your access keys were revoked',
+    preheader: lines.opening,
+    contentHtml: [
+      renderParagraph(esc(lines.opening)),
+      renderKeyList(keys),
+      renderParagraph(`${esc(lines.cause)} ${esc(lines.changedBy)}`),
+      renderParagraph(esc(lines.nextStep)),
+    ].join('\n'),
+    consoleUrl: process.env.WEBSITE_URL,
+  });
+}
+
+/**
+ * The revoked keys as a bordered list, like the console's table containers:
+ * the name leads, the id suffix in mono beside it, region and creation date
+ * below.
+ */
+function renderKeyList(keys: readonly AccessKeySummary[]): string {
+  const esc = validator.escape;
+  const rows = keys.map((key, index) => {
+    const divider = index === 0 ? '' : `border-top:1px solid ${EMAIL_COLORS.zinc200};`;
+    const suffix = key.accessKeyIdSuffix
+      ? ` <span style="font-family:${EMAIL_MONO_FONT_STACK};font-size:12px;font-weight:400;color:${EMAIL_COLORS.zinc500};">…${esc(key.accessKeyIdSuffix)}</span>`
+      : '';
+    return `<tr><td style="padding:10px 12px;${divider}">
+<div style="font-size:13px;line-height:19.5px;font-weight:500;color:${EMAIL_COLORS.zinc900};">${esc(key.keyName)}${suffix}</div>
+<div style="font-size:12px;line-height:16px;color:${EMAIL_COLORS.zinc500};">${esc(formatRegion(key.region))} · <span style="white-space:nowrap;">created ${esc(key.createdAt.slice(0, 10))}</span></div>
+</td></tr>`;
+  });
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;border:1px solid ${EMAIL_COLORS.zinc200};border-radius:8px;border-collapse:separate;">
+${rows.join('\n')}
+</table>`;
 }

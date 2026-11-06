@@ -24,6 +24,7 @@ import {
   putObject,
   toCanonicalPolicy,
   ConsoleApi,
+  IS_BEHIND_CLOUDFRONT,
   PAYLOAD,
   REGION,
   SEEDED_KEY,
@@ -47,7 +48,9 @@ const memberCreatedBucket = generateBucketName('api3');
 
 let owner: ConsoleApi;
 let member: ConsoleApi;
-const createdKeys: { api: ConsoleApi; id: string }[] = [];
+/** The key the beforeAll seeds the buckets with, deleted in afterAll. */
+const seedingKeys: { api: ConsoleApi; id: string }[] = [];
+const testKeys: { api: ConsoleApi; id: string }[] = [];
 
 test.beforeAll(async () => {
   const orgId = await resolvePersonalOrgId(ownerId);
@@ -55,9 +58,17 @@ test.beforeAll(async () => {
   member = await ConsoleApi.open('member', orgId);
   await owner.createBucket(seededBucket);
   await owner.createBucket(secondSeededBucket);
-  const ownerS3 = await createS3ClientWithNewKey(owner, createdKeys);
+  const ownerS3 = await createS3ClientWithNewKey(owner, seedingKeys);
   await putObject(ownerS3, seededBucket, SEEDED_KEY);
   await putObject(ownerS3, secondSeededBucket, SEEDED_KEY);
+});
+
+// A policy write revokes the grants of every live key its principals hold, so
+// the keys a test creates go when it ends.
+test.afterEach(async () => {
+  await runCleanup(
+    testKeys.splice(0).map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
+  );
 });
 
 test.afterAll(async () => {
@@ -68,13 +79,13 @@ test.afterAll(async () => {
       label: `bucket ${bucket}`,
       run: () => emptyAndDeleteBucket(owner, ownerId, bucket),
     })),
-    ...createdKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
+    ...seedingKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
   ]);
   await owner.dispose();
   await member.dispose();
 });
 
-test('1. a new bucket names only its creator', async () => {
+test('a new bucket names only its creator', { tag: '@api' }, async () => {
   const { policy, etag } = await owner.readPolicy(seededBucket);
   expect(toCanonicalPolicy(policy)).toEqual(
     toCanonicalPolicy(buildCreatorPolicy(seededBucket, ownerId)),
@@ -82,21 +93,21 @@ test('1. a new bucket names only its creator', async () => {
   expect(etag).toEqual(expect.any(String));
 });
 
-test('2. the owner key writes, reads and deletes an object', async () => {
-  const s3 = await createS3ClientWithNewKey(owner, createdKeys);
+test('the owner key writes, reads and deletes an object', { tag: '@api' }, async () => {
+  const s3 = await createS3ClientWithNewKey(owner, testKeys);
   expect(await getS3Outcome(putObject(s3, seededBucket, 'owner-write.txt'))).toBe('ok');
   const got = await s3.send(new GetObjectCommand({ Bucket: seededBucket, Key: 'owner-write.txt' }));
   expect(Buffer.from(await got.Body!.transformToByteArray())).toEqual(PAYLOAD);
   expect(await getS3Outcome(deleteObject(s3, seededBucket, 'owner-write.txt'))).toBe('ok');
 });
 
-test('3. a member no statement names cannot see the bucket', async () => {
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+test('a member no statement names cannot see the bucket', { tag: '@api' }, async () => {
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   expect(await getS3Outcome(listObjects(s3, seededBucket))).toBe('404 NoSuchBucket');
 });
 
-test('4. S3 lists every bucket to the member, the console only theirs', async () => {
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+test('S3 lists every bucket to the member, the console only theirs', { tag: '@api' }, async () => {
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   const { Buckets = [] } = await s3.send(new ListBucketsCommand({}));
   const ours = new Set([seededBucket, secondSeededBucket]);
   const byName = (a: string, b: string) => a.localeCompare(b);
@@ -108,12 +119,12 @@ test('4. S3 lists every bucket to the member, the console only theirs', async ()
   expect((await member.listBucketNames()).filter((n) => ours.has(n))).toEqual([]);
 });
 
-test('5. an allow grants exactly its actions on its bucket', async () => {
+test('an allow grants exactly its actions on its bucket', { tag: '@api' }, async () => {
   await owner.replaceStatements(seededBucket, [
     grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket', 's3:GetObject'], 'member-read'),
   ]);
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   const listed = await listObjects(s3, seededBucket);
   expect(listed.Contents?.map((o) => o.Key)).toEqual([SEEDED_KEY]);
   expect(
@@ -125,13 +136,13 @@ test('5. an allow grants exactly its actions on its bucket', async () => {
   ).toEqual(['ok', '403 AccessDenied', '404 NoSuchBucket']);
 });
 
-test('6. a deny beats an allow', async () => {
+test('a deny beats an allow', { tag: '@api' }, async () => {
   await owner.replaceStatements(seededBucket, [
     grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket', 's3:GetObject'], 'member-read'),
     deny([memberId], ['s3:GetObject'], 'no-get'),
   ]);
-  const s3 = await createS3ClientWithNewKey(member, createdKeys);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
   expect(
     await Promise.all([
       getS3Outcome(s3.send(new GetObjectCommand({ Bucket: seededBucket, Key: SEEDED_KEY }))),
@@ -140,13 +151,13 @@ test('6. a deny beats an allow', async () => {
   ).toEqual(['403 AccessDenied', 'ok']);
 });
 
-test('7. a removed grant applies to a key the gateway has cached', async () => {
+test('a removed grant applies to a key the gateway has cached', { tag: '@api' }, async () => {
   await owner.replaceStatements(seededBucket, [
     grantAllToOwner(ownerId),
     allow([memberId], ['s3:ListBucket'], 'member-list'),
   ]);
   // A first call makes the gateway cache the key with the grant.
-  const cachedS3 = await createS3ClientWithNewKey(member, createdKeys);
+  const cachedS3 = await createS3ClientWithNewKey(member, testKeys);
   expect(await getS3Outcome(listObjects(cachedS3, seededBucket))).toBe('ok');
 
   await owner.replaceStatements(seededBucket, [grantAllToOwner(ownerId)]);
@@ -155,45 +166,103 @@ test('7. a removed grant applies to a key the gateway has cached', async () => {
     .toBe('404 NoSuchBucket');
 });
 
-test('8. a write under a stale If-Match is refused with 412 POLICY_CONFLICT', async () => {
-  const { etag: stale } = await owner.readPolicy(seededBucket);
-  await owner.replaceStatements(seededBucket, [
-    grantAllToOwner(ownerId),
-    allow([memberId], ['s3:ListBucket']),
-  ]);
-  const before = await owner.readPolicy(seededBucket);
+test(
+  'a write under a stale If-Match is refused with 412 POLICY_CONFLICT',
+  { tag: '@api' },
+  async () => {
+    const { etag: stale } = await owner.readPolicy(seededBucket);
+    await owner.replaceStatements(seededBucket, [
+      grantAllToOwner(ownerId),
+      allow([memberId], ['s3:ListBucket']),
+    ]);
+    const before = await owner.readPolicy(seededBucket);
+    const res = await owner.putPolicy(seededBucket, {
+      policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
+      etag: stale,
+    });
+    expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
+    expect(await owner.readPolicy(seededBucket)).toEqual(before);
+  },
+);
+
+test('a write under the weak form of the ETag replaces the policy', { tag: '@api' }, async () => {
+  // A write answers 204 with no body, which CloudFront never compresses, so
+  // the ETag it returns is strong on every stage.
+  const etag = await owner.replaceStatements(seededBucket, [grantAllToOwner(ownerId)]);
+
   const res = await owner.putPolicy(seededBucket, {
-    policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
-    etag: stale,
+    policy: buildBucketPolicy(seededBucket, [
+      grantAllToOwner(ownerId),
+      allow([memberId], ['s3:ListBucket']),
+    ]),
+    etag: `W/${etag}`,
   });
-  expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
-  expect(await owner.readPolicy(seededBucket)).toEqual(before);
+  expect({ isWeak: etag.startsWith('W/'), status: res.status() }, await res.text()).toEqual({
+    isWeak: false,
+    status: 204,
+  });
 });
 
-test('9. creating a policy under If-None-Match: * where one exists is refused with 412 POLICY_CONFLICT', async () => {
-  const res = await owner.putPolicy(seededBucket, {
-    policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
-  });
-  expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
-});
+// CloudFront gzips an API response of 1,000 bytes or more and marks its ETag
+// weak. Twelve member statements put the policy read at 2,000 bytes or more,
+// well clear of that threshold.
+test(
+  'a policy read of 2,000 bytes or more carries a weak ETag that a write accepts',
+  { tag: '@api' },
+  async () => {
+    test.skip(!IS_BEHIND_CLOUDFRONT, 'a local stage has no CloudFront to compress the read');
+    await owner.replaceStatements(seededBucket, [
+      grantAllToOwner(ownerId),
+      ...Array.from({ length: 12 }, (_, i) =>
+        allow([memberId], ['s3:GetObject'], `member-read-${i}`),
+      ),
+    ]);
+    const read = await owner.fetchPolicyResponse(seededBucket);
+    expect(
+      (await read.body()).byteLength,
+      'the policy read must be 2,000 bytes or more',
+    ).toBeGreaterThanOrEqual(2000);
+    const etag = read.headers().etag!;
+
+    const res = await owner.putPolicy(seededBucket, {
+      policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
+      etag,
+    });
+    expect({ isWeak: etag.startsWith('W/'), status: res.status() }).toEqual({
+      isWeak: true,
+      status: 204,
+    });
+  },
+);
+
+test(
+  'creating a policy under If-None-Match: * where one exists is refused with 412 POLICY_CONFLICT',
+  { tag: '@api' },
+  async () => {
+    const res = await owner.putPolicy(seededBucket, {
+      policy: buildBucketPolicy(seededBucket, [grantAllToOwner(ownerId)]),
+    });
+    expect([res.status(), (await res.json()).code]).toEqual([412, 'POLICY_CONFLICT']);
+  },
+);
 
 const refusedPolicies: [string, UnboundStatement[]][] = [
   [
-    '10a. a policy with an unknown action is refused',
+    'a policy with an unknown action is refused',
     [{ ...allow([memberId], ['s3:GetObject']), Action: ['s3:Unknown' as PolicyAction] }],
   ],
   [
-    '10b. a policy with * inside a Principal list is refused',
+    'a policy with * inside a Principal list is refused',
     [{ ...allow([memberId], ['s3:GetObject']), Principal: { AWS: ['*'] } }],
   ],
-  ['10c. a policy with no statements is refused', []],
+  ['a policy with no statements is refused', []],
   [
-    '10d. a policy naming a principal id nobody in the tenant holds is refused',
+    'a policy naming a principal id nobody in the tenant holds is refused',
     [grantAllToOwner(ownerId), allow([randomUUID()], ['s3:GetObject'])],
   ],
 ];
 for (const [title, statements] of refusedPolicies) {
-  test(title, async () => {
+  test(title, { tag: '@api' }, async () => {
     const { etag } = await owner.readPolicy(seededBucket);
     const res = await owner.putPolicy(seededBucket, {
       policy: buildBucketPolicy(seededBucket, statements),
@@ -208,7 +277,7 @@ for (const [title, statements] of refusedPolicies) {
   });
 }
 
-test('11. a statement may take any Sid', async () => {
+test('a statement may take any Sid', { tag: '@api' }, async () => {
   const statements = [
     allow([ownerId], ['s3:*'], 'filone-custom'),
     allow([memberId], ['s3:ListBucket'], 'team'),
@@ -220,7 +289,7 @@ test('11. a statement may take any Sid', async () => {
   await owner.replaceStatements(secondSeededBucket, [grantAllToOwner(ownerId)]);
 });
 
-test('12. a member cannot read or write a policy', async () => {
+test('a member cannot read or write a policy', { tag: '@api' }, async () => {
   const statuses = [
     (await member.fetchPolicyResponse(seededBucket)).status(),
     (
@@ -232,72 +301,88 @@ test('12. a member cannot read or write a policy', async () => {
   expect(statuses).toEqual([403, 403]);
 });
 
-test('13. a deny naming everyone locks the owner out of S3 but not out of the policy', async () => {
-  await owner.replaceStatements(secondSeededBucket, [
-    grantAllToOwner(ownerId),
-    deny('*', ['s3:*'], 'lockdown'),
-  ]);
-  expect(
-    await getS3Outcome(
-      listObjects(await createS3ClientWithNewKey(owner, createdKeys), secondSeededBucket),
-    ),
-  ).toBe('404 NoSuchBucket');
-  await owner.replaceStatements(secondSeededBucket, [grantAllToOwner(ownerId)]);
-  expect(
-    await getS3Outcome(
-      listObjects(await createS3ClientWithNewKey(owner, createdKeys), secondSeededBucket),
-    ),
-  ).toBe('ok');
-});
+test(
+  'a deny naming everyone locks the owner out of S3 but not out of the policy',
+  { tag: '@api' },
+  async () => {
+    await owner.replaceStatements(secondSeededBucket, [
+      grantAllToOwner(ownerId),
+      deny('*', ['s3:*'], 'lockdown'),
+    ]);
+    expect(
+      await getS3Outcome(
+        listObjects(await createS3ClientWithNewKey(owner, testKeys), secondSeededBucket),
+      ),
+    ).toBe('404 NoSuchBucket');
+    await owner.replaceStatements(secondSeededBucket, [grantAllToOwner(ownerId)]);
+    expect(
+      await getS3Outcome(
+        listObjects(await createS3ClientWithNewKey(owner, testKeys), secondSeededBucket),
+      ),
+    ).toBe('ok');
+  },
+);
 
-test('14a. deleting the policy leaves the bucket to service keys alone', async () => {
+test('deleting the policy leaves the bucket to service keys alone', { tag: '@api' }, async () => {
   // Without If-Match, as on S3, the delete is unconditional.
   expect((await owner.deletePolicy(secondSeededBucket)).status()).toBe(204);
   const gone = await owner.fetchPolicyResponse(secondSeededBucket);
   expect([gone.status(), (await gone.json()).code]).toEqual([404, 'POLICY_NOT_FOUND']);
   expect(
     await getS3Outcome(
-      listObjects(await createS3ClientWithNewKey(owner, createdKeys), secondSeededBucket),
+      listObjects(await createS3ClientWithNewKey(owner, testKeys), secondSeededBucket),
     ),
   ).toBe('404 NoSuchBucket');
 });
 
-test('14b. a write without a precondition creates a policy where none exists', async () => {
-  const created = await owner.putPolicy(secondSeededBucket, {
-    policy: buildBucketPolicy(secondSeededBucket, [grantAllToOwner(ownerId)]),
-    unconditional: true,
-  });
-  expect([created.status(), created.headers().etag]).toEqual([204, expect.any(String)]);
-});
+test(
+  'a write without a precondition creates a policy where none exists',
+  { tag: '@api' },
+  async () => {
+    const created = await owner.putPolicy(secondSeededBucket, {
+      policy: buildBucketPolicy(secondSeededBucket, [grantAllToOwner(ownerId)]),
+      unconditional: true,
+    });
+    expect([created.status(), created.headers().etag]).toEqual([204, expect.any(String)]);
+  },
+);
 
 const presignGet = (bucket: string) =>
   member.send('POST', `/presign?region=${REGION}`, [{ op: 'getObject', bucket, key: SEEDED_KEY }]);
 
-test('15a. a member presigned GET works where a statement grants them s3:GetObject', async () => {
-  await owner.replaceStatements(seededBucket, [
-    grantAllToOwner(ownerId),
-    allow([memberId], ['s3:GetObject']),
-  ]);
-  const granted = await presignGet(seededBucket);
-  expect(granted.status(), await granted.text()).toBe(200);
-  const { items } = (await granted.json()) as { items: { url: string }[] };
-  const got = await fetch(items[0].url);
-  expect([got.status, await got.text()]).toEqual([200, PAYLOAD.toString()]);
-});
+test(
+  'a member presigned GET works where a statement grants them s3:GetObject',
+  { tag: '@api' },
+  async () => {
+    await owner.replaceStatements(seededBucket, [
+      grantAllToOwner(ownerId),
+      allow([memberId], ['s3:GetObject']),
+    ]);
+    const granted = await presignGet(seededBucket);
+    expect(granted.status(), await granted.text()).toBe(200);
+    const { items } = (await granted.json()) as { items: { url: string }[] };
+    const got = await fetch(items[0].url);
+    expect([got.status, await got.text()]).toEqual([200, PAYLOAD.toString()]);
+  },
+);
 
-test('15b. a member presigned GET is refused for a bucket no statement names them in', async () => {
-  // The URL would carry the tenant's key, which can access every bucket, so the
-  // console refuses to issue one for a bucket outside the member's policies,
-  // and answers as it would for a bucket that does not exist.
-  const refused = await presignGet(secondSeededBucket);
-  expect([refused.status(), ((await refused.json()) as { message: string }).message]).toEqual([
-    404,
-    'Bucket not found',
-  ]);
-});
+test(
+  'a member presigned GET is refused for a bucket no statement names them in',
+  { tag: '@api' },
+  async () => {
+    // The URL would carry the tenant's key, which can access every bucket, so the
+    // console refuses to issue one for a bucket outside the member's policies,
+    // and answers as it would for a bucket that does not exist.
+    const refused = await presignGet(secondSeededBucket);
+    expect([refused.status(), ((await refused.json()) as { message: string }).message]).toEqual([
+      404,
+      'Bucket not found',
+    ]);
+  },
+);
 
-test('16. a principal-bound key cannot create or delete buckets', async () => {
-  const s3 = await createS3ClientWithNewKey(owner, createdKeys);
+test('a principal-bound key cannot create or delete buckets', { tag: '@api' }, async () => {
+  const s3 = await createS3ClientWithNewKey(owner, testKeys);
   expect(
     await Promise.all([
       getS3Outcome(s3.send(new CreateBucketCommand({ Bucket: generateBucketName('nope') }))),
@@ -306,7 +391,7 @@ test('16. a principal-bound key cannot create or delete buckets', async () => {
   ).toEqual(['403 AccessDenied', '403 AccessDenied']);
 });
 
-test('17. a bucket a member creates names only its creator', async () => {
+test('a bucket a member creates names only its creator', { tag: '@api' }, async () => {
   await member.createBucket(memberCreatedBucket);
   expect(toCanonicalPolicy((await owner.readPolicy(memberCreatedBucket)).policy)).toEqual(
     toCanonicalPolicy(buildCreatorPolicy(memberCreatedBucket, memberId)),

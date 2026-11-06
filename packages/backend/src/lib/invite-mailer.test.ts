@@ -100,7 +100,7 @@ describe('sendInvitationEmail', () => {
     });
 
     const payload = sentPayload();
-    expect(payload.from).toEqual({ email: 'no-reply@filone.ai' });
+    expect(payload.from).toEqual({ email: 'no-reply@filone.ai', name: 'Fil One' });
     // The address as the inviter typed it — casing intact, so the recipient
     // sees the address they handed out rather than a normalized lookup key.
     expect(payload.personalizations).toEqual([{ to: [{ email: 'Invited.Person@Example.com' }] }]);
@@ -114,7 +114,7 @@ describe('sendInvitationEmail', () => {
 
     expect(sent).toBe(true);
     expect(mockFetch.mock.calls[0][0]).toBe(SEND_URL);
-    expect(sentPayload().from).toEqual({ email: 'no-reply+staging@filone.ai' });
+    expect(sentPayload().from).toEqual({ email: 'no-reply+staging@filone.ai', name: 'Fil One' });
   });
 
   it('carries the org, the inviter, the accept URL and the expiry in both parts', async () => {
@@ -133,6 +133,24 @@ describe('sendInvitationEmail', () => {
     expect(html).toContain('ada@example.com');
     expect(html).toContain(`href="${ACCEPT_URL_ESCAPED}"`);
     expect(html).toContain(EXPIRES_AT_READABLE);
+  });
+
+  it('loads the logo from the console the accept link opens', async () => {
+    await sendInvitationEmail(invitation());
+
+    expect(sentPart('text/html')).toContain(
+      'src="https:&#x2F;&#x2F;app.filone.ai&#x2F;static&#x2F;email&#x2F;fil-one-logo.png"',
+    );
+  });
+
+  it('sends without a logo image when the accept URL does not parse', async () => {
+    // Not an absolute URL, so there is no origin to load the logo from.
+    const sent = await sendInvitationEmail(
+      invitation({ acceptUrl: 'invite/accept#token=tok-123' }),
+    );
+
+    expect(sent).toBe(true);
+    expect(sentPart('text/html')).not.toContain('<img');
   });
 
   it('names the inviter by email when no display name is stored', async () => {

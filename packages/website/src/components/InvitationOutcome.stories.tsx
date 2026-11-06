@@ -46,6 +46,7 @@ const meta: Meta<typeof InvitationOutcome> = {
     status: 'accepting',
     onContinue: () => {},
     onLogOut: () => {},
+    onRetry: () => {},
   },
 };
 
@@ -118,6 +119,18 @@ export const InviterLostAuthority: Story = {
     error: apiError(
       'The person who invited you no longer has permission to add members. Ask an administrator for a new invitation.',
       403,
+    ),
+  },
+};
+
+/** A deletion still running left the invitation pending; the same token works once it ends. */
+export const DeletionInProgress: Story = {
+  args: {
+    status: 'refused',
+    error: apiError(
+      'Your organization is being deleted. Try again in a few minutes.',
+      409,
+      ApiErrorCode.DELETION_IN_PROGRESS,
     ),
   },
 };

@@ -126,6 +126,19 @@ describe('get-usage baseHandler', () => {
     expect(body.buckets).toEqual({ count: 5 });
   });
 
+  it('leaves Bucket Intelligence companion buckets out of the bucket count', async () => {
+    const forge = fakeOrchestrator('forge', {
+      region: S3Region.EuCentral3,
+      buckets: ['docs', 'filone-rag-0123456789abcdef0123456789abcdef01234567'],
+      info: { bucketCount: 2, bucketLimit: 100, keyCount: 0, accessKeyLimit: 300 },
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([forge]);
+
+    const body = await run();
+
+    expect(body.buckets).toEqual({ count: 1 });
+  });
+
   it('counts access keys from stored rows, not the orchestrator key count', async () => {
     const aurora = fakeOrchestrator('aurora', {
       region: S3Region.EuWest1,
@@ -317,5 +330,31 @@ describe('get-usage baseHandler', () => {
     expect(errorSpy).toHaveBeenCalledTimes(2);
 
     errorSpy.mockRestore();
+  });
+});
+
+describe('get-usage baseHandler (request deadline)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    stubAccessKeyRows();
+  });
+
+  // A call that ignores the deadline holds the handler until the Lambda timeout;
+  // the deadline log then names it among the steps still in flight.
+  it("names a region's listBuckets as in flight while it hangs after every other call has answered", async () => {
+    const aurora = fakeOrchestrator('aurora', { region: S3Region.EuWest1 });
+    const fth = fakeOrchestrator('fth', { region: S3Region.UsEast1 });
+    fth.listBuckets.mockReturnValue(new Promise(() => {}));
+    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
+    const event = authenticatedEvent();
+
+    void baseHandler(event);
+
+    await vi.waitFor(() =>
+      expect([...(event.requestContext.deadlineStepsInFlight?.values() ?? [])]).toStrictEqual([
+        'listBuckets:us-east-1',
+      ]),
+    );
   });
 });

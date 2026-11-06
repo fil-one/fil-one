@@ -9,10 +9,11 @@ import type { Role } from './roles.util.ts';
 // region, so the suite never writes BillingTable rows itself.
 //
 // Role names double as state names. The e2e suite does not import workspace
-// packages, so the Lambda's `AccountState` union is mirrored by `Role`; add a
-// state to the Lambda before giving a role its name.
+// packages, so this union mirrors the Lambda's `AccountState`: the states the
+// roles rest in, plus the grace period states that write-lock the tenants. Add
+// a state to the Lambda before giving a role its name.
 
-export type AccountState = Role;
+export type AccountState = Role | 'paid_grace_period' | 'trial_grace_period';
 
 export interface AccountStateResult {
   orgId: string;

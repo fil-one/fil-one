@@ -3,6 +3,8 @@ import {
   DeleteItemCommand,
   QueryCommand,
   ScanCommand,
+  TransactionCanceledException,
+  TransactWriteItemsCommand,
   UpdateItemCommand,
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
@@ -15,12 +17,16 @@ import {
   deleteManifestEntry,
   loadManifest,
 } from '../jobs/rag-indexer-manifest.ts';
-import { AuditKeys } from './audit.ts';
+import { prepareFloorOrg } from './account-creation.ts';
+import { AuditKeys, commitAudited } from './audit.ts';
 import { getDynamoClient } from './ddb-client.ts';
 import { collectPages } from './ddb-paging.ts';
 import { RAGKeys } from './dynamo-records.ts';
+import { cancelledLabels } from './membership-changes.ts';
 import { OrgKeys } from './org-membership.ts';
+import { isGuardRejection, orgNotDeletingCheck } from './org-profile.ts';
 import type { DeletionMember } from './deletion-record.ts';
+import { readHomeOrgPointers, readUserProfile } from './user-profile.ts';
 import { RagApiKeyKeys } from './rag-api-keys.ts';
 import { SubscriptionKeys } from './subscription-store.ts';
 
@@ -219,23 +225,54 @@ async function destroyOrgCredentials(orgRows: Item[]): Promise<void> {
  * The first two rows are the member's account, so they are stamped only for a
  * member whose account this deletion ends (`deleteIdentity`). A member who was
  * invited here, or who belongs to another org, still logs in tomorrow, and a
- * `deletedAt` on their identity row would say otherwise. That member's rows are
- * re-pointed instead. The legacy membership row is stamped either way: it
- * belongs to this org.
+ * `deletedAt` on their identity row would say otherwise. That member's rows were
+ * moved off this org at the start of the pass ({@link moveSurvivingMembers}).
+ * The legacy membership row is stamped either way: it belongs to this org.
+ *
+ * The identity row is stamped only while it still names the member's userId.
+ * Once a pass marks the deletion done, accepting an invitation replaces the row
+ * with a new account under the same sub and a new userId. A second pass that
+ * was already running, with the members it read before, must leave that
+ * account alone.
  */
 async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<void> {
   for (const member of members) {
     if (member.deleteIdentity) {
-      await scrubRow({ key: { pk: `SUB#${member.sub}`, sk: 'IDENTITY' } });
+      await scrubRow({
+        key: { pk: `SUB#${member.sub}`, sk: 'IDENTITY' },
+        condition: 'userId = :userId',
+        values: { ':userId': member.userId },
+      });
       await scrubRow({ key: { pk: `USER#${member.userId}`, sk: 'PROFILE' } });
       await deleteRow(Resource.UserInfoTable.name, {
         pk: `USER#${member.userId}`,
         sk: 'AVATAR_UPLOAD_RATE',
       });
-    } else {
-      await repointHomeOrg(orgId, member);
     }
     await scrubRow({ key: { pk: `ORG#${orgId}`, sk: `MEMBER#${member.userId}` } });
+  }
+}
+
+/**
+ * Moves every member whose account outlives the org off it: to another org they
+ * belong to, or, when there is none, to a floor org made for them.
+ *
+ * The first step of a pass, before any teardown. From the deletion's confirm
+ * until this runs, a member whose home is this org is refused on every request
+ * as a deleted account, so the earlier they move, the shorter that is. Nothing
+ * a later step reads depends on where a survivor's home points: the census has
+ * already run, and the teardown reaches only the accounts it ends.
+ *
+ * A member whose account ends has neither `needsFloorOrg` nor `homeOrgId`, so
+ * {@link repointHomeOrg} leaves their rows alone.
+ */
+export async function moveSurvivingMembers(
+  orgId: string,
+  members: DeletionMember[],
+): Promise<void> {
+  for (const member of members) {
+    if (member.needsFloorOrg) await moveToFloorOrg(orgId, member);
+    else await repointHomeOrg(orgId, member);
   }
 }
 
@@ -247,40 +284,127 @@ async function scrubMembers(orgId: string, members: DeletionMember[]): Promise<v
  * any `X-Org-Id` header is looked at. A member left naming this org would keep
  * their Auth0 user and their rows and still be refused on every request.
  *
- * `homeOrgId` is absent when the member has no other membership to move to —
- * an invited sole member, whose account survives with nowhere to send it. The
- * rows are left as they are; there is no org to name.
+ * `homeOrgId` is absent when the census could not choose one. A member with no
+ * other membership goes to {@link moveToFloorOrg} instead; any other member
+ * left without one (the census could not read all their memberships) keeps the
+ * rows as they are.
  *
  * Both writes are conditioned on the row still naming the deleting org, so a
  * re-drive after the move lands on a row that no longer matches and changes
  * nothing.
+ *
+ * Each write is also fenced on the destination not being deleted. The census
+ * skipped orgs that were deleting when it read them, but a deletion confirmed
+ * since would leave the member homed in an org about to go. When the identity's
+ * move finds that, the member gets a floor org instead. A profile that loses
+ * the race after its identity moved is left for that org's own pass, which
+ * finds the identity naming it.
  */
 async function repointHomeOrg(orgId: string, member: DeletionMember): Promise<void> {
   const { homeOrgId } = member;
   if (!homeOrgId) return;
-  await repointRow({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }, orgId, homeOrgId);
+  const identity = await repointRow({ pk: `SUB#${member.sub}`, sk: 'IDENTITY' }, orgId, homeOrgId);
+  if (identity.reason === 'destination-deleting') return await moveToFloorOrg(orgId, member);
   await repointRow({ pk: `USER#${member.userId}`, sk: 'PROFILE' }, orgId, homeOrgId);
+}
+
+/** Whether a repoint wrote the row, and when it did not, why. */
+interface RepointOutcome {
+  moved: boolean;
+  /** `row-already-moved` covers a missing row too: either way there is nothing to do. */
+  reason?: 'destination-deleting' | 'row-already-moved';
 }
 
 async function repointRow(
   key: Record<string, string>,
   deletingOrgId: string,
   homeOrgId: string,
-): Promise<void> {
+): Promise<RepointOutcome> {
   try {
     await getDynamoClient().send(
-      new UpdateItemCommand({
-        TableName: Resource.UserInfoTable.name,
-        Key: marshall(key),
-        UpdateExpression: 'SET orgId = :home',
-        ConditionExpression: 'attribute_exists(pk) AND orgId = :deleting',
-        ExpressionAttributeValues: marshall({ ':home': homeOrgId, ':deleting': deletingOrgId }),
+      new TransactWriteItemsCommand({
+        TransactItems: [
+          orgNotDeletingCheck(homeOrgId),
+          {
+            Update: {
+              TableName: Resource.UserInfoTable.name,
+              Key: marshall(key),
+              UpdateExpression: 'SET orgId = :home',
+              ConditionExpression: 'attribute_exists(pk) AND orgId = :deleting',
+              ExpressionAttributeValues: marshall({
+                ':home': homeOrgId,
+                ':deleting': deletingOrgId,
+              }),
+            },
+          },
+        ],
       }),
     );
+    return { moved: true };
   } catch (err) {
-    // The row is gone or already moved. Either way there is nothing to do.
-    if (!(err instanceof ConditionalCheckFailedException)) throw err;
+    if (isGuardRejection(err)) return { moved: false, reason: 'destination-deleting' };
+    if (
+      err instanceof TransactionCanceledException &&
+      err.CancellationReasons?.[1]?.Code === 'ConditionalCheckFailed'
+    ) {
+      return { moved: false, reason: 'row-already-moved' };
+    }
+    throw err;
   }
+}
+
+/**
+ * Gives a surviving member with no other org a floor org and moves their home
+ * onto it, as a removal from their last org does. Without it they would be
+ * fenced out on every request by an org that no longer exists. Their next
+ * request lands on `/left-organization`, which offers to create an org.
+ *
+ * The org and both repoints commit together. The identity's repoint is
+ * conditioned on still naming the deleting org: a pass that finds it moved
+ * already (a re-drive after this one, or an overlapping pass that got there
+ * first) writes nothing. A re-drive also reads the floor org as another
+ * membership, so the census sends it to {@link repointHomeOrg} rather than here.
+ * The profile's is conditioned on the org it was read naming, whichever that
+ * is, so a profile that disagrees with the identity does not block the move.
+ * That read throws rather than answering "no org": a guess would cancel the
+ * move, and the pass would finish with the member still fenced out. The name
+ * and address only name the floor org, so their read is best-effort.
+ */
+async function moveToFloorOrg(orgId: string, member: DeletionMember): Promise<void> {
+  const [{ profileOrgId }, profile] = await Promise.all([
+    readHomeOrgPointers(member.userId),
+    readUserProfile(member.userId, { consistentRead: true }),
+  ]);
+  const floorOrg = await prepareFloorOrg({
+    userId: member.userId,
+    sub: member.sub,
+    homeOrgIds: { profile: profileOrgId, identity: orgId },
+    name: profile?.name,
+    email: profile?.email,
+  });
+  try {
+    await commitAudited({ items: floorOrg.items, event: floorOrg.event });
+  } catch (err) {
+    // The org rows are create-only under a fresh id, so a failed condition is
+    // a repoint. Anything else is retried.
+    if (cancelledLabels(err, []).length === 0) throw err;
+    await reportUnmovedHome(orgId, member);
+  }
+}
+
+/**
+ * A repoint that failed for any reason but a move that already happened leaves
+ * the member fenced out with no org, and no later pass changes that. Logged
+ * loudly rather than thrown: a pass that can never succeed would hold the whole
+ * deletion open.
+ */
+async function reportUnmovedHome(orgId: string, member: DeletionMember): Promise<void> {
+  const { identityOrgId } = await readHomeOrgPointers(member.userId);
+  if (identityOrgId !== orgId) return;
+  console.error('[deletion-scrub] Floor org not written; the member still names the deleting org', {
+    orgId,
+    userId: member.userId,
+  });
 }
 
 /**
@@ -427,10 +551,13 @@ async function scrubOrgProfile(orgId: string): Promise<void> {
  * One stamped update. `if_not_exists` keeps the first pass's time across re-runs,
  * and `attribute_exists(pk)` stops a re-run recreating a row someone else removed
  * — a bare `UpdateItem` would upsert one holding nothing but a stamp.
+ * `condition` replaces that check for a row that must also still be the one the
+ * pass read; any comparison it makes fails on a missing row too.
  */
 async function scrubRow(params: {
   tableName?: string;
   key: Record<string, string>;
+  condition?: string;
   set?: string;
   remove?: string;
   values?: Record<string, unknown>;
@@ -443,7 +570,7 @@ async function scrubRow(params: {
         TableName: params.tableName ?? Resource.UserInfoTable.name,
         Key: marshall(params.key),
         UpdateExpression: `SET ${set}${params.remove ? ` REMOVE ${params.remove}` : ''}`,
-        ConditionExpression: 'attribute_exists(pk)',
+        ConditionExpression: params.condition ?? 'attribute_exists(pk)',
         ExpressionAttributeValues: marshall({
           ':now': new Date().toISOString(),
           ...params.values,

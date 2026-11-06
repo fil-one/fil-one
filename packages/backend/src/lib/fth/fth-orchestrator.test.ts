@@ -825,6 +825,39 @@ describe('fthOrchestrator.issueAccessKey', () => {
     });
   }
 
+  it('sends a bare expiry date as the start of the next UTC day', async () => {
+    stubConsoleStorageUser();
+    stubCreatedAccessKey();
+
+    await fthOrchestrator.issueAccessKey(fthClientId, {
+      keyName: baseOpts.keyName,
+      permissions: ['read'],
+      // The console's date picker sends a calendar date; FTH refuses anything
+      // but an RFC 3339 timestamp.
+      expiresAt: '2026-11-25',
+    });
+
+    expect(mockFthClient.createAccessKey.mock.calls[0]![2]).toMatchObject({
+      expiresAt: '2026-11-26T00:00:00.000Z',
+    });
+  });
+
+  it('refuses an impossible expiry date as a validation error without calling FTH', async () => {
+    stubConsoleStorageUser();
+    stubCreatedAccessKey();
+
+    await expect(
+      fthOrchestrator.issueAccessKey(fthClientId, {
+        keyName: baseOpts.keyName,
+        permissions: ['read'],
+        // Passes the schema's shape check; there is no 13th month.
+        expiresAt: '2026-13-01',
+      }),
+    ).rejects.toBeInstanceOf(AccessKeyValidationError);
+
+    expect(mockFthClient.createAccessKey).not.toHaveBeenCalled();
+  });
+
   it('maps FthConflictError to AccessKeyAlreadyExistsError', async () => {
     stubConsoleStorageUser();
     mockFthClient.createAccessKey.mockRejectedValue(

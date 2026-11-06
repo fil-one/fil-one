@@ -66,6 +66,17 @@ describe('useKeyActionScope', () => {
     expect(result.current.mayRevoke(OWN)).toBe(false);
   });
 
+  it.each([
+    [true, OrgRole.Member],
+    [false, OrgRole.Admin],
+    [false, OrgRole.Owner],
+    [false, OrgRole.ReadOnly],
+  ])('reports listsOwnKeysOnly as %s for the %s role', (expected, role) => {
+    const { result } = renderScope(role);
+
+    expect(result.current.listsOwnKeysOnly).toBe(expected);
+  });
+
   it('answers the column header with the rows it will render', () => {
     const { result } = renderScope(OrgRole.Member);
 

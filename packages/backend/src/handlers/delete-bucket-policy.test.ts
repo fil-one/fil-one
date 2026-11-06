@@ -105,6 +105,18 @@ describe('delete-bucket-policy baseHandler', () => {
     expect(iam.calls).toHaveLength(0);
   });
 
+  // CloudFront marks the ETag of a compressed read weak, so the browser sends it back that way.
+  it('removes the policy matching the weak form of its ETag', async () => {
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
+
+    const result = await baseHandler(buildDeleteEvent({ 'if-match': `W/${etag}` }));
+
+    expect({
+      statusCode: result.statusCode,
+      hasPolicy: iam.policies.get(TENANT_ID)?.has(BUCKET_NAME),
+    }).toStrictEqual({ statusCode: 204, hasPolicy: false });
+  });
+
   it('refuses a stale If-Match with the policy still in place', async () => {
     iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
 

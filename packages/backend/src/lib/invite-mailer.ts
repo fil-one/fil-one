@@ -110,15 +110,89 @@ function buildTextBody(params: SendInvitationEmailParams): string {
 function buildHtmlBody(params: SendInvitationEmailParams): string {
   const esc = validator.escape;
   const inviter = esc(describeInviter(params.inviterName, params.inviterEmail));
+  const orgName = esc(params.orgName);
   const acceptUrl = esc(params.acceptUrl);
   const expiry = esc(formatExpiry(params.expiresAt));
-  return [
-    `<p>${inviter} invited you to join <strong>${esc(params.orgName)}</strong> on Fil One.</p>`,
-    `<p><a href="${acceptUrl}">Accept the invitation</a></p>`,
-    `<p>The invitation expires on ${expiry}. After that, ask for a new one.</p>`,
-    `<p>If the link does not open, paste this into your browser:<br />${acceptUrl}</p>`,
-    '<p>If you were not expecting this invitation, you can ignore this email.</p>',
-  ].join('\n');
+  const logoUrl = getLogoUrl(params.acceptUrl);
+  const logo = logoUrl
+    ? `<img src="${esc(logoUrl)}" width="77" height="20" alt="Fil One" style="display:block;border:0;height:20px;width:77px;" />`
+    : `<span style="font-size:16px;font-weight:500;color:${COLORS.zinc900};">Fil One</span>`;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light" />
+<meta name="supported-color-schemes" content="light" />
+<title>You are invited to join ${orgName} on Fil One</title>
+</head>
+<body style="margin:0;padding:0;background-color:${COLORS.zinc50};">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${inviter} invited you to join ${orgName} on Fil One.</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${COLORS.zinc50};">
+<tr><td align="center" style="padding:48px 16px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:440px;font-family:${FONT_STACK};">
+<tr><td style="background-color:${COLORS.white};border:1px solid ${COLORS.zinc200};border-radius:12px;padding:32px;box-shadow:${AUTH_CARD_SHADOW};">
+${logo}
+<h1 style="margin:32px 0 0;font-size:16px;line-height:24px;font-weight:500;color:${COLORS.zinc900};">Join ${orgName} on Fil One</h1>
+<p style="margin:12px 0 0;font-size:14px;line-height:20px;color:${COLORS.zinc600};">${inviter} invited you to join <span style="font-weight:500;color:${COLORS.zinc900};">${orgName}</span> on Fil One.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px;">
+<tr><td align="center" style="border-radius:6px;background-color:${COLORS.brand600};">
+<a href="${acceptUrl}" style="display:block;padding:0 16px;font-size:14px;line-height:44px;font-weight:500;color:${COLORS.white};text-decoration:none;border-radius:6px;">Accept invitation</a>
+</td></tr>
+</table>
+<p style="margin:16px 0 0;font-size:13px;line-height:19.5px;color:${COLORS.zinc500};">The invitation expires on ${expiry}. After that, ask for a new one.</p>
+<hr style="margin:24px 0;border:0;border-top:1px solid ${COLORS.zinc200};" />
+<p style="margin:0;font-size:12px;line-height:16px;color:${COLORS.zinc500};">If the button does not work, paste this link into your browser:</p>
+<p style="margin:4px 0 0;font-size:12px;line-height:16px;word-break:break-all;"><a href="${acceptUrl}" style="color:${COLORS.brand600};text-decoration:none;">${acceptUrl}</a></p>
+</td></tr>
+<tr><td style="padding:20px 8px 0;font-size:12px;line-height:16px;color:${COLORS.zinc500};text-align:center;">If you were not expecting this invitation, you can ignore this email.</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+/**
+ * The console's design tokens (packages/website/src/styles/globals.css) as hex.
+ * Mail clients read neither CSS variables nor `oklch()`, so each value is the
+ * sRGB conversion of the token it is named after. Change one here when its
+ * token changes.
+ */
+const COLORS = {
+  white: '#ffffff',
+  zinc50: '#fafafa',
+  zinc200: '#e4e4e7',
+  zinc500: '#71717b',
+  zinc600: '#52525c',
+  zinc900: '#18181b',
+  brand600: '#055eff',
+};
+
+/**
+ * The console's `--shadow-auth-card`, so the email reads as the same card as the
+ * accept page it leads to. Clients that drop `box-shadow` (Gmail, Outlook) still
+ * get the border.
+ */
+const AUTH_CARD_SHADOW = '0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06)';
+
+/** Inter where the reader has it, then each platform's own UI font. */
+const FONT_STACK =
+  "Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+
+/**
+ * The logo as a PNG (mail clients do not render SVG), served by the same
+ * console the accept link opens. It sits under `/static/`, which the CloudFront
+ * rewrite passes through to the bucket. An accept URL that does not parse yields
+ * no logo rather than a throw, since sending never throws.
+ */
+function getLogoUrl(acceptUrl: string): string | undefined {
+  try {
+    return new URL('/static/email/fil-one-logo.png', acceptUrl).href;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -152,6 +226,7 @@ export async function sendInvitationEmail(params: SendInvitationEmailParams): Pr
       subject: buildSubject(params.orgName),
       text: buildTextBody(params),
       html: buildHtmlBody(params),
+      fromName: 'Fil One',
     },
     {
       source: 'invite-mailer',

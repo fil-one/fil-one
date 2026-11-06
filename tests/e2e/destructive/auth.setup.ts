@@ -3,7 +3,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { STORAGE_STATE, type Role } from './roles.util.ts';
 import { ACCOUNT_STATE_TIMEOUT_MS, setAccountState } from './account-state.util.ts';
-import { grantEmailBeta } from './invite.util.ts';
 import { maybeSkipPasskeyEnrollment } from './passkey.util.ts';
 
 const REQUIRED_CREDENTIAL_VARS = [
@@ -16,6 +15,9 @@ const REQUIRED_CREDENTIAL_VARS = [
   'E2E_TRIAL_EMAIL',
   'E2E_TRIAL_PASSWORD',
   'E2E_TRIAL_USER_ID',
+  'E2E_DISABLED_EMAIL',
+  'E2E_DISABLED_PASSWORD',
+  'E2E_DISABLED_USER_ID',
 ] as const;
 
 const missingCredentials = REQUIRED_CREDENTIAL_VARS.filter((name) => !process.env[name]);
@@ -50,6 +52,12 @@ const roles: ReadonlyArray<{
     password: process.env.E2E_TRIAL_PASSWORD!,
     userId: process.env.E2E_TRIAL_USER_ID!,
   },
+  {
+    name: 'disabled',
+    email: process.env.E2E_DISABLED_EMAIL!,
+    password: process.env.E2E_DISABLED_PASSWORD!,
+    userId: process.env.E2E_DISABLED_USER_ID!,
+  },
 ];
 
 for (const role of roles) {
@@ -60,7 +68,6 @@ for (const role of roles) {
     // safe to reuse.
     setup.setTimeout(ACCOUNT_STATE_TIMEOUT_MS);
     await setAccountState(role.userId, role.name);
-    await grantEmailBeta(role.email);
 
     await page.goto('/');
     await page.locator('#username').fill(role.email);

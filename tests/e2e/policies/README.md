@@ -1,6 +1,6 @@
 # Bucket policy e2e suite
 
-End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run against a stage whose Forge region serves the `iam` access model: locally `us-east-9`, backed by a smelt network; on a remote stage `eu-central-3`. The `full-*` projects ignore this directory, so the suite runs only as the `policies` project.
+End-to-end tests for bucket policies (ADR #696, fil-one/RFC#30). They run against a stage whose Forge region serves the `iam` access model: locally `us-east-9`, backed by a smelt network; on a remote stage `eu-central-3`. The suite runs only in its own `policies-*` projects. Tags in the specs choose where a test runs. `policies-chromium`, `policies-firefox` and `policies-webkit` run the spec files side by side, each file in order. A test that opens no page and only sends API or S3 requests is tagged `@api` and runs in Chromium only; every other test also runs in Firefox and WebKit. A test that changes what other tests see, such as the member's bucket list in `policy-member-ui` or the roster in `policy-lifecycle`, is tagged `@serial` and runs alone afterwards, in `policies-serial-chromium`, `policies-serial-firefox` and `policies-serial-webkit`. `pnpm test:e2e:policies` runs them all (`--project='policies-*'`), and CI runs the same with `--workers=2`. Locally, the WebKit page tests fail: smelt serves Ingot over plain `http`, and WebKit blocks those requests from the `https` console.
 
 ## What they need
 
@@ -23,6 +23,8 @@ export AWS_REGION=us-east-1 LOCAL=true BASE_URL=https://localhost:5173
 SST_STAGE=local pnpm test:e2e:policies
 ```
 
+A local run skips "a policy read of 2,000 bytes or more carries a weak ETag that a write accepts": the test checks the weak ETag CloudFront gives a compressed response, and a local stage has no CloudFront in front of the console API.
+
 ## Remote stage
 
 The same suite runs against staging. Register the five accounts against the stage once (`signup`, `verify`, `finish` with `https://staging.fil.one` as the origin; `E2E_POLICY_EMAIL_PREFIX` sets their addresses and `E2E_POLICY_ENV_FILE` the file they are written to), keep their credentials in `.env.e2e.local` or the `E2E_POLICY_*` secrets, and run the project through `sst shell` so the member and billing seeds reach the stage's tables:
@@ -32,12 +34,14 @@ export AWS_REGION=us-east-2 BASE_URL=https://staging.fil.one
 SST_STAGE=staging pnpm test:e2e:policies
 ```
 
-`E2E_POLICY_REGION` and `E2E_POLICY_S3_ENDPOINT` override the region and the S3 endpoint; by default a remote stage uses `eu-central-3` and the endpoint `getS3Endpoint` derives for it. The staging Forge network has to run Hilt and Ingot with the policy operations. In CI, `e2e-staging.yaml` runs the project when the `E2E_POLICY_*` secrets are set.
+`E2E_POLICY_REGION` and `E2E_POLICY_S3_ENDPOINT` override the region and the S3 endpoint; by default a remote stage uses `eu-central-3` and the endpoint `getS3Endpoint` derives for it. The staging Forge network has to run Hilt and Ingot with the policy operations. In CI, `e2e-staging.yaml` (nightly) and `test-staging.yaml` (after each staging deploy, before production) run it through `e2e-suites.yaml`, in its own job beside the destructive and multi-org suites.
 
-`policies-setup` logs all five accounts in and claims and activates the Owner's subscription. It then seats the other four in the Owner's organization: the Admin, the Member, the ReadOnly user, and the Leaver as a Member.
+`policies-setup` logs all five accounts in and claims and activates the Owner's subscription. It then seats the other four in the Owner's organization: the Admin, the Member, the ReadOnly user, and the Leaver as a Member. Last, it deletes every bucket and access key still in the Owner's organization, which earlier runs left behind (see Determinism).
+
+A local run against staging must use accounts of its own (`E2E_POLICY_EMAIL_PREFIX`), not the ones CI uses: that setup step deletes everything in the Owner's organization, including what a CI run in progress is using.
 
 ## Determinism
 
-Every case creates its own buckets and keys and deletes them afterwards. Uploads use a fixed in-memory payload.
+Every case creates its own buckets and keys and deletes them afterwards. A run that stops early, at the global timeout or when cancelled, leaves its buckets and keys behind, so `policies-setup` clears the Owner's organization before any case runs: buckets first, then keys. A principal-bound key holds grants over every bucket its principal reaches, and deleting the key revokes all of them in one request, so key deletions are cheap only once the buckets are gone. Each bucket is emptied with a service key scoped to it alone, which reaches the bucket whatever its policy says, so the sweep writes no policies. A deletion that fails is logged and left for the next run, and the sweep starts none after ten minutes. Uploads use a fixed in-memory payload.
 
 A narrowed policy applies to a key Ingot has cached only once the revocation arrives. So every check after a narrowing uses a key created after the write, which Ingot evaluates fresh. Only the cached-key tests poll, each for at most 30 seconds, because a key Ingot has cached is what they check.

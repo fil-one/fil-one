@@ -7,8 +7,10 @@ import {
   TransactWriteItemsCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
+import type { AttributeValue, TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { ApiErrorCode, OrgRole, S3Region } from '@filone/shared';
+import type { DeletionTrigger } from '../lib/deletion-record.ts';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
@@ -273,6 +275,42 @@ function body(result: unknown) {
   return JSON.parse((result as { body: string }).body);
 }
 
+/** The org a deleted account belonged to, whose teardown the tests finish or not. */
+const DELETED_ORG_ID = '44444444-4444-4444-4444-444444444444';
+const DELETED_USER_ID = 'any-deleted-user-id';
+const DELETED_AT = '2026-10-01T00:00:00.000Z';
+
+/** The caller's identity row, or none for a caller signing in for the first time. */
+function stubIdentityRow(item: Record<string, AttributeValue> | undefined) {
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+    })
+    .resolves(item ? { Item: item } : {});
+}
+
+/** An identity the account deletion stamped, and the state of that deletion. */
+function stubDeletedAccount(status: 'PENDING' | 'DONE', trigger: DeletionTrigger = 'USER_REQUEST') {
+  stubIdentityRow({
+    pk: { S: `SUB#${MOCK_SUB}` },
+    sk: { S: 'IDENTITY' },
+    userId: { S: DELETED_USER_ID },
+    orgId: { S: DELETED_ORG_ID },
+    deletedAt: { S: DELETED_AT },
+  });
+  ddbMock
+    .on(GetItemCommand, {
+      TableName: 'UserInfoTable',
+      Key: { pk: { S: `ORG#${DELETED_ORG_ID}` }, sk: { S: 'DELETION' } },
+    })
+    .resolves({ Item: { status: { S: status }, trigger: { S: trigger } } });
+}
+
+function putAt(items: TransactWriteItem[], pk: string) {
+  return items.find((item) => item.Put?.Item?.pk?.S === pk)?.Put;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -282,6 +320,8 @@ describe('POST /api/invitations/accept handler', () => {
     vi.clearAllMocks();
     mockMarkAuth0EmailVerified.mockReset();
     mockGetAuth0UserEmail.mockReset();
+    // Back to resolving: one test makes it reject, and `clearAllMocks` keeps that.
+    mockRegisterMemberPrincipal.mockReset();
     ddbMock.reset();
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -416,16 +456,19 @@ describe('POST /api/invitations/accept handler', () => {
     ).toHaveLength(1);
   });
 
-  it('answers account-deleted when the accepter’s own org is being torn down', async () => {
+  // The org, not the account, and not the invitation: a member may survive the
+  // deletion, and the same answer the session fence gives once its read catches up.
+  it('answers that the organization is being deleted when the accepter’s org starts deletion during the accept', async () => {
     stubAccepterProfile(PERSONAL_ORG_ID);
     ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 8));
 
     const result = await handler(acceptEvent(), buildContext());
 
-    // Their account, not the invitation: the answer their next request gets
-    // once the session fence's read catches up.
-    expect(result).toMatchObject({ statusCode: 410 });
-    expect(body(result).code).toBe(ApiErrorCode.ACCOUNT_DELETED);
+    expect(result).toMatchObject({ statusCode: 409 });
+    expect(body(result)).toStrictEqual({
+      message: 'Your organization is being deleted. Try again in a few minutes.',
+      code: ApiErrorCode.DELETION_IN_PROGRESS,
+    });
   });
 
   it('carries the fence even when the caller is already a member', async () => {
@@ -592,6 +635,21 @@ describe('POST /api/invitations/accept handler', () => {
     expect(result).toMatchObject({ statusCode: 403 });
     expect(body(result).code).toBe(ApiErrorCode.INVITE_EMAIL_MISMATCH);
     expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(0);
+  });
+
+  // The page names the signed-in address from this answer. Reading `/me` for it
+  // would answer 410 to a deleted account and leave the refusal unexplained.
+  it('names the address the session signed in with when it refuses a mismatch', async () => {
+    stubInvitation({ emailNorm: 'someone.else@example.com' });
+
+    const result = await handler(acceptEvent(), buildContext());
+
+    expect(body(result)).toStrictEqual({
+      message:
+        'This invitation was sent to a different email address than the one you signed in with.',
+      code: ApiErrorCode.INVITE_EMAIL_MISMATCH,
+      sessionEmail: EMAIL,
+    });
   });
 
   it('matches the invited address regardless of case', async () => {
@@ -834,11 +892,7 @@ describe('POST /api/invitations/accept handler', () => {
     expect(unmarshall(auditItemIn(retry)).details).toMatchObject({ alreadyMember: true });
   });
 
-  it('answers the member success even when that retirement cannot land', async () => {
-    // A revoke that won the race cancels the second transaction too. The caller
-    // is a member of the org, which is what they asked for; the bookkeeping
-    // failure is logged rather than answered.
-    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 7));
+  function stubMembershipAppearedMeanwhile() {
     ddbMock
       .on(GetItemCommand, {
         TableName: 'OrgTable',
@@ -853,11 +907,38 @@ describe('POST /api/invitations/accept handler', () => {
           joinedAt: { S: CREATED_AT },
         },
       });
+  }
+
+  it('answers the member success even when that retirement cannot land', async () => {
+    // A revoke that won the race cancels the second transaction too. The caller
+    // is a member of the org, which is what they asked for; the invitation is no
+    // longer pending, so there is nothing left to retire.
+    stubMembershipAppearedMeanwhile();
+    ddbMock.on(TransactWriteItemsCommand).rejects(cancelledAt(1, 7));
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
 
     const result = await handler(acceptEvent(), buildContext());
 
     expect(result).toMatchObject({ statusCode: 200 });
-    expect(console.error).toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining('no longer pending'),
+      expect.objectContaining({ inviteId: expect.any(String) }),
+    );
+  });
+
+  it('logs an error when the retirement fails for a reason that may leave the invitation pending', async () => {
+    stubMembershipAppearedMeanwhile();
+    ddbMock
+      .on(TransactWriteItemsCommand)
+      .rejectsOnce(cancelledAt(1, 7))
+      .rejectsOnce(new Error('any-throttle'));
+
+    await handler(acceptEvent(), buildContext());
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('invitation stayed pending'),
+      expect.anything(),
+    );
   });
 
   it('refuses when the inviter no longer holds the authority they invited with', async () => {
@@ -974,5 +1055,212 @@ describe('POST /api/invitations/accept handler', () => {
     await handler(acceptEvent(), buildContext());
 
     expect(mockRegisterMemberPrincipal).not.toHaveBeenCalled();
+  });
+
+  describe('for a caller with no account yet', () => {
+    beforeEach(() => {
+      stubIdentityRow(undefined);
+    });
+
+    it('creates the account in the inviting org, with no org of its own', async () => {
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      // One transaction in the whole request: no signup ran before the accept.
+      const items = transactItems();
+      const identity = putAt(items, `SUB#${MOCK_SUB}`);
+      expect(identity).toMatchObject({
+        TableName: 'UserInfoTable',
+        Item: { orgId: { S: INVITING_ORG_ID }, profileEmail: { S: EMAIL } },
+        ConditionExpression: 'attribute_not_exists(pk)',
+      });
+      const userId = identity!.Item!.userId.S!;
+      expect(putAt(items, `USER#${userId}`)).toMatchObject({
+        Item: { sk: { S: 'PROFILE' }, orgId: { S: INVITING_ORG_ID }, email: { S: EMAIL } },
+      });
+      expect(
+        items.find((item) => item.Put?.Item?.sk?.S === OrgKeys.memberSk(userId))?.Put,
+      ).toMatchObject({ Item: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) } } });
+      // No org profile: the only org the account has is the one it joined.
+      expect(
+        items.filter(
+          (item) => item.Put?.Item?.pk?.S?.startsWith('ORG#') && item.Put.Item.sk?.S === 'PROFILE',
+        ),
+      ).toStrictEqual([]);
+    });
+
+    /** The account another tab's request created between this one's read and its write. */
+    const OTHER_TAB_USER_ID = 'any-other-tab-user-id';
+
+    function stubAccountCreatedMeanwhile() {
+      // The first read is the auth middleware's, before the account existed;
+      // the next is the handler's, after its transaction lost to the other tab.
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } },
+        })
+        .resolvesOnce({})
+        .resolves({
+          Item: { userId: { S: OTHER_TAB_USER_ID }, orgId: { S: INVITING_ORG_ID } },
+        });
+      // Item 1 is the identity: the fence is item 0.
+      ddbMock.on(TransactWriteItemsCommand).rejectsOnce(cancelledAt(1, 9)).resolves({});
+    }
+
+    it('answers 409 and leaves the invitation pending when an account appeared meanwhile outside the inviting org', async () => {
+      stubAccountCreatedMeanwhile();
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 409 });
+      expect(body(result)).toStrictEqual({
+        message:
+          'Your account changed while we were setting it up. Open the invitation link again.',
+      });
+      // Only the accept that lost: nothing retired the invitation afterwards.
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+    });
+
+    // Two tabs open on the same link: the other one created the account and
+    // spent the invitation, so reopening the link would only say it is invalid.
+    function stubMemberOfInvitingOrg(userId: string) {
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'OrgTable',
+          Key: { pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) }, sk: { S: OrgKeys.memberSk(userId) } },
+        })
+        .resolves({
+          Item: {
+            pk: { S: OrgKeys.orgPk(INVITING_ORG_ID) },
+            sk: { S: OrgKeys.memberSk(userId) },
+            role: { S: OrgRole.Member },
+            joinedAt: { S: CREATED_AT },
+            source: { S: 'invitation' },
+          },
+        });
+    }
+
+    it('answers success when the account another tab created joined the inviting org', async () => {
+      stubAccountCreatedMeanwhile();
+      stubMemberOfInvitingOrg(OTHER_TAB_USER_ID);
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      expect(body(result)).toMatchObject({ alreadyMember: true, role: OrgRole.Member });
+    });
+
+    it('logs no error when the tab that won had already spent the invitation', async () => {
+      stubAccountCreatedMeanwhile();
+      stubMemberOfInvitingOrg(OTHER_TAB_USER_ID);
+      // The accept that lost, then the retirement after it: item 0 is the
+      // invitation's status, no longer pending.
+      ddbMock
+        .on(TransactWriteItemsCommand)
+        .rejectsOnce(cancelledAt(1, 9))
+        .rejectsOnce(cancelledAt(0, 3));
+
+      await handler(acceptEvent(), buildContext());
+
+      expect(console.error).not.toHaveBeenCalledWith(
+        expect.stringContaining('invitation stayed pending'),
+        expect.anything(),
+      );
+    });
+
+    it('creates no account when the invitation is no longer valid', async () => {
+      stubUnknownToken();
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 404 });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+    });
+  });
+
+  describe('for a caller whose account was deleted', () => {
+    it('replaces the deleted identity with a new account once the deletion has finished', async () => {
+      stubDeletedAccount('DONE');
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 200 });
+      const identity = putAt(transactItems(), `SUB#${MOCK_SUB}`);
+      expect(identity).toMatchObject({
+        Item: { orgId: { S: INVITING_ORG_ID } },
+        ConditionExpression: 'deletedAt = :deletedAt',
+        ExpressionAttributeValues: { ':deletedAt': { S: DELETED_AT } },
+      });
+      expect(identity!.Item!.userId.S).not.toBe(DELETED_USER_ID);
+      expect(identity!.Item!.deletedAt).toBeUndefined();
+    });
+
+    // Deleting the Stripe customer is the response to trial abuse, and an
+    // operator deletion is a decision made about the account, not by it.
+    it.each(['STRIPE_CUSTOMER_DELETED', 'OPERATOR'] as const)(
+      'refuses as a deleted account, and writes nothing, when the deletion was triggered by %s',
+      async (trigger) => {
+        stubDeletedAccount('DONE', trigger);
+
+        const result = await handler(acceptEvent(), buildContext());
+
+        expect(result).toMatchObject({ statusCode: 410 });
+        expect(body(result)).toMatchObject({ code: ApiErrorCode.ACCOUNT_DELETED });
+        expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+      },
+    );
+
+    // No record under the org the tombstone names: there is no deletion that will
+    // ever finish, so "try again in a few minutes" would be answered forever.
+    it('refuses as a deleted account, and writes nothing, when no deletion record exists for its org', async () => {
+      stubDeletedAccount('DONE');
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `ORG#${DELETED_ORG_ID}` }, sk: { S: 'DELETION' } },
+        })
+        .resolves({});
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 410 });
+      expect(body(result)).toMatchObject({ code: ApiErrorCode.ACCOUNT_DELETED });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+    });
+
+    it('answers that the deletion is still running, and writes nothing, until it finishes', async () => {
+      stubDeletedAccount('PENDING');
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 409 });
+      expect(body(result)).toStrictEqual({
+        message: 'Your previous account is still being deleted. Try again in a few minutes.',
+        code: ApiErrorCode.DELETION_IN_PROGRESS,
+      });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+    });
+
+    // The teardown fences the org first, then stamps the identity of an account
+    // it ends, or moves a member who survives it, near its end. Until then the
+    // only thing known to be going away is the org.
+    it('answers that the organization is being deleted, and writes nothing, while the home org is torn down', async () => {
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'UserInfoTable',
+          Key: { pk: { S: `ORG#${PERSONAL_ORG_ID}` }, sk: { S: 'PROFILE' } },
+        })
+        .resolves({ Item: { deleting: { BOOL: true } } });
+
+      const result = await handler(acceptEvent(), buildContext());
+
+      expect(result).toMatchObject({ statusCode: 409 });
+      expect(body(result)).toStrictEqual({
+        message: 'Your organization is being deleted. Try again in a few minutes.',
+        code: ApiErrorCode.DELETION_IN_PROGRESS,
+      });
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toStrictEqual([]);
+    });
   });
 });

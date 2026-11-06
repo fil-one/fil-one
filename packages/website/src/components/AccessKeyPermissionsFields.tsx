@@ -178,7 +178,7 @@ function Section({
 }) {
   return (
     <div className="flex flex-col" data-testid={testId}>
-      <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wider text-zinc-400">
+      <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wider text-zinc-500">
         {title}
       </p>
       {children}
@@ -214,7 +214,7 @@ function BucketManagementFields({
         description="List all buckets in the account"
         checked
         disabled
-        tooltip="Always enabled — this permission is currently not configurable."
+        tooltip="Always enabled. This permission is not configurable."
       />
 
       {/* Bucket-info reads — selectable in every region, not region-gated. */}

@@ -33,6 +33,25 @@ vi.mock('../lib/bucket-rag-enablement.ts', async () => {
   };
 });
 
+// Forge regions call the Bucket Intelligence engine. The client is faked;
+// the real target builder and response helpers run.
+let engine: FakeRagEngine = fakeRagEngine();
+let engineConfigured = true;
+vi.mock('../lib/rag-engine-client.ts', async () => {
+  const actual = await vi.importActual<typeof import('../lib/rag-engine-client.ts')>(
+    '../lib/rag-engine-client.ts',
+  );
+  return {
+    ...actual,
+    getRagEngineConfig: () =>
+      engineConfigured ? { baseUrl: 'https://engine.test.invalid', token: 't' } : undefined,
+    getRagEngineClient: () => {
+      if (!engineConfigured) throw new actual.RagEngineNotConfiguredError();
+      return engine;
+    },
+  };
+});
+
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './get-bucket-rag-enablement.ts';
@@ -48,6 +67,13 @@ import {
 import { OrgRole, S3_REGION, S3Region } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
+import {
+  engineStatus,
+  expectedTarget,
+  fakeRagEngine,
+  type FakeRagEngine,
+} from '../test/fake-rag-engine.ts';
+import { RagEngineRequestError } from '../lib/rag-engine-client.ts';
 
 const USER_1 = '00000000-0000-0000-0000-000000000001';
 
@@ -284,6 +310,101 @@ describe('get-bucket-rag-enablement member scope on an iam region', () => {
       const result = await baseHandler(eventAs(role));
 
       expect(result.statusCode).toBe(200);
+    },
+  );
+});
+
+describe('get-bucket-rag-enablement on a Forge region (Bucket Intelligence engine)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    engine = fakeRagEngine();
+    engineConfigured = true;
+    orch = fakeOrchestrator('forge', { bucket: BUCKET, region: S3Region.EuCentral3 });
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+    mockGetEnablement.mockResolvedValue(
+      enablementRecord({ filesIndexed: 0, indexSize: 0, lastSyncedAt: undefined }),
+    );
+  });
+
+  it('reports the engine status as the sync telemetry', async () => {
+    engine.status.mockResolvedValue(
+      engineStatus({
+        syncState: 'syncing',
+        progress: { objectsTotal: 10, objectsDone: 4, chunksWritten: 30 },
+      }),
+    );
+
+    const result = await baseHandler(event({ region: S3Region.EuCentral3 }));
+
+    expect(result.statusCode).toBe(200);
+    expect(engine.status).toHaveBeenCalledWith(
+      expectedTarget('forge', S3Region.EuCentral3, 'my-bucket'),
+    );
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      enabled: true,
+      status: 'active',
+      syncState: 'syncing',
+      filesIndexed: 3,
+      indexSize: 4096,
+      lastSyncedAt: '2026-11-03T10:00:00.000Z',
+    });
+  });
+
+  it('skips the engine for a bucket never enabled', async () => {
+    mockGetEnablement.mockResolvedValue(undefined);
+
+    const result = await baseHandler(event({ region: S3Region.EuCentral3 }));
+
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      enabled: false,
+      status: 'disabled',
+      filesIndexed: 0,
+      indexSize: 0,
+    });
+    expect(engine.status).not.toHaveBeenCalled();
+  });
+
+  it('still answers 200 with a failed sync when the engine is down', async () => {
+    engine.status.mockRejectedValue(new RagEngineRequestError('down'));
+
+    const result = await baseHandler(event({ region: S3Region.UsEast9 }));
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!)).toMatchObject({
+      enabled: true,
+      syncState: 'error',
+      lastSyncError: 'The Bucket Intelligence engine could not be reached.',
+    });
+  });
+
+  it('still answers 200 with a failed sync when the stage has no engine', async () => {
+    engineConfigured = false;
+
+    const result = await baseHandler(event({ region: S3Region.EuCentral3 }));
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!).lastSyncError).toBe(
+      'Bucket Intelligence is not available in this region yet.',
+    );
+  });
+
+  it.each([S3Region.EuWest1, S3Region.UsEast1])(
+    'reads %s telemetry from the enablement row without calling the engine',
+    async (region) => {
+      orch = fakeOrchestrator('aurora', { bucket: BUCKET, region });
+      mockGetOrchestratorForRegion.mockReturnValue(orch);
+      mockGetEnablement.mockResolvedValue(enablementRecord());
+
+      const result = await baseHandler(event({ region }));
+
+      expect(JSON.parse(result.body!)).toStrictEqual({
+        enabled: true,
+        status: 'active',
+        filesIndexed: 12,
+        indexSize: 2048,
+        lastSyncedAt: '2026-06-22T12:00:00Z',
+      });
+      expect(engine.status).not.toHaveBeenCalled();
     },
   );
 });

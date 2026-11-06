@@ -1,7 +1,7 @@
 // What un-provisioning one region touches, decided before anything is written.
 //
-// bin/reset-region-provisioning.ts scans two tables and then deletes; the
-// classification in between lives here so it can be tested without AWS. The
+// region-reset-run.ts scans two tables and then deletes; the classification in
+// between lives here so it can be tested without AWS. The
 // same object it builds is the backup file's body, so a restore reads exactly
 // what the run decided to delete.
 

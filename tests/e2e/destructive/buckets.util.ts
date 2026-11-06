@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expect, type Page } from '@playwright/test';
+import { expect, type APIResponse, type Page } from '@playwright/test';
 import { isRegion, REGIONS, type Region } from './regions.util.ts';
 
 // Bucket names are unique within a region and rejected with 409 if taken
@@ -36,8 +36,23 @@ async function listRegionsWithBucket(page: Page): Promise<Set<Region>> {
       response.request().method() === 'GET',
   );
   await page.goto('/buckets');
-  const response = await listResponse;
+  const buckets = await readBucketList(await listResponse);
 
+  // Regions the account has buckets in but this suite does not know about are
+  // irrelevant for seeding, so drop them instead of widening the type.
+  return new Set(buckets.map((bucket) => bucket.region).filter(isRegion));
+}
+
+// Reads the buckets from a GET /api/buckets response and throws when the list
+// may be incomplete. A missing bucket must mean the account has none in that
+// region: seeding would otherwise pile up duplicates, and a spec looking for
+// its bucket would blame the seeding for an outage.
+//
+// The parameter picks only the methods used here, so it accepts both the
+// Response a page receives and the APIResponse of an APIRequestContext.
+export async function readBucketList(
+  response: Pick<APIResponse, 'ok' | 'status' | 'text' | 'json'>,
+): Promise<Array<{ bucketName: string; region: string }>> {
   if (!response.ok()) {
     throw new Error(
       `GET /api/buckets returned ${response.status()}, so we cannot tell whether this account ` +
@@ -46,12 +61,12 @@ async function listRegionsWithBucket(page: Page): Promise<Set<Region>> {
   }
 
   const { buckets, unavailableRegions } = (await response.json()) as {
-    buckets: Array<{ region: string }>;
+    buckets: Array<{ bucketName: string; region: string }>;
     unavailableRegions?: string[];
   };
 
-  // A partial 200 (FIL-1049) hides a down region's buckets, which reads here as "that region
-  // is empty" and makes the seeder pile up duplicates. Same reason as the !ok() check above.
+  // A partial 200 (FIL-1049) hides a down region's buckets, which reads as
+  // "that region is empty". Same reason as the !ok() check above.
   if (unavailableRegions?.length) {
     throw new Error(
       `GET /api/buckets could not list ${unavailableRegions.join(', ')}, so we cannot tell ` +
@@ -59,9 +74,7 @@ async function listRegionsWithBucket(page: Page): Promise<Set<Region>> {
     );
   }
 
-  // Regions the account has buckets in but this suite does not know about are
-  // irrelevant for seeding, so drop them instead of widening the type.
-  return new Set(buckets.map((bucket) => bucket.region).filter(isRegion));
+  return buckets;
 }
 
 // Creates a bucket without an access key. With the key toggle left off, the

@@ -22,14 +22,14 @@ legitimate Owner out. Extend the middleware to the Owner-granting branches of
 `create-invitation` and `update-member-role`, plus Owner removal. Scoped to
 FIL-945.
 
-### Throttle invitation sends per org before the beta widens
+### Throttle invitation sends per org
 
 `packages/backend/src/handlers/create-invitation.ts` — the 25-invite cap bounds
 how many invitations can be outstanding, not how much mail goes out: revoking
 frees a slot immediately, so a loop of invite-revoke-invite sends without limit
-from a sender identity shared with Auth0's own mail. Today every account that
-can reach the route is a named, hand-admitted beta org, which is what makes this
-wait. It should land before `ORGS_BETA` widens.
+from a sender identity shared with Auth0's own mail. The organizations beta flag
+that kept the route to hand-admitted orgs is gone, so every Owner and Admin can
+reach it.
 
 ### Check the creator's permission on the RAG bearer path
 
@@ -184,22 +184,6 @@ but skips `dropInvitation`, `refusals.clear()` and `undelivered.clearFor()`, all
 of which the success path runs. If the refetch then fails, the stale row stays
 actionable and its undelivered warning and cap refusal stand over an invitation
 that is confirmed gone.
-
-### Put the org's member count on /me
-
-`packages/website/src/lib/use-members-surface.ts:45` decides the members surface
-from the caller's own membership count and `orgsBeta`, and `MeResponse` carries
-nothing about the org's shape. One org shape therefore reads wrong: the founding
-Owner of a multi-member org holds a single membership, because every invited
-member keeps the personal org signup created for them and only the founder does
-not. Revoking that org's beta row takes the roster, the role picker, removal and
-transfer off their console while `GET /api/org/members` and the three writes keep
-serving — the org has members, and the person responsible for them cannot see
-them. `bin/orgs-beta.ts` refuses that revoke without `--force-members`, which is
-the operator-side half of the answer. The durable half is the count: carry the
-org's member count on `MeResponse` and let the surface read the org's shape
-rather than the caller's, which is the deferral
-`docs/architectural-decisions/2026-08-organizations-roles-m1.md:135` names.
 
 ## Infrastructure and CI
 

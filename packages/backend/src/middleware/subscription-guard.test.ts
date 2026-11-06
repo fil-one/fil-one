@@ -190,6 +190,24 @@ describe('subscriptionGuardMiddleware', () => {
     expect(result).toBeUndefined();
   });
 
+  it('allows write access when the org is billed manually', async () => {
+    ddbMock.on(GetItemCommand).resolves(
+      billingItem({
+        pk: `ORG#${ORG_ID}`,
+        sk: 'SUBSCRIPTION',
+        orgId: ORG_ID,
+        subscriptionStatus: SubscriptionStatus.Manual,
+      }),
+    );
+
+    const { before } = subscriptionGuardMiddleware(AccessLevel.Write);
+    const result = await before(
+      buildMiddyRequest(buildEvent({ userInfo: { userId: USER_ID, orgId: ORG_ID } })),
+    );
+
+    expect(result).toBeUndefined();
+  });
+
   it('allows when trialing and trial has not expired', async () => {
     const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     ddbMock.on(GetItemCommand).resolves(

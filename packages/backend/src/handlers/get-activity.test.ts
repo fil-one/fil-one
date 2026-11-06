@@ -160,6 +160,24 @@ describe('get-activity baseHandler', () => {
     );
   });
 
+  it('leaves Bucket Intelligence companion buckets out of the feed', async () => {
+    mockListBuckets.mockResolvedValue([
+      { bucketName: 'photos', createdAt: '2026-01-01T00:00:00Z' },
+      {
+        bucketName: 'filone-rag-0123456789abcdef0123456789abcdef01234567',
+        createdAt: '2026-01-02T00:00:00Z',
+      },
+    ]);
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.activities.map((a: { resourceName: string }) => a.resourceName)).toStrictEqual([
+      'photos',
+    ]);
+  });
+
   it('respects the limit query parameter', async () => {
     mockListBuckets.mockResolvedValue([
       { bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' },
@@ -652,6 +670,22 @@ describe('get-activity baseHandler (request deadline)', () => {
     } finally {
       error.mockRestore();
     }
+  });
+
+  // A call that ignores the deadline holds the handler until the Lambda timeout;
+  // the deadline log then names it among the steps still in flight.
+  it("names a region's listBuckets as in flight while it hangs after every other call has answered", async () => {
+    fth.listBuckets.mockReturnValue(new Promise(() => {}));
+    const event = buildEvent({ userInfo: USER_INFO });
+
+    void baseHandler(event);
+
+    await vi.waitFor(() =>
+      expect([...(event.requestContext.deadlineStepsInFlight?.values() ?? [])]).toStrictEqual([
+        'fetchBucketActivities',
+        'listBuckets:us-east-1',
+      ]),
+    );
   });
 
   it('logs the region that hit the deadline so the hang is not silent', async () => {

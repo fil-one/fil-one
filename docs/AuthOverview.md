@@ -252,8 +252,6 @@ An invitation is a row plus a single-use token, and the token exists only in the
 
 Accepting is the one authenticated route with no org gate at all: the caller is not a member of the inviting org yet, so a membership check would refuse every invitation there is. Its authorization is the token plus a session whose verified email is the invited address, both checked in the handler.
 
-Creating an invitation is gated on the organizations beta flag — see [`bin/README.md`](https://github.com/filecoin-project/fil-one/blob/main/bin/README.md) for where the flag lives and how to grant it. Nothing downstream of an invitation existing is flagged: accepting, the roster, role changes, removal, and transfer never read it. The same flag reaches the console as `MeResponse.orgsBeta`, where it decides whether the Members nav entry and `/members` render for a caller who belongs to exactly one org. A caller with two or more memberships gets that surface either way.
-
 ### Ownership transfer
 
 Transfer is the only org action behind a step-up, because it is the only verb that takes the caller's own authority away: the outgoing Owner lands as Admin, and Admin cannot promote anyone back. `requireMfaIfEnrolled()` runs after `authorize('org.transfer')`, so a non-Owner is refused before being sent on an Auth0 round trip.
@@ -354,8 +352,6 @@ The fetch wrapper at [`api.ts`](https://github.com/filecoin-project/fil-one/blob
 - On 401, calls `redirectToLogin()` — except the `step_up_required` 401, which becomes a `StepUpRequiredError` for the caller to handle.
 
 The console hides what the server would refuse: `usePermissions()` reads the permission list `/api/me` computes from the same registry the backend enforces, and gated pages render a refusal rather than redirecting. This is presentation only. Every decision is made again on the server.
-
-The Members surface is the one gate that hides something the server would serve: the nav entry and `/members` render on more than one membership or the `orgsBeta` flag, while all four roles hold `members.read` and no server route reads the flag on a read path.
 
 ## MFA
 

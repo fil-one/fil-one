@@ -338,7 +338,7 @@ export function AccessKeysTable({
       <div className="flex flex-col items-center justify-center rounded-xl border border-zinc-200 bg-white px-6 py-16 text-center">
         <IconBox icon={KeyIcon} size="md" color="blue" className="mb-4" />
         <p className="mb-1 text-sm font-medium text-zinc-900">{emptyTitle}</p>
-        <p className="mb-4 max-w-xs text-sm text-zinc-500">{emptyDescription}</p>
+        <p className="mb-4 max-w-xs text-sm text-balance text-zinc-500">{emptyDescription}</p>
         {onCreateOpen && (
           <Button variant="primary" icon={PlusIcon} onClick={onCreateOpen}>
             Create your first key
