@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import type { S3ObjectVersion } from '@filone/shared';
 
-import { countObjects } from './ObjectBrowser.js';
+import { countObjects, getSelectAllLabel } from './ObjectBrowser.js';
 
 function version(
   overrides: Partial<S3ObjectVersion> & Pick<S3ObjectVersion, 'key'>,
@@ -56,4 +56,18 @@ describe('countObjects', () => {
   it('returns 0 for an empty list', () => {
     expect(countObjects([])).toBe(0);
   });
+});
+
+describe('getSelectAllLabel', () => {
+  it.each([
+    { searching: true, listingTruncated: true, label: 'Select all matching objects' },
+    { searching: true, listingTruncated: false, label: 'Select all matching objects' },
+    { searching: false, listingTruncated: true, label: 'Select all loaded objects' },
+    { searching: false, listingTruncated: false, label: 'Select all objects' },
+  ])(
+    'returns "$label" when searching is $searching and the listing truncated is $listingTruncated',
+    ({ searching, listingTruncated, label }) => {
+      expect(getSelectAllLabel({ searching, listingTruncated })).toBe(label);
+    },
+  );
 });
