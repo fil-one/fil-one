@@ -148,8 +148,8 @@ describe('EditOrganizationPage', () => {
       renderPage(OrgRole.Owner);
 
       expect(await screen.findByText('Delete organization')).toBeInTheDocument();
-      const link = screen.getByRole('link', { name: 'support@fil.one' });
-      expect(link).toHaveAttribute('href', 'mailto:support@fil.one');
+      const link = screen.getByRole('link', { name: 'support@filone.com' });
+      expect(link).toHaveAttribute('href', 'mailto:support@filone.com');
       expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
     });
 
