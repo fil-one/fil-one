@@ -118,6 +118,12 @@ export function errorCodeOf(error: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
+/** The signed-in address an invitation email mismatch names, when it names one. */
+export function sessionEmailOf(error: unknown): string | undefined {
+  const email = (error as { sessionEmail?: unknown } | null | undefined)?.sessionEmail;
+  return typeof email === 'string' ? email : undefined;
+}
+
 /** The HTTP status an error carries, when it carries one. */
 export function errorStatusOf(error: unknown): number | undefined {
   const status = (error as { status?: unknown } | null | undefined)?.status;
@@ -233,15 +239,19 @@ export interface ApiRequestBehavior {
   skipSwitchWait?: boolean;
 }
 
+/** What a 403's body may carry. Only an invitation email mismatch sends `sessionEmail`. */
+interface ForbiddenBody {
+  message?: string;
+  code?: string;
+  sessionEmail?: string;
+}
+
 /**
  * The error a 403 becomes. Every denial the API can send is named here so a
  * caller renders intent rather than a generic toast, and the two role codes get
  * types a component can branch on.
  */
-function forbidden(
-  body: { message?: string; code?: string },
-  behavior: ApiRequestBehavior = {},
-): Error {
+function forbidden(body: ForbiddenBody, behavior: ApiRequestBehavior = {}): Error {
   switch (body.code) {
     case ApiErrorCode.EMAIL_NOT_VERIFIED:
       if (!isRedirecting && !behavior.rendersUnverifiedEmail) redirectTo('/verify-email');
@@ -252,6 +262,15 @@ function forbidden(
       return Object.assign(new Error('Email verification required'), {
         status: 403,
         code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
+
+    // The accept page names the signed-in address from this, rather than from
+    // `/me`, which a deleted account's session cannot read.
+    case ApiErrorCode.INVITE_EMAIL_MISMATCH:
+      return Object.assign(new Error(body.message ?? 'Access denied'), {
+        status: 403,
+        code: body.code,
+        ...(body.sessionEmail ? { sessionEmail: body.sessionEmail } : {}),
       });
 
     case ApiErrorCode.NOT_A_MEMBER:
@@ -407,7 +426,7 @@ export async function sendApiRequest(
   }
 
   if (response.status === 403) {
-    const body = (await response.json().catch(() => ({}))) as { message?: string; code?: string };
+    const body = (await response.json().catch(() => ({}))) as ForbiddenBody;
     throw forbidden(body, behavior);
   }
 

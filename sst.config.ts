@@ -90,6 +90,18 @@ export default $config({
       ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
       ...(forgeDevManagementApiToken ? [forgeDevManagementApiToken] : []),
     ];
+    // Bucket Intelligence in Forge regions runs on an engine on the Forge
+    // appliance (FIL-1709). Like the Forge tokens, these exist only off
+    // production. The placeholder lets a stage deploy before an operator sets
+    // them; the backend treats it as "no engine" and answers 503 in Forge regions.
+    const ragEngineUrl =
+      isStaging || isEphemeralStage ? new sst.Secret('RagEngineUrl', 'unset') : undefined;
+    const ragEngineToken =
+      isStaging || isEphemeralStage ? new sst.Secret('RagEngineToken', 'unset') : undefined;
+    const ragEngineResources = [
+      ...(ragEngineUrl ? [ragEngineUrl] : []),
+      ...(ragEngineToken ? [ragEngineToken] : []),
+    ];
     const grafanaLokiAuth = new sst.Secret('GrafanaLokiAuth');
     const hubSpotServiceKey = new sst.Secret('HubSpotServiceKey');
     // Keys the deletion-code HMAC, so a table dump alone cannot enumerate a
@@ -412,17 +424,17 @@ export default $config({
         : `${stage}.dev.fil.one`;
 
     // Extra hostnames the production console answers on: the unlisted demo alias for
-    // when fil.one is blocklisted, and app.filone.com, the domain the console is
-    // moving to. They are alternate domain names on this same distribution, not
-    // another deployment.
+    // when fil.one is blocklisted, and app.fil.one, the console's previous canonical
+    // host. They are alternate domain names on this same distribution, not another
+    // deployment.
     const aliasHosts = isProduction ? [...PROD_CONSOLE_ALIAS_HOSTS] : [];
 
     // ACM cert must be in us-east-1 for CloudFront. Ephemeral stages share a
     // wildcard cert for *.dev.fil.one provisioned in the fil-one/infrastructure repo.
     //
     // CloudFront allows one viewer certificate per distribution, so in production a
-    // single cert carries app.fil.one and every alias. It is named after
-    // app.filone.com, the console's next canonical host, and looked up by that name.
+    // single cert carries the canonical host and every alias. It is named after
+    // app.filone.com, the console's canonical host, and looked up by that name.
     // See environments/prod/filone-com.tf in fil-one/infrastructure.
     const certDomain = isEphemeralStage
       ? '*.dev.fil.one'
@@ -625,9 +637,9 @@ export default $config({
         ? undefined
         : {
             name: domainName,
-            // Demo aliases keep visitors on the alias hostname (unlike `redirects`,
-            // which would bounce them back to the blocklisted canonical host). The
-            // cert above must cover every entry or CloudFront rejects the deploy.
+            // Aliases keep visitors on the hostname they came in on (unlike
+            // `redirects`, which would send them to the canonical host). The cert
+            // above must cover every entry or CloudFront rejects the deploy.
             aliases: aliasHosts,
             // Ephemeral stages: SST creates the Route 53 alias in the delegated
             // dev.fil.one zone. Staging/prod: records are managed in Cloudflare
@@ -1055,6 +1067,8 @@ export default $config({
         orgLogoBucket,
         ...managementApiTokens,
         ...mgmtRuntimeResources,
+        // Drops Forge-region Lance datasets on the Bucket Intelligence engine.
+        ...ragEngineResources,
       ],
       environment: {
         ...orchestratorEnv,
@@ -1068,6 +1082,8 @@ export default $config({
       memory: '1024 MB',
       permissions: [
         ...ragPermissions,
+        // The tenant's Forge S3 key, which the engine needs to drop a dataset.
+        { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
         { actions: ['sqs:SendMessage'], resources: [accountDeletionDlq.arn] },
         // The one credential in the system that may remove an audit entry. The
         // auditLog link above deliberately withholds this from every route, and
@@ -1333,8 +1349,9 @@ export default $config({
       'query-bucket': {
         rag: true,
         // Reads the bucket's enablement row to reject queries before the first
-        // indexing pass completes (BUCKET_NOT_INDEXED).
-        extraLink: [ragIndexerTable],
+        // indexing pass completes (BUCKET_NOT_INDEXED). Forge regions query the
+        // Bucket Intelligence engine, whose answers take 10–20 s.
+        extraLink: [ragIndexerTable, ...ragEngineResources],
         extraEnv: orchestratorEnv,
         permissions: [
           ...bucketReadPermissions,
@@ -1358,15 +1375,34 @@ export default $config({
       // linked via allResources) for tenant/org profile, and resolve tenant
       // ownership via the orchestrator (SSM-backed S3 keys), so they need the SSM
       // read grant but not `rag: true` (no s3vectors/bedrock).
+      // In Forge regions both also call the Bucket Intelligence engine: the
+      // read merges its sync status, and turning indexing on starts a sync.
       'get-bucket-rag-enablement': {
         extraEnv: orchestratorEnv,
-        extraLink: [ragIndexerTable],
+        extraLink: [ragIndexerTable, ...ragEngineResources],
         permissions: bucketReadPermissions,
+        timeout: '15 seconds',
       },
       'set-bucket-rag-enablement': {
         extraEnv: orchestratorEnv,
-        extraLink: [ragIndexerTable],
+        extraLink: [ragIndexerTable, ...ragEngineResources],
         permissions: bucketReadPermissions,
+        timeout: '15 seconds',
+      },
+      // Forge regions only (FIL-1709): index a bucket now, and the engine's view
+      // of its Lance dataset and versions. They pass the tenant's Forge S3 key to
+      // the engine, so they need the same SSM read grant as the routes above.
+      'sync-bucket-rag': {
+        extraEnv: orchestratorEnv,
+        extraLink: [ragIndexerTable, ...ragEngineResources],
+        permissions: bucketReadPermissions,
+        timeout: '15 seconds',
+      },
+      'get-bucket-rag-engine': {
+        extraEnv: orchestratorEnv,
+        extraLink: [ragIndexerTable, ...ragEngineResources],
+        permissions: bucketReadPermissions,
+        timeout: '15 seconds',
       },
 
       // ── Auth ───────────────────────────────────────────────────────
@@ -1639,7 +1675,15 @@ export default $config({
     // buckets are resumed across runs via a persisted continuation checkpoint.
     const ragIndexerWorker = createFn('RagIndexerWorker', {
       handler: 'packages/backend/src/jobs/rag-indexer-worker.handler',
-      link: [billingTable, userInfoTable, ragIndexerTable, ragVectorBucket, ...managementApiTokens],
+      // Forge-region buckets sync on the Bucket Intelligence engine instead.
+      link: [
+        billingTable,
+        userInfoTable,
+        ragIndexerTable,
+        ragVectorBucket,
+        ...managementApiTokens,
+        ...ragEngineResources,
+      ],
       environment: orchestratorEnv,
       timeout: '900 seconds',
       // 1024 MB: PDF text extraction runs in-process (pdf.js), which is

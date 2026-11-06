@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import type { RagCitation, RagQueryTrace } from './rag-engine.ts';
+
 /** Default number of chunks retrieved when the caller does not specify `top_k`. */
 export const QUERY_DEFAULT_TOP_K = 10;
 
@@ -58,12 +60,18 @@ export const QueryBucketSchema = z.object({
       message: `model must be one of: ${SUPPORTED_COMPLETION_MODEL_IDS.join(', ')}`,
     })
     .optional(),
+  /** Engine-backed (Forge) buckets only: how to retrieve chunks. Ignored elsewhere. */
+  search_mode: z.enum(['vector', 'fulltext', 'hybrid']).optional(),
+  /** Engine-backed (Forge) buckets only: query the index as of this version. Ignored elsewhere. */
+  version: z.number().int().min(1).optional(),
 });
 
 export interface QueryBucketRequest {
   query: string;
   top_k?: number;
   model?: string;
+  search_mode?: 'vector' | 'fulltext' | 'hybrid';
+  version?: number;
 }
 
 export interface QueryBucketResponse {
@@ -71,6 +79,10 @@ export interface QueryBucketResponse {
   answer: string;
   /** Deduplicated source object keys of the retrieved chunks. */
   sources: string[];
+  /** Engine-backed (Forge) buckets only: the numbered chunks the answer cites as `[n]`. */
+  citations?: RagCitation[];
+  /** Engine-backed (Forge) buckets only: how the query was served. */
+  trace?: RagQueryTrace;
 }
 
 /**

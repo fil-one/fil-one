@@ -1,15 +1,16 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
+import type { BucketRagEnablementResponse, ErrorResponse, S3Region } from '@filone/shared';
 import {
   S3_REGION,
   SetBucketRagEnabledSchema,
   isSupportedRegion,
-  supportsIamMethods,
+  usesRagEngine,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { RegionOrchestrator, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import { checkIndexingAccess } from '../lib/rag-indexing-access.ts';
 import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
@@ -22,6 +23,15 @@ import {
   setBucketRagEnablement,
   toEnablementResponse,
 } from '../lib/bucket-rag-enablement.ts';
+import {
+  getRagEngineConfig,
+  getRagEngineClient,
+  ragEngineErrorResponse,
+  ragEngineTarget,
+  RagEngineNotConfiguredError,
+  withEngineFailure,
+  withEngineStatus,
+} from '../lib/rag-engine-client.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getScopedMemberId } from '../lib/member-scope.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -57,31 +67,6 @@ function parseEnabledBody(
     };
   }
   return { enabled: parsed.data.enabled };
-}
-
-/**
- * Refuse to index a bucket for a scoped member whose policies grant neither
- * listing nor reading it: the indexer lists and reads the bucket with the
- * tenant's key, and the query path answers from that content. A region serving
- * service keys has no policies to consult.
- */
-async function checkIndexingAccess(
-  orchestrator: RegionOrchestrator,
-  tenantId: string,
-  bucketName: string,
-  memberId: string | undefined,
-): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  if (!memberId || !supportsIamMethods(orchestrator.region)) return undefined;
-  const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(
-    tenantId,
-    memberId,
-  );
-  const actions = access.find((entry) => entry.bucketName === bucketName)?.actions ?? [];
-  if (actions.includes('s3:ListBucket') && actions.includes('s3:GetObject')) return undefined;
-  return new ResponseBuilder()
-    .status(403)
-    .body<ErrorResponse>({ message: `Your access to ${bucketName} does not permit indexing it.` })
-    .build();
 }
 
 /**
@@ -144,7 +129,7 @@ export async function baseHandler(
       .build();
   }
   const refused = enabled
-    ? await checkIndexingAccess(orchestrator, tenantId, bucketName, memberId)
+    ? await checkCanIndex({ orchestrator, tenantId, bucketName, memberId, region })
     : undefined;
   if (refused) return refused;
 
@@ -169,10 +154,64 @@ export async function baseHandler(
     existing: owned,
   });
 
-  return new ResponseBuilder()
-    .status(200)
-    .body<BucketRagEnablementResponse>(toEnablementResponse(record))
-    .build();
+  const response = await startEngineSync(toEnablementResponse(record), orchestrator, tenantId, {
+    orgId,
+    region,
+    bucketName,
+    enabled,
+  });
+
+  return new ResponseBuilder().status(200).body<BucketRagEnablementResponse>(response).build();
+}
+
+/** Why this bucket cannot be indexed for this caller, or undefined when it can. */
+async function checkCanIndex(args: {
+  orchestrator: RegionOrchestrator;
+  tenantId: string;
+  bucketName: string;
+  memberId: string | undefined;
+  region: S3Region;
+}): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
+  const { orchestrator, tenantId, bucketName, memberId, region } = args;
+  return (
+    refuseWithoutEngine(region) ??
+    (await checkIndexingAccess(orchestrator, tenantId, bucketName, memberId))
+  );
+}
+
+/**
+ * Forge regions index on the engine. Without one on this stage, turning
+ * indexing on would record a bucket nothing can ever index: 503 instead.
+ */
+function refuseWithoutEngine(region: S3Region): APIGatewayProxyStructuredResultV2 | undefined {
+  if (!usesRagEngine(region) || getRagEngineConfig()) return undefined;
+  return ragEngineErrorResponse(new RagEngineNotConfiguredError());
+}
+
+/**
+ * Forge regions, when indexing is turned on: the first index starts now rather
+ * than at the next indexer pass. The row is already written, so an engine
+ * failure is reported as a failed sync and the indexer's next pass retries it.
+ * Every other case returns the response unchanged.
+ */
+async function startEngineSync(
+  response: BucketRagEnablementResponse,
+  orchestrator: RegionOrchestrator,
+  tenantId: string,
+  bucket: { orgId: string; region: S3Region; bucketName: string; enabled: boolean },
+): Promise<BucketRagEnablementResponse> {
+  if (!bucket.enabled || !usesRagEngine(bucket.region)) return response;
+  try {
+    const target = await ragEngineTarget(orchestrator, tenantId, bucket);
+    return withEngineStatus(response, await getRagEngineClient().sync(target));
+  } catch (error) {
+    console.error('[set-bucket-rag-enablement] engine sync failed', {
+      region: bucket.region,
+      bucketName: bucket.bucketName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return withEngineFailure(response, error);
+  }
 }
 
 export const handler = middy(baseHandler)

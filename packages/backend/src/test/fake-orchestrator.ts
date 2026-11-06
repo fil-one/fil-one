@@ -20,6 +20,7 @@ export interface FakeOrchestrator {
   getBucketUsageMetrics: ReturnType<typeof vi.fn>;
   getBucket: ReturnType<typeof vi.fn>;
   listBuckets: ReturnType<typeof vi.fn>;
+  getS3ClientContext: ReturnType<typeof vi.fn>;
 }
 
 export interface FakeOrchestratorOpts {
@@ -81,6 +82,21 @@ export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): F
     listBuckets: failUsage
       ? regionDown()
       : vi.fn().mockResolvedValue((opts.buckets ?? []).map((bucketName) => ({ bucketName }))),
+    getS3ClientContext: vi.fn(async (tenantId: string) =>
+      fakeS3ClientContext(id, region, tenantId),
+    ),
+  };
+}
+
+/** The S3 context a {@link fakeOrchestrator} hands out for a tenant. */
+export function fakeS3ClientContext(orchestratorId: string, region: string, tenantId: string) {
+  return {
+    endpointUrl: `https://s3.${region}.test.invalid`,
+    region,
+    credentials: { accessKeyId: `AK-${tenantId}`, secretAccessKey: `SK-${tenantId}` },
+    forcePathStyle: true,
+    orchestratorId,
+    tenantId,
   };
 }
 

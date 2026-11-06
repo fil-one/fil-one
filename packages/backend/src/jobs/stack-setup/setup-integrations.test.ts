@@ -123,8 +123,11 @@ function stubAuth0Fetch(
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    // Each PATCH updates the state later GETs return, so a test that runs teardown
+    // and then setup sees what Auth0 would hold after both.
     if (urlStr.includes('/api/v2/clients/') && init?.method === 'PATCH') {
       capturedAuth0PatchBody = JSON.parse(init.body!);
+      Object.assign(clientState, capturedAuth0PatchBody);
       return new Response('{}', { status: 200 });
     }
     if (urlStr.includes('/api/v2/emails/provider') && init?.method === 'PATCH') {
@@ -226,6 +229,8 @@ function stubAuth0Fetch(
     }
     return new Response('Not found', { status: 404 });
   });
+
+  return clientState;
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +495,59 @@ describe('setup-integrations', () => {
       });
     });
 
+    // Teardown removes every callback and web origin of the old host list, and
+    // app.fil.one is on both the old list and the new one. It stays registered
+    // only because setup runs after teardown and adds it back.
+    it('keeps the previous canonical host registered when production moves its SiteUrl', async () => {
+      const auth0Client = stubAuth0Fetch({
+        callbacks: [
+          'https://app.fil.one/api/auth/callback',
+          'https://app.filone.ai/api/auth/callback',
+          'https://app.filone.com/api/auth/callback',
+        ],
+        allowed_logout_urls: ['https://fil.one', 'https://filone.ai', 'https://www.filone.com'],
+        web_origins: ['https://app.fil.one', 'https://app.filone.ai', 'https://app.filone.com'],
+        initiate_login_uri: 'https://app.fil.one/login',
+      });
+      mockResource.StripeSecretKey.value = 'sk_live_real';
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      ssmMock.on(DeleteParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({ id: 'we_new', secret: 'whsec_new' });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Update',
+          PhysicalResourceId: 'filone-setup-production',
+          ResourceProperties: {
+            SiteUrl: 'https://app.filone.com',
+            SiteAliasUrls: 'https://app.filone.ai,https://app.fil.one',
+            Stage: 'production',
+          },
+          OldResourceProperties: {
+            SiteUrl: 'https://app.fil.one',
+            SiteAliasUrls: 'https://app.filone.ai,https://app.filone.com',
+            Stage: 'production',
+          },
+        } as never),
+      );
+
+      expect(auth0Client).toEqual({
+        callbacks: [
+          'https://app.filone.com/api/auth/callback',
+          'https://app.filone.ai/api/auth/callback',
+          'https://app.fil.one/api/auth/callback',
+        ],
+        // Teardown leaves marketing logout URLs alone, since other stages share
+        // them, so the old site's entry stays. www.filone.com was already there
+        // for the app.filone.com alias, so setup adds nothing.
+        allowed_logout_urls: ['https://fil.one', 'https://filone.ai', 'https://www.filone.com'],
+        web_origins: ['https://app.filone.com', 'https://app.filone.ai', 'https://app.fil.one'],
+        initiate_login_uri: 'https://app.filone.com/login',
+      });
+    });
+
     it('skips old-URL teardown when URL has not changed', async () => {
       ssmMock.on(GetParameterCommand).resolves({
         Parameter: { Value: 'whsec_existing' },
@@ -637,7 +695,7 @@ describe('setup-integrations', () => {
       });
     });
 
-    it('registers a callback, origin, and logout URL for each demo alias', async () => {
+    it('registers a callback, origin, and logout URL for each alias host', async () => {
       // Production stage refuses a test Stripe key, and the alias hosts only
       // exist in production.
       mockResource.StripeSecretKey.value = 'sk_live_real';
@@ -651,8 +709,8 @@ describe('setup-integrations', () => {
           RequestType: 'Create',
           ResourceProperties: {
             ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
-            SiteUrl: 'https://app.fil.one',
-            SiteAliasUrls: 'https://app.filone.ai',
+            SiteUrl: 'https://app.filone.com',
+            SiteAliasUrls: 'https://app.filone.ai,https://app.fil.one',
             Stage: 'production',
           },
         }),
@@ -661,15 +719,18 @@ describe('setup-integrations', () => {
       expect(capturedAuth0PatchBody).toEqual({
         callbacks: [
           'https://old.example.com/callback',
-          'https://app.fil.one/api/auth/callback',
+          'https://app.filone.com/api/auth/callback',
           'https://app.filone.ai/api/auth/callback',
+          'https://app.fil.one/api/auth/callback',
         ],
         // Each console origin maps to its own marketing site, so logging out of
         // the alias does not land on the domain the alias exists to avoid.
-        allowed_logout_urls: ['https://fil.one', 'https://filone.ai'],
-        web_origins: ['https://app.fil.one', 'https://app.filone.ai'],
+        // app.fil.one shares www.filone.com with the canonical host, so it adds
+        // no entry of its own.
+        allowed_logout_urls: ['https://www.filone.com', 'https://filone.ai'],
+        web_origins: ['https://app.filone.com', 'https://app.filone.ai', 'https://app.fil.one'],
         // Auth0 permits exactly one, so it stays on the canonical host.
-        initiate_login_uri: 'https://app.fil.one/login',
+        initiate_login_uri: 'https://app.filone.com/login',
       });
     });
 
@@ -764,12 +825,18 @@ describe('setup-integrations', () => {
 
       stubAuth0Fetch({
         callbacks: [
-          'https://app.fil.one/api/auth/callback',
+          'https://app.filone.com/api/auth/callback',
           'https://app.filone.ai/api/auth/callback',
+          'https://app.fil.one/api/auth/callback',
         ],
-        allowed_logout_urls: ['https://fil.one', 'https://filone.ai', 'https://staging.fil.one'],
-        web_origins: ['https://app.fil.one', 'https://app.filone.ai'],
-        initiate_login_uri: 'https://app.fil.one/login',
+        allowed_logout_urls: [
+          'https://fil.one',
+          'https://www.filone.com',
+          'https://filone.ai',
+          'https://staging.fil.one',
+        ],
+        web_origins: ['https://app.filone.com', 'https://app.filone.ai', 'https://app.fil.one'],
+        initiate_login_uri: 'https://app.filone.com/login',
       });
 
       await handler(
@@ -778,8 +845,8 @@ describe('setup-integrations', () => {
           PhysicalResourceId: 'filone-setup-production',
           ResourceProperties: {
             ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
-            SiteUrl: 'https://app.fil.one',
-            SiteAliasUrls: 'https://app.filone.ai',
+            SiteUrl: 'https://app.filone.com',
+            SiteAliasUrls: 'https://app.filone.ai,https://app.fil.one',
             Stage: 'production',
           },
         }),
@@ -787,9 +854,14 @@ describe('setup-integrations', () => {
 
       expect(capturedAuth0PatchBody).toEqual({
         callbacks: [],
-        // Both marketing sites are shared by every stage, and staging's console
+        // The marketing sites are shared by every stage, and staging's console
         // entry belongs to staging, so none of them may be removed here.
-        allowed_logout_urls: ['https://fil.one', 'https://filone.ai', 'https://staging.fil.one'],
+        allowed_logout_urls: [
+          'https://fil.one',
+          'https://www.filone.com',
+          'https://filone.ai',
+          'https://staging.fil.one',
+        ],
         web_origins: [],
         initiate_login_uri: '',
       });

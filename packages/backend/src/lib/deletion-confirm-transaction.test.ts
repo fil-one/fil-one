@@ -13,6 +13,7 @@ import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 vi.mock('sst', () => ({
   Resource: {
     UserInfoTable: { name: 'UserInfoTable' },
+    BillingTable: { name: 'BillingTable' },
     DeletionChallengeTable: { name: 'DeletionChallengeTable' },
     DeletionCodeHmacKey: { value: 'test-hmac-key' },
   },
@@ -20,7 +21,11 @@ vi.mock('sst', () => ({
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { confirmAccountDeletion, consumeVerifyAttempt } from './deletion-confirm-transaction.ts';
+import {
+  commitStripeTriggeredDeletion,
+  confirmAccountDeletion,
+  consumeVerifyAttempt,
+} from './deletion-confirm-transaction.ts';
 import { MAX_VERIFY_ATTEMPTS } from './deletion-challenge.ts';
 
 const PARAMS = {
@@ -162,6 +167,48 @@ describe('confirmAccountDeletion', () => {
     await expect(confirmAccountDeletion(PARAMS)).rejects.toBeInstanceOf(
       TransactionCanceledException,
     );
+  });
+});
+
+describe('commitStripeTriggeredDeletion', () => {
+  beforeEach(() => {
+    ddbMock.reset();
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+  });
+
+  it('commits the deletion only while the org is not billed manually', async () => {
+    const result = await commitStripeTriggeredDeletion('org-1');
+
+    expect(result).toStrictEqual({ outcome: 'confirmed' });
+    expect(sentItems().at(-1)).toStrictEqual({
+      ConditionCheck: {
+        TableName: 'BillingTable',
+        Key: { pk: { S: 'ORG#org-1' }, sk: { S: 'SUBSCRIPTION' } },
+        ConditionExpression:
+          'attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual',
+        ExpressionAttributeValues: { ':manual': { S: 'manual' } },
+      },
+    });
+  });
+
+  it('reports billed_manually when the billing row is manual', async () => {
+    ddbMock
+      .on(TransactWriteItemsCommand)
+      .rejects(cancelled([OK, OK, { Code: 'ConditionalCheckFailed' }]));
+
+    await expect(commitStripeTriggeredDeletion('org-1')).resolves.toStrictEqual({
+      outcome: 'billed_manually',
+    });
+  });
+
+  it('reports already_deleting when the deletion record exists', async () => {
+    ddbMock
+      .on(TransactWriteItemsCommand)
+      .rejects(cancelled([{ Code: 'ConditionalCheckFailed' }, OK, OK]));
+
+    await expect(commitStripeTriggeredDeletion('org-1')).resolves.toStrictEqual({
+      outcome: 'already_deleting',
+    });
   });
 });
 

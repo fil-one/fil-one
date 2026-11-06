@@ -1,5 +1,8 @@
 import type {
+  BucketRagEngineResponse,
   BucketRagEnablementResponse,
+  RagEngineStatus,
+  RagSearchMode,
   ListBucketsResponse,
   QueryBucketResponse,
   S3Region,
@@ -136,12 +139,22 @@ export function setBucketRagEnabled(
   );
 }
 
+/** Options for {@link queryBucket}. */
+export type QueryBucketOptions = {
+  topK?: number;
+  model?: string;
+  /** Engine-backed (Forge) buckets only: vector, full-text or hybrid retrieval. */
+  searchMode?: RagSearchMode;
+  /** Engine-backed (Forge) buckets only: query the index as of this dataset version. */
+  version?: number;
+};
+
 /** Submit a grounded query against a bucket's index (FIL-554). */
 export function queryBucket(
   bucketName: string,
   region: S3Region,
   query: string,
-  options: { topK?: number; model?: string } = {},
+  options: QueryBucketOptions = {},
 ): Promise<QueryBucketResponse> {
   const qs = new URLSearchParams({ region }).toString();
   return apiRequest<QueryBucketResponse>(`/buckets/${encodeURIComponent(bucketName)}/query?${qs}`, {
@@ -150,6 +163,34 @@ export function queryBucket(
       query,
       ...(options.topK !== undefined ? { top_k: options.topK } : {}),
       ...(options.model ? { model: options.model } : {}),
+      ...(options.searchMode ? { search_mode: options.searchMode } : {}),
+      ...(options.version !== undefined ? { version: options.version } : {}),
     }),
   });
+}
+
+/**
+ * Index an engine-backed (Forge) bucket now instead of waiting for the schedule.
+ * The engine answers with its status, which reads `syncing` once the run starts.
+ */
+export function syncBucketRag(bucketName: string, region: S3Region): Promise<RagEngineStatus> {
+  const qs = new URLSearchParams({ region }).toString();
+  return apiRequest<RagEngineStatus>(`/buckets/${encodeURIComponent(bucketName)}/rag/sync?${qs}`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * Read an engine-backed (Forge) bucket's dataset status and version history:
+ * the Lance dataset on Forge storage, its indexes, sync progress, and versions
+ * newest first.
+ */
+export function getBucketRagEngine(
+  bucketName: string,
+  region: S3Region,
+): Promise<BucketRagEngineResponse> {
+  const qs = new URLSearchParams({ region }).toString();
+  return apiRequest<BucketRagEngineResponse>(
+    `/buckets/${encodeURIComponent(bucketName)}/rag/engine?${qs}`,
+  );
 }

@@ -11,6 +11,7 @@
 // So the eligibility test and the claim live here, and the two callers differ
 // only in what they do with the outcome.
 
+import { OrgRole } from '@filone/shared';
 import { listMemberships } from './org-membership.ts';
 import type { SubscriptionRecord } from './dynamo-records.ts';
 import { ensureTrialEntitlement } from './trial-entitlement.ts';
@@ -44,13 +45,18 @@ export function isTrialClaimable(record: SubscriptionRecord | undefined): boolea
 /**
  * Claim the trial when this caller may spend theirs on this org.
  *
- * Only in their own org, and only while it is the only one they belong to
- * (ADR §5). Without the personal-org condition this would create Stripe billing
- * on somebody else's org, anchoring that org's subscription to this caller's
- * Stripe customer; without the sole-membership condition, every employee of an
- * org who ever opened their personal dashboard would mint a trial nobody asked
- * for. A member who genuinely wants personal use activates billing explicitly,
- * and their claim is still theirs to spend.
+ * Only in their own org (ADR §5). Without that condition this would create
+ * Stripe billing on somebody else's org, anchoring that org's subscription to
+ * this caller's Stripe customer.
+ *
+ * An org they created is their own while they own it, whatever other orgs they
+ * belong to: creating it is the request for it. An invitee's account comes with
+ * no org, so the first one they create is where their trial goes. The org that
+ * came with an account at signup is their own only while it is the only one they
+ * belong to: without that condition, every employee of an org who ever opened
+ * their personal dashboard would mint a trial nobody asked for. A member who
+ * genuinely wants personal use activates billing explicitly, and their claim is
+ * still theirs to spend.
  *
  * Decided from stored rows, never from the request: `X-Org-Id` names the org but
  * cannot prove whose it is. `source` says how the membership came to be — an
@@ -61,7 +67,7 @@ export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialCla
   const { sub, userId, orgId, email, emailVerified, apiKeySession } = userInfo;
   if (apiKeySession) return 'api-key-session';
 
-  if (!(await isSoloPersonalOrg(userInfo))) return 'not-own-org';
+  if (!(await isOwnOrgForTrial(userInfo))) return 'not-own-org';
 
   const entitled = await ensureTrialEntitlement({
     sub,
@@ -78,7 +84,7 @@ export async function claimTrialIfEligible(userInfo: UserInfo): Promise<TrialCla
  * Every refusal logs, so a `not-own-org` outcome can be told apart from an
  * upstream bug that resolved `userInfo.membership` wrongly for this request.
  */
-async function isSoloPersonalOrg({ userId, orgId, membership }: UserInfo): Promise<boolean> {
+async function isOwnOrgForTrial({ userId, orgId, membership }: UserInfo): Promise<boolean> {
   if (!membership || membership.orgId !== orgId) {
     console.warn('[trial-claim] No membership row for the active org — refusing the claim', {
       userId,
@@ -91,6 +97,18 @@ async function isSoloPersonalOrg({ userId, orgId, membership }: UserInfo): Promi
     console.warn('[trial-claim] Membership arrived by invitation — refusing the claim', {
       userId,
       orgId,
+    });
+    return false;
+  }
+  // Created by the caller, or the floor org made for them when they lost their
+  // last membership. Theirs only while they own it: after a transfer, billing
+  // it would anchor somebody else's org to this caller's Stripe customer.
+  if (membership.source === 'manual') {
+    if (membership.role === OrgRole.Owner) return true;
+    console.warn('[trial-claim] Caller no longer owns the org they created: refusing the claim', {
+      userId,
+      orgId,
+      role: membership.role,
     });
     return false;
   }

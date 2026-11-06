@@ -33,8 +33,7 @@ type OrgSwitcherMenuProps = {
 /**
  * The org's pages. Without an active plan the billing gate stands in for every
  * page but a few, so the `gated` ones would only land back on it; Edit
- * organization is one of the pages past the gate. The `beta` ones belong to the
- * organizations beta.
+ * organization is one of the pages past the gate.
  */
 const ORG_LINKS: {
   href: string;
@@ -42,7 +41,6 @@ const ORG_LINKS: {
   icon: React.ElementType;
   permission: Permission;
   gated: boolean;
-  beta?: boolean;
   testId?: string;
 }[] = [
   {
@@ -59,7 +57,6 @@ const ORG_LINKS: {
     icon: UsersIcon,
     permission: 'members.read',
     gated: true,
-    beta: true,
   },
   {
     href: '/billing',
@@ -74,7 +71,6 @@ const ORG_LINKS: {
     icon: ClockCounterClockwiseIcon,
     permission: 'audit.view',
     gated: true,
-    beta: true,
   },
 ];
 
@@ -101,12 +97,12 @@ const itemClassName =
  * return wrong (FIL-990).
  *
  * Always renders, even for a single-org account where `OrgSwitcher` itself
- * renders nothing: "Create organization" is reachable in the organizations beta
- * regardless of how many orgs the caller already has.
+ * renders nothing: "Create organization" is reachable regardless of how many
+ * orgs the caller already has.
  */
 export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMenuProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const { has, billingActive, orgsBeta } = usePermissions();
+  const { has, billingActive } = usePermissions();
   const { data: me } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
@@ -146,10 +142,7 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
               className="z-50 mt-1 w-60 rounded-lg border border-zinc-200 bg-white p-1 shadow-md outline-none"
             >
               {ORG_LINKS.filter(
-                (link) =>
-                  has(link.permission) &&
-                  (billingActive || !link.gated) &&
-                  (orgsBeta || !link.beta),
+                (link) => has(link.permission) && (billingActive || !link.gated),
               ).map(({ href, label, icon: Icon, testId: linkTestId }) => (
                 <MenuItem
                   key={href}
@@ -164,12 +157,7 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
                 </MenuItem>
               ))}
 
-              {/* Only when something sits below it: a sole membership outside
-                  the beta has no switcher rows and no Create organization, and
-                  a divider with nothing under it is a stray line. */}
-              {(orgsBeta || (me?.memberships?.length ?? 0) > 1) && (
-                <MenuSeparator className="my-1 border-t border-zinc-100" />
-              )}
+              <MenuSeparator className="my-1 border-t border-zinc-100" />
               <OrgSwitcher
                 memberships={me?.memberships}
                 activeOrgId={me?.orgId}
@@ -178,18 +166,12 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
                   onNavigate?.();
                 }}
               />
-              {orgsBeta && (
-                <MenuItem>
-                  <button
-                    type="button"
-                    onClick={() => setCreateOpen(true)}
-                    className={itemClassName}
-                  >
-                    <PlusIcon size={13} className="flex-shrink-0 text-zinc-400" />
-                    Create organization
-                  </button>
-                </MenuItem>
-              )}
+              <MenuItem>
+                <button type="button" onClick={() => setCreateOpen(true)} className={itemClassName}>
+                  <PlusIcon size={13} className="flex-shrink-0 text-zinc-400" />
+                  Create organization
+                </button>
+              </MenuItem>
             </MenuItems>
           </>
         )}
