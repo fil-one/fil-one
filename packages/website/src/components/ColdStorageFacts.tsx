@@ -51,62 +51,20 @@ export function Term({
   );
 }
 
-/** The rate a choice bills at, as shown in the Rate column. */
-export type RowRate = {
-  /** "$5.99/TB-month". */
-  rate: string;
-  /** What qualifies the rate: its minimum, or the rate it replaces. */
-  rateNote: string;
-};
-
-// A fixed width, so each rate lines up under the heading across rows. Below
-// `sm` the column gives way to a labelled line under the row's text, since a
-// rate column left the descriptions a few words wide.
-const RATE_WIDTH = 'w-28 shrink-0 text-right';
-
 /**
- * The Rate heading, set above the bordered list rather than in a header strip
- * of its own: one word doesn't need a filled row and a divider.
+ * What a cold storage action does, as label and value pairs, followed in the
+ * dialog by any footnote. The markup is ToggleConfirmModal's fact list, so a
+ * confirmation reads the same across the console.
  */
-export function RateColumnHeader() {
+export function FactList({ facts }: { facts: { label: string; value: string }[] }) {
   return (
-    <div
-      className="hidden items-center gap-3 px-4 pb-1.5 text-xs text-zinc-500 sm:flex"
-      aria-hidden="true"
-    >
-      <span className="flex-1" />
-      <span className={RATE_WIDTH}>Rate</span>
-    </div>
-  );
-}
-
-/** A row's title and description, with its rate as a line beneath on small screens. */
-export function RateRowText({
-  title,
-  description,
-  rate,
-}: {
-  title: string;
-  description: string;
-  rate: RowRate;
-}) {
-  return (
-    <span className="flex flex-col gap-0.5">
-      <span className="font-medium text-zinc-900">{title}</span>
-      <span className="text-xs text-zinc-500">{description}</span>
-      <span className="mt-1 text-xs text-zinc-500 tabular-nums sm:hidden">
-        <span className="font-medium text-zinc-900">{rate.rate}</span>, {rate.rateNote}
-      </span>
-    </span>
-  );
-}
-
-/** A row's Rate cell, from `sm` up. */
-export function RateRowAmount({ rate }: { rate: RowRate }) {
-  return (
-    <span className={`${RATE_WIDTH} hidden flex-col items-end tabular-nums sm:flex`}>
-      <span className="font-medium text-zinc-900">{rate.rate}</span>
-      <span className="text-xs text-zinc-500">{rate.rateNote}</span>
-    </span>
+    <dl className="divide-y divide-(--color-border-muted) border-y border-(--color-border-muted)">
+      {facts.map((fact) => (
+        <div key={fact.label} className="flex gap-4 py-2.5 text-sm leading-relaxed">
+          <dt className="w-28 flex-shrink-0 text-(--color-paragraph-text-subtle)">{fact.label}</dt>
+          <dd className="text-(--color-paragraph-text-strong)">{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

@@ -1,236 +1,202 @@
 import { useState } from 'react';
-import { SnowflakeIcon, ThermometerIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
+import { SnowflakeIcon, ThermometerIcon } from '@phosphor-icons/react/dist/ssr';
 
-import type { S3Region } from '@filone/shared';
+import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
-import { BucketActionMenu } from './BucketActionMenu';
-import { Button } from './Button';
-import { DeleteFrozenCopyDialog } from './DeleteFrozenCopyDialog';
-import { ExtendRestoreDialog } from './ExtendRestoreDialog';
-import { Tooltip } from './Tooltip';
-import { useToast } from './Toast';
-import { ColdStorageIcon } from './ColdStorageStatus';
+import type { BucketAction } from './BucketActionMenu';
 import { ColdStoragePrototypeControls } from './ColdStoragePrototypeControls';
+import { useToast } from './Toast';
 import { FreezeBucketDialog, type ColdStorageTarget } from './FreezeBucketDialog';
-import { GetDataBackDialog } from './GetDataBackDialog';
+import { KeepInStandardDialog, type KeepInStandardTarget } from './KeepInStandardDialog';
+import { RestoreFilesDialog, type RestoreScope, type RestoreTarget } from './RestoreFilesDialog';
+import type { ObjectColdStorage } from './ObjectBrowserRows';
 import {
-  extendWarm,
-  formatMoment,
-  formatWaitLeft,
-  useBucketBytes,
-  useColdStorage,
-  useFreezeBlock,
-  type ColdStorageState,
-  type WarmState,
+  FREEZE_BLOCK_HINTS,
+  describeColdDelete,
+  freezeAgain,
+  isColdFile,
+  isInMinimumTerm,
   trackColdStorage,
+  useColdFiles,
+  useFreezeBlock,
+  type ColdFile,
+  type ColdFiles,
 } from '../lib/cold-storage-prototype.js';
+import { useCachedListing } from '../lib/use-cached-listing.js';
+import { isFilePolicy } from '../lib/cold-storage-files.js';
 
-type DownloadObject = (key: string, versionId?: string) => Promise<void>;
+function getColdStates(
+  versions: S3ObjectVersion[],
+  cold: ColdFiles,
+): { version: S3ObjectVersion; state: ColdFile }[] {
+  return versions.flatMap((version) => {
+    const state = cold.getState(version);
+    return isColdFile(state) ? [{ version, state }] : [];
+  });
+}
+
+/**
+ * The scopes a restore can cover, narrowest first: what was asked for, the
+ * folder being browsed, and the whole bucket. A scope that holds no frozen
+ * file, or the same files as a narrower one, is left out.
+ */
+function buildRestoreScopes(
+  requested: RestoreScope | null,
+  allVersions: S3ObjectVersion[],
+  cold: ColdFiles,
+  currentPrefix: string,
+): RestoreScope[] {
+  const coldVersions = getColdStates(allVersions, cold).map(({ version }) => version);
+  const candidates = [
+    requested,
+    currentPrefix
+      ? {
+          id: 'folder',
+          label: `Everything in ${currentPrefix}`,
+          versions: coldVersions.filter((v) => v.key.startsWith(currentPrefix)),
+        }
+      : null,
+    { id: 'bucket', label: 'The whole bucket', versions: coldVersions },
+  ];
+  const scopes: RestoreScope[] = [];
+  for (const scope of candidates) {
+    if (!scope || scope.versions.length === 0) continue;
+    if (scopes.some((s) => s.versions.length === scope.versions.length)) continue;
+    scopes.push(scope);
+  }
+  return scopes;
+}
+
+function describeDeleteCharge(versions: S3ObjectVersion[], cold: ColdFiles): string | undefined {
+  const states = getColdStates(versions, cold).map(({ state }) => state);
+  return describeColdDelete(states, cold.now);
+}
+
+function describeSelection(versions: S3ObjectVersion[]): string {
+  if (versions.length === 1) return versions[0].key.split('/').at(-1) ?? versions[0].key;
+  return `The ${versions.length} selected files`;
+}
 
 /**
  * Everything the bucket page shows for cold storage (FIL-1608 prototype), kept
- * out of the page so the page stays about the bucket. The page places each
- * piece; this hook owns the state and the dialogs behind them.
+ * out of the page so the page stays about the bucket. Freezing is per file:
+ * the bucket holds freeze policies, and each file in the listing has a state
+ * of its own. The page places each piece; this hook owns the dialogs.
  */
-export function useBucketColdStorage(
-  bucketName: string,
-  region: S3Region,
-  downloadObject: DownloadObject,
-) {
-  const state = useColdStorage(bucketName, region);
-  const freezeBlock = useFreezeBlock(useBucketBytes(bucketName, region));
-  const [freezeTarget, setFreezeTarget] = useState<ColdStorageTarget | null>(null);
-  const [getBackTarget, setGetBackTarget] = useState<ColdStorageTarget | null>(null);
-  const [extendTarget, setExtendTarget] = useState<WarmState | null>(null);
-  const [deleteFrozenTarget, setDeleteFrozenTarget] = useState<WarmState | null>(null);
-
-  const openGetDataBack = () => setGetBackTarget({ bucketName, region });
-
-  // Downloads work only while warm. On a frozen bucket a download click is the
-  // moment someone needs the data, so it opens the restore.
-  const downloadsBlocked = state !== null && state.status !== 'warm';
-  const guardedDownload: DownloadObject = downloadsBlocked
-    ? () => {
-        trackColdStorage('frozen file clicked');
-        if (state.status === 'frozen') openGetDataBack();
-        return Promise.resolve();
-      }
-    : downloadObject;
-
+export function useBucketColdStorage(bucketName: string, region: S3Region, currentPrefix: string) {
+  // The listing the page itself loaded: same query, read from the cache.
+  const listing = useCachedListing(bucketName, region);
+  const versions = listing.versions ?? [];
+  const cold = useColdFiles(bucketName, region);
   const { toast } = useToast();
-  const actions = (
-    <HeaderActions
-      state={state}
-      canFreeze={freezeBlock === null}
-      // Deleting the frozen copy ends the freeze term early, so it takes the
-      // role freezing does.
-      canDeleteFrozenCopy={freezeBlock !== 'role'}
-      onFreeze={() => {
-        trackColdStorage('freeze started');
-        setFreezeTarget({ bucketName, region });
-      }}
-      onGetDataBack={openGetDataBack}
-      onExtend={(warm) => {
-        trackColdStorage('extend opened');
-        setExtendTarget(warm);
-      }}
-      onDeleteFrozenCopy={(warm) => {
-        trackColdStorage('delete frozen copy opened');
-        setDeleteFrozenTarget(warm);
-      }}
-    />
-  );
+  const freezeBlock = useFreezeBlock();
+  const [freezeTarget, setFreezeTarget] = useState<ColdStorageTarget | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<RestoreTarget | null>(null);
+  const [keepTarget, setKeepTarget] = useState<KeepInStandardTarget | null>(null);
+
+  const openRestore = (requested: RestoreScope | null) => {
+    trackColdStorage('restore opened', { scope: requested?.id ?? 'bucket' });
+    const scopes = buildRestoreScopes(requested, versions, cold, currentPrefix);
+    // Asked for files that all have a copy already: this adds days to them.
+    const extend =
+      requested !== null &&
+      requested.versions.length > 0 &&
+      requested.versions.every((v) => cold.getState(v).status === 'restored');
+    if (scopes.length > 0) {
+      setRestoreTarget({
+        bucketName,
+        region,
+        scopes: extend ? scopes.slice(0, 1) : scopes,
+        extend,
+      });
+    }
+  };
+
+  const objectColdStorage: ObjectColdStorage = {
+    showColumn: cold.record !== null,
+    getState: cold.getState,
+    now: cold.now,
+    onFreeze:
+      freezeBlock === null
+        ? (selected) => setFreezeTarget({ bucketName, region, keys: selected.map((v) => v.key) })
+        : undefined,
+    onRestore: (selected) =>
+      openRestore({
+        id: 'selection',
+        label: describeSelection(selected),
+        versions: getColdStates(selected, cold).map(({ version }) => version),
+      }),
+    onKeepInStandard: (selected) => {
+      const restored = getColdStates(selected, cold).filter(
+        ({ state }) => state.status === 'restored',
+      );
+      setKeepTarget({
+        bucketName,
+        region,
+        keys: restored.map(({ version }) => version.key),
+        inTermCount: restored.filter(({ state }) => isInMinimumTerm(state, cold.now)).length,
+      });
+    },
+    onFreezeAgain:
+      freezeBlock === null
+        ? (selected) => {
+            freezeAgain(
+              bucketName,
+              region,
+              selected.map((v) => v.key),
+            );
+            trackColdStorage('frozen again');
+            toast.success('Freezing scheduled for the next daily run.');
+          }
+        : undefined,
+    describeDeleteCharge: (selected) => describeDeleteCharge(selected, cold),
+  };
+
+  const hasWholeBucketPolicy =
+    cold.record?.policies.some((p) => !isFilePolicy(p) && p.prefix === '') ?? false;
+  const hasColdFiles = versions.some((v) => isColdFile(cold.getState(v)));
 
   return {
-    state,
-    /** Frozen buckets are read-only in every state, warm included, so uploads and emptying go. */
-    readOnly: state !== null,
-    downloadObject: guardedDownload,
-    /** Disables download and share on every object row until the bucket is restored. */
-    lockedReason: downloadsBlocked ? 'Restore the bucket first' : undefined,
-    actions,
+    /** Each file's storage and the cold storage actions on the object table. */
+    objectColdStorage,
+    /**
+     * Freeze files, beside the header's other actions. Gone once the whole
+     * bucket has a rule; a role that can't freeze never sees it, and a trial
+     * sees it disabled with the reason.
+     */
+    /**
+     * The header "…" menu's cold storage items: Freeze files, until the whole
+     * bucket has a rule, and Restore files, while any file is frozen or
+     * restored. Restoring is mostly done from the files themselves, a row or
+     * a selection, so the whole-bucket restore is a rare step that sits here.
+     * A role that can't freeze never sees Freeze files; a trial sees it disabled.
+     */
+    menuActions: [
+      ...(!hasWholeBucketPolicy && freezeBlock !== 'role'
+        ? [
+            {
+              label: 'Freeze all files',
+              icon: SnowflakeIcon,
+              disabled: freezeBlock !== null,
+              hint: freezeBlock ? FREEZE_BLOCK_HINTS[freezeBlock] : undefined,
+              onSelect: () => {
+                trackColdStorage('freeze started');
+                setFreezeTarget({ bucketName, region, prefix: currentPrefix });
+              },
+            },
+          ]
+        : []),
+      ...(hasColdFiles
+        ? [{ label: 'Restore files', icon: ThermometerIcon, onSelect: () => openRestore(null) }]
+        : []),
+    ] satisfies BucketAction[],
     overlays: (
       <>
         <FreezeBucketDialog target={freezeTarget} onClose={() => setFreezeTarget(null)} />
-        <GetDataBackDialog target={getBackTarget} onClose={() => setGetBackTarget(null)} />
-        <ExtendRestoreDialog
-          state={extendTarget}
-          bucketName={bucketName}
-          onClose={() => setExtendTarget(null)}
-          onConfirm={(warm) => {
-            extendWarm(bucketName, region, warm);
-            trackColdStorage('warm extended', { extensions: String(warm.extensions + 1) });
-            toast.success('Restored for 2 more weeks');
-          }}
-        />
-        <DeleteFrozenCopyDialog
-          state={deleteFrozenTarget}
-          bucketName={bucketName}
-          region={region}
-          onClose={() => setDeleteFrozenTarget(null)}
-        />
+        <RestoreFilesDialog target={restoreTarget} onClose={() => setRestoreTarget(null)} />
+        <KeepInStandardDialog target={keepTarget} onClose={() => setKeepTarget(null)} />
         <ColdStoragePrototypeControls />
       </>
     ),
-  };
-}
-
-/**
- * The cold storage controls beside the bucket heading. The action the bucket's
- * state calls for is a visible button (Restore while frozen, Extend while
- * restored); deleting the frozen copy, the rarer and final step, sits in the
- * overflow menu. A bucket waiting on
- * a restore has nothing to do, and one that can't be frozen gets no menu,
- * since a menu holding only a disabled item is a dead end.
- */
-function HeaderActions({
-  state,
-  canFreeze,
-  canDeleteFrozenCopy,
-  onFreeze,
-  onGetDataBack,
-  onExtend,
-  onDeleteFrozenCopy,
-}: {
-  state: ColdStorageState | null;
-  canFreeze: boolean;
-  canDeleteFrozenCopy: boolean;
-  onFreeze: () => void;
-  onGetDataBack: () => void;
-  onExtend: (state: WarmState) => void;
-  onDeleteFrozenCopy: (state: WarmState) => void;
-}) {
-  if (state === null) {
-    return canFreeze ? (
-      <BucketActionMenu
-        actions={[{ label: 'Freeze bucket', icon: SnowflakeIcon, onSelect: onFreeze }]}
-      />
-    ) : null;
-  }
-  if (state.status === 'frozen') {
-    return (
-      <Button
-        id="cold-storage-restore-button"
-        variant="ghost"
-        size="sm"
-        icon={ThermometerIcon}
-        onClick={onGetDataBack}
-      >
-        Restore
-      </Button>
-    );
-  }
-  if (state.status === 'warm') {
-    return (
-      <>
-        <Button
-          id="cold-storage-extend-button"
-          variant="ghost"
-          size="sm"
-          onClick={() => onExtend(state)}
-        >
-          Extend 2 weeks
-        </Button>
-        {canDeleteFrozenCopy && (
-          <BucketActionMenu
-            actions={[
-              {
-                label: 'Delete frozen copy',
-                icon: TrashIcon,
-                onSelect: () => onDeleteFrozenCopy(state),
-              },
-            ]}
-          />
-        )}
-      </>
-    );
-  }
-  return null;
-}
-
-/** After this many extensions in a row, the data is likely needed for good. */
-const EXTENSIONS_BEFORE_NUDGE = 2;
-
-/**
- * The bucket's cold storage state as one item in the grey line under its
- * heading, beside region and size: an icon and a short phrase, with what it
- * means for the objects and the bill in a tooltip. One place on the page says
- * the bucket is frozen, and the detail is there for whoever wants it.
- */
-export function ColdStorageMeta({ state }: { state: ColdStorageState }) {
-  const { text, detail } = describeMeta(state);
-  return (
-    <Tooltip content={detail} side="bottom" focusable label={`${text}. ${detail}`}>
-      <span className="inline-flex items-center gap-1 text-xs text-zinc-500">
-        <span className="underline decoration-zinc-300 decoration-dotted underline-offset-4">
-          {text}
-        </span>
-        <ColdStorageIcon state={state} />
-      </span>
-    </Tooltip>
-  );
-}
-
-function describeMeta(state: ColdStorageState): { text: string; detail: string } {
-  if (state.status === 'frozen') {
-    return {
-      text: 'Frozen',
-      detail: 'Objects are listed but can’t be downloaded or changed until you restore the bucket.',
-    };
-  }
-  if (state.status === 'warm') {
-    const until = formatMoment(state.warmUntil);
-    const base = `Downloads work until ${until}. Then the restored copy is deleted and the bucket is frozen again.`;
-    return {
-      text: `Restored until ${until}`,
-      detail:
-        state.extensions >= EXTENSIONS_BEFORE_NUDGE
-          ? `${base} To keep it in standard storage, delete the frozen copy.`
-          : base,
-    };
-  }
-  return {
-    text: `Restoring, ready in ${formatWaitLeft(state.readyAt)}`,
-    detail: 'You can’t download yet. We’ll email you when it’s ready.',
   };
 }

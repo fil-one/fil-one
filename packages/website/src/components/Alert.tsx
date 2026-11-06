@@ -6,7 +6,7 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import clsx from 'clsx';
 
-import type { IconBoxColor } from './IconBox.js';
+import type { IconBoxColor, IconBoxProps } from './IconBox.js';
 import { IconBox } from './IconBox.js';
 
 export type AlertVariant = 'blue' | 'green' | 'red' | 'grey' | 'amber';
@@ -33,6 +33,11 @@ export type AlertProps = {
    * elsewhere is worse than one that carries it.
    */
   action?: React.ReactNode;
+  /**
+   * Replaces the variant's glyph when the alert reports a state with an icon
+   * of its own, such as a frozen bucket's snowflake.
+   */
+  icon?: IconBoxProps['icon'];
 };
 
 const containerStyles: Record<AlertVariant, string> = {
@@ -75,6 +80,7 @@ export function Alert({
   centered = false,
   assertive = true,
   action,
+  icon,
 }: AlertProps) {
   return (
     <div
@@ -96,7 +102,7 @@ export function Alert({
           badge read as an undersized speck beside the text. Set here rather than
           exposed as a per-caller prop so every alert stays consistent. */}
       {showIcon && (
-        <IconBox icon={iconComponents[variant]} color={iconBoxColors[variant]} size="md" />
+        <IconBox icon={icon ?? iconComponents[variant]} color={iconBoxColors[variant]} size="md" />
       )}
       {/* No top offset: `pt-1` nudged the text down to sit against the icon box
           back when the row was top-aligned. The row now centres, so the offset

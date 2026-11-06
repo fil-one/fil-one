@@ -5,28 +5,26 @@ import { Button } from './Button';
 import { Switch } from './Switch';
 import {
   resetPrototype,
-  useLargeBucketName,
   updatePrototypeSettings,
   usePrototypeSettings,
   type PrototypeSettings,
 } from '../lib/cold-storage-prototype.js';
 
 const SETTINGS: { key: keyof PrototypeSettings; label: string }[] = [
-  { key: 'simulateLargeBucket', label: 'Treat one bucket as 70 TB' },
-  { key: 'shortWaits', label: 'Short waits (10 seconds, restored for 1 minute)' },
+  { key: 'demoBucket', label: 'Add a demo bucket (raw-footage-2021)' },
+  { key: 'shortWaits', label: 'Short waits (a day lasts 10 seconds, a restore takes 10)' },
   { key: 'trialAccount', label: 'Trial account' },
   { key: 'memberRole', label: 'Member role' },
 ];
 
 /**
- * Switches for walking every branch of the flow in a demo: real buckets are
- * small, real waits are an hour, and the eligibility checks depend on the
+ * Switches for walking every branch of the flow in a demo: real runs are
+ * daily, real restores take an hour, and the eligibility checks depend on the
  * account. Collapsed to one button by default so it covers nothing at 375px.
  */
 export function ColdStoragePrototypeControls() {
   const settings = usePrototypeSettings();
   const [open, setOpen] = useState(false);
-  const largeBucket = useLargeBucketName();
 
   return (
     <div className="fixed bottom-4 left-4 z-40 flex flex-col items-start gap-2">
@@ -51,10 +49,10 @@ export function ColdStoragePrototypeControls() {
               />
             </label>
           ))}
-          {settings.simulateLargeBucket && largeBucket && (
+          {settings.shortWaits && (
             <p className="text-xs text-zinc-500">
-              {largeBucket} is the 70 TB bucket. Every other bucket keeps its real size, so it is
-              under 1 TB and can’t be frozen.
+              Daily runs happen every 10 seconds, a 2-week restore lasts 140 seconds and a 90-day
+              term 15 minutes.
             </p>
           )}
           <Button
@@ -63,7 +61,7 @@ export function ColdStoragePrototypeControls() {
             size="sm"
             onClick={resetPrototype}
           >
-            Reset all buckets and show the announcement again
+            Clear every freeze and restore, and show the announcement again
           </Button>
         </div>
       )}

@@ -12,6 +12,7 @@ import type { Bucket } from '@filone/shared';
 import { S3Region, getRegionLabel } from '@filone/shared';
 
 import { BucketsTable } from './BucketsTable';
+import { Button } from './Button';
 import {
   BUCKET_TABLE_CONTROLS_MIN,
   DEFAULT_BUCKET_SORT,
@@ -22,11 +23,22 @@ import {
   type BucketSort,
 } from '../lib/bucket-table.js';
 import {
-  freezeBucket,
+  addFreezePolicy,
   resetPrototype,
-  setLargeBucket,
-  warmBucket,
+  setColdRecord,
+  useHasColdBuckets,
+  useStorageFilteredBuckets,
+  type StorageFilter,
 } from '../lib/cold-storage-prototype.js';
+import { EMPTY_COLD_RECORD } from '../lib/cold-storage-files.js';
+
+/** A freeze policy old enough that its first daily run has passed. */
+function freezeLongAgo(bucketName: string, region: S3Region, prefix = '') {
+  setColdRecord(bucketName, region, {
+    ...EMPTY_COLD_RECORD,
+    policies: [{ prefix, createdAt: Date.now() - 30 * 24 * 60 * 60 * 1000 }],
+  });
+}
 
 function withRouter(Story: () => React.JSX.Element) {
   const rootRoute = createRootRoute({ component: Story });
@@ -71,6 +83,8 @@ const MANY: Bucket[] = [
  */
 function InteractiveBucketsTable({ buckets }: { buckets: Bucket[] }) {
   const [filters, setFilters] = useState<BucketFilters>(EMPTY_BUCKET_FILTERS);
+  const [storage, setStorage] = useState<StorageFilter>('all');
+  const hasColdBuckets = useHasColdBuckets(buckets);
   const [sort, setSort] = useState<BucketSort>(DEFAULT_BUCKET_SORT);
   const showControls = shouldShowBucketControls(buckets.length);
   const regions = useMemo(() => bucketRegions(buckets), [buckets]);
@@ -94,9 +108,11 @@ function InteractiveBucketsTable({ buckets }: { buckets: Bucket[] }) {
     });
   }, [buckets, filters, sort]);
 
+  const shown = useStorageFilteredBuckets(visible, storage);
+
   return (
     <BucketsTable
-      buckets={visible}
+      buckets={shown}
       onDelete={() => {}}
       showControls={showControls}
       filters={filters}
@@ -104,9 +120,13 @@ function InteractiveBucketsTable({ buckets }: { buckets: Bucket[] }) {
       sort={sort}
       onSortChange={setSort}
       regions={regions}
-      matchCount={visible.length}
+      matchCount={shown.length}
       totalCount={buckets.length}
-      coldStorage={{ onFreeze: () => {}, onGetDataBack: () => {}, onDeleteFrozenCopy: () => {} }}
+      coldStorage={{
+        onFreeze: () => {},
+        onRestoreAll: () => {},
+        storageFilter: hasColdBuckets ? { value: storage, onChange: setStorage } : undefined,
+      }}
     />
   );
 }
@@ -145,24 +165,66 @@ export const SingleRegion: Story = {
 };
 
 /**
- * Cold storage prototype (FIL-1608): one bucket frozen, one restoring, the
- * rest standard, so the frozen treatment reads against its neighbours.
+ * Cold storage prototype (FIL-1608): one bucket frozen as a whole, one with a
+ * frozen folder, the rest standard, so the frozen treatment reads against its
+ * neighbours.
  */
 export const WithColdStorage: Story = {
   args: { buckets: FEW },
   render: function Render(args) {
     useState(() => {
       resetPrototype();
-      const [frozen, restoring] = [FEW[2], FEW[1]];
-      setLargeBucket(frozen.bucketName, S3Region.EuWest1);
-      freezeBucket(frozen.bucketName, S3Region.EuWest1, 70e12);
-      freezeBucket(restoring.bucketName, S3Region.EuWest1, 70e12);
-      warmBucket(restoring.bucketName, S3Region.EuWest1, {
-        status: 'frozen',
-        frozenAt: Date.now(),
-        termEndsAt: Date.now(),
-        bytes: 70e12,
-      });
+      const [frozen, partly] = [FEW[2], FEW[1]];
+      freezeLongAgo(frozen.bucketName, S3Region.EuWest1);
+      freezeLongAgo(partly.bucketName, S3Region.EuWest1, '2025/');
+    });
+    return <InteractiveBucketsTable {...args} />;
+  },
+};
+
+/**
+ * The freeze moment: Freeze schedules the bucket, and at the next daily run
+ * (every 10 seconds with short waits) the frost sweeps across the row and the
+ * Frozen pill pops in. Reset to try again.
+ */
+export const FreezeAnimation: Story = {
+  args: { buckets: FEW },
+  render: function Render(args) {
+    useState(() => {
+      resetPrototype();
+    });
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex gap-2">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => addFreezePolicy(FEW[2].bucketName, S3Region.EuWest1, '')}
+          >
+            Freeze
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => resetPrototype()}>
+            Reset
+          </Button>
+        </div>
+        <InteractiveBucketsTable {...args} />
+      </div>
+    );
+  },
+};
+
+/**
+ * A long list with buckets in cold storage, so the toolbar adds its storage
+ * filter beside the region one.
+ */
+export const WithStorageFilter: Story = {
+  args: { buckets: MANY },
+  render: function Render(args) {
+    useState(() => {
+      resetPrototype();
+      for (const b of MANY.filter((b) => ['archive-2025', 'legal-hold'].includes(b.bucketName))) {
+        freezeLongAgo(b.bucketName, (b.region ?? S3Region.EuWest1) as S3Region);
+      }
     });
     return <InteractiveBucketsTable {...args} />;
   },

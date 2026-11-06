@@ -20,7 +20,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
 import { IconButton } from '../components/IconButton';
 import { ShareObjectModal } from '../components/ShareObjectModal';
-import { useColdStorage } from '../lib/cold-storage-prototype.js';
+import { useObjectColdStorage } from '../components/ObjectColdStorage';
 import { Spinner } from '../components/Spinner';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
 import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
@@ -164,11 +164,9 @@ export function ObjectDetailPage({
 
   const mayDelete = useHasPermission('objects.delete');
   const canShare = useCanShareObjects();
-  // Cold storage prototype: a frozen or restoring bucket's objects can't be
-  // downloaded or shared yet, and any bucket in cold storage is read-only.
-  const coldState = useColdStorage(bucketName, region);
-  const lockedReason =
-    coldState && coldState.status !== 'warm' ? 'Restore the bucket first' : undefined;
+  // Cold storage prototype: a frozen file waits for a restore before it can be
+  // downloaded or shared, and deleting it early still bills its term.
+  const cold = useObjectColdStorage({ bucketName, region, versionId, objectVersions });
 
   // The confirmation goes with the Delete control it was opened from.
   const [confirmDeleteOpen, setConfirmDeleteOpen] = usePermittedDialog(false, mayDelete);
@@ -265,25 +263,31 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         </div>
 
         <div className="flex items-center gap-1">
-          <IconButton
-            id="object-download-button"
-            icon={DownloadSimpleIcon}
-            aria-label="Download object"
-            tooltip={lockedReason ?? 'Download'}
-            tooltipSide="bottom"
-            disabled={lockedReason !== undefined}
-            onClick={() => void objectActions.downloadObject(objectKey, versionId)}
-          />
-          <IconButton
-            id="object-share-button"
-            icon={LinkIcon}
-            aria-label="Share object"
-            tooltip={lockedReason ?? (canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP)}
-            tooltipSide="bottom"
-            disabled={lockedReason !== undefined || !canShare}
-            onClick={() => setShareOpen(true)}
-          />
-          {mayDelete && !coldState && (
+          {/* Cold storage prototype: a frozen file has nothing to download or
+              share until it is restored, so the buttons go; Restore sits in its
+              Storage row. */}
+          {!cold.locked && (
+            <>
+              <IconButton
+                id="object-download-button"
+                icon={DownloadSimpleIcon}
+                aria-label="Download object"
+                tooltip="Download"
+                tooltipSide="bottom"
+                onClick={() => void objectActions.downloadObject(objectKey, versionId)}
+              />
+              <IconButton
+                id="object-share-button"
+                icon={LinkIcon}
+                aria-label="Share object"
+                tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
+                tooltipSide="bottom"
+                disabled={!canShare}
+                onClick={() => setShareOpen(true)}
+              />
+            </>
+          )}
+          {mayDelete && (
             <IconButton
               id="object-delete-button"
               icon={TrashIcon}
@@ -304,6 +308,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         <div className="flex flex-col gap-1">
           <DetailRow label="Name" value={objectKey} />
           {metadata && <DetailRow label="Size" value={formatBytes(metadata.sizeBytes)} />}
+          {cold.storageRow}
           <DetailRow label="Bucket" value={bucketName} />
           <CopyableDetailRow label="S3 Path" value={s3Path} />
           {versionId && <CopyableDetailRow label="Version ID" value={versionId} />}
@@ -392,8 +397,10 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
         onConfirm={() => objectActions.deleteObject(objectKey, versionId)}
         title="Delete object"
         description="This object will be permanently deleted. This action cannot be undone."
+        notice={cold.deleteCharge}
         confirmLabel="Delete object"
       />
+      {cold.overlays}
     </div>
   );
 }

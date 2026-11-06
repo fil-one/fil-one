@@ -19,12 +19,12 @@ import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { ColdStoragePrototypeControls } from '../components/ColdStoragePrototypeControls';
 import { FreezeBucketDialog, type ColdStorageTarget } from '../components/FreezeBucketDialog';
-import { GetDataBackDialog } from '../components/GetDataBackDialog';
-import { DeleteFrozenCopyDialog } from '../components/DeleteFrozenCopyDialog';
+import { useRestoreAll } from '../components/RestoreAllFiles';
 import {
   trackColdStorage,
-  useEnsureLargeBucket,
-  type WarmState,
+  useHasColdBuckets,
+  useStorageFilteredBuckets,
+  type StorageFilter,
 } from '../lib/cold-storage-prototype.js';
 
 // Mirrors BucketsTable's columns (labels and breakpoints) so the loading
@@ -58,27 +58,25 @@ export function BucketsPage() {
   } = useBucketsListing(filters, sort);
   // "No buckets yet" would be a lie while a region is down. The banner explains the gap.
   const showEmptyState = baseBuckets.length === 0 && unavailableRegions.length === 0;
+  // Cold storage prototype: the storage filter narrows the listing here, since
+  // the backend knows nothing of cold storage. Shown once any bucket is cold.
+  const [storage, setStorage] = useState<StorageFilter>('all');
+  const shownBuckets = useStorageFilteredBuckets(buckets, storage);
+  const hasColdBuckets = useHasColdBuckets(baseBuckets);
 
   const { pendingBucket, contents, requestDelete, cancelDelete, confirmDelete } = useDeleteBucket();
-  useEnsureLargeBucket(baseBuckets);
 
-  // Cold storage prototype (FIL-1608): the row menu opens these, one bucket at a time.
+  // Cold storage prototype (FIL-1608): the row menu opens the freeze review,
+  // and the restore over every frozen file once it has loaded the listing.
   const [freezeTarget, setFreezeTarget] = useState<ColdStorageTarget | null>(null);
-  const [getBackTarget, setGetBackTarget] = useState<ColdStorageTarget | null>(null);
-  const [deleteFrozenTarget, setDeleteFrozenTarget] = useState<
-    (ColdStorageTarget & { state: WarmState }) | null
-  >(null);
+  const restoreAll = useRestoreAll();
   const coldStorage = {
     onFreeze: (bucketName: string, region: S3Region) => {
       trackColdStorage('freeze started');
       setFreezeTarget({ bucketName, region });
     },
-    onGetDataBack: (bucketName: string, region: S3Region) =>
-      setGetBackTarget({ bucketName, region }),
-    onDeleteFrozenCopy: (bucketName: string, region: S3Region, state: WarmState) => {
-      trackColdStorage('delete frozen copy opened');
-      setDeleteFrozenTarget({ bucketName, region, state });
-    },
+    onRestoreAll: restoreAll.open,
+    storageFilter: hasColdBuckets ? { value: storage, onChange: setStorage } : undefined,
   };
 
   // Shared across every state so navigating to Buckets never blanks the header
@@ -160,7 +158,7 @@ export function BucketsPage() {
         </EmptyStateCard>
       ) : (
         <BucketsTable
-          buckets={buckets}
+          buckets={shownBuckets}
           onDelete={requestDelete}
           showControls={showControls}
           filters={filters}
@@ -168,7 +166,7 @@ export function BucketsPage() {
           sort={sort}
           onSortChange={setSort}
           regions={regions}
-          matchCount={buckets.length}
+          matchCount={shownBuckets.length}
           totalCount={baseBuckets.length}
           coldStorage={coldStorage}
         />
@@ -191,13 +189,7 @@ export function BucketsPage() {
         }}
       />
       <FreezeBucketDialog target={freezeTarget} onClose={() => setFreezeTarget(null)} />
-      <GetDataBackDialog target={getBackTarget} onClose={() => setGetBackTarget(null)} />
-      <DeleteFrozenCopyDialog
-        state={deleteFrozenTarget?.state ?? null}
-        bucketName={deleteFrozenTarget?.bucketName ?? ''}
-        region={deleteFrozenTarget?.region ?? ''}
-        onClose={() => setDeleteFrozenTarget(null)}
-      />
+      {restoreAll.dialog}
       <ColdStoragePrototypeControls />
     </PageLayout>
   );

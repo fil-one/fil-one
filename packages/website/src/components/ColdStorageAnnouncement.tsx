@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import { DialogTitle } from '@headlessui/react';
 import { useNavigate } from '@tanstack/react-router';
-import { ArrowCounterClockwiseIcon, ThermometerIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
+import {
+  ArrowCounterClockwiseIcon,
+  SnowflakeIcon,
+  ThermometerIcon,
+  XIcon,
+} from '@phosphor-icons/react/dist/ssr';
 import clsx from 'clsx';
 
 import { Badge } from './Badge';
 import { Button } from './Button';
-import { ColdStorageStatus } from './ColdStorageStatus';
 import { IconBox } from './IconBox';
 import { IconButton } from './IconButton';
 import { Modal } from './Modal';
@@ -57,17 +61,17 @@ type Step = { title: string; body: string; visual: React.ReactNode };
 const STEPS: Step[] = [
   {
     title: 'Cold storage is here',
-    body: `Keep the archives you rarely open at ${formatRate(COLD_PRICE_PER_TB_MONTH)}. No retrieval or egress fees.`,
+    body: `Freeze the files you rarely open and pay ${formatRate(COLD_PRICE_PER_TB_MONTH)} instead of ${formatRate(WARM_PRICE_PER_TB_MONTH)}. They stay in your buckets, listed as usual.`,
     visual: <PriceVisual />,
   },
   {
-    title: 'Upload, then freeze',
-    body: `Upload to a standard bucket at ${formatRate(WARM_PRICE_PER_TB_MONTH)}. Once the upload is done, choose Freeze bucket from its menu. Buckets of 1 TB or more can be frozen, for at least ${MIN_TERM_DAYS} days.`,
+    title: 'Freeze a file, a folder or a whole bucket',
+    body: `Files freeze at the next daily run. Freeze a folder or a bucket, and files you add there later freeze too. Each file stays frozen for at least ${MIN_TERM_DAYS} days.`,
     visual: <BucketsVisual />,
   },
   {
-    title: 'Restore it when you need it',
-    body: `Restore a bucket for ${WARM_MIN_DAYS / 7} weeks at ${formatRate(WARM_PRICE_PER_TB_MONTH)} while the frozen copy stays at ${formatRate(COLD_PRICE_PER_TB_MONTH)}. Your data is ready in about an hour. To keep it in standard storage, delete the frozen copy.`,
+    title: 'Restore what you need',
+    body: `Restore one file, a folder or a whole bucket. Copies are ready in about an hour and cost ${formatRate(WARM_PRICE_PER_TB_MONTH)} for at least ${WARM_MIN_DAYS / 7} weeks, while the originals stay frozen. Need a file back for good? Unfreeze it.`,
     visual: <GetBackVisual />,
   },
 ];
@@ -165,7 +169,7 @@ function StepDots({ count, current }: { count: number; current: number }) {
 function PriceVisual() {
   const rows = [
     { label: 'Standard', price: WARM_PRICE_PER_TB_MONTH, bar: 'w-full bg-zinc-300' },
-    { label: 'Cold', price: COLD_PRICE_PER_TB_MONTH, bar: 'w-1/3 bg-brand-600' },
+    { label: 'Cold', price: COLD_PRICE_PER_TB_MONTH, bar: 'w-1/2 bg-brand-600' },
   ];
   return (
     <div className="flex w-full max-w-72 flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-xs">
@@ -189,8 +193,8 @@ function PriceVisual() {
 
 function BucketsVisual() {
   const rows = [
-    { name: 'raw-footage-2021', size: '70 TB', frozen: true },
-    { name: 'client-projects', size: '8 TB', frozen: false },
+    { name: '2025/final-cut.mov', size: '412 GB', frozen: true },
+    { name: '2026/rough-cut.mov', size: '388 GB', frozen: false },
   ];
   return (
     <div className="w-full max-w-72 divide-y divide-zinc-100 rounded-lg border border-zinc-200 bg-white shadow-xs">
@@ -203,9 +207,10 @@ function BucketsVisual() {
               {row.frozen && (
                 <>
                   <span aria-hidden="true">·</span>
-                  <ColdStorageStatus
-                    state={{ status: 'frozen', frozenAt: 0, termEndsAt: 0, bytes: 70e12 }}
-                  />
+                  <span className="inline-flex items-center gap-1">
+                    <SnowflakeIcon size={13} className="text-zinc-400" aria-hidden="true" />
+                    Frozen
+                  </span>
                 </>
               )}
             </span>
@@ -218,8 +223,8 @@ function BucketsVisual() {
 
 function GetBackVisual() {
   const options = [
-    { icon: ThermometerIcon, title: 'Restore for 2 weeks', note: 'Frozen copy stays' },
-    { icon: ArrowCounterClockwiseIcon, title: 'Keep it for good', note: 'Delete the frozen copy' },
+    { icon: ThermometerIcon, title: 'Restore for a while', note: 'Frozen copy stays' },
+    { icon: ArrowCounterClockwiseIcon, title: 'Back for good', note: 'Unfreeze it' },
   ];
   return (
     <div className="grid w-full max-w-80 grid-cols-2 gap-3">

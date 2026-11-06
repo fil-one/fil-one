@@ -36,17 +36,19 @@ import {
 } from '../lib/bucket-table.js';
 import {
   FREEZE_BLOCK_HINTS,
-  useBucketBytes,
-  useColdStorage,
+  useBucketColdSummary,
   useFreezeBlock,
-  type WarmState,
+  useJustFroze,
+  type StorageFilter,
 } from '../lib/cold-storage-prototype.js';
 
 /** Opens the page's cold storage dialogs for one bucket (FIL-1608 prototype). */
 export type ColdStorageHandlers = {
   onFreeze: (bucketName: string, region: S3Region) => void;
-  onGetDataBack: (bucketName: string, region: S3Region) => void;
-  onDeleteFrozenCopy: (bucketName: string, region: S3Region, state: WarmState) => void;
+  /** Loads the bucket's listing and opens the restore over every frozen file in it. */
+  onRestoreAll: (bucketName: string, region: S3Region) => void;
+  /** The toolbar's storage filter, omitted while no bucket is in cold storage. */
+  storageFilter?: { value: StorageFilter; onChange: (value: StorageFilter) => void };
 };
 
 /**
@@ -103,6 +105,7 @@ export function BucketsTable({
           regions={regions}
           matchCount={matchCount}
           totalCount={totalCount}
+          storageFilter={coldStorage.storageFilter}
         />
       )}
 
@@ -116,7 +119,10 @@ export function BucketsTable({
           <Button
             id="buckets-clear-filters-button"
             variant="ghost"
-            onClick={() => onFiltersChange(EMPTY_BUCKET_FILTERS)}
+            onClick={() => {
+              onFiltersChange(EMPTY_BUCKET_FILTERS);
+              coldStorage.storageFilter?.onChange('all');
+            }}
           >
             Clear filters
           </Button>
@@ -169,8 +175,8 @@ function BucketRowActions({
   coldStorage: ColdStorageHandlers;
 }) {
   const navigate = useNavigate();
-  const coldState = useColdStorage(bucket.bucketName, region);
-  const freezeBlock = useFreezeBlock(useBucketBytes(bucket.bucketName, region));
+  const summary = useBucketColdSummary(bucket.bucketName, region);
+  const freezeBlock = useFreezeBlock();
   const { copy } = useCopyToClipboard();
   const { toast } = useToast();
   const mayDelete = useHasPermission('buckets.delete');
@@ -192,15 +198,15 @@ function BucketRowActions({
               search: { region },
             }),
         },
-        // Restore stands in for Freeze once the bucket is frozen. A restoring
-        // bucket has its way back in progress, so it gets neither; a restored
-        // one offers deleting its frozen copy, beside Delete below.
-        // A role that can't freeze never sees the item, like Delete below. Size
-        // and plan can change, so those show it disabled with the reason.
-        ...(coldState === null && freezeBlock !== 'role'
+        // Freezing is a rule over the bucket's files, so the item goes once the
+        // whole bucket has one. Restoring all files waits for the first daily
+        // run, before which nothing is frozen yet.
+        // A role that can't freeze never sees the item, like Delete below. The
+        // plan can change, so a trial sees it disabled with the reason.
+        ...(summary?.scope !== 'bucket' && freezeBlock !== 'role'
           ? [
               {
-                label: 'Freeze bucket',
+                label: 'Freeze all files',
                 icon: SnowflakeIcon,
                 onSelect: () => coldStorage.onFreeze(bucket.bucketName, region),
                 disabled: freezeBlock !== null,
@@ -208,12 +214,12 @@ function BucketRowActions({
               },
             ]
           : []),
-        ...(coldState?.status === 'frozen'
+        ...(summary && !summary.scheduled
           ? [
               {
-                label: 'Restore',
+                label: 'Restore all files',
                 icon: ThermometerIcon,
-                onSelect: () => coldStorage.onGetDataBack(bucket.bucketName, region),
+                onSelect: () => coldStorage.onRestoreAll(bucket.bucketName, region),
               },
             ]
           : []),
@@ -231,18 +237,6 @@ function BucketRowActions({
         // absent for everyone else rather than disabled — a disabled Delete
         // invites a support question about a capability the member will
         // never have.
-        // Deleting the frozen copy ends the freeze term early, so it sits with
-        // freezing and deleting: Owner and Admin.
-        ...(coldState?.status === 'warm' && mayDelete
-          ? [
-              {
-                label: 'Delete frozen copy',
-                icon: TrashIcon,
-                onSelect: () =>
-                  coldStorage.onDeleteFrozenCopy(bucket.bucketName, region, coldState),
-              },
-            ]
-          : []),
         ...(mayDelete
           ? [
               {
@@ -275,7 +269,10 @@ function BucketRow({
 }) {
   // The listing types region as a plain string; every bucket it returns is in a served region.
   const region = (bucket.region ?? S3_REGION) as S3Region;
-  const coldState = useColdStorage(bucket.bucketName, region);
+  const summary = useBucketColdSummary(bucket.bucketName, region);
+  // The wash marks a bucket frozen as a whole, once its first daily run has passed.
+  const wholeBucketFrozen = summary?.scope === 'bucket' && !summary.scheduled;
+  const justFroze = useJustFroze(wholeBucketFrozen);
 
   return (
     <Table.Row
@@ -288,7 +285,9 @@ function BucketRow({
       // and would otherwise turn a hovered frozen row grey. Both dividers take
       // the wash's hue so the band has crisp edges; the one above belongs to
       // the previous row, which `:has(+ …)` lets that row find out about.
-      data-cold-storage={coldState?.status}
+      data-cold-storage={wholeBucketFrozen ? 'frozen' : undefined}
+      // Plays the frost sweep in cold-storage.css once, as the bucket freezes.
+      data-freezing={justFroze || undefined}
       className={FROZEN_ROW_CLASSES}
     >
       {/* py-4 rather than the cell default: this is the only two-line cell, so it
@@ -324,7 +323,7 @@ function BucketRow({
             </Tooltip>
           )}
           {/* Cold storage prototype: only a bucket in cold storage says so. */}
-          {coldState && <ColdStorageBadge state={coldState} />}
+          {summary && <ColdStorageBadge summary={summary} />}
         </div>
         {/* The secondary line reserves its height in every state, so a row whose
             storage read fails doesn't sit shorter than its neighbours. */}

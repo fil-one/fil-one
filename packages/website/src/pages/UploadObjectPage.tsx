@@ -28,6 +28,7 @@ import { Label } from '../components/Label';
 import { ProgressBar } from '../components/ProgressBar';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast/index.js';
+import { FrozenOverwriteNotice } from '../components/FrozenOverwriteNotice';
 import { useFileUpload } from '../lib/use-file-upload.js';
 import type { FileEntry, FileUploadStatus } from '../lib/use-file-upload.js';
 import { resolveDropItems } from '../lib/drop-helpers.js';
@@ -528,6 +529,14 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
               fileCount={upload.files.length}
               uploading={isUploading}
               onClear={handleClearAll}
+            />
+          )}
+
+          {!isUploading && (
+            <FrozenOverwriteNotice
+              bucketName={bucketName}
+              region={region}
+              uploadKeys={upload.files.filter((f) => f.status === 'pending').map((f) => f.key)}
             />
           )}
 
