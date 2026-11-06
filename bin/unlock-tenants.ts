@@ -6,7 +6,7 @@
 // lifting a write-lock or a disable: the trial limit's lock, a grace period's,
 // or one left behind when the org moved to manual billing.
 //
-// It runs the backend's own status sync (syncTenantStatusInProvisionedRegions),
+// It runs the backend's own status sync (syncTenantStatusInProvisionedNetworks),
 // so each region is probed first, updated only when it differs, and retried
 // through a transient outage. The orchestrator URLs come from the deployed
 // AccountDeletionWorker's environment and the tokens from the stage's SST
@@ -108,7 +108,7 @@ Object.assign(
   }),
   { AWS_REGION: awsRegion },
 );
-const { getProvisionedRegions, syncTenantStatusInProvisionedRegions } =
+const { getProvisionedNetworks, syncTenantStatusInProvisionedNetworks } =
   await import('@filone/backend/src/lib/region-helpers.ts');
 const { isOrgDeletedOrDeleting } = await import('@filone/backend/src/lib/org-profile.ts');
 
@@ -132,12 +132,12 @@ const { Item: billingRow } = await new DynamoDBClient({ region: awsRegion }).sen
 const billingStatus = billingRow?.subscriptionStatus?.S;
 console.log(`  billing status: ${billingStatus ?? '(none)'}\n`);
 
-const regions = await getProvisionedRegions(orgId, { consistent: true });
-if (regions.length === 0) {
-  console.error('Refused: the org has no provisioned region. Nothing was changed.');
+const networks = await getProvisionedNetworks(orgId, { consistent: true });
+if (networks.length === 0) {
+  console.error('Refused: the org is provisioned on no network. Nothing was changed.');
   process.exit(1);
 }
-for (const { orchestrator, tenantId } of regions) {
+for (const { orchestrator, tenantId } of networks) {
   const probe = await orchestrator.getTenantStatus(tenantId);
   const status = probe.kind === 'ok' ? probe.status : probe.kind;
   console.log(`  ${orchestrator.id}  ${tenantId}  ${status}`);
@@ -151,13 +151,13 @@ if (!cli.execute) {
 }
 
 const { lines, failed } = summarizeOutcomes(
-  await syncTenantStatusInProvisionedRegions(orgId, 'active', { consistent: true }),
+  await syncTenantStatusInProvisionedNetworks(orgId, 'active', { consistent: true }),
 );
 console.log('Result:');
 for (const line of lines) console.log(line);
 if (failed) {
   console.error(
-    '\nNot every region was unlocked. Re-run to retry an error; a not-found tenant needs investigating.',
+    '\nNot every network was unlocked. Re-run to retry an error; a not-found tenant needs investigating.',
   );
   process.exit(1);
 }

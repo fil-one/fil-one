@@ -771,7 +771,7 @@ describe('stripe-event-worker handler', () => {
       await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
     });
 
     it('refuses the grace period write if the org turns manual after the status was read', async () => {
@@ -800,7 +800,7 @@ describe('stripe-event-worker handler', () => {
 
       await deliver();
 
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
     });
   });
 

@@ -49,8 +49,10 @@ export async function reportOrgUsage(params: {
   const { orgId, subscriptionId, stripeCustomerId, currentPeriodStart, to, meterEventName } =
     params;
 
-  // Each region resolves its own tenant id (side-effect-free), is fetched
-  // independently, then aggregated and reported at the org level.
+  // Each network resolves its own tenant id (side-effect-free), is fetched
+  // independently, then aggregated and reported at the org level. A tenant's
+  // metrics cover its buckets in every region its network serves, so one fetch
+  // per network is the whole picture and counts nothing twice.
   const orgNetworks = await getProvisionedNetworks(orgId);
 
   if (orgNetworks.length === 0) {
