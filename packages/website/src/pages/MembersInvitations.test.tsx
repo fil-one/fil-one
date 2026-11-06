@@ -318,6 +318,31 @@ describe('MembersInvitations', () => {
   });
 });
 
+describe('MembersInvitations — while the list loads', () => {
+  it('shows the invitation column headers above placeholder rows', async () => {
+    // Never settles, so the list stays loading.
+    mockList.mockReturnValue(new Promise(() => {}));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, OrgRole.Owner);
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <InvitationsHarness />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    const loading = await screen.findByRole('status', { name: 'Loading invitations' });
+    expect(
+      within(loading)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent),
+    ).toStrictEqual(['Email', 'Role', 'Status', 'Expires']);
+    // The header row, then three placeholder rows.
+    expect(within(loading).getAllByRole('row')).toHaveLength(4);
+  });
+});
+
 describe('MembersInvitations — when the server refuses or the list goes stale', () => {
   beforeEach(() => {
     vi.clearAllMocks();
