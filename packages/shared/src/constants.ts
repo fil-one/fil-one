@@ -99,6 +99,56 @@ export function getAvailableRegions(stage: StageLike): S3Region[] {
 }
 
 /**
+ * The storage network behind each region, by the id the account profile and the
+ * SSM paths use. The type makes a new member of {@link S3Region} fail to
+ * compile until it has an entry here.
+ */
+export const NETWORK_ID_BY_REGION: Record<S3Region, string> = {
+  [S3Region.EuWest1]: 'aurora',
+  [S3Region.UsEast1]: 'fth',
+  [S3Region.EuCentral3]: 'forge',
+  [S3Region.UsEast9]: 'forgeDev',
+};
+
+/** The network behind a region, or undefined for a region the product does not know. */
+export function networkIdForRegion(region: string): string | undefined {
+  return Object.values(S3Region).includes(region as S3Region)
+    ? NETWORK_ID_BY_REGION[region as S3Region]
+    : undefined;
+}
+
+/**
+ * The regions a network serves on a stage, in {@link S3Region} order. A tenant
+ * on a network is region-free, so its access keys work at every one of these
+ * regions and its buckets may live in any of them.
+ */
+export function regionsForNetwork(id: string, stage: StageLike): S3Region[] {
+  return getAvailableRegions(stage).filter((region) => NETWORK_ID_BY_REGION[region] === id);
+}
+
+/** A storage network and the regions it serves, one entry per network. */
+export interface StorageNetwork {
+  id: string;
+  regions: NonEmptyArray<S3Region>;
+}
+
+/**
+ * Every network selectable on a stage, each with the regions it serves, in the
+ * order their first region appears. One entry per network however many regions
+ * it serves, which is what a picker over networks lists.
+ */
+export function getAvailableNetworks(stage: StageLike): StorageNetwork[] {
+  const byId = new Map<string, S3Region[]>();
+  for (const region of getAvailableRegions(stage)) {
+    const id = NETWORK_ID_BY_REGION[region];
+    const regions = byId.get(id);
+    if (regions) regions.push(region);
+    else byId.set(id, [region]);
+  }
+  return [...byId].map(([id, regions]) => ({ id, regions: regions as NonEmptyArray<S3Region> }));
+}
+
+/**
  * Checks if the region is one Fil One supports for the given stage. Provides
  * type-narrowing information to TypeScript, changing `region` from `string` to
  * `S3Region` when the function returns `true`. Pass `stage` so non-GA regions
