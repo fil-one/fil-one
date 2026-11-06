@@ -1,9 +1,6 @@
 import { S3Region, type StageLike } from '@filone/shared';
-import {
-  ORCHESTRATOR_ID_BY_REGION,
-  orchestratorIdForRegion,
-  regionsForOrchestrator,
-} from './service-orchestrator-ids.ts';
+import { UnknownAccessKeyRegionError } from './errors.ts';
+import { orchestratorIdForRegion, regionsForOrchestrator } from './service-orchestrator-ids.ts';
 import type {
   AccessKeyBucketScope,
   AccessKeyPermission,
@@ -48,8 +45,9 @@ export const AccessKeyKeys = {
 
 /**
  * The region of an access-key row that carries neither an `orchestratorId` nor
- * a `region` attribute. Those rows were written before multi-region routing, so
- * they predate FTH and belong to Aurora.
+ * a `region` attribute. Until keys could be minted outside Aurora, the create
+ * handler refused every other region, so such a row is an Aurora key. (Other
+ * regions existed in the product before then; keys could not be made in them.)
  */
 export const DEFAULT_ACCESS_KEY_REGION: S3Region = S3Region.EuWest1;
 
@@ -58,15 +56,20 @@ export const DEFAULT_ACCESS_KEY_REGION: S3Region = S3Region.EuWest1;
  * keys became network-wide names it directly; an older row names the region it
  * was minted in, which is the one region its network served at the time; the
  * oldest rows name neither and are Aurora's.
+ *
+ * Throws {@link UnknownAccessKeyRegionError} for a row stored against a region
+ * the product no longer knows, such as one renamed since it was written. The
+ * caller is deleting or rotating a credential, so answering with a network it
+ * guessed would act on the wrong one.
  */
 export function getAccessKeyOrchestratorId(
   record: Pick<AccessKeyRecord, 'orchestratorId' | 'region'>,
 ): string {
   if (record.orchestratorId) return record.orchestratorId;
-  return (
-    orchestratorIdForRegion(record.region ?? DEFAULT_ACCESS_KEY_REGION) ??
-    ORCHESTRATOR_ID_BY_REGION[DEFAULT_ACCESS_KEY_REGION]
-  );
+  const region = record.region ?? DEFAULT_ACCESS_KEY_REGION;
+  const id = orchestratorIdForRegion(region);
+  if (!id) throw new UnknownAccessKeyRegionError(region);
+  return id;
 }
 
 /**
