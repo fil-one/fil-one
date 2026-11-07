@@ -252,7 +252,7 @@ function useBucketQueries(bucketName: string, region: S3Region, mayListKeys: boo
   };
 }
 
-function BucketErrorState({
+export function BucketErrorState({
   bucketName,
   error,
   fallback,
