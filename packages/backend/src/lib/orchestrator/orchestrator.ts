@@ -130,8 +130,8 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     this.id = config.id;
     this.region = config.region;
     this.client = resolveClient(config);
-    const { id, stage, region } = config;
-    this.setupDeps = { client: this.client, id, stage, region };
+    const { id, stage } = config;
+    this.setupDeps = { client: this.client, id, stage };
     this.tenantIdAttribute = `${config.id}TenantId`;
   }
 
