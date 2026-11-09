@@ -197,8 +197,8 @@ importers:
         specifier: ^7.9.2
         version: 7.9.2
       disposable-domains:
-        specifier: ^2.0.1
-        version: 2.0.1
+        specifier: ^2.0.7
+        version: 2.0.7
       jose:
         specifier: ^6.2.12
         version: 6.2.12
@@ -3602,8 +3602,8 @@ packages:
     resolution: {integrity: sha512-vtcDfH3TOjP8UekytvnHH1o1P4FcUdt4eQ1Y+Abap1tk/OB2MWQvcwS2ClCd1zuIhc3JKOx6p3kod8Vfys3E+A==}
     engines: {node: '>=0.3.1'}
 
-  disposable-domains@2.0.1:
-    resolution: {integrity: sha512-HHFOvipnCiPKQyFRClxViWYHoeLVYYdBXecpJ59MzdYtlxvC/u/eFJW+ZIGw8Lk01Fp+kmUlxJPwgaRudtqJCQ==}
+  disposable-domains@2.0.7:
+    resolution: {integrity: sha512-kWAEB/UbnAR+kXcF34zXYWp70opLZbZdtpY63N68Cc4tLPPJonosx85x/DMenn/0E2DF66GjmxVSWjd/O5IfnA==}
 
   doctrine@3.0.0:
     resolution: {integrity: sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==}
@@ -5029,8 +5029,8 @@ packages:
     resolution: {integrity: sha512-voyz6MApa1rQGUxT3E+BK7/ROe8itEx7vD8/HEvt4xwXucvQ5G5oeEiHkmHZJuBO21RpOf+YYm9MOivj709jow==}
     engines: {node: '>=14.14'}
 
-  top-level-domains@1.0.10:
-    resolution: {integrity: sha512-dMFXw9iNF6wkfjuaEubHFgm9V5w7FJ63JJNnF4w0s1MASQc1JBNgORLnIfFgpus2abUGaQn2cTjqVj9+VKEozg==}
+  top-level-domains@1.0.11:
+    resolution: {integrity: sha512-kBORlQjwwukFiPwOXWvZW8OvRgix6m3cUGREZPdi9LFN4oqJ01bRLch//BdMeGVPte1pYp4BDLKWZgwMn69z/A==}
 
   totalist@3.0.1:
     resolution: {integrity: sha512-sf4i37nQ2LBx4m3wB74y+ubopq6W/dIzXg0FDGjsYnZHVa1Da8FH853wlL2gtUhg+xJXjfk3kUZS3BRoQeoQBQ==}
@@ -8320,10 +8320,10 @@ snapshots:
 
   diff@5.2.2: {}
 
-  disposable-domains@2.0.1:
+  disposable-domains@2.0.7:
     dependencies:
       lodash: 4.18.1
-      top-level-domains: 1.0.10
+      top-level-domains: 1.0.11
       validator: 13.15.35
 
   doctrine@3.0.0:
@@ -9809,7 +9809,7 @@ snapshots:
 
   tmp@0.2.5: {}
 
-  top-level-domains@1.0.10: {}
+  top-level-domains@1.0.11: {}
 
   totalist@3.0.1: {}
 
