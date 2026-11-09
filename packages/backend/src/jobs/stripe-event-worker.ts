@@ -457,9 +457,14 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   const { refused } = await updateSubscriptionByUser(
     { userId, orgId },
     {
-      UpdateExpression: `SET subscriptionStatus = :status, canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
+      // A row that names no subscription gets this one's id, so the guard in
+      // updateBillingRecord can refuse a late created/updated event for it.
+      // Without the id, `subscriptionId <> :subId` holds and that event would
+      // put the row back to trialing or active.
+      UpdateExpression: `SET subscriptionStatus = :status, subscriptionId = if_not_exists(subscriptionId, :subId), canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.GracePeriod },
+        ':subId': { S: subscription.id },
         ':canceledAt': { S: canceledAt },
         ':now': { S: now.toISOString() },
         ':grace': { S: gracePeriodEndsAt },

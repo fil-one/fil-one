@@ -836,9 +836,10 @@ describe('stripe-event-worker handler', () => {
         TableName: TABLE_NAME,
         Key: ORG_KEY,
         UpdateExpression:
-          'SET subscriptionStatus = :status, canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
+          'SET subscriptionStatus = :status, subscriptionId = if_not_exists(subscriptionId, :subId), canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
         ExpressionAttributeValues: {
           ':status': { S: SubscriptionStatus.GracePeriod },
+          ':subId': { S: MOCK_SUBSCRIPTION_ID },
           ':canceledAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
@@ -870,6 +871,21 @@ describe('stripe-event-worker handler', () => {
       expect(values).toMatchObject({
         ':canceledAt': { S: '2026-10-01T00:00:00.000Z' },
         ':grace': { S: '2026-10-31T00:00:00.000Z' },
+      });
+    });
+
+    it('records the ended subscription id on a row that names none, so a late update for it is refused', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription({ id: 'sub_any' }));
+      setupCustomerRetrieve();
+
+      await deliver();
+
+      const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+      expect(input).toMatchObject({
+        UpdateExpression: expect.stringContaining(
+          'subscriptionId = if_not_exists(subscriptionId, :subId)',
+        ),
+        ExpressionAttributeValues: { ':subId': { S: 'sub_any' } },
       });
     });
 
