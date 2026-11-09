@@ -304,7 +304,9 @@ but does not itself reconcile.
 
 Webhook security: verify signatures, idempotency layer (webhooks can be delivered multiple times), async processing via DB queue or SQS.
 
-Stripe does not deliver events in order. On `customer.subscription.created` and
+Events can reach the worker in a different order than Stripe generated them. Stripe does not
+guarantee delivery order ([Event ordering](https://docs.stripe.com/webhooks)), and concurrent
+webhook invocations can queue their events either way round. On `customer.subscription.created` and
 `customer.subscription.updated`, the worker fetches the subscription from Stripe and writes that
 state, not the event's copy, so a late event cannot roll the row back. When Stripe has already
 canceled the subscription, the worker writes nothing and leaves the row to

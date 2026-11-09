@@ -16,7 +16,7 @@ import {
 
 // Upgrade updates the subscription twice, milliseconds apart: first its
 // default payment method, while it is still trialing, then trial_end: 'now',
-// which makes it active. Stripe can deliver the first update last. That late
+// which makes it active. The first update can reach the worker last. That late
 // event must not put the paying org back on its trial.
 describe('A late customer.subscription.updated from before the upgrade', () => {
   let userId: string;

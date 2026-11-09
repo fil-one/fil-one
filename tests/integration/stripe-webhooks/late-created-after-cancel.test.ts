@@ -10,7 +10,7 @@ import {
   testOrgId,
 } from './helpers.js';
 
-// Stripe does not deliver events in order. A trial canceled right after it was
+// Stripe does not guarantee delivery order. A trial canceled right after it was
 // created can have its customer.subscription.created reach the worker after
 // customer.subscription.deleted. The late event must not take the row out of
 // its grace period.

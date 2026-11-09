@@ -506,11 +506,12 @@ describe('stripe-event-worker handler', () => {
     it('leaves the row to the deletion when Stripe has already canceled the subscription', async () => {
       setupStripeEvent('customer.subscription.updated', mockSubscription({ status: 'active' }));
       mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'canceled' }));
-      vi.spyOn(console, 'info').mockImplementation(() => {});
+      const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
 
       await deliver();
 
       expect(updateInputs()).toStrictEqual([]);
+      infoSpy.mockRestore();
     });
 
     it('sets currentPeriodEnd from subscription.items.data[0].current_period_end', async () => {
@@ -1527,6 +1528,39 @@ describe('stripe-event-worker handler', () => {
       expect(dunningEmissions()).toMatchObject([
         { stage: 'recovered', reason: 'past_due', attemptBucket: 'unknown' },
       ]);
+    });
+
+    it('emits stage=recovered for a recovery event that arrives after Stripe has canceled the subscription', async () => {
+      currentEvent = {
+        id: MOCK_EVENT_ID,
+        type: 'customer.subscription.updated',
+        data: { object: mockSubscription(), previous_attributes: { status: 'past_due' } },
+      };
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'canceled' }));
+      const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      await deliver();
+
+      expect(dunningEmissions()).toMatchObject([
+        { stage: 'recovered', reason: 'past_due', attemptBucket: 'unknown' },
+      ]);
+      infoSpy.mockRestore();
+    });
+
+    it('does NOT emit recovered for a late past_due-to-unpaid event after Stripe has recovered', async () => {
+      currentEvent = {
+        id: MOCK_EVENT_ID,
+        type: 'customer.subscription.updated',
+        data: {
+          object: mockSubscription({ status: 'unpaid' }),
+          previous_attributes: { status: 'past_due' },
+        },
+      };
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'active' }));
+
+      await deliver();
+
+      expect(dunningEmissions()).toStrictEqual([]);
     });
 
     it('does NOT emit recovered on an update that leaves the status unchanged', async () => {

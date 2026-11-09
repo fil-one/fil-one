@@ -82,7 +82,17 @@ async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
       const subscription = stripeEvent.data.object as Stripe.Subscription;
-      await handleSubscriptionUpdate(subscription, stripeEvent.data.previous_attributes?.status);
+      await handleSubscriptionUpdate(subscription);
+      // The row is written from the subscription Stripe holds now, but the
+      // event records the transition Stripe made, even when it arrives after
+      // later ones. Emitted once the delivery can no longer fail, so a retried
+      // event counts once.
+      if (
+        stripeEvent.data.previous_attributes?.status === 'past_due' &&
+        subscription.status === 'active'
+      ) {
+        emitDunningEscalation({ stage: 'recovered', reason: 'past_due', attemptCount: 0 });
+      }
       return;
     }
     case 'customer.subscription.deleted': {
@@ -245,16 +255,15 @@ async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
 
-async function handleSubscriptionUpdate(
-  eventSubscription: Stripe.Subscription,
-  previousStatus: Stripe.Subscription.Status | undefined,
-): Promise<void> {
-  // Stripe delivers events out of order, so the event's copy of the
-  // subscription can be older than what the row already holds. Upgrade sends a
-  // `trialing` update and an `active` one milliseconds apart, and the
-  // `trialing` one arriving last put a paying org back on its trial. The row
-  // takes the subscription as Stripe holds it now, which a late event cannot
-  // make stale.
+async function handleSubscriptionUpdate(eventSubscription: Stripe.Subscription): Promise<void> {
+  // Events can reach this worker in a different order than Stripe generated
+  // them. Stripe does not guarantee delivery order (https://docs.stripe.com/webhooks,
+  // "Event ordering"), and two webhook invocations running at once can queue
+  // their events either way round. The event's copy of the subscription can
+  // therefore be older than what the row already holds. Upgrade sends a
+  // `trialing` update and an `active` one milliseconds apart; writing the
+  // `trialing` one last puts a paying org back on its trial. The row takes the
+  // subscription as Stripe holds it now, which a late event cannot make stale.
   const stripe = getStripeClient();
   const subscription = await stripe.subscriptions.retrieve(eventSubscription.id);
   const customerId = getCustomerIdString(subscription.customer);
@@ -294,7 +303,6 @@ async function handleSubscriptionUpdate(
       subscription,
       mappedStatus,
       orgId: eventOrgId,
-      previousStatus,
     });
     return;
   }
@@ -322,7 +330,6 @@ async function handleSubscriptionUpdate(
     subscription,
     mappedStatus,
     orgId: resolveOrgId(subscription.metadata, customer.metadata),
-    previousStatus,
   });
 }
 
@@ -331,7 +338,6 @@ interface UpdateBillingRecordParams {
   subscription: Stripe.Subscription;
   mappedStatus: SubscriptionStatus;
   orgId: string | undefined;
-  previousStatus: Stripe.Subscription.Status | undefined;
 }
 
 async function updateBillingRecord({
@@ -339,7 +345,6 @@ async function updateBillingRecord({
   subscription,
   mappedStatus,
   orgId,
-  previousStatus,
 }: UpdateBillingRecordParams): Promise<void> {
   const backfill = orgIdBackfill(orgId);
   await updateSubscriptionByUser(
@@ -365,11 +370,6 @@ async function updateBillingRecord({
       guardAgainstScrub: { caller: 'subscription.updated' },
     },
   );
-
-  // Emitted once the delivery can no longer fail, so a retried event counts once.
-  if (previousStatus === 'past_due' && subscription.status === 'active') {
-    emitDunningEscalation({ stage: 'recovered', reason: 'past_due', attemptCount: 0 });
-  }
 }
 
 // The grace period a cancellation starts, sized by the row's status: a trial
