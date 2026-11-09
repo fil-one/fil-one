@@ -413,8 +413,8 @@ importers:
         specifier: ^11.10.0
         version: 11.10.0(rollup@4.60.1)
       '@storybook/addon-a11y':
-        specifier: ^10.6.1
-        version: 10.6.1(storybook@10.6.2(@types/react@19.3.0)(react@19.3.1))
+        specifier: ^10.6.6
+        version: 10.6.6(storybook@10.6.2(@types/react@19.3.0)(react@19.3.1))
       '@storybook/addon-docs':
         specifier: ^10.6.2
         version: 10.6.2(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(storybook@10.6.2(@types/react@19.3.0)(react@19.3.1))
@@ -2609,10 +2609,10 @@ packages:
   '@standard-schema/utils@0.3.0':
     resolution: {integrity: sha512-e7Mew686owMaPJVNNLs55PUvgz371nKgwsc4vxE49zsODpJEnxgxRo2y/OKrqueavXgZNMDVj3DdHFlaSAeU8g==}
 
-  '@storybook/addon-a11y@10.6.1':
-    resolution: {integrity: sha512-73wx4xyOMBbFIF4DnlfHy5o/c5sWjawn/tb+zq/GAKXkYCuBziE5aa3WDzRDhdxN259p5kTDyJcRi1SlUEUexg==}
+  '@storybook/addon-a11y@10.6.6':
+    resolution: {integrity: sha512-+LdCNVDELDqYWWbWkMX8LH9CXxDXnizfzvyJUVfkdF5CPZFRZu1xpv+jvLBFEumw/sQmizPZUXlw8zbdO1jvEQ==}
     peerDependencies:
-      storybook: ^10.6.1
+      storybook: ^10.6.6
 
   '@storybook/addon-docs@10.6.2':
     resolution: {integrity: sha512-f7Rv/rzX1sk4lUDTeoIRkXWcWvNwLv7vBnfpFGb3f88MliB+M4ZekGKNiKtrmi44uLFt52gzwwPzj2eGDu0DQQ==}
@@ -3333,8 +3333,8 @@ packages:
   aws4fetch@1.0.18:
     resolution: {integrity: sha512-3Cf+YaUl07p24MoQ46rFwulAmiyCwH2+1zw1ZyPAX5OtJ34Hh185DwB8y/qRLb6cYYYtSFJ9pthyLc0MD4e8sQ==}
 
-  axe-core@4.11.2:
-    resolution: {integrity: sha512-byD6KPdvo72y/wj2T/4zGEvvlis+PsZsn/yPS3pEO+sFpcrqRpX/TJCxvVaEsNeMrfQbCr7w163YqoD9IYwHXw==}
+  axe-core@4.14.0:
+    resolution: {integrity: sha512-9WTZxEjsZ7b13TH8JPmbV2z8CHbl80/2hm3XPEG4JgNdQLK81IBRXmSxHfMAOkSqQeRxT/0dwNDz2GOm3zzpcQ==}
     engines: {node: '>=4'}
 
   balanced-match@4.0.4:
@@ -7402,10 +7402,10 @@ snapshots:
 
   '@standard-schema/utils@0.3.0': {}
 
-  '@storybook/addon-a11y@10.6.1(storybook@10.6.2(@types/react@19.3.0)(react@19.3.1))':
+  '@storybook/addon-a11y@10.6.6(storybook@10.6.2(@types/react@19.3.0)(react@19.3.1))':
     dependencies:
       '@storybook/global': 5.0.0
-      axe-core: 4.11.2
+      axe-core: 4.14.0
       storybook: 10.6.2(@types/react@19.3.0)(react@19.3.1)
 
   '@storybook/addon-docs@10.6.2(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(storybook@10.6.2(@types/react@19.3.0)(react@19.3.1))':
@@ -8063,7 +8063,7 @@ snapshots:
 
   aws4fetch@1.0.18: {}
 
-  axe-core@4.11.2: {}
+  axe-core@4.14.0: {}
 
   balanced-match@4.0.4: {}
 
