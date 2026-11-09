@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { S3Region } from '@filone/shared';
 import type { AccessKey, ServiceAccessKey } from '@filone/shared';
 import { AccessKeysTable } from './AccessKeysTable.js';
 import { ToastProvider } from './Toast/ToastProvider';
@@ -20,6 +21,7 @@ function makeKey(overrides: Partial<ServiceAccessKey>): ServiceAccessKey {
     accessKeyId: 'ACCESS_KEY_12345EXAMPL',
     createdAt: '2026-01-15T10:00:00Z',
     status: 'active',
+    regions: [S3Region.EuWest1],
     permissions: ['read'],
     bucketScope: 'all',
     ...overrides,
@@ -147,6 +149,7 @@ describe('AccessKeysTable: the details drawer', () => {
         id: '2',
         type: 'principal',
         principalId: 'any-user',
+        regions: [S3Region.EuWest1],
         keyName: 'any-personal-key',
         accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
         createdAt: '2026-01-15T10:00:00Z',
@@ -208,6 +211,7 @@ describe('AccessKeysTable: the details drawer', () => {
       id: '2',
       type: 'principal',
       principalId: 'any-user',
+      regions: [S3Region.EuWest1],
       keyName: 'any-personal-key',
       accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
       createdAt: '2026-01-15T10:00:00Z',
@@ -296,6 +300,7 @@ describe('AccessKeysTable — a principal-bound key', () => {
       id: '1',
       type: 'principal',
       principalId: 'user-1',
+      regions: [S3Region.EuWest1],
       keyName: 'Test Key',
       accessKeyId: 'ACCESS_KEY_12345EXAMPL',
       createdAt: '2026-01-15T10:00:00Z',
@@ -343,6 +348,7 @@ describe('AccessKeysTable — the key type', () => {
     id: '2',
     type: 'principal',
     principalId: 'user-1',
+    regions: [S3Region.EuWest1],
     keyName: 'Laptop',
     accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
     createdAt: '2026-01-15T10:00:00Z',
@@ -559,6 +565,7 @@ describe("AccessKeysTable: keyboard order and the drawer's key", () => {
     id: 'personal',
     type: 'principal',
     principalId: 'any-user',
+    regions: [S3Region.EuWest1],
     keyName: 'any-personal-key',
     accessKeyId: 'ACCESS_KEY_PRINCEXAMPL',
     createdAt: '2026-01-15T10:00:00Z',

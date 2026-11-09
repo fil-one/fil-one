@@ -12,6 +12,10 @@ export {
   formatRegion,
   getRegionLabel,
   getAvailableRegions,
+  getAvailableNetworks,
+  NETWORK_ID_BY_REGION,
+  networkIdForRegion,
+  regionsForNetwork,
   isSupportedRegion,
   supportsBucketManagement,
   getRegionAccessModel,
@@ -37,6 +41,7 @@ export {
   getUsageLimits,
   senderAddress,
 } from './constants.ts';
+export type { StorageNetwork } from './constants.ts';
 export type {
   AccessModel,
   UsageLimits,

@@ -3,10 +3,10 @@ import { RevocationNotRecordedError, revokeAccessKey } from './key-revocation.ts
 import { summarizeAccessKey } from './member-keys.ts';
 import type { AccessKeyToRevoke } from './member-keys.ts';
 import type { OrgProfileItem } from './org-profile.ts';
-import { getOrchestratorForRegion } from './service-orchestrator-registry.ts';
+import { findOrchestratorById } from './service-orchestrator-registry.ts';
 
 /**
- * Revoke a member's keys, all at once, across whichever regions hold them.
+ * Revoke a member's keys, all at once, across whichever networks hold them.
  *
  * Each key on its own rather than in one call: each revocation is its own
  * audit correlation and its own row delete, so a pass that fails partway leaves
@@ -64,7 +64,7 @@ export async function revokeMemberKeys({
     if (outcome.reason instanceof RevocationNotRecordedError) {
       console.error('[revoke-member-keys] A key was revoked but its row survives', {
         orgId,
-        region: key.region,
+        orchestratorId: key.orchestratorId,
         keyIdSuffix: summary.accessKeyIdSuffix,
         error: outcome.reason,
       });
@@ -73,7 +73,7 @@ export async function revokeMemberKeys({
     }
     console.error('[revoke-member-keys] A key could not be revoked', {
       orgId,
-      region: key.region,
+      orchestratorId: key.orchestratorId,
       keyIdSuffix: summary.accessKeyIdSuffix,
       error: outcome.reason,
     });
@@ -87,16 +87,19 @@ async function revokeOne(
   key: AccessKeyToRevoke,
   { orgId, orgProfile, actor, reason }: Pass,
 ): Promise<void> {
-  const orchestrator = getOrchestratorForRegion(key.region);
+  const orchestrator = findOrchestratorById(key.orchestratorId);
+  if (!orchestrator) {
+    throw new Error(`No orchestrator "${key.orchestratorId}" is available to revoke this key at.`);
+  }
   const tenantId = orchestrator.isTenantReady(orgProfile);
-  if (!tenantId) throw new Error(`No tenant on ${key.region} to revoke this key at.`);
+  if (!tenantId) throw new Error(`No tenant on ${key.orchestratorId} to revoke this key at.`);
 
   await revokeAccessKey({
     orgId,
     keyId: key.id,
     accessKeyId: key.accessKeyId,
     keyName: key.keyName,
-    region: key.region,
+    orchestratorId: key.orchestratorId,
     orchestrator,
     tenantId,
     actor,
