@@ -11,7 +11,7 @@ vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { takeHourlyAllowance } from './hourly-allowance.ts';
+import { recordRateLimitedRequest } from './rate-limit.ts';
 
 const NOW = new Date('2026-09-23T10:30:00Z');
 const CUTOFF = { N: String(NOW.getTime() - 3_600_000) };
@@ -57,10 +57,10 @@ function sentInputs() {
 }
 
 function take() {
-  return takeHourlyAllowance({ tableName: TABLE, key: KEY, max: MAX, now: NOW });
+  return recordRateLimitedRequest({ tableName: TABLE, key: KEY, max: MAX, now: NOW });
 }
 
-describe('takeHourlyAllowance', () => {
+describe('recordRateLimitedRequest', () => {
   beforeEach(() => ddbMock.reset());
 
   it('spends one from an open window under the cap', async () => {

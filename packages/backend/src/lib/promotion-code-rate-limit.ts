@@ -1,6 +1,6 @@
 import { Resource } from 'sst';
-import { takeHourlyAllowance } from './hourly-allowance.ts';
-import type { HourlyAllowance } from './hourly-allowance.ts';
+import { recordRateLimitedRequest } from './rate-limit.ts';
+import type { RateLimitResult } from './rate-limit.ts';
 
 /**
  * How many promo codes one org may check in an hour. Room for typos, a second
@@ -11,8 +11,8 @@ import type { HourlyAllowance } from './hourly-allowance.ts';
 export const PROMOTION_CODE_CHECKS_PER_HOUR = 10;
 
 /** Spend one of the org's promo code checks for the hour, or refuse. */
-export function takePromotionCodeCheck(orgId: string, now?: Date): Promise<HourlyAllowance> {
-  return takeHourlyAllowance({
+export function takePromotionCodeCheck(orgId: string, now?: Date): Promise<RateLimitResult> {
+  return recordRateLimitedRequest({
     tableName: Resource.OrgTable.name,
     key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'PROMOTION_CODE_CHECK_RATE' } },
     max: PROMOTION_CODE_CHECKS_PER_HOUR,

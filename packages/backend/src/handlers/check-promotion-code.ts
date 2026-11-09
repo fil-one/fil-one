@@ -22,7 +22,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * activation accepts.
  *
  * Unlike activation, it needs no card, so it is the cheap way to guess codes.
- * Each org has an hourly allowance of checks (`PROMOTION_CODE_CHECKS_PER_HOUR`);
+ * Each org has an hourly limit of checks (`PROMOTION_CODE_CHECKS_PER_HOUR`);
  * past it this answers 429 with when to try again. Only a well-formed request
  * spends one.
  */
@@ -44,15 +44,15 @@ export async function baseHandler(
   }
 
   const { orgId } = getUserInfo(event);
-  const allowance = await takePromotionCodeCheck(orgId);
-  if (!allowance.allowed) {
-    const minutes = Math.max(1, Math.ceil((allowance.retryAt.getTime() - Date.now()) / 60_000));
+  const rateLimit = await takePromotionCodeCheck(orgId);
+  if (!rateLimit.allowed) {
+    const minutes = Math.max(1, Math.ceil((rateLimit.retryAt.getTime() - Date.now()) / 60_000));
     return new ResponseBuilder()
       .status(429)
       .body<ErrorResponse & { retryAt: string }>({
         message: `Too many promo code attempts. Try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`,
         code: ApiErrorCode.PROMOTION_CODE_RATE_LIMITED,
-        retryAt: allowance.retryAt.toISOString(),
+        retryAt: rateLimit.retryAt.toISOString(),
       })
       .build();
   }

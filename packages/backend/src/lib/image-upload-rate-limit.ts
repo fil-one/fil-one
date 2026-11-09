@@ -1,5 +1,5 @@
 import { Resource } from 'sst';
-import { takeHourlyAllowance } from './hourly-allowance.ts';
+import { recordRateLimitedRequest } from './rate-limit.ts';
 
 /**
  * How many image upload URLs one limit allows in an hour. Far above anyone
@@ -10,22 +10,22 @@ export const IMAGE_UPLOAD_PRESIGNS_PER_HOUR = 30;
 
 /** Spend one of the org's logo upload URLs for the hour, or refuse. */
 export async function takeOrgLogoPresign(orgId: string, now?: Date): Promise<boolean> {
-  const allowance = await takeHourlyAllowance({
+  const result = await recordRateLimitedRequest({
     tableName: Resource.OrgTable.name,
     key: { pk: { S: `ORG#${orgId}` }, sk: { S: 'LOGO_UPLOAD_RATE' } },
     max: IMAGE_UPLOAD_PRESIGNS_PER_HOUR,
     now,
   });
-  return allowance.allowed;
+  return result.allowed;
 }
 
 /** Spend one of the user's avatar upload URLs for the hour, or refuse. */
 export async function takeAvatarPresign(userId: string, now?: Date): Promise<boolean> {
-  const allowance = await takeHourlyAllowance({
+  const result = await recordRateLimitedRequest({
     tableName: Resource.UserInfoTable.name,
     key: { pk: { S: `USER#${userId}` }, sk: { S: 'AVATAR_UPLOAD_RATE' } },
     max: IMAGE_UPLOAD_PRESIGNS_PER_HOUR,
     now,
   });
-  return allowance.allowed;
+  return result.allowed;
 }

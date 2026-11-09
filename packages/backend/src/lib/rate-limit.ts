@@ -4,18 +4,19 @@ import { getDynamoClient } from './ddb-client.ts';
 
 const HOUR_MS = 60 * 60 * 1000;
 
-/** Whether a call fit in the hour's allowance, and if not, when the next one will. */
-export type HourlyAllowance = { allowed: true } | { allowed: false; retryAt: Date };
+/** Whether a request fit within the hourly limit, and if not, when the next one will. */
+export type RateLimitResult = { allowed: true } | { allowed: false; retryAt: Date };
 
 /**
- * Spend one call from the hourly allowance on the row at `key`, or refuse.
+ * Record one request against the hourly limit on the row at `key`, or refuse
+ * it. A refused request is not recorded.
  *
  * The row holds one window: `windowStart` (epoch ms) and `count`. A window
- * lasts an hour; the first call after it has passed opens a new one. A refused
- * call spends nothing, and learns when its window closes from the row the last
- * spend was refused against.
+ * lasts an hour; the first request after it has passed opens a new one. A
+ * refused request learns when its window closes from the row the last attempt
+ * was refused against.
  */
-export async function takeHourlyAllowance({
+export async function recordRateLimitedRequest({
   tableName,
   key,
   max,
@@ -23,10 +24,10 @@ export async function takeHourlyAllowance({
 }: {
   tableName: string;
   key: Record<string, AttributeValue>;
-  /** Calls one window allows. */
+  /** Requests one window allows. */
   max: number;
   now?: Date;
-}): Promise<HourlyAllowance> {
+}): Promise<RateLimitResult> {
   const cutoff = { N: String(now.getTime() - HOUR_MS) };
   const names = { '#count': 'count', '#windowStart': 'windowStart' };
   const spend = (returnRowOnRefusal: boolean) =>
