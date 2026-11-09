@@ -874,7 +874,7 @@ describe('stripe-event-worker handler', () => {
       });
     });
 
-    it('records the ended subscription id on a row that names none, so a late update for it is refused', async () => {
+    it('records the ended subscription id on a row that names none', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription({ id: 'sub_any' }));
       setupCustomerRetrieve();
 
