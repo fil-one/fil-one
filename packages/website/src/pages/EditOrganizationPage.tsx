@@ -247,7 +247,7 @@ function OrganizationDetails() {
 
 const SKELETON_SECTIONS = [
   { section: 'general', height: 'h-44' },
-  { section: 'danger-zone', height: 'h-[78px]' },
+  { section: 'danger-zone', height: 'h-19.5' },
 ];
 
 /**

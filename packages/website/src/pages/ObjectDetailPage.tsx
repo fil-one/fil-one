@@ -430,7 +430,7 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
 function ObjectDetailSkeleton({ hasVersionId }: { hasVersionId: boolean }) {
   return (
     <div role="status" aria-label="Loading object details">
-      <Skeleton className={`rounded-xl ${hasVersionId ? 'h-[390px]' : 'h-[350px]'}`} />
+      <Skeleton className={`rounded-xl ${hasVersionId ? 'h-97.5' : 'h-87.5'}`} />
     </div>
   );
 }
