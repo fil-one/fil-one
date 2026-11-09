@@ -1,4 +1,9 @@
-import { getAvailableRegions, isSupportedRegion, S3Region } from '@filone/shared';
+import {
+  getAvailableRegions,
+  isSupportedRegion,
+  S3Region,
+  type NonEmptyArray,
+} from '@filone/shared';
 import { Resource } from 'sst';
 import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
 import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
@@ -24,18 +29,19 @@ const forgeOrchestrators = new Map<string, ServiceOrchestrator>();
 
 function getForgeOrchestrator(
   id: string,
-  region: S3Region,
+  regions: NonEmptyArray<S3Region>,
   api: () => ForgeManagementApi,
   s3?: { endpointUrl?: string; presignEndpointUrl?: string },
 ): ServiceOrchestrator {
   let orchestrator = forgeOrchestrators.get(id);
   if (!orchestrator) {
-    orchestrator = createForgeOrchestrator(id, region, api(), s3);
+    orchestrator = createForgeOrchestrator(id, regions, api(), s3);
     forgeOrchestrators.set(id, orchestrator);
   }
   return orchestrator;
 }
 
+/** The orchestrator (storage network) serving a region. */
 export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
   const stage = process.env.FILONE_STAGE!;
   if (isSupportedRegion(region, stage)) {
@@ -46,14 +52,14 @@ export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
         fthOrchestrator ??= createFthOrchestrator(createInstrumentedFthClient());
         return fthOrchestrator;
       case S3Region.EuCentral3:
-        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], region, () => ({
+        return getForgeOrchestrator(ORCHESTRATOR_ID_BY_REGION[region], [region], () => ({
           baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
           accessToken: Resource.ForgeManagementApiToken.value,
         }));
       case S3Region.UsEast9:
         return getForgeOrchestrator(
           ORCHESTRATOR_ID_BY_REGION[region],
-          region,
+          [region],
           () => ({
             baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
             accessToken: Resource.ForgeDevManagementApiToken.value,
@@ -68,7 +74,24 @@ export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
   throw new Error(`Unsupported region "${String(region)}".`);
 }
 
+/**
+ * Every orchestrator available on this stage, once each and in first-region
+ * order. A network serving several regions appears once: its tenant, console
+ * key and bucket listing are shared across them, so a per-network loop must
+ * not visit it twice.
+ */
 export function getAvailableOrchestrators(): RegionOrchestrator[] {
   const stage = process.env.FILONE_STAGE!;
-  return getAvailableRegions(stage).map(getOrchestratorForRegion);
+  const seen = new Set<RegionOrchestrator>();
+  for (const region of getAvailableRegions(stage)) seen.add(getOrchestratorForRegion(region));
+  return [...seen];
+}
+
+/**
+ * The orchestrator with this id, or undefined when no network by that id is
+ * available on this stage. This is how a stored key row, which records the
+ * network that holds its credential, finds its way back to it.
+ */
+export function findOrchestratorById(id: string): RegionOrchestrator | undefined {
+  return getAvailableOrchestrators().find((orchestrator) => orchestrator.id === id);
 }
