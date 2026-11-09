@@ -248,6 +248,17 @@ describe('AcceptInvitationPage', () => {
     expect(panel).toHaveTextContent('Ask an administrator for a new invitation.');
   });
 
+  it('sends the invitee back to the email link when the CSRF check refuses', async () => {
+    mockAccept.mockRejectedValue(
+      apiError('CSRF validation failed', 403, ApiErrorCode.CSRF_INVALID),
+    );
+    renderPage();
+
+    const panel = await screen.findByTestId('accept-session-changed');
+    expect(panel).toHaveTextContent('Open your invitation link again');
+    expect(panel).not.toHaveTextContent('CSRF');
+  });
+
   it('renders the server’s sentence for a refusal it has no state for', async () => {
     mockAccept.mockRejectedValue(
       apiError(

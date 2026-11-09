@@ -154,6 +154,44 @@ function getCsrfToken(): string | undefined {
 }
 
 /**
+ * Send a request, and send it once more when the CSRF check alone refused it
+ * and the refusal brought a new CSRF cookie with it.
+ *
+ * The cookie lives as long as the access token (an hour), the session as long as
+ * the refresh token (a month). A write that is the first request after the hour
+ * goes out with no token, the server refreshes the session and sets a new
+ * cookie, and the CSRF check refuses the write anyway. Most pages never see it
+ * because they read before they write, and the read collects the new cookie.
+ * The invitation link is the one that writes first, so an invitee who signed in
+ * yesterday met the refusal as "CSRF validation failed".
+ *
+ * Retrying is safe because the check runs before any handler: the refused write
+ * did nothing, a single-use invitation token included. It retries only when the
+ * cookie changed, so a token that still fails against a cookie it matches is
+ * refused once, not in a loop.
+ */
+async function fetchRetryingStaleCsrf(
+  url: string,
+  init: RequestInit & { headers: Headers },
+): Promise<Response> {
+  const response = await fetch(url, init);
+  if (response.status !== 403) return response;
+
+  const freshToken = getCsrfToken();
+  if (!freshToken || freshToken === init.headers.get('X-CSRF-Token')) return response;
+
+  const body = (await response
+    .clone()
+    .json()
+    .catch(() => ({}))) as { code?: string };
+  if (body.code !== ApiErrorCode.CSRF_INVALID) return response;
+
+  const headers = new Headers(init.headers);
+  headers.set('X-CSRF-Token', freshToken);
+  return fetch(url, { ...init, headers });
+}
+
+/**
  * Redirect to the server-side login endpoint which handles OAuth state
  * generation and redirects to Auth0 Universal Login.
  */
@@ -305,12 +343,20 @@ function forbidden(body: ForbiddenBody, behavior: ApiRequestBehavior = {}): Erro
         { status: 403 },
       );
 
+    // Reaches a caller only when the retry in `fetchRetryingStaleCsrf` could not
+    // help, so the server's wording ("CSRF validation failed") would mean nothing
+    // to the person reading it.
+    case ApiErrorCode.CSRF_INVALID:
+      return Object.assign(
+        new Error('Your session changed while this page was open. Reload the page and try again.'),
+        { status: 403, code: ApiErrorCode.CSRF_INVALID },
+      );
+
     // Every other 403 keeps its code, so a caller that knows one can branch on
     // it — the accept page tells INVITE_EMAIL_MISMATCH from the rest — while a
     // caller that does not still renders the message the server sent. A denial
-    // with no code arrives with none and means nothing in particular: an expired
-    // CSRF cookie is the routine one, so no component should read the absence of
-    // a code as a named refusal.
+    // with no code arrives with none and means nothing in particular, so no
+    // component should read the absence of a code as a named refusal.
     default:
       return Object.assign(new Error(body.message ?? 'Access denied'), {
         status: 403,
@@ -381,7 +427,7 @@ export async function sendApiRequest(
   if (activeOrgId) headers.set(ORG_ID_HEADER, activeOrgId);
   if (sentOrg) sentOrg.orgId = activeOrgId;
 
-  const response = await fetch(`${API_URL}/api${path}`, {
+  const response = await fetchRetryingStaleCsrf(`${API_URL}/api${path}`, {
     ...options,
     credentials: 'include',
     headers,
