@@ -91,6 +91,10 @@ export function ObjectsPanel({
 
   return (
     <ObjectBrowser
+      // The route stays mounted when the URL moves to another bucket, so the key
+      // makes each bucket open fresh: no search, sort or selection carried over
+      // from the last one, where a bulk delete could reach the wrong objects.
+      key={`${browser.region}:${browser.bucketName}`}
       {...browser}
       onDownload={objectActions.downloadObject}
       downloading={objectActions.downloading}
