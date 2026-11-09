@@ -91,7 +91,7 @@ export function ApiReference() {
           <p className="text-xs leading-4 text-zinc-500">
             Supported file types, indexing schedule, and key handling in full.{' '}
             <Link href={RAG_DOCS_URL} variant="accent">
-              docs.fil.one
+              docs.filone.com
             </Link>
           </p>
         </ReferenceRow>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { formatBytes } from '@filone/shared';
+import { formatBytes, usesRagEngine } from '@filone/shared';
 
 import { Alert } from '../components/Alert.js';
 import { BucketActionMenu } from '../components/BucketActionMenu.js';
@@ -86,7 +86,9 @@ function detailFor(bucket: RagBucket): React.ReactNode {
     case 'error':
       return bucket.lastSyncError ?? 'The last indexing run did not complete';
     case 'awaiting-first-index':
-      return 'Up to 6 hours until the first results';
+      return usesRagEngine(bucket.region)
+        ? 'Not indexed yet'
+        : 'Up to 6 hours until the first results';
     case 'synced':
       return <BucketSyncedStats bucket={bucket} />;
   }
@@ -288,6 +290,7 @@ export function BucketsTab({
       <ToggleConfirmModal
         enabled={confirm?.enabled ?? false}
         bucketName={confirm?.name ?? ''}
+        engine={confirm ? usesRagEngine(confirm.region) : false}
         pending={confirm != null && togglingBucket === bucketKey(confirm)}
         open={confirm != null}
         onClose={() => setConfirm(null)}

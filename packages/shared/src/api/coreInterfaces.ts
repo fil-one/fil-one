@@ -12,6 +12,11 @@ export const ApiErrorCode = {
    * the account holder to fix their own payment method.
    */
   ORG_BILLING_INACTIVE: 'ORG_BILLING_INACTIVE',
+  /**
+   * The org is billed by hand under a sales agreement, so Stripe checkout, card
+   * setup and the Stripe portal do not apply to it.
+   */
+  BILLED_MANUALLY: 'BILLED_MANUALLY',
   /** Promo code is invalid, expired, or inactive. */
   INVALID_PROMOTION_CODE: 'INVALID_PROMOTION_CODE',
   /** Trial accounts cannot generate presigned URLs — upgrade required. */
@@ -34,6 +39,12 @@ export const ApiErrorCode = {
   IMAGE_UPLOAD_RATE_LIMITED: 'IMAGE_UPLOAD_RATE_LIMITED',
   /** The account has been deleted; the session is dead and cannot be revived. */
   ACCOUNT_DELETED: 'ACCOUNT_DELETED',
+  /**
+   * The caller's previous account or home org is still being deleted. Unlike
+   * ACCOUNT_DELETED the session lives on, and the same request succeeds once
+   * the deletion finishes.
+   */
+  DELETION_IN_PROGRESS: 'DELETION_IN_PROGRESS',
   /** The caller's role in the active organization does not carry this permission. */
   FORBIDDEN_ROLE: 'FORBIDDEN_ROLE',
   /** The caller is not a member of the organization the request names. */
@@ -53,13 +64,6 @@ export const ApiErrorCode = {
    * than an incident: revoking or accepting one frees a slot.
    */
   INVITE_LIMIT_REACHED: 'INVITE_LIMIT_REACHED',
-  /**
-   * Issuing invitations is not switched on for this organization yet. Its own
-   * code because the console renders it as a state of the form rather than a
-   * failed attempt, and the alternative — recognising it by the absence of a
-   * code — collects every other code-less 403 with it, CSRF expiry included.
-   */
-  INVITES_NOT_ENABLED: 'INVITES_NOT_ENABLED',
   /**
    * The change would leave the organization with no Owner. Its own code because
    * the console's remedy is specific — promote somebody first, or transfer

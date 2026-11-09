@@ -4,6 +4,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { RecentActivity, RecentActivityResponse } from '@filone/shared';
+import { isRagCompanionBucket } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import { keyScope, withinScope } from '../lib/key-scope.ts';
@@ -195,13 +196,17 @@ async function listBucketActivities(
       bucketCount: buckets.length,
       durationMs: Math.round(durationMs),
     });
-    return buckets.map((bucket) => ({
-      id: `bucket-${bucket.bucketName}`,
-      action: 'bucket.created' as const,
-      resourceType: 'bucket' as const,
-      resourceName: bucket.bucketName,
-      timestamp: bucket.createdAt,
-    }));
+    // Bucket Intelligence companion buckets hold the engine's index; the
+    // bucket list hides them, so the activity feed does too.
+    return buckets
+      .filter((bucket) => !isRagCompanionBucket(bucket.bucketName))
+      .map((bucket) => ({
+        id: `bucket-${bucket.bucketName}`,
+        action: 'bucket.created' as const,
+        resourceType: 'bucket' as const,
+        resourceName: bucket.bucketName,
+        timestamp: bucket.createdAt,
+      }));
   } catch (err) {
     const errName = (err as { name?: string }).name;
     const errCode = (err as { Code?: string }).Code;

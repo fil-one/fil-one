@@ -31,9 +31,11 @@ import { getDynamoClient } from '../lib/ddb-client.ts';
 import { getStripeClient } from '../lib/stripe-client.ts';
 import {
   GRACE_STATE_PROJECTION,
+  NOT_BILLED_MANUALLY,
   getSubscription,
   updateSubscriptionByUser,
 } from '../lib/subscription-store.ts';
+import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
 import {
   emitBillingRowMissing,
   emitDunningEscalation,
@@ -337,10 +339,11 @@ async function updateBillingRecord({
         },
         ':now': { S: new Date().toISOString() },
         ...backfill.values,
+        ...NOT_BILLED_MANUALLY.values,
       },
       // A late event for the subscription Stripe ended may not revive the row;
       // an event for a new subscription id, after reactivation, still writes.
-      ConditionExpression: 'attribute_not_exists(canceledAt) OR subscriptionId <> :subId',
+      ConditionExpression: `(attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND (${NOT_BILLED_MANUALLY.condition})`,
       guardAgainstScrub: { caller: 'subscription.updated' },
     },
   );
@@ -354,19 +357,11 @@ async function updateBillingRecord({
 // The grace period a cancellation starts, sized by the row's status: a trial
 // gets 7 days, a paying org 30. A row with canceledAt keeps its dates, since an
 // earlier delivery of this event already set them.
-async function getGraceWindow(
+function getGraceWindow(
   subscription: Stripe.Subscription,
-  orgId: string | undefined,
+  stored: SubscriptionRecord | undefined,
   now: Date,
-): Promise<{ canceledAt: string; gracePeriodEndsAt: string }> {
-  // Consistent: an upgrade written a moment earlier has to be what this sees,
-  // or a paying org reads as `trialing`.
-  const stored = orgId
-    ? await getSubscription(orgId, {
-        projectionExpression: GRACE_STATE_PROJECTION,
-        consistentRead: true,
-      })
-    : undefined;
+): { canceledAt: string; gracePeriodEndsAt: string } {
   if (stored?.canceledAt && stored.gracePeriodEndsAt) {
     return { canceledAt: stored.canceledAt, gracePeriodEndsAt: stored.gracePeriodEndsAt };
   }
@@ -438,24 +433,52 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
     return;
   }
 
+  // Consistent: an upgrade written a moment earlier has to be what this sees,
+  // or a paying org reads as `trialing`.
+  const stored = orgId
+    ? await getSubscription(orgId, {
+        projectionExpression: GRACE_STATE_PROJECTION,
+        consistentRead: true,
+      })
+    : undefined;
+  if (stored?.subscriptionStatus === SubscriptionStatus.Manual) {
+    console.warn('[stripe-webhook] Skipping a cancellation for an org billed manually', {
+      userId,
+      orgId,
+      subscriptionId: subscription.id,
+    });
+    return;
+  }
+
   const now = new Date();
-  const { canceledAt, gracePeriodEndsAt } = await getGraceWindow(subscription, orgId, now);
+  const { canceledAt, gracePeriodEndsAt } = getGraceWindow(subscription, stored, now);
 
   const backfill = orgIdBackfill(orgId);
-  await updateSubscriptionByUser(
+  const { refused } = await updateSubscriptionByUser(
     { userId, orgId },
     {
-      UpdateExpression: `SET subscriptionStatus = :status, canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
+      // A row that names no subscription gets this one's id, so the guard in
+      // updateBillingRecord can refuse a late created/updated event for it.
+      // Without the id, `subscriptionId <> :subId` holds and that event would
+      // put the row back to trialing or active.
+      UpdateExpression: `SET subscriptionStatus = :status, subscriptionId = if_not_exists(subscriptionId, :subId), canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.GracePeriod },
+        ':subId': { S: subscription.id },
         ':canceledAt': { S: canceledAt },
         ':now': { S: now.toISOString() },
         ':grace': { S: gracePeriodEndsAt },
         ...backfill.values,
+        ...NOT_BILLED_MANUALLY.values,
       },
+      // The status read above can be stale: ops may have moved the org to
+      // manual billing since.
+      ConditionExpression: NOT_BILLED_MANUALLY.condition,
       guardAgainstScrub: { caller: 'subscription.deleted' },
     },
   );
+  // A row that refused the grace period is not in one, so nothing is locked.
+  if (refused) return;
 
   // Write-lock the tenant on every orchestrator during grace period. A failure
   // fails the delivery, so SQS retries the event and parks it in the DLQ once

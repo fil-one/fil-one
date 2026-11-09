@@ -75,6 +75,28 @@ describe('apiRequest — 403 handling', () => {
     expect((error as Error).message).toContain('grace period');
   });
 
+  it('keeps the signed-in address an invitation email mismatch names', async () => {
+    respondWith(
+      new Response(
+        JSON.stringify({
+          code: ApiErrorCode.INVITE_EMAIL_MISMATCH,
+          message: 'Sent to another address',
+          sessionEmail: 'any-signed-in@example.com',
+        }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const error = await apiRequest('/invitations/accept').catch((err: unknown) => err);
+
+    expect(error).toMatchObject({
+      message: 'Sent to another address',
+      status: 403,
+      code: ApiErrorCode.INVITE_EMAIL_MISMATCH,
+      sessionEmail: 'any-signed-in@example.com',
+    });
+  });
+
   it('falls back to the server message for an unrecognized 403', async () => {
     respondWith(forbiddenResponse(undefined, 'CSRF validation failed'));
 

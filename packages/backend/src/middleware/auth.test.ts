@@ -10,6 +10,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import {
   DynamoDBClient,
   GetItemCommand,
+  QueryCommand,
   TransactionCanceledException,
   TransactWriteItemsCommand,
   UpdateItemCommand,
@@ -187,6 +188,10 @@ describe('authMiddleware', () => {
       }
 
       it('validates against the custom domain on the canonical host', async () => {
+        expect(await issuerUsedFor('app.filone.com')).toBe('https://auth.fil.one/');
+      });
+
+      it('validates against the custom domain on the previous canonical host', async () => {
         expect(await issuerUsedFor('app.fil.one')).toBe('https://auth.fil.one/');
       });
 
@@ -537,6 +542,152 @@ describe('authMiddleware', () => {
         );
         expect(consoleError).toHaveBeenCalled();
         consoleError.mockRestore();
+      });
+    });
+
+    describe('an account homed in an org whose deletion has finished', () => {
+      const STRANDED_IN = 'any-deleted-org';
+
+      /**
+       * Homed before deletions moved their survivors: the org is fenced for good,
+       * its teardown is done, and nothing will move the account off it.
+       */
+      function stubStrandedAccount(otherMemberships: string[] = []) {
+        mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+          payload: { email: MOCK_EMAIL, email_verified: true },
+        });
+        ddbMock.on(GetItemCommand).callsFake((input) => {
+          const pk: string = input.Key.pk?.S ?? '';
+          const sk: string = input.Key.sk?.S ?? '';
+          if (pk === `SUB#${MOCK_SUB}`) {
+            return { Item: { userId: { S: MOCK_USER_ID }, orgId: { S: STRANDED_IN } } };
+          }
+          if (pk === `ORG#${STRANDED_IN}` && sk === 'PROFILE') {
+            return { Item: { pk: { S: pk }, deleting: { BOOL: true } } };
+          }
+          if (pk === `ORG#${STRANDED_IN}` && sk === 'DELETION') {
+            return { Item: { status: { S: 'DONE' }, trigger: { S: 'USER_REQUEST' } } };
+          }
+          if (pk === `USER#${MOCK_USER_ID}` && sk === 'PROFILE') {
+            return { Item: { sub: { S: MOCK_SUB }, orgId: { S: STRANDED_IN } } };
+          }
+          return {};
+        });
+        ddbMock.on(QueryCommand).resolves({
+          Items: otherMemberships.map((orgId) => ({
+            pk: { S: `USER#${MOCK_USER_ID}` },
+            sk: { S: `MEMBERSHIP#${orgId}` },
+            role: { S: OrgRole.Member },
+            joinedAt: { S: '2026-01-01T00:00:00.000Z' },
+          })),
+        });
+        ddbMock.on(TransactWriteItemsCommand).resolves({});
+      }
+
+      function sessionRequest() {
+        return buildMiddyRequest(
+          buildEvent({ cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`] }),
+        );
+      }
+
+      it('moves the account onto a floor org and lets the request through', async () => {
+        stubStrandedAccount();
+        const request = sessionRequest();
+
+        const result = await authMiddleware().before(request);
+
+        expect(result).toBeUndefined();
+        const items =
+          ddbMock.commandCalls(TransactWriteItemsCommand)[0]!.args[0].input.TransactItems!;
+        const floorOrgId = items
+          .find((item) => item.Put?.Item?.floorOrg?.BOOL)!
+          .Put!.Item!.pk!.S!.slice('ORG#'.length);
+        expect(getUserInfoFromEvent(request.event)).toMatchObject({ orgId: floorOrgId });
+      });
+
+      it('moves the account onto another org it still belongs to', async () => {
+        stubStrandedAccount(['any-live-org']);
+        const request = sessionRequest();
+
+        const result = await authMiddleware().before(request);
+
+        expect(result).toBeUndefined();
+        expect(getUserInfoFromEvent(request.event)).toMatchObject({ orgId: 'any-live-org' });
+      });
+    });
+
+    // An invitation replaced the tombstone, and the console reads /me straight
+    // after: a replica that has not seen the write still holds the old stamp.
+    it('lets in an account that just rejoined when a stale read still shows its tombstone', async () => {
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { email: MOCK_EMAIL, email_verified: true },
+      });
+      ddbMock.on(GetItemCommand).callsFake((input) => {
+        if (input.Key.pk?.S !== `SUB#${MOCK_SUB}`) return {};
+        return {
+          Item: input.ConsistentRead
+            ? { userId: { S: MOCK_USER_ID }, orgId: { S: MOCK_ORG_ID } }
+            : {
+                userId: { S: 'any-deleted-user' },
+                orgId: { S: 'any-deleted-org' },
+                deletedAt: { S: '2026-01-01T00:00:00.000Z' },
+              },
+        };
+      });
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({ cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`] }),
+      );
+
+      const result = await before(request);
+
+      expect(result).toBeUndefined();
+      expect(getUserInfoFromEvent(request.event)).toMatchObject({
+        userId: MOCK_USER_ID,
+        orgId: MOCK_ORG_ID,
+      });
+    });
+
+    describe('on a route that lets a deleted account start over', () => {
+      it('hands back the rotated cookies when it answers that the org is being deleted', async () => {
+        mockJwtVerify
+          .mockRejectedValueOnce(new Error('token expired'))
+          .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: async () => ({
+            access_token: 'new-access-token',
+            id_token: 'new-id-token',
+            refresh_token: 'new-refresh-token',
+          }),
+        });
+        ddbMock
+          .on(GetItemCommand, { Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } } })
+          .resolves({ Item: { userId: { S: MOCK_USER_ID }, orgId: { S: MOCK_ORG_ID } } });
+        ddbMock
+          .on(GetItemCommand, { Key: { pk: { S: `ORG#${MOCK_ORG_ID}` }, sk: { S: 'PROFILE' } } })
+          .resolves({ Item: { deleting: { BOOL: true } } });
+
+        const { before } = authMiddleware({
+          requireVerifiedEmail: false,
+          deferAccountCreation: true,
+        });
+        const request = buildMiddyRequest(
+          buildEvent({
+            cookies: [`hs_access_token=expired-token`, `hs_refresh_token=valid-refresh`],
+          }),
+        );
+
+        const result = (await before(request)) as APIGatewayProxyStructuredResultV2;
+
+        expect(result).toMatchObject({
+          statusCode: 409,
+          cookies: expect.arrayContaining([
+            expect.stringContaining('hs_refresh_token=new-refresh-token'),
+          ]),
+        });
       });
     });
 

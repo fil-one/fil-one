@@ -5,6 +5,7 @@ import { HubSpotLifecycleStatus, fromInternalStatus } from './hubspot-lifecycle-
 describe('fromInternalStatus', () => {
   it.each([
     [SubscriptionStatus.Active, HubSpotLifecycleStatus.Paying],
+    [SubscriptionStatus.Manual, HubSpotLifecycleStatus.Paying],
     [SubscriptionStatus.Trialing, HubSpotLifecycleStatus.Trialing],
     [SubscriptionStatus.PastDue, HubSpotLifecycleStatus.PaymentFailing],
     [SubscriptionStatus.GracePeriod, HubSpotLifecycleStatus.Lapsed],

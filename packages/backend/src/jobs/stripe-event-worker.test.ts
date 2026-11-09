@@ -280,9 +280,10 @@ describe('stripe-event-worker handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
           ':orgId': { S: MOCK_ORG_ID },
+          ':manual': { S: SubscriptionStatus.Manual },
         },
         ConditionExpression:
-          'attribute_exists(pk) AND ((attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND attribute_not_exists(deletedAt))',
+          'attribute_exists(pk) AND (((attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND (attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual)) AND attribute_not_exists(deletedAt))',
       });
     });
 
@@ -475,9 +476,10 @@ describe('stripe-event-worker handler', () => {
           ':periodEnd': { S: new Date(1700000000 * 1000).toISOString() },
           ':now': { S: expect.any(String) },
           ':orgId': { S: MOCK_ORG_ID },
+          ':manual': { S: SubscriptionStatus.Manual },
         },
         ConditionExpression:
-          'attribute_exists(pk) AND ((attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND attribute_not_exists(deletedAt))',
+          'attribute_exists(pk) AND (((attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND (attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual)) AND attribute_not_exists(deletedAt))',
       });
     });
 
@@ -740,6 +742,68 @@ describe('stripe-event-worker handler', () => {
     });
   });
 
+  // An org billed by hand still has the Stripe customer and trial subscription
+  // it signed up with, and their events keep arriving.
+  describe('an org billed manually', () => {
+    it.each(['customer.subscription.created', 'customer.subscription.updated'])(
+      'refuses to overwrite the manual status on %s',
+      async (type) => {
+        setupStripeEvent(type, mockSubscription());
+
+        await deliver();
+
+        expect(updateInputs()[0]).toMatchObject({
+          ConditionExpression: expect.stringContaining(
+            '(attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual)',
+          ),
+          ExpressionAttributeValues: expect.objectContaining({
+            ':manual': { S: SubscriptionStatus.Manual },
+          }),
+        });
+      },
+    );
+
+    it('neither starts a grace period nor write-locks the tenant when its old subscription is deleted', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      setupStoredGraceState({ subscriptionStatus: SubscriptionStatus.Manual });
+
+      await deliver();
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    });
+
+    it('refuses the grace period write if the org turns manual after the status was read', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+
+      await deliver();
+
+      expect(updateInputs()[0]).toMatchObject({
+        ConditionExpression: expect.stringContaining(
+          '(attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual)',
+        ),
+        ExpressionAttributeValues: expect.objectContaining({
+          ':manual': { S: SubscriptionStatus.Manual },
+        }),
+      });
+    });
+
+    it('does not write-lock the tenant when the row refuses the grace period', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      setupStripeEvent('customer.subscription.deleted', mockSubscription());
+      setupCustomerRetrieve();
+      ddbMock
+        .on(UpdateItemCommand)
+        .rejects(new ConditionalCheckFailedException({ message: 'manual', $metadata: {} }));
+
+      await deliver();
+
+      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    });
+  });
+
   describe('a late update for the subscription Stripe ended', () => {
     it('acknowledges the event when the row refuses it', async () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -772,15 +836,18 @@ describe('stripe-event-worker handler', () => {
         TableName: TABLE_NAME,
         Key: ORG_KEY,
         UpdateExpression:
-          'SET subscriptionStatus = :status, canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
+          'SET subscriptionStatus = :status, subscriptionId = if_not_exists(subscriptionId, :subId), canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
         ExpressionAttributeValues: {
           ':status': { S: SubscriptionStatus.GracePeriod },
+          ':subId': { S: MOCK_SUBSCRIPTION_ID },
           ':canceledAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
           ':orgId': { S: MOCK_ORG_ID },
+          ':manual': { S: SubscriptionStatus.Manual },
         },
-        ConditionExpression: 'attribute_exists(pk) AND (attribute_not_exists(deletedAt))',
+        ConditionExpression:
+          'attribute_exists(pk) AND ((attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual) AND attribute_not_exists(deletedAt))',
       });
 
       const graceDate = new Date(input.ExpressionAttributeValues![':grace'].S!).getTime();
@@ -804,6 +871,21 @@ describe('stripe-event-worker handler', () => {
       expect(values).toMatchObject({
         ':canceledAt': { S: '2026-10-01T00:00:00.000Z' },
         ':grace': { S: '2026-10-31T00:00:00.000Z' },
+      });
+    });
+
+    it('records the ended subscription id on a row that names none', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription({ id: 'sub_any' }));
+      setupCustomerRetrieve();
+
+      await deliver();
+
+      const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+      expect(input).toMatchObject({
+        UpdateExpression: expect.stringContaining(
+          'subscriptionId = if_not_exists(subscriptionId, :subId)',
+        ),
+        ExpressionAttributeValues: { ':subId': { S: 'sub_any' } },
       });
     });
 

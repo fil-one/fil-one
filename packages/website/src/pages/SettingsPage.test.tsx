@@ -57,7 +57,6 @@ function me(role: OrgRole, overrides: Partial<MeResponse> = {}): MeResponse {
     connectionType: 'auth0',
     mfaEnrollments: [],
     ragAccess: true,
-    orgsBeta: true,
     billingActive: true,
     userId: 'user-1',
     role,

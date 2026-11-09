@@ -2,12 +2,11 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { TransactWriteItem } from '@aws-sdk/client-dynamodb';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { Resource } from 'sst';
 import { NO_ROLE, OrgRole } from '@filone/shared';
 import type { AccessKeySummary, ErrorResponse, RemoveMemberResponse } from '@filone/shared';
 import { AuditSubjects, auditPut, userActor } from '../lib/audit.ts';
-import { prepareFloorOrg } from '../lib/account-creation.ts';
-import type { FloorOrgPreparation } from '../lib/account-creation.ts';
+import { planHomeOrgMove } from '../lib/home-org-move.ts';
+import type { HomeOrgMovePlan } from '../lib/home-org-move.ts';
 import { commitAfterRevokingKeys } from '../lib/commit-after-revoking-keys.ts';
 import { removeMemberPrincipal } from '../lib/member-principals.ts';
 import { notifyRevokedKeys } from '../lib/key-revocation-email.ts';
@@ -30,14 +29,9 @@ import {
   membershipDeleteItems,
   ownerCountItem,
 } from '../lib/membership-changes.ts';
-import {
-  listMemberships,
-  OrgKeys,
-  readOwnerCount,
-  resolveMembership,
-} from '../lib/org-membership.ts';
+import { readOwnerCount, resolveMembership } from '../lib/org-membership.ts';
 import type { OrgMembership } from '../lib/org-membership.ts';
-import { readHomeOrgPointers, readUserProfile } from '../lib/user-profile.ts';
+import { readUserProfile } from '../lib/user-profile.ts';
 import {
   ResponseBuilder,
   badRequestResponse,
@@ -58,6 +52,9 @@ import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
 const SOURCE = 'remove-member';
+
+/** The `ConditionCheck` `commitAfterRevokingKeys` appends when the member holds keys. */
+const KEY_MINT_FENCE_ITEMS = 1;
 
 /**
  * The way out of a last-Owner refusal, for somebody removing an Owner: unlike a
@@ -122,6 +119,11 @@ const LAST_OWNER_REMEDY = 'Transfer ownership or promote another member first.';
  * is logged loudly rather than blocking the removal itself. A read that fails
  * outright is different: it stops the removal before any key is revoked, since
  * going ahead could leave the account with no org at all.
+ *
+ * An account that still belongs to another org and whose home org is this one
+ * gets that other org as its home in the same transaction. Otherwise a request
+ * without an org header, `/api/me`'s fallback among them, would keep resolving
+ * to the org it was just removed from.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -152,26 +154,34 @@ export async function baseHandler(
       userId: targetUserId,
       ...(targetEmail ? { emailNorm: normalizeInviteEmail(targetEmail) } : {}),
     }),
-    prepareFloorOrgIfLastMembership({
-      targetUserId,
+    planHomeOrgMove({
+      userId: targetUserId,
       orgId,
       name: targetProfile?.name,
       email: targetProfile?.email,
     }),
   ]);
-  const { now, later } = planRevocations(invitationsToRevoke, wasOwner ? 3 : 2);
+  const buildRemovalTransaction = (invitations: InvitationRecord[]) =>
+    removalTransaction({
+      orgId,
+      targetUserId,
+      fromRole: target.role,
+      wasOwner,
+      invitations,
+      lastMembership,
+    });
+  // Counted from the transaction itself, so a floor org or a home repoint
+  // cannot push it past DynamoDB's item limit. The key-mint fence is appended
+  // later, by `commitAfterRevokingKeys`.
+  const { now, later } = planRevocations(
+    invitationsToRevoke,
+    buildRemovalTransaction([]).items.length + KEY_MINT_FENCE_ITEMS,
+  );
 
   const refusal = await refuseBeforeRevokingKeys(orgId, wasOwner);
   if (refusal) return refusal;
 
-  const { items, failure } = removalTransaction({
-    orgId,
-    targetUserId,
-    fromRole: target.role,
-    wasOwner,
-    invitations: now,
-    lastMembership,
-  });
+  const { items, failure } = buildRemovalTransaction(now);
 
   const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   const { keysToRevoke, fence } = await reviewKeysForRoleChange(orgId, targetUserId, NO_ROLE);
@@ -376,14 +386,14 @@ function removalTransaction({
   fromRole,
   wasOwner,
   invitations,
-  lastMembership: { floorOrg, remainingCheck },
+  lastMembership: { floorOrg, remainingItems = [] },
 }: {
   orgId: string;
   targetUserId: string;
   fromRole: OrgRole;
   wasOwner: boolean;
   invitations: InvitationRecord[];
-  lastMembership: { floorOrg?: FloorOrgPreparation; remainingCheck?: TransactWriteItem };
+  lastMembership: HomeOrgMovePlan;
 }): { items: TransactWriteItem[]; failure: Omit<RemovalFailure, 'keysRevoked'> } {
   const floorOrgItems = floorOrg ? [...floorOrg.items, auditPut(floorOrg.event)] : [];
   return {
@@ -392,7 +402,7 @@ function removalTransaction({
       ...(wasOwner ? [ownerCountItem(orgId, 'decrement')] : []),
       ...invitations.flatMap((invitation) => retireInvitationItems(invitation, 'revoked')),
       ...floorOrgItems,
-      ...(remainingCheck ? [remainingCheck] : []),
+      ...remainingItems,
     ],
     failure: {
       orgId,
@@ -400,7 +410,7 @@ function removalTransaction({
       wasOwner,
       revocations: invitations.length,
       floorOrgItems: floorOrgItems.length,
-      remainingCheck: remainingCheck !== undefined,
+      remainingItems: remainingItems.length,
     },
   };
 }
@@ -413,8 +423,8 @@ interface RemovalFailure {
   revocations: number;
   /** How many items the floor org added (its rows and its audit Put), 0 for none. */
   floorOrgItems: number;
-  /** Whether the removal checks that another membership still stands. */
-  remainingCheck: boolean;
+  /** How many items keep the account in another org: the check and any home repoints. */
+  remainingItems: number;
   /**
    * Keys the pass already revoked. They are gone whatever the membership now
    * says, so every refusal below carries them: a removal that cancels after a
@@ -422,74 +432,6 @@ interface RemovalFailure {
    * and an answer that mentions only the membership hides that.
    */
   keysRevoked: AccessKeySummary[];
-}
-
-/**
- * What stops this removal leaving the account with no org at all: a floor org
- * to create alongside it when this is the last membership, or otherwise a
- * check that one of the others is still there when the removal commits.
- *
- * The check is what makes the count below safe to act on. Two removals of the
- * same account at once (leaving one org while an admin removes them from the
- * other) each count two memberships and each skip the floor org; without it
- * both would commit and the account would be left in no org. With it, the
- * second to commit finds the membership the first removed, cancels, and a
- * retry counts again.
- *
- * Neither, when this is the last membership but nothing here can name the row
- * that needs repointing.
- *
- * `listMemberships` is read fresh rather than reused from anywhere else: it is
- * the strongly-consistent count of every org this account belongs to right
- * now, and the removal about to happen is not among them yet, so a count of
- * one means this org is the only one — the removal would take it to zero.
- */
-async function prepareFloorOrgIfLastMembership({
-  targetUserId,
-  orgId,
-  name,
-  email,
-}: {
-  targetUserId: string;
-  orgId: string;
-  name?: string;
-  email?: string;
-}): Promise<{ floorOrg?: FloorOrgPreparation; remainingCheck?: TransactWriteItem }> {
-  const memberships = await listMemberships(targetUserId);
-  const remaining = memberships.find((membership) => membership.orgId !== orgId);
-  if (remaining) return { remainingCheck: membershipStandsCheck(targetUserId, remaining.orgId) };
-
-  // Throws on a failed read rather than answering "no sub": this runs before
-  // any key is revoked or row written, so a read error stops the removal here
-  // instead of letting it leave the account with no org at all.
-  const { sub, profileOrgId, identityOrgId } = await readHomeOrgPointers(targetUserId);
-  if (!sub) {
-    console.error(
-      '[remove-member] Removed member has no sub on their profile, leaving them without an org',
-      { targetUserId, orgId },
-    );
-    return {};
-  }
-
-  const floorOrg = await prepareFloorOrg({
-    userId: targetUserId,
-    sub,
-    homeOrgIds: { profile: profileOrgId, identity: identityOrgId },
-    name,
-    email,
-  });
-  return { floorOrg };
-}
-
-/** A condition that the account's membership of `orgId` still stands. */
-function membershipStandsCheck(userId: string, orgId: string): TransactWriteItem {
-  return {
-    ConditionCheck: {
-      TableName: Resource.OrgTable.name,
-      Key: { pk: { S: OrgKeys.userPk(userId) }, sk: { S: OrgKeys.membershipSk(orgId) } },
-      ConditionExpression: 'attribute_exists(pk)',
-    },
-  };
 }
 
 async function removalFailureResponse(
@@ -500,12 +442,12 @@ async function removalFailureResponse(
     wasOwner,
     revocations,
     floorOrgItems,
-    remainingCheck,
+    remainingItems,
     keysRevoked,
   }: RemovalFailure,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   // The floor org's items (its rows and the audit Put appended alongside them)
-  // and the remaining-membership check each mean the same thing to the caller
+  // and the remaining membership's items each mean the same thing to the caller
   // when their condition fails: the account changed, try the removal again. So
   // they share one label rather than naming each row. Counted from what was
   // actually sent, so a change to the floor org's rows cannot shift the labels.
@@ -515,7 +457,7 @@ async function removalFailureResponse(
     ...(wasOwner ? ['ownerCount'] : []),
     ...Array.from({ length: revocations * 2 }, () => 'invitation'),
     ...Array.from({ length: floorOrgItems }, () => 'accountChanged'),
-    ...(remainingCheck ? ['accountChanged'] : []),
+    ...Array.from({ length: remainingItems }, () => 'accountChanged'),
   ]);
   if (failed.length === 0) throw err;
   if (failed.includes('accountChanged')) return accountChangedResponse(keysRevoked);

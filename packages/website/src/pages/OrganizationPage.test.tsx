@@ -83,16 +83,6 @@ describe('OrganizationPage', () => {
     expect(screen.getByTestId('org-tab-invitations')).toHaveAttribute('data-selected');
   });
 
-  it('withholds Add member outside the beta but keeps Invitations for revoking', async () => {
-    // `POST /api/org/invitations` still refuses an org outside the beta, so the
-    // button would only ever earn a 403. The tab stays: tokens already issued
-    // remain redeemable, and revoking is the only way to withdraw one.
-    renderPage(OrgRole.Owner, 0, 0, { orgsBeta: false });
-
-    await waitFor(() => expect(tabNames()).toContain('Invitations'));
-    expect(screen.queryByTestId('org-invite-button')).not.toBeInTheDocument();
-  });
-
   it('hides Invitations and Add member from a role without members.manage', async () => {
     renderPage(OrgRole.Member);
 

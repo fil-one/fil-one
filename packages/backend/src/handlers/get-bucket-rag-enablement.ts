@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { BucketRagEnablementResponse, ErrorResponse } from '@filone/shared';
-import { S3_REGION, isSupportedRegion } from '@filone/shared';
+import { S3_REGION, isSupportedRegion, usesRagEngine } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import {
@@ -11,6 +11,12 @@ import {
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import { getBucketRagEnablement, toEnablementResponse } from '../lib/bucket-rag-enablement.ts';
+import {
+  getRagEngineClient,
+  ragEngineTarget,
+  withEngineFailure,
+  withEngineStatus,
+} from '../lib/rag-engine-client.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getScopedMemberId } from '../lib/member-scope.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -68,11 +74,25 @@ export async function baseHandler(
   // Defense in depth: the org-scoped pk already prevents addressing another
   // org's row, but keep ignoring a record whose stamped org somehow differs.
   const owned = record && record.orgId === orgId ? record : undefined;
+  let response = toEnablementResponse(owned);
 
-  return new ResponseBuilder()
-    .status(200)
-    .body<BucketRagEnablementResponse>(toEnablementResponse(owned))
-    .build();
+  // In Forge regions the engine keeps the index, so its status is the sync
+  // telemetry. A bucket never enabled has nothing on the engine to report.
+  if (owned && usesRagEngine(region)) {
+    try {
+      const target = await ragEngineTarget(orchestrator, tenantId, { orgId, region, bucketName });
+      response = withEngineStatus(response, await getRagEngineClient().status(target));
+    } catch (error) {
+      console.error('[get-bucket-rag-enablement] engine status failed', {
+        region,
+        bucketName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      response = withEngineFailure(response, error);
+    }
+  }
+
+  return new ResponseBuilder().status(200).body<BucketRagEnablementResponse>(response).build();
 }
 
 export const handler = middy(baseHandler)

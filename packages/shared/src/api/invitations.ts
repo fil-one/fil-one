@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ApiErrorCode, ErrorResponse } from './coreInterfaces.ts';
 import { OrgRole } from './org.ts';
 
 /**
@@ -32,8 +33,7 @@ export const INVITE_EXPIRY_DAYS = 14;
  * much mail it can send: revoking frees a slot immediately, and re-inviting an
  * address that already has a live invitation replaces that one rather than
  * taking a second slot. Volume over time is a per-org send throttle, which the
- * API does not have — the ORGS_BETA allowlist is what stands in for it while
- * every account that can invite is one we admitted by hand.
+ * API does not have.
  *
  * Small on purpose: a real team invites people a handful at a time.
  */
@@ -147,4 +147,15 @@ export interface AcceptInvitationResponse {
   role: OrgRole;
   /** The caller was already a member, so accepting changed only the invitation. */
   alreadyMember: boolean;
+}
+
+/**
+ * The 403 an accept answers when the invitation was sent to another address.
+ * It names the address the session signed in with, so the accept page can show
+ * it without reading `/me`, which refuses a deleted account's session.
+ */
+export interface InviteEmailMismatchResponse extends ErrorResponse {
+  code: typeof ApiErrorCode.INVITE_EMAIL_MISMATCH;
+  /** Absent when the session's token carries no address. */
+  sessionEmail?: string;
 }

@@ -77,7 +77,7 @@ export async function resetToHomeOrg(userId: string): Promise<void> {
   }
 }
 
-/** Every row an org owns: its partition, its members' inverse rows, its profile, beta and billing. */
+/** Every row an org owns: its partition, its members' inverse rows, its profile and billing. */
 export async function deleteOrg(orgId: string): Promise<void> {
   for (const row of await query('OrgTable', `ORG#${orgId}`)) {
     const sk = row.sk!.S!;
@@ -90,7 +90,40 @@ export async function deleteOrg(orgId: string): Promise<void> {
     await deleteItem('BillingTable', `ORG#${orgId}`, row.sk!.S!);
   }
   await deleteItem('UserInfoTable', `ORG#${orgId}`, 'PROFILE');
-  await deleteItem('UserInfoTable', `ORG#${orgId}`, 'ORGS_BETA');
+}
+
+/**
+ * Make the console forget a test account, so its next request is a first one.
+ * Auth0 cannot mint a new user from a test, so a brand-new sign-up is this:
+ * the same Auth0 user, with no identity, profile or membership rows behind it.
+ * Orgs it owns go with it; memberships in other orgs are dropped.
+ */
+export async function forgetAccount(user: OrgUser): Promise<void> {
+  const identityKey = { pk: `SUB#${credential(user, 'AUTH0_ID')}`, sk: 'IDENTITY' };
+  const { Item } = await client.send(
+    new GetItemCommand({
+      TableName: table('UserInfoTable'),
+      Key: { pk: { S: identityKey.pk }, sk: { S: identityKey.sk } },
+      ConsistentRead: true,
+    }),
+  );
+  const userId = Item?.userId?.S;
+  if (userId) {
+    for (const row of await query('OrgTable', `USER#${userId}`, 'MEMBERSHIP#')) {
+      const orgId = row.sk!.S!.slice('MEMBERSHIP#'.length);
+      if (row.role?.S === 'owner') await deleteOrg(orgId);
+      else await deleteMembership({ orgId, userId });
+    }
+    await deleteItem('UserInfoTable', `USER#${userId}`, 'PROFILE');
+  }
+  await deleteItem('UserInfoTable', identityKey.pk, identityKey.sk);
+}
+
+/** Every org the account belongs to, by id, in the order the table keeps them. */
+export async function membershipsOf(userId: string): Promise<string[]> {
+  return (await query('OrgTable', `USER#${userId}`, 'MEMBERSHIP#')).map((row) =>
+    row.sk!.S!.slice('MEMBERSHIP#'.length),
+  );
 }
 
 /** Clear the org's hourly logo-upload allowance. */
