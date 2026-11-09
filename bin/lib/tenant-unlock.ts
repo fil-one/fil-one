@@ -5,10 +5,10 @@
 // The backend reads its settings from process.env and its secrets and tables
 // through `Resource` from 'sst', which parses each `SST_RESOURCE_<Name>`
 // variable as JSON on first access. Seeding those variables before the first
-// access lets the script call `syncTenantStatusInProvisionedRegions` unchanged.
+// access lets the script call `syncTenantStatusInProvisionedNetworks` unchanged.
 
 import { SubscriptionStatus } from '@filone/shared';
-import type { RegionSyncOutcome } from '@filone/backend/src/lib/region-helpers.ts';
+import type { TenantSyncOutcome } from '@filone/backend/src/lib/region-helpers.ts';
 
 /**
  * The orchestrator settings in the deployed Lambda's environment (orchestratorEnv
@@ -95,11 +95,11 @@ export function unlockWarnings(subscriptionStatus: string | undefined): string[]
  * One line per region, and whether the run failed: a region that errored or
  * has no tenant, or no region at all, means the org is not unlocked.
  */
-export function summarizeOutcomes(outcomes: RegionSyncOutcome[]): {
+export function summarizeOutcomes(outcomes: TenantSyncOutcome[]): {
   lines: string[];
   failed: boolean;
 } {
-  if (outcomes.length === 0) return { lines: ['  (no provisioned regions)'], failed: true };
+  if (outcomes.length === 0) return { lines: ['  (no provisioned networks)'], failed: true };
   return {
     lines: outcomes.map(({ orchestratorId, tenantId, outcome, cause }) => {
       const detail =

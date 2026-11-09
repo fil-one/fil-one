@@ -23,8 +23,8 @@ import {
 import { resolveOrgId } from '../lib/billing-org-lookup.ts';
 import { startDeletionFromStripe } from '../lib/deletion-from-stripe.ts';
 import {
-  assertRegionSyncSucceeded,
-  syncTenantStatusInProvisionedRegions,
+  assertTenantSyncSucceeded,
+  syncTenantStatusInProvisionedNetworks,
 } from '../lib/region-helpers.ts';
 import { subscriptionSuperseded } from '../lib/billing-identity.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
@@ -481,7 +481,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
   // WRITE_LOCK for active grace periods missing it. The sync never downgrades a
   // tenant that is already disabled.
   if (orgId) {
-    assertRegionSyncSucceeded(await syncTenantStatusInProvisionedRegions(orgId, 'write-locked'));
+    assertTenantSyncSucceeded(await syncTenantStatusInProvisionedNetworks(orgId, 'write-locked'));
     console.log('[stripe-webhook] Tenant write-locked', { userId, orgId });
   }
 

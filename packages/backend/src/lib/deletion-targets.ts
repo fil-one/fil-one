@@ -11,7 +11,7 @@ import {
   type OrgMembershipSource,
 } from './org-membership.ts';
 import { isOrgDeleting } from './org-profile.ts';
-import { getProvisionedRegions } from './region-helpers.ts';
+import { getProvisionedNetworks } from './region-helpers.ts';
 
 const LOG = '[deletion-targets]';
 
@@ -32,7 +32,7 @@ export async function resolveDeletionTargets(orgId: string): Promise<{
 }> {
   const [members, provisioned] = await Promise.all([
     resolveMembers(orgId),
-    getProvisionedRegions(orgId, { consistent: true }),
+    getProvisionedNetworks(orgId, { consistent: true }),
   ]);
 
   return {

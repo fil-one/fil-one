@@ -1,5 +1,5 @@
 import { GB_BYTES } from '@filone/shared';
-import { getProvisionedRegions } from './region-helpers.ts';
+import { getProvisionedNetworks } from './region-helpers.ts';
 import type { TenantUsageMetrics } from './service-orchestrator.ts';
 import { getStripeClient, isStripeResourceMissing } from './stripe-client.ts';
 import {
@@ -25,7 +25,7 @@ export interface OrgUsageReport {
 }
 
 /**
- * Meters an org's storage across its provisioned regions and submits it to
+ * Meters an org's storage across the networks it is provisioned on and submits it to
  * Stripe. Returns undefined when the org is provisioned nowhere.
  *
  * Two callers: the 12-hourly cron, and account teardown, which reports the
@@ -49,19 +49,21 @@ export async function reportOrgUsage(params: {
   const { orgId, subscriptionId, stripeCustomerId, currentPeriodStart, to, meterEventName } =
     params;
 
-  // Each region resolves its own tenant id (side-effect-free), is fetched
-  // independently, then aggregated and reported at the org level.
-  const orgRegions = await getProvisionedRegions(orgId);
+  // Each network resolves its own tenant id (side-effect-free), is fetched
+  // independently, then aggregated and reported at the org level. A tenant's
+  // metrics cover its buckets in every region its network serves, so one fetch
+  // per network is the whole picture and counts nothing twice.
+  const orgNetworks = await getProvisionedNetworks(orgId);
 
-  if (orgRegions.length === 0) {
-    console.warn(`${LOG} Org not provisioned in any available region, skipping`, { orgId });
+  if (orgNetworks.length === 0) {
+    console.warn(`${LOG} Org not provisioned on any available network, skipping`, { orgId });
     return undefined;
   }
 
   let usageMetrics: TenantUsageMetrics[];
   try {
     usageMetrics = await Promise.all(
-      orgRegions.map(async (t) => {
+      orgNetworks.map(async (t) => {
         try {
           return await t.orchestrator.getTenantUsageMetrics(t.tenantId, {
             from: currentPeriodStart,
@@ -87,7 +89,10 @@ export async function reportOrgUsage(params: {
     const e = error as Error & { cause?: unknown };
     console.error(`${LOG} Usage metrics fetch failed`, {
       orgId,
-      regions: orgRegions.map((r) => ({ orchestratorId: r.orchestrator.id, tenantId: r.tenantId })),
+      regions: orgNetworks.map((r) => ({
+        orchestratorId: r.orchestrator.id,
+        tenantId: r.tenantId,
+      })),
       subscriptionId,
       message: e.message,
       cause: e.cause,
