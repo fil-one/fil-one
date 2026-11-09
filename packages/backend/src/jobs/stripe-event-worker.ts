@@ -246,10 +246,29 @@ async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
 }
 
 async function handleSubscriptionUpdate(
-  subscription: Stripe.Subscription,
+  eventSubscription: Stripe.Subscription,
   previousStatus: Stripe.Subscription.Status | undefined,
 ): Promise<void> {
+  // Stripe delivers events out of order, so the event's copy of the
+  // subscription can be older than what the row already holds. Upgrade sends a
+  // `trialing` update and an `active` one milliseconds apart, and the
+  // `trialing` one arriving last put a paying org back on its trial. The row
+  // takes the subscription as Stripe holds it now, which a late event cannot
+  // make stale.
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(eventSubscription.id);
   const customerId = getCustomerIdString(subscription.customer);
+
+  // The cancellation is customer.subscription.deleted's to write. Writing
+  // `canceled` here would drop canceledAt, and that event would then size a
+  // paying org's grace period as a trial's.
+  if (subscription.status === 'canceled') {
+    console.info('[stripe-webhook] Subscription already canceled; leaving it to the deletion', {
+      subscriptionId: subscription.id,
+      customerId,
+    });
+    return;
+  }
   const mappedStatus = mapStripeStatus(subscription.status);
 
   if (mappedStatus === null) {
@@ -267,8 +286,8 @@ async function handleSubscriptionUpdate(
   const eventUserId = subscription.metadata?.userId || undefined;
   const eventOrgId = resolveOrgId(subscription.metadata);
 
-  // The event already names the org the row is keyed by, so it addresses the
-  // write on its own and the Stripe call is skipped.
+  // The subscription already names the org the row is keyed by, so it
+  // addresses the write on its own and the customer lookup is skipped.
   if (eventUserId && eventOrgId) {
     await updateBillingRecord({
       userId: eventUserId,
@@ -285,7 +304,6 @@ async function handleSubscriptionUpdate(
   // the org is the key the row is written under. Fetch the customer and resolve
   // against both — writing with no org resolves nothing and throws
   // MissingOrgIdError, which no retry can fix.
-  const stripe = getStripeClient();
   const customer = await stripe.customers.retrieve(customerId);
   if ('deleted' in customer && customer.deleted) {
     console.warn('[stripe-webhook] Customer deleted, skipping subscription update', {

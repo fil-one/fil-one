@@ -38,11 +38,13 @@ vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
 
 const mockCustomersRetrieve = vi.fn();
 const mockPaymentMethodsRetrieve = vi.fn();
+const mockSubscriptionsRetrieve = vi.fn();
 
 vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     customers: { retrieve: mockCustomersRetrieve },
     paymentMethods: { retrieve: mockPaymentMethodsRetrieve },
+    subscriptions: { retrieve: mockSubscriptionsRetrieve },
   }),
 }));
 
@@ -239,6 +241,12 @@ describe('stripe-event-worker handler', () => {
     currentEvent = {};
     mockCustomersRetrieve.mockReset();
     mockPaymentMethodsRetrieve.mockReset();
+    // Stripe holds the subscription as the event describes it, unless a test
+    // says the event is stale.
+    mockSubscriptionsRetrieve.mockReset();
+    mockSubscriptionsRetrieve.mockImplementation(
+      async () => (currentEvent as { data: { object: unknown } }).data.object,
+    );
     mockSyncTenantStatusInProvisionedRegions.mockReset();
     mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
     mockStartDeletion.mockReset();
@@ -481,6 +489,28 @@ describe('stripe-event-worker handler', () => {
         ConditionExpression:
           'attribute_exists(pk) AND (((attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND (attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual)) AND attribute_not_exists(deletedAt))',
       });
+    });
+
+    it('writes the status Stripe holds now when the event carries an older one', async () => {
+      // A late event from before the upgrade: Stripe has since ended the trial.
+      setupStripeEvent('customer.subscription.updated', mockSubscription({ status: 'trialing' }));
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'active' }));
+
+      await deliver();
+
+      expect(updateInputs()).toMatchObject([
+        { ExpressionAttributeValues: { ':status': { S: SubscriptionStatus.Active } } },
+      ]);
+    });
+
+    it('leaves the row to the deletion when Stripe has already canceled the subscription', async () => {
+      setupStripeEvent('customer.subscription.updated', mockSubscription({ status: 'active' }));
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'canceled' }));
+      vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      await deliver();
+
+      expect(updateInputs()).toStrictEqual([]);
     });
 
     it('sets currentPeriodEnd from subscription.items.data[0].current_period_end', async () => {
