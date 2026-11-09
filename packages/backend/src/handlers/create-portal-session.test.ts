@@ -65,6 +65,20 @@ describe('create-portal-session', () => {
     });
   });
 
+  it('refuses with 409 BILLED_MANUALLY when the org is billed manually', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(subscriptionRow({ stripeCustomerId: 'cus_any', subscriptionStatus: 'manual' }));
+
+    const result = await baseHandler(portalEvent());
+
+    expect(result).toMatchObject({
+      statusCode: 409,
+      body: expect.stringContaining('BILLED_MANUALLY'),
+    });
+    expect(mockSessionsCreate).not.toHaveBeenCalled();
+  });
+
   it('refuses when the org has no billing record', async () => {
     ddbMock.on(GetItemCommand).resolves({});
 

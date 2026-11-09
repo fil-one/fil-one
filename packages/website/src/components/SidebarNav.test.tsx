@@ -131,6 +131,7 @@ const UNIQUE_TESTIDS = [
   'nav-dashboard',
   'nav-buckets',
   'nav-api-keys',
+  'nav-bucket-intelligence',
   'nav-members',
   'nav-billing',
   'nav-audit',
@@ -271,18 +272,19 @@ describe('SidebarNav, the Organization group', () => {
 
     expect(renderedOrgLinks(container)).toStrictEqual(expected);
   });
+});
 
-  it('leaves out Members and Audit log for an org outside the organizations beta', () => {
-    const { container } = renderBothSidebars(OrgRole.Owner, { orgsBeta: false });
+describe('SidebarNav, the Bucket Intelligence entry', () => {
+  it('renders for a user on the Bucket Intelligence allowlist', () => {
+    const { container } = renderBothSidebars(OrgRole.Owner, { ragAccess: true });
 
-    expect(renderedOrgLinks(container)).toStrictEqual(['nav-billing']);
+    expect(container.querySelectorAll('[data-testid="nav-bucket-intelligence"]')).toHaveLength(1);
   });
 
-  it('leaves out the group label when the caller can open none of its pages', () => {
-    // ReadOnly holds `members.read` only, and Members is beta-only.
-    renderBothSidebars(OrgRole.ReadOnly, { orgsBeta: false });
+  it('is absent for a user off the allowlist', () => {
+    const { container } = renderBothSidebars(OrgRole.Owner, { ragAccess: false });
 
-    expect(screen.queryByText('Organization')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('[data-testid="nav-bucket-intelligence"]')).toHaveLength(0);
   });
 });
 

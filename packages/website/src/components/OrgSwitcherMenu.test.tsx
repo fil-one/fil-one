@@ -124,28 +124,8 @@ describe('OrgSwitcherMenu', () => {
     expect(screen.queryByRole('separator')).not.toBeInTheDocument();
   });
 
-  it('leaves out Create organization outside the organizations beta', () => {
-    renderMenu({ orgsBeta: false });
-
-    fireEvent.click(screen.getByTestId('org-switcher-button'));
-
-    expect(screen.queryByText('Create organization')).not.toBeInTheDocument();
-  });
-
-  it('draws no divider under Edit organization when nothing sits below it', () => {
-    renderMenu({
-      orgsBeta: false,
-      memberships: [{ orgId: ORG_A, orgName: 'Acme', role: OrgRole.Owner }],
-    });
-
-    fireEvent.click(screen.getByTestId('org-switcher-button'));
-
-    expect(screen.getByText('Edit organization')).toBeInTheDocument();
-    expect(screen.queryByRole('separator')).not.toBeInTheDocument();
-  });
-
   it('divides Edit organization from the switcher', () => {
-    renderMenu({ orgsBeta: false });
+    renderMenu();
 
     fireEvent.click(screen.getByTestId('org-switcher-button'));
 

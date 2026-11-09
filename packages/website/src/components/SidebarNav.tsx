@@ -2,6 +2,7 @@ import {
   ArrowUpRightIcon,
   BookOpenIcon,
   ChatCircleIcon,
+  ChatTeardropDotsIcon,
   ClockCounterClockwiseIcon,
   CreditCardIcon,
   DatabaseIcon,
@@ -14,6 +15,7 @@ import { Link, useMatchRoute } from '@tanstack/react-router';
 import { DOCS_URL } from '@filone/shared';
 import type { Permission } from '@filone/shared';
 import { usePermissions } from '../lib/use-permissions.js';
+import { useRagAccess } from '../lib/use-rag-access.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
 import { BaseLink } from './BaseLink.js';
@@ -41,8 +43,8 @@ type NavItem = {
   testId: string;
   /** What the destination needs. Omitted, every member sees the entry. */
   permission?: Permission;
-  /** Part of the organizations beta, so shown only to orgs in it. */
-  beta?: boolean;
+  /** Shown only to users on the Bucket Intelligence allowlist (`ragAccess`). */
+  ragOnly?: boolean;
 };
 
 type NavGroup = {
@@ -52,7 +54,7 @@ type NavGroup = {
 
 const navGroups: NavGroup[] = [
   {
-    // Unlabelled: with two storage pages, a "Storage" heading only added noise.
+    // Unlabelled: a heading over three or four workspace pages only added noise.
     items: [
       { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard', testId: 'nav-dashboard' },
       { path: '/buckets', icon: DatabaseIcon, label: 'Buckets', testId: 'nav-buckets' },
@@ -64,6 +66,13 @@ const navGroups: NavGroup[] = [
         // ReadOnly holds no `keys.*`, so the list request is refused and the
         // page has nothing but the connection reference to offer.
         permission: 'keys.manage_own',
+      },
+      {
+        path: '/bucket-intelligence',
+        icon: ChatTeardropDotsIcon,
+        label: 'Bucket Intelligence',
+        testId: 'nav-bucket-intelligence',
+        ragOnly: true,
       },
     ],
   },
@@ -77,7 +86,6 @@ const navGroups: NavGroup[] = [
         label: 'Members',
         testId: 'nav-members',
         permission: 'members.read',
-        beta: true,
       },
       {
         path: '/billing',
@@ -92,7 +100,6 @@ const navGroups: NavGroup[] = [
         label: 'Audit log',
         testId: 'nav-audit',
         permission: 'audit.view',
-        beta: true,
       },
     ],
   },
@@ -108,13 +115,14 @@ type NavLinksProps = {
 };
 
 function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
-  const { has, orgsBeta } = usePermissions();
+  const { has } = usePermissions();
+  const ragAccess = useRagAccess();
   // A group whose every page the caller cannot open is left out, label and all.
   const visibleGroups = navGroups
     .map((group) => ({
       ...group,
       items: group.items.filter(
-        (item) => (!item.permission || has(item.permission)) && (orgsBeta || !item.beta),
+        (item) => (!item.permission || has(item.permission)) && (ragAccess || !item.ragOnly),
       ),
     }))
     .filter((group) => group.items.length > 0);

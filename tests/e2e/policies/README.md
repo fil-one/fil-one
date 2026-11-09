@@ -23,6 +23,8 @@ export AWS_REGION=us-east-1 LOCAL=true BASE_URL=https://localhost:5173
 SST_STAGE=local pnpm test:e2e:policies
 ```
 
+A local run skips "a policy read of 2,000 bytes or more carries a weak ETag that a write accepts": the test checks the weak ETag CloudFront gives a compressed response, and a local stage has no CloudFront in front of the console API.
+
 ## Remote stage
 
 The same suite runs against staging. Register the five accounts against the stage once (`signup`, `verify`, `finish` with `https://staging.fil.one` as the origin; `E2E_POLICY_EMAIL_PREFIX` sets their addresses and `E2E_POLICY_ENV_FILE` the file they are written to), keep their credentials in `.env.e2e.local` or the `E2E_POLICY_*` secrets, and run the project through `sst shell` so the member and billing seeds reach the stage's tables:

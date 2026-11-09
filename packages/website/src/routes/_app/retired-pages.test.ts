@@ -3,14 +3,13 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../_app', () => ({ Route: {} }));
 
 import { Route as aiAgentToolkitRoute } from './ai-agent-toolkit';
-import { Route as bucketIntelligenceRoute } from './bucket-intelligence';
 
 type BeforeLoad = () => unknown;
 
-function thrownBy(route: typeof aiAgentToolkitRoute | typeof bucketIntelligenceRoute): unknown {
+function thrownBy(route: typeof aiAgentToolkitRoute): unknown {
   try {
-    // `beforeLoad` is typed to take the router's full context, which these
-    // routes never read, so it is called here with none.
+    // `beforeLoad` is typed to take the router's full context, which this
+    // route never reads, so it is called here with none.
     (route.options.beforeLoad as unknown as BeforeLoad)();
   } catch (err) {
     return err;
@@ -18,13 +17,10 @@ function thrownBy(route: typeof aiAgentToolkitRoute | typeof bucketIntelligenceR
   return undefined;
 }
 
-// Both pages are gone, but their paths are in bookmarks and emailed links.
-describe('the retired AI Tools URLs', () => {
-  it.each([
-    ['/ai-agent-toolkit', aiAgentToolkitRoute],
-    ['/bucket-intelligence', bucketIntelligenceRoute],
-  ])('sends %s to the dashboard, replacing the history entry', (_path, route) => {
-    expect(thrownBy(route)).toMatchObject({
+// The page is gone, but its path is in bookmarks and emailed links.
+describe('the retired AI Agent Toolkit URL', () => {
+  it('sends /ai-agent-toolkit to the dashboard, replacing the history entry', () => {
+    expect(thrownBy(aiAgentToolkitRoute)).toMatchObject({
       status: 307,
       options: { to: '/dashboard', replace: true },
     });

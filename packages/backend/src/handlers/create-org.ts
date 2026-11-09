@@ -7,7 +7,6 @@ import { createAdditionalOrg } from '../lib/account-creation.ts';
 import { SanitizedOrgNameSchema } from '../lib/org-name-validation.ts';
 import { isUploadedOrgLogoUrl, withClaimedOrgLogo } from '../lib/org-logo-storage.ts';
 import { listMemberships } from '../lib/org-membership.ts';
-import { hasOrgsBetaAccess } from '../lib/orgs-beta.ts';
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
@@ -25,8 +24,7 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 const CreateOrgBodySchema = CreateOrgSchema.extend({ name: SanitizedOrgNameSchema });
 
 /**
- * POST /api/org — an existing account creating an additional organization,
- * which only the organizations beta may do.
+ * POST /api/org — an existing account creating an additional organization.
  *
  * Membership-only, with no `authorize(permission)`: see the `'in-handler'` doc
  * in `route-manifest.ts`.
@@ -38,15 +36,8 @@ const CreateOrgBodySchema = CreateOrgSchema.extend({ name: SanitizedOrgNameSchem
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const { userId, orgId } = getUserInfo(event);
+  const { userId } = getUserInfo(event);
   const email = getVerifiedEmail(event);
-
-  if (!(await hasOrgsBetaAccess({ verifiedEmail: email, orgId }))) {
-    return new ResponseBuilder()
-      .status(403)
-      .body<ErrorResponse>({ message: 'Creating organizations is not enabled for you yet.' })
-      .build();
-  }
 
   const parsed = parseJsonBody(event.body, CreateOrgBodySchema);
   if ('error' in parsed) return parsed.error;

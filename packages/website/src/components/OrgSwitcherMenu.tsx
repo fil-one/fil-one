@@ -45,12 +45,12 @@ const itemClassName =
  * return wrong (FIL-990).
  *
  * Always renders, even for a single-org account where `OrgSwitcher` itself
- * renders nothing: "Create organization" is reachable in the organizations beta
- * regardless of how many orgs the caller already has.
+ * renders nothing: "Create organization" is reachable regardless of how many
+ * orgs the caller already has.
  */
 export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMenuProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const { has, orgsBeta } = usePermissions();
+  const { has } = usePermissions();
   const mayEdit = has('org.rename');
   const { data: me } = useQuery({
     queryKey: queryKeys.me,
@@ -105,14 +105,9 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
                 </MenuItem>
               )}
 
-              {/* Only when something sits on both sides of it: a role that
-                  cannot rename the org has nothing above it, a sole membership
-                  outside the beta has no switcher rows and no Create
-                  organization below it, and a divider at an edge is a stray
-                  line. */}
-              {mayEdit && (orgsBeta || (me?.memberships?.length ?? 0) > 1) && (
-                <MenuSeparator className="my-1 border-t border-zinc-100" />
-              )}
+              {/* A role that cannot rename the org has nothing above the
+                  divider, and a divider at the top edge is a stray line. */}
+              {mayEdit && <MenuSeparator className="my-1 border-t border-zinc-100" />}
               <OrgSwitcher
                 memberships={me?.memberships}
                 activeOrgId={me?.orgId}
@@ -121,18 +116,12 @@ export function OrgSwitcherMenu({ collapsed, testId, onNavigate }: OrgSwitcherMe
                   onNavigate?.();
                 }}
               />
-              {orgsBeta && (
-                <MenuItem>
-                  <button
-                    type="button"
-                    onClick={() => setCreateOpen(true)}
-                    className={itemClassName}
-                  >
-                    <PlusIcon size={13} className="flex-shrink-0 text-zinc-400" />
-                    Create organization
-                  </button>
-                </MenuItem>
-              )}
+              <MenuItem>
+                <button type="button" onClick={() => setCreateOpen(true)} className={itemClassName}>
+                  <PlusIcon size={13} className="flex-shrink-0 text-zinc-400" />
+                  Create organization
+                </button>
+              </MenuItem>
             </MenuItems>
           </>
         )}

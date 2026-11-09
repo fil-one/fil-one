@@ -2,6 +2,7 @@ import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import { SubscriptionStatus } from '@filone/shared';
 import type { CreateSetupIntentResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getStripeClient } from '../lib/stripe-client.ts';
@@ -10,7 +11,7 @@ import {
   updateSubscription,
   writeSubscription,
 } from '../lib/subscription-store.ts';
-import { ResponseBuilder } from '../lib/response-builder.ts';
+import { billedManuallyResponse, ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -29,6 +30,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // (a trial claim, or a second click on the same button) creates a second
   // Stripe customer for the same org.
   const record = await getSubscription(orgId, { consistentRead: true });
+
+  if (record?.subscriptionStatus === SubscriptionStatus.Manual) return billedManuallyResponse();
 
   let stripeCustomerId: string;
 

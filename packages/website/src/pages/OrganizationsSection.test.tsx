@@ -51,7 +51,6 @@ function me(overrides: Partial<MeResponse> = {}): MeResponse {
     email: 'user@example.com',
     mfaEnrollments: [],
     ragAccess: true,
-    orgsBeta: true,
     billingActive: true,
     userId: USER_ID,
     role: OrgRole.Owner,

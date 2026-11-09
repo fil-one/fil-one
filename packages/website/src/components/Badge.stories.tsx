@@ -14,7 +14,7 @@ const meta: Meta<typeof Badge> = {
   argTypes: {
     color: { control: 'select', options: ['green', 'blue', 'red', 'amber', 'grey'] },
     size: { control: 'select', options: ['xs', 'sm', 'md', 'lg'] },
-    weight: { control: 'select', options: ['regular', 'medium', 'semibold'] },
+    weight: { control: 'select', options: ['regular', 'medium'] },
     strength: { control: 'select', options: ['subtle', 'strong'] },
     variant: { control: 'select', options: ['default', 'solid'] },
     dot: { control: 'boolean' },
