@@ -175,11 +175,16 @@ describe('MembersPage — while the roster loads', () => {
     mockListInvitations.mockResolvedValue({ invitations: [] });
   });
 
-  it('shows the roster column headers above placeholder rows', async () => {
+  it.each([
+    // Owner and Admin get row actions, so the placeholder keeps their column.
+    [OrgRole.Owner, ['Member', 'Role', 'Joined', 'Actions']],
+    [OrgRole.Admin, ['Member', 'Role', 'Joined', 'Actions']],
+    [OrgRole.Member, ['Member', 'Role', 'Joined']],
+  ])('shows %s the roster column headers above placeholder rows', async (role, headers) => {
     // Never settles, so the roster stays loading.
     mockListMembers.mockReturnValue(new Promise(() => {}));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    seedPermissions(client, OrgRole.Owner);
+    seedPermissions(client, role);
     render(
       <QueryClientProvider client={client}>
         <ToastProvider>
@@ -193,7 +198,7 @@ describe('MembersPage — while the roster loads', () => {
       within(loading)
         .getAllByRole('columnheader')
         .map((h) => h.textContent),
-    ).toStrictEqual(['Member', 'Role', 'Joined']);
+    ).toStrictEqual(headers);
     // The header row, then three placeholder rows.
     expect(within(loading).getAllByRole('row')).toHaveLength(4);
   });

@@ -21,6 +21,12 @@ export type SkeletonColumn = {
   className?: string;
 };
 
+/**
+ * A row actions column, which has no visible heading. Add it when the caller's
+ * role would get row actions, so the table does not gain a column on load.
+ */
+export const ACTIONS_COLUMN: SkeletonColumn = {};
+
 type TableSkeletonProps = {
   /** The columns to mirror, matching the real table (labels and breakpoints). */
   columns: SkeletonColumn[];

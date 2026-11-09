@@ -342,7 +342,7 @@ describe('MembersInvitations', () => {
 });
 
 describe('MembersInvitations — while the list loads', () => {
-  it('shows the invitation column headers above placeholder rows', async () => {
+  it('shows the invitation column headers, with a place for row actions, above placeholder rows', async () => {
     // Never settles, so the list stays loading.
     mockList.mockReturnValue(new Promise(() => {}));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -360,7 +360,7 @@ describe('MembersInvitations — while the list loads', () => {
       within(loading)
         .getAllByRole('columnheader')
         .map((h) => h.textContent),
-    ).toStrictEqual(['Email', 'Role', 'Status', 'Expires']);
+    ).toStrictEqual(['Email', 'Role', 'Status', 'Expires', 'Actions']);
     // The header row, then three placeholder rows.
     expect(within(loading).getAllByRole('row')).toHaveLength(4);
   });
