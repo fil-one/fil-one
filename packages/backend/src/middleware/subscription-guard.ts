@@ -64,7 +64,7 @@ async function runSubscriptionGuard(
   // without a second DynamoDB query (may be updated below by lazy transitions).
   event.requestContext.subscriptionStatus = status;
 
-  if (status === SubscriptionStatus.Active) return;
+  if (status === SubscriptionStatus.Active || status === SubscriptionStatus.Manual) return;
 
   if (status === SubscriptionStatus.Trialing) {
     const transitioned = await transitionExpiredTrial(record, { orgId, userId });

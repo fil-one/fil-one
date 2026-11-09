@@ -77,7 +77,8 @@ export function parsePreconditionHeaders(
 ):
   | { precondition: PolicyPrecondition | undefined }
   | { response: APIGatewayProxyStructuredResultV2 } {
-  const ifMatch = getRequestHeader(event, 'If-Match');
+  const sentIfMatch = getRequestHeader(event, 'If-Match');
+  const ifMatch = sentIfMatch === undefined ? undefined : stripWeakEtagPrefix(sentIfMatch);
   const ifNoneMatch = getRequestHeader(event, 'If-None-Match');
   if (ifMatch === '' || ifNoneMatch === '') {
     return { response: badRequestResponse('If-Match and If-None-Match cannot be empty') };
@@ -90,6 +91,18 @@ export function parsePreconditionHeaders(
   }
   if (ifMatch !== undefined) return { precondition: { ifMatch } };
   return { precondition: ifNoneMatch ? { ifNoneMatch: '*' } : undefined };
+}
+
+/**
+ * The ETag as the storage system issued it. CloudFront gzips an API response
+ * of 1,000 bytes or more and marks its ETag weak (`W/"…"`), so the browser
+ * sends a large policy's ETag back in that form, and the storage system's
+ * strong comparison refuses it. The console hands out only the storage
+ * system's strong ETags over an unchanged document, so dropping the prefix
+ * restores the value that was read.
+ */
+function stripWeakEtagPrefix(etag: string): string {
+  return etag.startsWith('W/') ? etag.slice('W/'.length) : etag;
 }
 
 export const POLICIES_UNAVAILABLE_MESSAGE = 'Bucket policies are not available in this region';

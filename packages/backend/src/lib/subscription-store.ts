@@ -20,6 +20,7 @@ import {
   type ReturnValue,
 } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
+import { SubscriptionStatus } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
 import type { SubscriptionRecord } from './dynamo-records.ts';
@@ -107,6 +108,20 @@ export const BILLING_IDENTITY_PROJECTION = 'stripeCustomerId, subscriptionId';
 
 /** The attributes a cancellation reads to size the grace period it starts. */
 export const GRACE_STATE_PROJECTION = 'subscriptionStatus, canceledAt, gracePeriodEndsAt';
+
+/**
+ * A condition clause, and its value, that refuses a write to an org billed by
+ * hand. Stripe events about the customer such an org signed up with keep
+ * arriving, and none of them may change its status or start its teardown.
+ *
+ * The clause carries no parentheses of its own: DynamoDB rejects an expression
+ * with redundant ones, and `guardAgainstScrub` already wraps a lone condition.
+ * A caller ANDing it with another clause wraps it.
+ */
+export const NOT_BILLED_MANUALLY = {
+  condition: 'attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual',
+  values: { ':manual': { S: SubscriptionStatus.Manual } },
+} as const;
 
 /** The attributes every row carries about who it belongs to. */
 export function ownerAttributes({

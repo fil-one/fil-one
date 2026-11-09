@@ -413,7 +413,6 @@ describe('queryAllAuditEvents', () => {
 
 describe('queryActivityEvents', () => {
   const ACTIVITY_WINDOW = { from: '2026-08-01T00:00:00.000Z', to: NOW };
-  const OWNER_SCOPES = { bucketEvents: { sees: 'all' }, keyEvents: { sees: 'all' } } as const;
   const MORE = { LastEvaluatedKey: marshall({ gsi1sk: 'any' }) };
 
   /** The event type a Query reads, from the index partition it names. */
@@ -445,7 +444,7 @@ describe('queryActivityEvents', () => {
   afterEach(() => vi.useRealTimers());
 
   it('reads each event type on the type index, newest first, over the window it is given', async () => {
-    await queryActivityEvents({ orgId: ORG_ID, ...OWNER_SCOPES, ...ACTIVITY_WINDOW, limit: 10 });
+    await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 10 });
 
     expect(queryInput()).toMatchObject({
       IndexName: 'byType',
@@ -466,51 +465,25 @@ describe('queryActivityEvents', () => {
   const SUCCEEDED = '#ttl > :now AND #outcome = :succeeded';
   const S3 = `${SUCCEEDED} AND details.keyKind = :s3`;
   const NOT_ROTATION = `${S3} AND NOT details.reason = :rotation`;
-  const MINE = ' AND actor.id = :actorId';
 
-  it.each([
-    [
-      'the whole org’s succeeded bucket and S3 key events, rotation deletes left out, for Owner and Admin',
-      OWNER_SCOPES,
-      {
-        'bucket.created': SUCCEEDED,
-        'bucket.deleted': SUCCEEDED,
-        'key.created': S3,
-        'key.rotated': S3,
-        'key.deleted': NOT_ROTATION,
-      },
-    ],
-    [
-      'only the bucket and key events the reader acted on, for a Member',
-      {
-        bucketEvents: { sees: 'own', actorId: USER_ID },
-        keyEvents: { sees: 'own', actorId: USER_ID },
-      } as const,
-      {
-        'bucket.created': SUCCEEDED + MINE,
-        'bucket.deleted': SUCCEEDED + MINE,
-        'key.created': S3 + MINE,
-        'key.rotated': S3 + MINE,
-        'key.deleted': NOT_ROTATION + MINE,
-      },
-    ],
-    [
-      'only the bucket events the reader acted on and no key events, for ReadOnly',
-      { bucketEvents: { sees: 'own', actorId: USER_ID }, keyEvents: { sees: 'none' } } as const,
-      { 'bucket.created': SUCCEEDED + MINE, 'bucket.deleted': SUCCEEDED + MINE },
-    ],
-  ])('reads %s', async (_case, scopes, filterByType) => {
-    await queryActivityEvents({ orgId: ORG_ID, ...scopes, ...ACTIVITY_WINDOW, limit: 10 });
+  it('reads the org’s succeeded bucket and S3 key events, rotation deletes left out', async () => {
+    await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 10 });
 
     const filters = Object.fromEntries(
       ddbMock
         .commandCalls(QueryCommand)
         .map((call) => [typeOf(call.args[0].input), call.args[0].input.FilterExpression]),
     );
-    expect(filters).toStrictEqual(filterByType);
+    expect(filters).toStrictEqual({
+      'bucket.created': SUCCEEDED,
+      'bucket.deleted': SUCCEEDED,
+      'key.created': S3,
+      'key.rotated': S3,
+      'key.deleted': NOT_ROTATION,
+    });
   });
 
-  it('merges the types newest first and returns no more than the limit', async () => {
+  it('merges the types newest first and returns every match, not only the limit', async () => {
     pagesByType({
       'bucket.created': [
         { Items: [storedEvent('2026-08-10T00:00:00.000Z', 'evt-old', 'bucket.created')] },
@@ -525,12 +498,15 @@ describe('queryActivityEvents', () => {
 
     const result = await queryActivityEvents({
       orgId: ORG_ID,
-      ...OWNER_SCOPES,
       ...ACTIVITY_WINDOW,
       limit: 2,
     });
 
-    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-new', 'evt-mid']);
+    // The caller merges rows of its own in before cutting to the limit.
+    expect(result).toMatchObject({
+      events: [{ eventId: 'evt-new' }, { eventId: 'evt-mid' }, { eventId: 'evt-old' }],
+    });
+    expect(result.events).toHaveLength(3);
   });
 
   it('keeps reading a type past a page that matched nothing', async () => {
@@ -543,7 +519,6 @@ describe('queryActivityEvents', () => {
 
     const result = await queryActivityEvents({
       orgId: ORG_ID,
-      ...OWNER_SCOPES,
       ...ACTIVITY_WINDOW,
       limit: 1,
     });
@@ -559,7 +534,7 @@ describe('queryActivityEvents', () => {
       ],
     });
 
-    await queryActivityEvents({ orgId: ORG_ID, ...OWNER_SCOPES, ...ACTIVITY_WINDOW, limit: 1 });
+    await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 1 });
 
     expect(readsOf('bucket.created')).toHaveLength(1);
   });
@@ -569,7 +544,6 @@ describe('queryActivityEvents', () => {
 
     const result = await queryActivityEvents({
       orgId: ORG_ID,
-      ...OWNER_SCOPES,
       ...ACTIVITY_WINDOW,
       limit: 5,
     });
@@ -597,12 +571,31 @@ describe('queryActivityEvents', () => {
 
     const result = await queryActivityEvents({
       orgId: ORG_ID,
-      ...OWNER_SCOPES,
       ...ACTIVITY_WINDOW,
       limit: 5,
     });
 
     expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-newer']);
+  });
+
+  it('reports the time before which a read stopped early', async () => {
+    pagesByType({
+      'key.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        { Items: [], ...stoppedAt('2026-08-11T00:00:00.000Z#any-event') },
+      ],
+    });
+
+    const result = await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 5 });
+
+    expect(result).toMatchObject({ completeSince: '2026-08-11T00:00:00.000Z' });
+  });
+
+  it('reports no such time when every read reached the start of the window', async () => {
+    const result = await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 5 });
+
+    expect(result).toStrictEqual({ events: [], cost: { pages: 5, rows: 0 } });
   });
 
   it('keeps the event a read stopped on, since that row was read', async () => {
@@ -621,7 +614,6 @@ describe('queryActivityEvents', () => {
 
     const result = await queryActivityEvents({
       orgId: ORG_ID,
-      ...OWNER_SCOPES,
       ...ACTIVITY_WINDOW,
       limit: 5,
     });
@@ -634,7 +626,6 @@ describe('queryActivityEvents', () => {
 
     await queryActivityEvents({
       orgId: ORG_ID,
-      ...OWNER_SCOPES,
       ...ACTIVITY_WINDOW,
       limit: 5,
       signal,

@@ -9,11 +9,13 @@ vi.mock('./api.js', () => ({
 import {
   bucketDisplayState,
   getBucketRagEnabled,
+  getBucketRagEngine,
   isBucketQueryable,
   listBucketsForRag,
   queryBucket,
   type RagBucket,
   setBucketRagEnabled,
+  syncBucketRag,
 } from './rag-bucket-api.js';
 
 describe('rag-bucket-api', () => {
@@ -74,6 +76,30 @@ describe('rag-bucket-api', () => {
       method: 'POST',
       body: JSON.stringify({ query: 'hello', top_k: 5, model: 'm' }),
     });
+  });
+
+  it('queryBucket sends search_mode and version for engine-backed buckets', async () => {
+    await queryBucket('my-bucket', S3Region.EuCentral3, 'hello', {
+      searchMode: 'hybrid',
+      version: 11,
+    });
+    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/query?region=eu-central-3', {
+      method: 'POST',
+      body: JSON.stringify({ query: 'hello', search_mode: 'hybrid', version: 11 }),
+    });
+  });
+
+  it('syncBucketRag POSTs the sync route with the region', async () => {
+    await syncBucketRag('weird/name', S3Region.EuCentral3);
+    expect(mockApiRequest).toHaveBeenCalledWith(
+      '/buckets/weird%2Fname/rag/sync?region=eu-central-3',
+      { method: 'POST' },
+    );
+  });
+
+  it('getBucketRagEngine GETs the engine route with the region', async () => {
+    await getBucketRagEngine('my-bucket', S3Region.UsEast9);
+    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/rag/engine?region=us-east-9');
   });
 });
 

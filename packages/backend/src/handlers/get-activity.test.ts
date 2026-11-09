@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AUDIT_RETENTION_DAYS, OrgRole } from '@filone/shared';
+import { AUDIT_RETENTION_DAYS } from '@filone/shared';
 import type { AuditEvent, AuditEventType } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
@@ -12,13 +12,23 @@ vi.mock('../lib/audit-query.ts', async (importOriginal) => ({
   queryActivityEvents: (...args: unknown[]) => mockQueryActivityEvents(...args),
 }));
 
+const mockListBuckets = vi.fn();
+vi.mock('../lib/region-helpers.ts', () => ({
+  getProvisionedRegions: async () => [
+    {
+      orchestrator: { id: 'any-orchestrator', region: 'any-region', listBuckets: mockListBuckets },
+      tenantId: 'any-tenant',
+    },
+  ],
+}));
+
 const mockReportAuditQuery = vi.fn();
 vi.mock('../lib/audit-metrics.ts', () => ({
   reportAuditQuery: (...args: unknown[]) => mockReportAuditQuery(...args),
 }));
 
 import { baseHandler } from './get-activity.ts';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,15 +63,14 @@ function resolveEvents(...events: AuditEvent[]) {
   mockQueryActivityEvents.mockResolvedValue({ events, cost: { pages: 1, rows: events.length } });
 }
 
+/** A bucket as the storage system lists it; only the name, region and creation time matter here. */
+function listedBucket(bucketName: string, createdAt: string, region = 'any-region') {
+  return { bucketName, region, createdAt, isPublic: false, encrypted: false };
+}
+
 async function getActivities(queryStringParameters?: Record<string, string>) {
   const result = await baseHandler(buildEvent({ userInfo: USER_INFO, queryStringParameters }));
   return { statusCode: result.statusCode, body: JSON.parse(String(result.body)) };
-}
-
-function eventFor(role: OrgRole) {
-  return buildEvent({
-    userInfo: { ...USER_INFO, membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role) },
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +81,7 @@ describe('get-activity baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resolveEvents();
+    mockListBuckets.mockResolvedValue([]);
   });
 
   it('returns no activities when the audit log holds no matching event', async () => {
@@ -192,72 +202,153 @@ describe('get-activity baseHandler', () => {
   });
 });
 
-describe('bucket activity follows the Buckets page scope', () => {
-  // On a region with per-member access the Buckets page lists only the buckets
-  // a Member's policy names, so the feed must not name the others.
+describe('get-activity buckets created outside the console', () => {
+  const NOW = '2026-12-15T12:00:00.000Z';
+  const RECENT = '2026-12-10T00:00:00.000Z';
+
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
     resolveEvents();
+    mockListBuckets.mockResolvedValue([]);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  function created(bucketName: string, createdAt: string, region = 'any-region') {
+    return { ...auditEvent('bucket.created', { region, bucketName }), createdAt } as AuditEvent;
+  }
+
+  it('adds an unattributed creation row for a listed bucket the audit log has no creation for', async () => {
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
+
+    expect((await getActivities()).body).toStrictEqual({
+      activities: [
+        {
+          id: `unrecorded:any-region:any-bucket:${RECENT}`,
+          action: 'bucket.created',
+          resourceType: 'bucket',
+          resourceName: 'any-bucket',
+          timestamp: RECENT,
+          createdOutsideConsole: true,
+        },
+      ],
+    });
   });
 
-  it.each([OrgRole.Owner, OrgRole.Admin])(
-    'reads the whole org’s bucket events for %s',
-    async (role) => {
-      await baseHandler(eventFor(role));
+  it('adds no row for a bucket whose creation the audit log recorded', async () => {
+    // The console writes the event a moment after the storage system made the bucket.
+    resolveEvents(created('any-bucket', '2026-12-10T00:00:01.000Z'));
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
 
-      expect(mockQueryActivityEvents).toHaveBeenCalledWith(
-        expect.objectContaining({ bucketEvents: { sees: 'all' } }),
-      );
-    },
-  );
-
-  it.each([OrgRole.Member, OrgRole.ReadOnly])(
-    'reads only the bucket events %s acted on',
-    async (role) => {
-      await baseHandler(eventFor(role));
-
-      expect(mockQueryActivityEvents).toHaveBeenCalledWith(
-        expect.objectContaining({
-          bucketEvents: { sees: 'own', actorId: USER_INFO.userId },
-        }),
-      );
-    },
-  );
-});
-
-describe('key activity follows the keys pages scope', () => {
-  // The route requirement is only half the gate: this feed carries key
-  // lifecycle entries, and the dashboard must not show a caller keys the keys
-  // page would refuse to list.
-  beforeEach(() => {
-    vi.clearAllMocks();
-    resolveEvents();
+    expect((await getActivities()).body).toStrictEqual({
+      activities: [
+        {
+          id: 'any-event',
+          action: 'bucket.created',
+          resourceType: 'bucket',
+          resourceName: 'any-bucket',
+          timestamp: '2026-12-10T00:00:01.000Z',
+        },
+      ],
+    });
   });
 
-  it.each([OrgRole.Owner, OrgRole.Admin])(
-    'reads the whole org’s key events for %s, holding keys.manage_all',
-    async (role) => {
-      await baseHandler(eventFor(role));
+  it('adds a row for a bucket of the same name in another region', async () => {
+    // Stamped just after the listed bucket, so only the region tells them apart.
+    resolveEvents(created('any-bucket', '2026-12-10T00:00:01.000Z', 'other-region'));
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
 
-      expect(mockQueryActivityEvents).toHaveBeenCalledWith(
-        expect.objectContaining({ keyEvents: { sees: 'all' } }),
-      );
-    },
-  );
+    expect((await getActivities()).body.activities).toMatchObject([
+      { id: 'any-event' },
+      { createdOutsideConsole: true },
+    ]);
+  });
 
-  it('reads only the key events a Member acted on', async () => {
-    await baseHandler(eventFor(OrgRole.Member));
+  it('adds a row for a bucket made again outside the console after an older console creation', async () => {
+    // The console made the first `any-bucket`; it was deleted and made again
+    // with the S3 API a week later.
+    resolveEvents(created('any-bucket', '2026-12-03T00:00:00.000Z'));
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
 
-    expect(mockQueryActivityEvents).toHaveBeenCalledWith(
-      expect.objectContaining({ keyEvents: { sees: 'own', actorId: USER_INFO.userId } }),
+    expect((await getActivities()).body.activities).toMatchObject([
+      { createdOutsideConsole: true, timestamp: RECENT },
+      { id: 'any-event' },
+    ]);
+  });
+
+  it('adds a plain creation row for a bucket made before the console audited bucket creations', async () => {
+    // The log could not have recorded this one, whichever way it was made.
+    vi.setSystemTime(new Date('2026-11-20T12:00:00.000Z'));
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', '2026-11-05T00:00:00.000Z')]);
+
+    expect((await getActivities()).body).toStrictEqual({
+      activities: [
+        {
+          id: 'unrecorded:any-region:any-bucket:2026-11-05T00:00:00.000Z',
+          action: 'bucket.created',
+          resourceType: 'bucket',
+          resourceName: 'any-bucket',
+          timestamp: '2026-11-05T00:00:00.000Z',
+        },
+      ],
+    });
+  });
+
+  it('leaves out a bucket created before the retention window', async () => {
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', '2026-01-01T00:00:00.000Z')]);
+
+    expect((await getActivities()).body).toStrictEqual({ activities: [] });
+  });
+
+  it('leaves out a bucket created before the point the audit read stopped early', async () => {
+    // Older creations were left unread, so the log may hold this one's.
+    mockQueryActivityEvents.mockResolvedValue({
+      events: [],
+      cost: { pages: 3, rows: 300 },
+      completeSince: '2026-12-12T00:00:00.000Z',
+    });
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
+
+    expect((await getActivities()).body).toStrictEqual({ activities: [] });
+  });
+
+  it('leaves out Bucket Intelligence companion buckets', async () => {
+    mockListBuckets.mockResolvedValue([listedBucket(`filone-rag-${'a'.repeat(40)}`, RECENT)]);
+
+    expect((await getActivities()).body).toStrictEqual({ activities: [] });
+  });
+
+  it('merges both kinds of row newest first and cuts them to the limit', async () => {
+    resolveEvents(
+      created('console-new', '2026-12-12T00:00:00.000Z'),
+      created('console-old', '2026-12-08T00:00:00.000Z'),
     );
+    mockListBuckets.mockResolvedValue([
+      listedBucket('console-new', '2026-12-12T00:00:00.000Z'),
+      listedBucket('console-old', '2026-12-08T00:00:00.000Z'),
+      listedBucket('outside', RECENT),
+    ]);
+
+    expect((await getActivities({ limit: '2' })).body.activities).toMatchObject([
+      { resourceName: 'console-new' },
+      { resourceName: 'outside', createdOutsideConsole: true },
+    ]);
   });
 
-  it('reads no key events for ReadOnly, who holds no keys.* permission', async () => {
-    await baseHandler(eventFor(OrgRole.ReadOnly));
+  it('still returns the audit events when a region fails to list its buckets', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    resolveEvents(created('any-bucket', RECENT));
+    mockListBuckets.mockRejectedValue(new Error('any-error'));
 
-    expect(mockQueryActivityEvents).toHaveBeenCalledWith(
-      expect.objectContaining({ keyEvents: { sees: 'none' } }),
-    );
+    expect((await getActivities()).body).toMatchObject({ activities: [{ id: 'any-event' }] });
+  });
+
+  it('lists every bucket in the tenant, under the request deadline', async () => {
+    const deadline = new AbortController().signal;
+
+    await baseHandler(buildEvent({ userInfo: USER_INFO, requestContext: { deadline } }));
+
+    expect(mockListBuckets).toHaveBeenCalledWith('any-tenant', undefined, { signal: deadline });
   });
 });

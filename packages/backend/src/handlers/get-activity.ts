@@ -2,11 +2,11 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { AuditEvent, RecentActivity, RecentActivityResponse } from '@filone/shared';
+import { isRagCompanionBucket } from '@filone/shared';
 import { queryActivityEvents, resolveWindow } from '../lib/audit-query.ts';
-import type { ActivityBucketScope, ActivityScope } from '../lib/audit-query.ts';
 import { reportAuditQuery } from '../lib/audit-metrics.ts';
-import { keyScope } from '../lib/key-scope.ts';
-import { getScopedMemberId } from '../lib/member-scope.ts';
+import type { BucketSummary } from '../lib/bucket-orchestrator.ts';
+import { getProvisionedRegions } from '../lib/region-helpers.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -20,16 +20,33 @@ import {
 } from '../middleware/request-deadline.ts';
 
 /**
- * GET /api/activity — the dashboard's activity feed.
+ * How long before a bucket's creation time its `bucket.created` event may be
+ * stamped and still count as the record of it. The console writes the event
+ * after the storage system answers, so the event is normally the later of the
+ * two; the margin covers clock drift between the storage system and Lambda.
+ */
+const CREATION_MATCH_MARGIN_MS = 5 * 60 * 1000;
+
+/**
+ * When the console started writing `bucket.created`. A bucket made before it
+ * has no creation in the log whichever way it was made, so it gets a plain
+ * "Created" row, as the feed gave every bucket before it read the log. Must
+ * not be earlier than the production deploy of that change: a console bucket
+ * made between the two would read as created outside the console.
+ */
+export const BUCKET_CREATIONS_AUDITED_SINCE = '2026-11-10T00:00:00.000Z';
+
+/**
+ * GET /api/activity — the dashboard's activity feed, for Owner and Admin.
  *
- * Read from the audit log, so every row here is a row the audit page shows too
- * and the dashboard's "View all" lands on the same history. The audit page is
- * Owner and Admin only; this feed is open to every role under `buckets.read`
- * because it carries only bucket and key events, and below Admin only the ones
- * the caller acted on.
+ * Read from the audit log, so the dashboard's "View all" lands on the same
+ * history, and gated on `audit.view` like the audit page it previews.
  *
- * The audit log records what the console did, so a bucket created or deleted
- * with the S3 API directly appears on the Buckets page but never here.
+ * The audit log records what the console did, so a bucket created with the
+ * S3 API directly is missing from it. The feed lists the org's buckets beside
+ * the read and adds a creation row for each bucket the log has no creation
+ * for. A bucket deleted with the S3 API leaves nothing to list, so that
+ * deletion never appears.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -39,56 +56,116 @@ export async function baseHandler(
     Math.max(parseInt(event.queryStringParameters?.limit ?? '10', 10) || 10, 1),
     50,
   );
+  const signal = getRequestDeadline(event);
 
   // The whole retention window up to now: the feed takes no dates.
   const { from, to } = resolveWindow({ to: new Date().toISOString() });
   const start = performance.now();
-  // A named step, so a read cut off by the deadline is logged by name.
-  const { events, cost } = await trackRequestStep(event, 'queryActivityEvents', () =>
-    queryActivityEvents({
-      orgId,
-      bucketEvents: getBucketEventScope(event),
-      keyEvents: getKeyEventScope(event),
-      from,
-      to,
-      limit,
-      signal: getRequestDeadline(event),
-    }),
-  );
+  // Named steps, so a read cut off by the deadline is logged by name.
+  const [read, buckets] = await Promise.all([
+    trackRequestStep(event, 'queryActivityEvents', () =>
+      queryActivityEvents({ orgId, from, to, limit, signal }),
+    ),
+    trackRequestStep(event, 'listBuckets', () => listBuckets(orgId, signal)),
+  ]);
 
-  const activities = events.flatMap(mapToActivities);
+  const recorded = read.events.flatMap(mapToActivities);
   reportAuditQuery({
     route: 'activity',
-    cost,
+    cost: read.cost,
     durationMs: performance.now() - start,
-    rowsReturned: activities.length,
+    rowsReturned: recorded.length,
   });
+
+  const unrecorded = getUnrecordedCreations({
+    buckets,
+    events: read.events,
+    // Below the point the audit read stopped, the log's creations are not all
+    // in hand, so a bucket there cannot be told apart and is left out.
+    since: read.completeSince ?? from,
+  });
+  const activities = [...recorded, ...unrecorded]
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, limit);
 
   return new ResponseBuilder().status(200).body<RecentActivityResponse>({ activities }).build();
 }
 
 /**
- * The bucket events this caller may see: the whole org's for Owner and Admin,
- * and only those the caller acted on for everyone else. A bucket on a region
- * with per-member access is open to a Member only through a policy naming them,
- * and the Buckets page lists only those, so the feed must not name the rest.
- * Reading what the caller did is the narrowing that needs no storage-system call;
- * it also hides a bucket someone else created and then shared with them.
+ * Every bucket in the org's provisioned regions. A region that fails to list
+ * is logged and skipped: its buckets then lack a creation row, and the audit
+ * events still show.
  */
-function getBucketEventScope(event: AuthenticatedEvent): ActivityBucketScope {
-  const { userId, membership } = getUserInfo(event);
-  const memberId = getScopedMemberId(membership?.role, userId);
-  return memberId ? { sees: 'own', actorId: memberId } : { sees: 'all' };
+async function listBuckets(orgId: string, signal: AbortSignal): Promise<BucketSummary[]> {
+  const regions = await getProvisionedRegions(orgId);
+  const settled = await Promise.allSettled(
+    // No member id: the feed is for Owner and Admin, who see every bucket.
+    regions.map(({ orchestrator, tenantId }) =>
+      orchestrator.listBuckets(tenantId, undefined, { signal }),
+    ),
+  );
+  return settled.flatMap((result, index) => {
+    if (result.status === 'fulfilled') {
+      // Companion buckets hold Bucket Intelligence's datasets, not user data.
+      return result.value.filter((bucket) => !isRagCompanionBucket(bucket.bucketName));
+    }
+    const { orchestrator, tenantId } = regions[index];
+    console.error('[get-activity] Orchestrator listBuckets failed', {
+      orgId,
+      orchestratorId: orchestrator.id,
+      region: orchestrator.region,
+      tenantId,
+      error: result.reason,
+    });
+    return [];
+  });
 }
 
 /**
- * The key events this caller may see, under the scope the keys pages use: the
- * whole org's under `keys.manage_all`, those the caller acted on under
- * `keys.manage_own`, and none for a ReadOnly member who holds neither.
+ * A creation row for each bucket made since `since` that the audit log has no
+ * `bucket.created` for. Made after {@link BUCKET_CREATIONS_AUDITED_SINCE}, that
+ * means it was created outside the console, and the row says so; made before,
+ * the log could not have recorded it, and the row is a plain creation.
+ *
+ * A creation event counts for a bucket when it names the same bucket in the
+ * same region and is no older than the bucket, give or take
+ * {@link CREATION_MATCH_MARGIN_MS}. The age check keeps an old console creation
+ * from covering a bucket of the same name deleted and made again over S3.
  */
-function getKeyEventScope(event: AuthenticatedEvent): ActivityScope {
-  const scope = keyScope(event);
-  return scope.sees === 'own' ? { sees: 'own', actorId: scope.userId } : scope;
+function getUnrecordedCreations({
+  buckets,
+  events,
+  since,
+}: {
+  buckets: BucketSummary[];
+  events: AuditEvent[];
+  since: string;
+}): RecentActivity[] {
+  const creations = events.flatMap((event) =>
+    event.type === 'bucket.created' ? [{ ...event.details, at: Date.parse(event.createdAt) }] : [],
+  );
+  return buckets
+    .filter((bucket) => Date.parse(bucket.createdAt) >= Date.parse(since))
+    .filter(
+      (bucket) =>
+        !creations.some(
+          (creation) =>
+            creation.bucketName === bucket.bucketName &&
+            creation.region === bucket.region &&
+            creation.at >= Date.parse(bucket.createdAt) - CREATION_MATCH_MARGIN_MS,
+        ),
+    )
+    .map((bucket) => ({
+      // No event id exists; this one is stable for as long as the bucket is.
+      id: `unrecorded:${bucket.region}:${bucket.bucketName}:${bucket.createdAt}`,
+      timestamp: bucket.createdAt,
+      resourceType: 'bucket',
+      action: 'bucket.created',
+      resourceName: bucket.bucketName,
+      ...(Date.parse(bucket.createdAt) >= Date.parse(BUCKET_CREATIONS_AUDITED_SINCE) && {
+        createdOutsideConsole: true,
+      }),
+    }));
 }
 
 /**
@@ -132,5 +209,5 @@ export const handler = middy(baseHandler)
   .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
-  .use(authorize('buckets.read'))
+  .use(authorize('audit.view'))
   .use(errorHandlerMiddleware());

@@ -15,7 +15,7 @@ export type Stage = (typeof Stage)[keyof typeof Stage];
  */
 export type StageLike = Stage | (string & {});
 
-export const DOCS_URL = 'https://docs.fil.one';
+export const DOCS_URL = 'https://docs.filone.com';
 
 /** Available S3 regions. */
 export const S3Region = {
@@ -193,18 +193,19 @@ export function getAuth0Domain(stage: StageLike): string {
 }
 
 /** Canonical hostname the production console is served on. */
-export const PROD_CONSOLE_HOST = 'app.fil.one';
+export const PROD_CONSOLE_HOST = 'app.filone.com';
 
 /**
- * Unlisted demo-alias hostnames the production console is also served on.
+ * Alias hostnames the production console is also served on: the unlisted demo alias
+ * app.filone.ai, and app.fil.one, the console's previous canonical host, which keeps
+ * serving until it redirects to app.filone.com.
  *
  * These are alternate domain names on the same CloudFront distribution serving the
- * same bundle — not a separate deployment — and they are deliberately unadvertised.
- * The first entry is the ACM cert's primary domain, which is how sst.config.ts finds
- * the cert. See environments/prod/filone-ai.tf in fil-one/infrastructure, and
- * docs/Auth0OneTimeSetup.md §4a for the accepted mail-deliverability trade.
+ * same bundle — not a separate deployment. The CloudFront cert must cover every entry;
+ * see environments/prod/filone-com.tf in fil-one/infrastructure, and
+ * docs/Auth0OneTimeSetup.md §4a.
  */
-export const PROD_CONSOLE_ALIAS_HOSTS = ['app.filone.ai'] as const;
+export const PROD_CONSOLE_ALIAS_HOSTS = ['app.filone.ai', 'app.fil.one'] as const;
 
 /**
  * Marketing site to send a user to when they leave the console, keyed by the
@@ -217,7 +218,8 @@ export const PROD_CONSOLE_ALIAS_HOSTS = ['app.filone.ai'] as const;
  * instead of redirecting.
  */
 export const MARKETING_URL_BY_CONSOLE_ORIGIN: Readonly<Record<string, string | undefined>> = {
-  [`https://${PROD_CONSOLE_HOST}`]: 'https://fil.one',
+  [`https://${PROD_CONSOLE_HOST}`]: 'https://www.filone.com',
+  'https://app.fil.one': 'https://www.filone.com',
   'https://app.filone.ai': 'https://filone.ai',
 };
 
@@ -243,15 +245,17 @@ export function logoutReturnTo(origin: string): string {
  * Auth0 tenant, so `resolveAuth0Domain` ignores the table outside the production
  * stage and non-production deployments keep their configured domain.
  *
- * Aliases cannot use `auth.fil.one`: a second Auth0 custom domain requires an
- * Enterprise plan, and `auth.fil.one` sits on the same flagged TLD the aliases exist
- * to escape. They use the tenant's own domain, which stays available alongside a
- * custom domain. Consequences — passkeys and sessions do not carry between the two,
- * because the WebAuthn relying-party ID is the Auth0 hostname — are in
- * docs/Auth0OneTimeSetup.md §4a.
+ * The demo alias has no custom auth domain of its own, because a second Auth0 custom
+ * domain requires an Enterprise plan, so it uses the tenant's own domain. Consequences
+ * — passkeys and sessions do not carry between the two, because the WebAuthn
+ * relying-party ID is the Auth0 hostname — are in docs/Auth0OneTimeSetup.md §4a.
+ *
+ * Both the canonical host and app.fil.one sign in through `auth.fil.one`, where existing
+ * passkeys keep working, until login itself moves to filone.com.
  */
 export const AUTH0_DOMAIN_BY_CONSOLE_ORIGIN: Readonly<Record<string, string | undefined>> = {
   [`https://${PROD_CONSOLE_HOST}`]: 'auth.fil.one',
+  'https://app.fil.one': 'auth.fil.one',
   'https://app.filone.ai': 'fil-one.us.auth0.com',
 };
 
@@ -263,7 +267,7 @@ const PRODUCTION_HOSTS: ReadonlySet<string> = new Set([
 /**
  * Infer the deployment stage from the hostname a deployment is served on.
  *
- * Production is served from {@link PROD_CONSOLE_HOST} and its demo aliases;
+ * Production is served from {@link PROD_CONSOLE_HOST} and its aliases;
  * staging, per-PR previews and personal dev all share a non-production Auth0
  * tenant and are treated as {@link Stage.Staging} for the purposes of
  * stage-derived config (Auth0 domain, S3 endpoint, etc.).

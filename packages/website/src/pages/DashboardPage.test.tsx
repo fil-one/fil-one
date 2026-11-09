@@ -115,6 +115,17 @@ describe('DashboardPage — the plan panels', () => {
     expect(screen.getByText('$4.99/TB per month · no egress fees')).toBeInTheDocument();
   });
 
+  it('names a manually billed plan and says it is billed manually', async () => {
+    mockGetBilling.mockResolvedValue({
+      subscription: { planId: PlanId.Manual, status: SubscriptionStatus.Manual },
+    });
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('Custom plan')).toBeInTheDocument();
+    expect(screen.getByText('Billed manually')).toBeInTheDocument();
+    expect(screen.queryByText('Est. monthly cost')).not.toBeInTheDocument();
+  });
+
   it('withholds an estimate from an org whose price states no rate', async () => {
     // The card used to multiply by a hardcoded $4.99, so a contracted org was
     // shown an estimate for a rate it does not pay.
@@ -153,82 +164,6 @@ describe('DashboardPage — the plan panels', () => {
   });
 });
 
-describe('DashboardPage — quick setup', () => {
-  /** An account partway through onboarding: no objects yet, so the card applies. */
-  const ONBOARDING: UsageResponse = { ...USAGE, objects: { count: 0 } };
-
-  it('offers the setup steps while onboarding is unfinished', async () => {
-    mockGetUsage.mockResolvedValue(ONBOARDING);
-    renderPage(OrgRole.Owner);
-
-    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
-  });
-
-  it('drops the setup steps once every one of them is done', async () => {
-    renderPage(OrgRole.Owner);
-
-    await screen.findByText('STORAGE');
-    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
-  });
-
-  // None of the steps are available to a disabled account, and none of them is
-  // the step that restores it, so the card would only compete with the banner
-  // that names the one action that matters.
-  it('drops the setup steps on a disabled account, unfinished or not', async () => {
-    mockGetUsage.mockResolvedValue({ ...ONBOARDING, tenantStatus: 'disabled' });
-    renderPage(OrgRole.Owner);
-
-    await screen.findByText('STORAGE');
-    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
-  });
-
-  // Write-locked is a narrower state: reads still work and the account is not
-  // out of action, so onboarding still has something to say.
-  it('keeps the setup steps on a write-locked account', async () => {
-    mockGetUsage.mockResolvedValue({ ...ONBOARDING, tenantStatus: 'write-locked' });
-    renderPage(OrgRole.Owner);
-
-    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
-  });
-
-  it('lists the steps in the order they are done: bucket, key, then upload', async () => {
-    mockGetUsage.mockResolvedValue(ONBOARDING);
-    renderPage(OrgRole.Owner);
-
-    await screen.findByText('QUICK SETUP');
-    const titles = ['Create a bucket', 'Generate API key', 'Upload an object'].map((title) =>
-      screen.getByText(title),
-    );
-    for (let i = 1; i < titles.length; i++) {
-      expect(titles[i - 1].compareDocumentPosition(titles[i])).toBe(
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      );
-    }
-  });
-
-  it('hides the card on dismiss and moves focus to the page heading', async () => {
-    mockGetUsage.mockResolvedValue(ONBOARDING);
-    renderPage(OrgRole.Owner);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss quick setup' }));
-
-    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Dashboard' }));
-  });
-
-  // Dismissal is page state, like the trial banner's: it lasts until the next
-  // visit, not across visits.
-  it('offers the card again on the next visit', async () => {
-    mockGetUsage.mockResolvedValue(ONBOARDING);
-    const { unmount } = renderPage(OrgRole.Owner);
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss quick setup' }));
-    unmount();
-
-    renderPage(OrgRole.Owner);
-    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
-  });
-});
-
 describe('DashboardPage — trial banner', () => {
   it('hides the banner on dismiss and moves focus to the page heading', async () => {
     const billing = payAsYouGoBilling();
@@ -259,28 +194,30 @@ describe('DashboardPage — bucket buttons', () => {
 });
 
 describe('DashboardPage — recent activity', () => {
-  it('opens the audit log from "View all" for a role that may read it', async () => {
-    renderPage(OrgRole.Admin);
+  it.each([OrgRole.Owner, OrgRole.Admin])(
+    'shows %s the feed with a "View all" link to the audit log',
+    async (role) => {
+      renderPage(role);
 
-    await screen.findByText('Recent Activity');
-    const hrefs = screen
-      .getAllByRole('link', { name: 'View all' })
-      .map((link) => link.getAttribute('href'));
-    expect(hrefs).toContain('/audit');
-  });
+      await screen.findByText('Recent Activity');
+      const hrefs = screen
+        .getAllByRole('link', { name: 'View all' })
+        .map((link) => link.getAttribute('href'));
+      expect(hrefs).toContain('/audit');
+    },
+  );
 
-  it.each([
-    ['a Member, who cannot read the audit log', OrgRole.Member, {}],
-    ['an org outside the organizations beta', OrgRole.Owner, { orgsBeta: false }],
-  ])('offers no link to the audit log to %s', async (_case, role, me) => {
-    renderPage(role, me);
+  it.each([OrgRole.Member, OrgRole.ReadOnly])(
+    'leaves the feed out for %s, who cannot read the audit log, and never asks for it',
+    async (role) => {
+      renderPage(role);
 
-    await screen.findByText('Recent Activity');
-    const hrefs = screen
-      .queryAllByRole('link', { name: 'View all' })
-      .map((link) => link.getAttribute('href'));
-    expect(hrefs).not.toContain('/audit');
-  });
+      // The usage counters render once the page is past its skeleton.
+      await screen.findByRole('heading', { name: 'Dashboard' });
+      expect(screen.queryByText('Recent Activity')).not.toBeInTheDocument();
+      expect(mockGetActivity).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ['buckets', { buckets: { count: 2 }, accessKeys: { count: 0 } }],
@@ -307,16 +244,30 @@ describe('DashboardPage — recent activity', () => {
     expect(screen.queryByText('No recent activity')).not.toBeInTheDocument();
   });
 
-  it.each([
-    [OrgRole.Owner, 'Bucket and key changes from the last 90 days appear here'],
-    [OrgRole.Admin, 'Bucket and key changes from the last 90 days appear here'],
-    [OrgRole.Member, 'Your bucket and key changes from the last 90 days appear here'],
-    [OrgRole.ReadOnly, 'Your bucket changes from the last 90 days appear here'],
-  ])('describes the empty feed by what a %s sees', async (role, description) => {
-    mockGetUsage.mockResolvedValue({ ...USAGE, buckets: { count: 1 } });
-    renderPage(role);
+  it('labels a bucket created outside the console apart from one the console created', async () => {
+    mockGetActivity.mockResolvedValue({
+      activities: [
+        {
+          id: 'any-outside',
+          resourceType: 'bucket',
+          action: 'bucket.created',
+          resourceName: 'outside-bucket',
+          timestamp: new Date().toISOString(),
+          createdOutsideConsole: true,
+        },
+        {
+          id: 'any-console',
+          resourceType: 'bucket',
+          action: 'bucket.created',
+          resourceName: 'console-bucket',
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    });
+    renderPage();
 
-    expect(await screen.findByText(description)).toBeInTheDocument();
+    expect(await screen.findByText('Created outside the console')).toBeInTheDocument();
+    expect(screen.getByText('Created')).toBeInTheDocument();
   });
 
   it('loads the activity again from "Try again" after a failure', async () => {

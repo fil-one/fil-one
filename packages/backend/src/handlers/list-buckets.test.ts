@@ -134,6 +134,25 @@ describe('list-buckets baseHandler (single-region)', () => {
     });
   });
 
+  it('hides Bucket Intelligence companion buckets', async () => {
+    aurora.listBuckets.mockResolvedValue([
+      { bucketName: 'my-bucket', region: S3_REGION, createdAt: '2026-01-01T00:00:00.000Z' },
+      {
+        bucketName: 'filone-rag-0123456789abcdef0123456789abcdef01234567',
+        region: S3_REGION,
+        createdAt: '2026-01-02T00:00:00.000Z',
+      },
+    ]);
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(200);
+    const names = JSON.parse(result.body as string).buckets.map(
+      (bucket: { bucketName: string }) => bucket.bucketName,
+    );
+    expect(names).toStrictEqual(['my-bucket']);
+  });
+
   it('passes versioning and encrypted flags through', async () => {
     aurora.listBuckets.mockResolvedValue([
       {

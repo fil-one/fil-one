@@ -173,6 +173,25 @@ const MANIFEST = [
     requires: 'in-handler',
     ragAllowlisted: true,
   },
+  // Forge regions run Bucket Intelligence on an engine on the Forge appliance.
+  // Indexing now is the same bucket-configuration write as turning indexing on;
+  // the engine view reads index metadata and sits with the other bucket reads.
+  {
+    method: 'POST',
+    path: '/api/buckets/{name}/rag/sync',
+    handler: 'sync-bucket-rag',
+    category: 'authenticated',
+    requires: 'buckets.create',
+    ragAllowlisted: true,
+  },
+  {
+    method: 'GET',
+    path: '/api/buckets/{name}/rag/engine',
+    handler: 'get-bucket-rag-engine',
+    category: 'authenticated',
+    requires: 'buckets.read',
+    ragAllowlisted: true,
+  },
 
   // ── Objects ──────────────────────────────────────────────────────
   // One route serves all seven presign operations, so the check branches per
@@ -571,17 +590,15 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'buckets.read',
   },
-  // A synthesized feed of bucket, object, and key events — not the audit log.
-  // The route requirement is only half the gate: the key-lifecycle entries it
-  // carries follow the same scope the keys pages do, so `keys.manage_all` sees
-  // the org's, `keys.manage_own` sees the caller's own, and a caller with
-  // neither is not handed the key inventory at all.
+  // The dashboard's preview of the audit log: the org's recent bucket and key
+  // events, plus buckets created outside the console. Gated like the audit page
+  // it links to.
   {
     method: 'GET',
     path: '/api/activity',
     handler: 'get-activity',
     category: 'authenticated',
-    requires: 'buckets.read',
+    requires: 'audit.view',
   },
 
   // ── Audit log ────────────────────────────────────────────────────

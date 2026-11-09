@@ -1,13 +1,5 @@
 import { lazy, Suspense, useRef, useState } from 'react';
-import {
-  PlusIcon,
-  DatabaseIcon,
-  KeyIcon,
-  CloudArrowUpIcon,
-  XIcon,
-  CheckIcon,
-} from '@phosphor-icons/react/dist/ssr';
-import { Link } from '@tanstack/react-router';
+import { PlusIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 import { Link as AppLink } from '../components/Link';
 
@@ -18,7 +10,6 @@ import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { Badge, type BadgeColor } from '../components/Badge';
 import { Card } from '../components/Card';
-import { IconBox } from '../components/IconBox';
 import { ProgressBar } from '../components/ProgressBar';
 import { formatBytes } from '@filone/shared';
 
@@ -29,12 +20,8 @@ import { daysUntil, formatDateTime, formatDaysLeft } from '../lib/time.js';
 import { costDisclosure, formatCents, planTitle, pricingLine } from '../lib/billing-view.js';
 import { queryKeys, USAGE_STALE_TIME } from '../lib/query-client.js';
 import { RequirePermission } from '../components/RequirePermission';
-import {
-  ACTIVITY_LIMIT,
-  getActivityEmptyDescription,
-  RecentActivityFeed,
-} from './RecentActivityFeed';
-import { useHasPermission, usePermissions } from '../lib/use-permissions.js';
+import { ACTIVITY_LIMIT, RecentActivityFeed } from './RecentActivityFeed';
+import { useHasPermission } from '../lib/use-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,6 +32,7 @@ function statusBadgeProps(status: SubscriptionStatus): { label: string; color: B
     case SubscriptionStatus.Trialing:
       return { label: 'Trial', color: 'blue' };
     case SubscriptionStatus.Active:
+    case SubscriptionStatus.Manual:
       return { label: 'Active', color: 'green' };
     case SubscriptionStatus.PastDue:
       return { label: 'Past Due', color: 'amber' };
@@ -89,15 +77,11 @@ function DashboardSkeleton() {
 // eslint-disable-next-line max-lines-per-function, complexity/complexity
 export function DashboardPage() {
   const [trialBannerVisible, setTrialBannerVisible] = useState(true);
-  // A prompt toward pages the caller can always reach on their own (Buckets,
-  // API Keys), so dismissing it costs nothing. Like the trial banner above it,
-  // dismissal lasts until the next visit to the dashboard.
-  const [quickSetupVisible, setQuickSetupVisible] = useState(true);
-  // Dismissing either removes the button that held focus, so focus moves to
-  // the page heading rather than dropping to the document body.
+  // Dismissing removes the button that held focus, so focus moves to the page
+  // heading rather than dropping to the document body.
   const headingRef = useRef<HTMLHeadingElement>(null);
-  function dismiss(hide: (visible: boolean) => void) {
-    hide(false);
+  function dismissTrialBanner() {
+    setTrialBannerVisible(false);
     headingRef.current?.focus();
   }
 
@@ -106,11 +90,9 @@ export function DashboardPage() {
   // the only thing that depends on billing, and they are simply absent for a
   // role that cannot read it.
   const mayReadBilling = useHasPermission('billing.view');
-  // The feed is read from the audit log, so its "View all" opens the audit
-  // page. Only where that page exists for the caller: it is a page of the
-  // organizations beta, and Owner and Admin only.
-  const { has, orgsBeta, role } = usePermissions();
-  const mayViewAuditLog = orgsBeta && has('audit.view');
+  // The feed is a preview of the audit log, so it shows to the roles that may
+  // open the audit page, Owner and Admin, and links there.
+  const mayViewAuditLog = useHasPermission('audit.view');
 
   const { data: usage, isPending: usagePending } = useQuery({
     queryKey: queryKeys.usage,
@@ -135,10 +117,11 @@ export function DashboardPage() {
   const activityQuery = useQuery({
     queryKey: queryKeys.activityRecent(ACTIVITY_LIMIT),
     queryFn: () => getActivity({ limit: ACTIVITY_LIMIT }),
+    enabled: mayViewAuditLog,
   });
 
-  // Usage alone decides whether there is a page: every counter and the quick
-  // setup read it, and it is `buckets.read`, which every role holds.
+  // Usage alone decides whether there is a page: every counter reads it, and it
+  // is `buckets.read`, which every role holds.
   if (usagePending || !usage) {
     return <DashboardSkeleton />;
   }
@@ -158,14 +141,6 @@ export function DashboardPage() {
     ? `Expires ${formatDateTime(billing.subscription.trialEndsAt)}`
     : undefined;
 
-  // Quick setup is onboarding: it tells a new account what to do next. A
-  // disabled account cannot do any of it, and the steps it lists are not the
-  // step that gets the account back, so it competes with the banner that names
-  // the one action that matters. Restoring access is the only next step there.
-  const showQuickSetup =
-    usage.tenantStatus !== 'disabled' &&
-    (usage.buckets.count === 0 || usage.objects.count === 0 || usage.accessKeys.count === 0);
-
   const badge = billing ? statusBadgeProps(billing.subscription.status) : null;
   // The rate comes from the price the org is billed on. This card used to
   // multiply by a hardcoded $4.99 per TB, so an org on a quoted price was shown
@@ -182,36 +157,6 @@ export function DashboardPage() {
     limits.egressLimitBytes > 0
       ? Math.round((usage.egress.usedBytes / limits.egressLimitBytes) * 100)
       : 0;
-
-  const quickSetupTasks = [
-    {
-      id: 'create-bucket',
-      icon: DatabaseIcon,
-      title: 'Create a bucket',
-      subtitle: 'Organize your storage',
-      href: '/buckets',
-      done: usage.buckets.count > 0,
-    },
-    {
-      id: 'generate-key',
-      icon: KeyIcon,
-      title: 'Generate API key',
-      subtitle: 'Connect via S3 API',
-      href: '/api-keys',
-      done: usage.accessKeys.count > 0,
-    },
-    {
-      id: 'upload-object',
-      icon: CloudArrowUpIcon,
-      title: 'Upload an object',
-      subtitle: 'Store files on Fil One',
-      href: '/buckets',
-      done: usage.objects.count > 0,
-    },
-  ];
-
-  const quickSetupDone = quickSetupTasks.filter((t) => t.done).length;
-  const quickSetupTotal = quickSetupTasks.length;
 
   return (
     <PageLayout
@@ -232,7 +177,7 @@ export function DashboardPage() {
         </RequirePermission>
       }
     >
-      {/* 2. Trial banner */}
+      {/* Trial banner */}
       {isTrialing && trialBannerVisible && (
         <div className="mb-5 flex flex-col gap-3 rounded-xl bg-brand-50/60 px-5 py-3.5 ring-1 ring-brand-100 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
@@ -254,7 +199,7 @@ export function DashboardPage() {
             <IconButton
               icon={XIcon}
               aria-label="Dismiss trial banner"
-              onClick={() => dismiss(setTrialBannerVisible)}
+              onClick={dismissTrialBanner}
               size="md"
               className="rounded-md focus-visible:brand-outline"
             />
@@ -262,51 +207,7 @@ export function DashboardPage() {
         </div>
       )}
 
-      {/* 3. Quick Setup */}
-      {showQuickSetup && quickSetupVisible && (
-        <Card className="mb-5">
-          <div className="mb-4 flex items-center justify-between">
-            <span className="text-meta font-medium uppercase tracking-wider text-zinc-500">
-              QUICK SETUP
-            </span>
-            <div className="flex items-center gap-3">
-              <span className="text-meta text-zinc-500">
-                {quickSetupDone} of {quickSetupTotal}
-              </span>
-              <IconButton
-                icon={XIcon}
-                aria-label="Dismiss quick setup"
-                onClick={() => dismiss(setQuickSetupVisible)}
-                size="md"
-                className="rounded-md focus-visible:brand-outline"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-            {quickSetupTasks.map(({ id, icon: Icon, title, subtitle, href, done }) => (
-              <Link
-                key={id}
-                to={href}
-                className={`flex items-center gap-3 rounded-lg border p-4 ${
-                  done ? 'border-green-200 bg-green-50' : 'border-zinc-200 hover:bg-zinc-50'
-                }`}
-              >
-                <IconBox icon={done ? CheckIcon : Icon} color={done ? 'green' : 'blue'} size="md" />
-                <div className="min-w-0">
-                  <p className={`text-ui font-medium ${done ? 'text-green-900' : 'text-zinc-900'}`}>
-                    {title}
-                  </p>
-                  <p className={`text-meta ${done ? 'text-green-700' : 'text-zinc-500'}`}>
-                    {subtitle}
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* 4. Top row: Plan · Storage · Egress. The plan card is absent, not
+      {/* Top row: Plan · Storage · Egress. The plan card is absent, not
              skeletal, for a role that cannot read billing — the counters beside
              it are `buckets.read` and stand on their own. */}
       <div
@@ -350,6 +251,11 @@ export function DashboardPage() {
               {isPayAsYouGo && billing && (
                 <p className="mt-0.5 text-meta text-zinc-500">
                   {pricingLine(billing.subscription)} · no egress fees
+                </p>
+              )}
+              {billing.subscription.planId === PlanId.Manual && (
+                <p className="mt-0.5 text-meta text-zinc-500">
+                  {pricingLine(billing.subscription)}
                 </p>
               )}
             </div>
@@ -413,7 +319,7 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      {/* 5. Buckets · Objects · API Keys — single card with vertical dividers */}
+      {/* Buckets · Objects · API Keys — single card with vertical dividers */}
       <Card
         padding="none"
         className="mb-5 grid grid-cols-1 divide-y divide-zinc-200 lg:grid-cols-3 lg:divide-x lg:divide-y-0"
@@ -457,34 +363,33 @@ export function DashboardPage() {
         </div>
       </Card>
 
-      {/* 6. Filecoin Sealing Status — hidden until event system is ready.
+      {/* Filecoin Sealing Status — hidden until event system is ready.
              Re-enable with <SealingStatus /> from ../components/SealingStatus.
              https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard */}
 
-      {/* 7. Usage Trends */}
+      {/* Usage Trends */}
       <Suspense fallback={<div className="mb-6" style={{ height: 200 }} />}>
         <UsageTrends />
       </Suspense>
 
-      {/* 8. Recent Activity */}
-      <Card>
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-            Recent Activity
-          </h2>
-          {mayViewAuditLog && (
+      {/* Recent Activity */}
+      {mayViewAuditLog && (
+        <Card>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+              Recent Activity
+            </h2>
             <AppLink href="/audit" className="text-meta">
               View all
             </AppLink>
-          )}
-        </div>
+          </div>
 
-        <RecentActivityFeed
-          activityQuery={activityQuery}
-          hasResources={usage.buckets.count > 0 || usage.accessKeys.count > 0}
-          emptyDescription={getActivityEmptyDescription(role, has)}
-        />
-      </Card>
+          <RecentActivityFeed
+            activityQuery={activityQuery}
+            hasResources={usage.buckets.count > 0 || usage.accessKeys.count > 0}
+          />
+        </Card>
+      )}
     </PageLayout>
   );
 }

@@ -62,6 +62,12 @@ export interface BucketActivity extends BaseActivity {
   resourceType: 'bucket';
   /** Derived from the audit union, as on {@link KeyActivity}: the feed reads the audit log. */
   action: Extract<AuditEventType, 'bucket.created' | 'bucket.deleted'>;
+  /**
+   * True on a creation the audit log has no record of, found in the bucket
+   * listing instead: the bucket was made outside the console, such as with the
+   * S3 API, so nobody is named as having made it. Absent on rows from the log.
+   */
+  createdOutsideConsole?: boolean;
 }
 
 export interface ObjectActivity extends BaseActivity {

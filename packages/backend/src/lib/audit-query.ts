@@ -202,22 +202,10 @@ export async function queryAllAuditEvents({
   return { ...page, truncated };
 }
 
-/** The bucket events the dashboard feed shows, narrowed by {@link ActivityScope}. */
+/** The bucket events the dashboard feed shows. */
 const ACTIVITY_BUCKET_EVENT_TYPES: AuditEventType[] = ['bucket.created', 'bucket.deleted'];
-/** The key events the dashboard feed shows, narrowed by {@link ActivityScope}. */
+/** The key events the dashboard feed shows. */
 const ACTIVITY_KEY_EVENT_TYPES: AuditEventType[] = ['key.created', 'key.rotated', 'key.deleted'];
-
-/**
- * Which events of one kind a feed reader may see: the whole org's, only those
- * the reader acted on, or none.
- */
-export type ActivityScope = { sees: 'all' } | { sees: 'own'; actorId: string } | { sees: 'none' };
-
-/**
- * Bucket events are never `none`: the feed's route requires `buckets.read`, so
- * every reader sees at least their own.
- */
-export type ActivityBucketScope = Exclude<ActivityScope, { sees: 'none' }>;
 
 /**
  * Rows one feed read examines per round trip. About two rows per action, since
@@ -250,6 +238,19 @@ interface ActivityTypeRead {
   unreadBelow?: string;
 }
 
+/** What a feed read found: its events, what it cost, and how far back they are complete. */
+export interface ActivityEventsRead {
+  /** Every match newer than {@link completeSince}, newest first. Not cut to the limit. */
+  events: AuditEvent[];
+  cost: AuditQueryCost;
+  /**
+   * When a read stopped early, the time before which events may be missing.
+   * Absent when every read reached the start of the window. The caller cuts
+   * anything it merges in at the same point, so the feed keeps its order.
+   */
+  completeSince?: string;
+}
+
 /**
  * The newest bucket and key events that succeeded, for the dashboard's
  * activity feed.
@@ -260,8 +261,8 @@ interface ActivityTypeRead {
  * page but not activity. Key events are S3 keys only, the ones the API keys
  * page lists.
  *
- * The feed runs on the dashboard, for every role, so its cost must not grow
- * with the org's history. Each event type it shows is read on the `byType`
+ * The feed runs on every dashboard load, so its cost must not grow with the
+ * org's history. Each event type it shows is read on the `byType`
  * index, in parallel, newest first, for at most
  * {@link ACTIVITY_MAX_PAGES_PER_TYPE} pages; reading the org partition instead
  * would examine every membership and policy row too, and for a reader whose
@@ -271,37 +272,31 @@ interface ActivityTypeRead {
  * A type whose read stopped early may hold unread events newer than another
  * type's matches. The merge therefore drops every match older than the newest
  * point any read stopped at, so the feed may come back short but never out of
- * order. There is no cursor: the feed has no next page.
+ * order. Every match newer than that point is returned, not only the first
+ * `limit`: the caller merges in rows of its own before cutting to the limit,
+ * and needs every bucket creation the log holds to tell which buckets it lacks.
+ * There is no cursor: the feed has no next page.
  */
 export async function queryActivityEvents({
   orgId,
-  bucketEvents,
-  keyEvents,
   from,
   to,
   limit,
   signal,
 }: {
   orgId: string;
-  bucketEvents: ActivityBucketScope;
-  keyEvents: ActivityScope;
   from: string;
   to: string;
   limit: number;
   /** Cancels the reads in flight, so none outlives the request. */
   signal?: AbortSignal;
-}): Promise<{ events: AuditEvent[]; cost: AuditQueryCost }> {
+}): Promise<ActivityEventsRead> {
   const window = { orgId, from, to, limit, signal };
-  const reads = await Promise.all([
-    ...ACTIVITY_BUCKET_EVENT_TYPES.map((type) =>
-      readActivityType({ ...window, type, actorId: actorIdOf(bucketEvents) }),
+  const reads = await Promise.all(
+    [...ACTIVITY_BUCKET_EVENT_TYPES, ...ACTIVITY_KEY_EVENT_TYPES].map((type) =>
+      readActivityType({ ...window, type }),
     ),
-    ...(keyEvents.sees === 'none'
-      ? []
-      : ACTIVITY_KEY_EVENT_TYPES.map((type) =>
-          readActivityType({ ...window, type, actorId: actorIdOf(keyEvents) }),
-        )),
-  ]);
+  );
 
   const cost: AuditQueryCost = { pages: 0, rows: 0 };
   for (const read of reads) {
@@ -322,15 +317,11 @@ export async function queryActivityEvents({
     .flatMap((read) => read.matches)
     .filter((match) => cutoff === undefined || match.sortKey >= cutoff)
     .sort((a, b) => (a.sortKey < b.sortKey ? 1 : -1))
-    .slice(0, limit)
     .map((match) => match.event);
 
-  return { events, cost };
-}
-
-/** The actor a scope narrows to, or undefined when it shows the whole org. */
-function actorIdOf(scope: ActivityBucketScope | Exclude<ActivityScope, { sees: 'none' }>) {
-  return scope.sees === 'own' ? scope.actorId : undefined;
+  if (cutoff === undefined) return { events, cost };
+  // The sort key is `{createdAt}#{eventId}`; the time is the part before `#`.
+  return { events, cost, completeSince: cutoff.split('#')[0] };
 }
 
 /**
@@ -340,7 +331,6 @@ function actorIdOf(scope: ActivityBucketScope | Exclude<ActivityScope, { sees: '
 async function readActivityType({
   orgId,
   type,
-  actorId,
   from,
   to,
   limit,
@@ -348,7 +338,6 @@ async function readActivityType({
 }: {
   orgId: string;
   type: AuditEventType;
-  actorId: string | undefined;
   from: string;
   to: string;
   limit: number;
@@ -360,7 +349,7 @@ async function readActivityType({
 
   do {
     const page = await getDynamoClient().send(
-      new QueryCommand(buildActivityQueryInput({ orgId, type, actorId, from, to, startKey })),
+      new QueryCommand(buildActivityQueryInput({ orgId, type, from, to, startKey })),
       { abortSignal: signal },
     );
     cost.pages += 1;
@@ -380,14 +369,12 @@ async function readActivityType({
 function buildActivityQueryInput({
   orgId,
   type,
-  actorId,
   from,
   to,
   startKey,
 }: {
   orgId: string;
   type: AuditEventType;
-  actorId: string | undefined;
   from: string;
   to: string;
   startKey: DynamoCursor;
@@ -415,10 +402,6 @@ function buildActivityQueryInput({
     // under its new credential.
     filterParts.push('NOT details.reason = :rotation');
     values[':rotation'] = 'rotation';
-  }
-  if (actorId) {
-    filterParts.push('actor.id = :actorId');
-    values[':actorId'] = actorId;
   }
 
   return {
