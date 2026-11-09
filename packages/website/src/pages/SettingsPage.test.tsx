@@ -57,7 +57,6 @@ function me(role: OrgRole, overrides: Partial<MeResponse> = {}): MeResponse {
     connectionType: 'auth0',
     mfaEnrollments: [],
     ragAccess: true,
-    orgsBeta: true,
     billingActive: true,
     userId: 'user-1',
     role,
@@ -270,5 +269,15 @@ describe('SettingsPage — the danger zone', () => {
     expect(await screen.findByText('Danger zone')).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'support@fil.one' });
     expect(link).toHaveAttribute('href', 'mailto:support@fil.one');
+  });
+});
+
+describe('SettingsPage — loading', () => {
+  it('keeps the page heading in place while the profile loads', () => {
+    // Asserted on the first render, before the mocked `/me` resolves.
+    renderSettings(OrgRole.Admin);
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Loading settings' })).toBeInTheDocument();
   });
 });

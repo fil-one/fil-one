@@ -173,6 +173,25 @@ const MANIFEST = [
     requires: 'in-handler',
     ragAllowlisted: true,
   },
+  // Forge regions run Bucket Intelligence on an engine on the Forge appliance.
+  // Indexing now is the same bucket-configuration write as turning indexing on;
+  // the engine view reads index metadata and sits with the other bucket reads.
+  {
+    method: 'POST',
+    path: '/api/buckets/{name}/rag/sync',
+    handler: 'sync-bucket-rag',
+    category: 'authenticated',
+    requires: 'buckets.create',
+    ragAllowlisted: true,
+  },
+  {
+    method: 'GET',
+    path: '/api/buckets/{name}/rag/engine',
+    handler: 'get-bucket-rag-engine',
+    category: 'authenticated',
+    requires: 'buckets.read',
+    ragAllowlisted: true,
+  },
 
   // ── Objects ──────────────────────────────────────────────────────
   // One route serves all seven presign operations, so the check branches per

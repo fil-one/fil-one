@@ -178,7 +178,7 @@ function Section({
 }) {
   return (
     <div className="flex flex-col" data-testid={testId}>
-      <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wider text-zinc-400">
+      <p className="mb-1 px-3 text-meta font-medium uppercase tracking-wider text-zinc-500">
         {title}
       </p>
       {children}

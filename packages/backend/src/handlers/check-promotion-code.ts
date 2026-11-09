@@ -2,7 +2,8 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { ApiErrorCode, CheckPromotionCodeRequestSchema } from '@filone/shared';
-import type { CheckPromotionCodeResponse } from '@filone/shared';
+import type { CheckPromotionCodeResponse, ErrorResponse } from '@filone/shared';
+import { takePromotionCodeCheck } from '../lib/promotion-code-rate-limit.ts';
 import { describePromotionCode, findActivePromotionCode } from '../lib/promotion-codes.ts';
 import { getStripeClient } from '../lib/stripe-client.ts';
 import { getSubscription } from '../lib/subscription-store.ts';
@@ -19,6 +20,11 @@ import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
  * discount before the card is submitted. Applies nothing: activation looks the
  * code up again through the same helper, so a code accepted here is one
  * activation accepts.
+ *
+ * Unlike activation, it needs no card, so it is the cheap way to guess codes.
+ * Each org has an hourly allowance of checks (`PROMOTION_CODE_CHECKS_PER_HOUR`);
+ * past it this answers 429 with when to try again. Only a well-formed request
+ * spends one.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -37,9 +43,22 @@ export async function baseHandler(
       .build();
   }
 
+  const { orgId } = getUserInfo(event);
+  const allowance = await takePromotionCodeCheck(orgId);
+  if (!allowance.allowed) {
+    const minutes = Math.max(1, Math.ceil((allowance.retryAt.getTime() - Date.now()) / 60_000));
+    return new ResponseBuilder()
+      .status(429)
+      .body<ErrorResponse & { retryAt: string }>({
+        message: `Too many promo code attempts. Try again in ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}.`,
+        code: ApiErrorCode.PROMOTION_CODE_RATE_LIMITED,
+        retryAt: allowance.retryAt.toISOString(),
+      })
+      .build();
+  }
+
   // The org's Stripe customer, so a code restricted to another customer is
   // refused here rather than accepted and then refused at activation.
-  const { orgId } = getUserInfo(event);
   const stripeCustomerId = (await getSubscription(orgId))?.stripeCustomerId;
   const promotionCode = await findActivePromotionCode(
     getStripeClient(),

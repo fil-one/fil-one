@@ -46,6 +46,10 @@ export async function startDeletionFromStripe(params: {
       console.log(`${LOG} already committed`, { orgId, customerId, caller });
       return;
     }
+    if (outcome === 'billed_manually') {
+      console.warn(`${LOG} refused for an org billed manually`, { orgId, customerId, caller });
+      return;
+    }
 
     console.log(`${LOG} committed`, { orgId, userId, customerId, caller });
     await invokeAccountDeletionWorker(orgId);

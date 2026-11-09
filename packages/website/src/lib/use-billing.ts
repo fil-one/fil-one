@@ -17,9 +17,16 @@ import { activateSubscription, apiRequest, getBilling, getInvoices, getUsage } f
 import { queryKeys, USAGE_STALE_TIME } from './query-client.js';
 import { usePermittedDialog } from './use-permitted-dialog.js';
 
-/** Neither a trial nor an unentitled account has invoices to fetch. */
+/**
+ * Neither a trial nor an unentitled account has invoices to fetch, and a
+ * manually billed org's invoices are sent outside Stripe.
+ */
 export function hasInvoiceHistory(status: SubscriptionStatus): boolean {
-  return status !== SubscriptionStatus.Trialing && status !== SubscriptionStatus.Inactive;
+  return (
+    status !== SubscriptionStatus.Trialing &&
+    status !== SubscriptionStatus.Inactive &&
+    status !== SubscriptionStatus.Manual
+  );
 }
 
 /** The two states a saved card can be put straight back to work from. */

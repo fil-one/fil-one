@@ -323,6 +323,43 @@ describe('get-billing baseHandler', () => {
     expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
   });
 
+  describe('an org billed manually', () => {
+    // Left over from the trial the org signed up with.
+    const leftoverStripeIds = {
+      stripeCustomerId: 'cus_any',
+      subscriptionId: 'sub_any',
+      stripePrice: CACHED_GRANDFATHERED_PRICE,
+      currentPeriodStart: '2026-01-01T00:00:00.000Z',
+      currentPeriodEnd: '2026-02-01T00:00:00.000Z',
+    };
+
+    it('reports the manual plan with no price, period or card', async () => {
+      ddbMock
+        .on(GetItemCommand)
+        .resolves(
+          subscriptionItem({ ...leftoverStripeIds, subscriptionStatus: SubscriptionStatus.Manual }),
+        );
+
+      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(JSON.parse(String(result.body))).toStrictEqual({
+        subscription: { planId: PlanId.Manual, status: SubscriptionStatus.Manual },
+      });
+    });
+
+    it('does not look up the leftover Stripe subscription', async () => {
+      ddbMock
+        .on(GetItemCommand)
+        .resolves(
+          subscriptionItem({ ...leftoverStripeIds, subscriptionStatus: SubscriptionStatus.Manual }),
+        );
+
+      await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+      expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+    });
+  });
+
   it('never writes to DynamoDB when reporting inactive', async () => {
     ddbMock.on(GetItemCommand).resolves(subscriptionItem({ stripeCustomerId: 'cus_123' }));
 

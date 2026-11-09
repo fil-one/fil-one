@@ -201,8 +201,14 @@ test.describe('as the member', { tag: '@serial' }, () => {
 test.describe('as the owner', { tag: '@serial' }, () => {
   test.use({ storageState: STORAGE_STATE.owner });
 
+  // The owner may mint a service key, so the form offers the choice and starts
+  // on a personal key. That option's own description says it follows bucket
+  // policies, so the separate notice is only for callers who get no choice.
   async function expectPrincipalKeyFields(page: Page): Promise<void> {
-    await expect(page.getByTestId('access-key-follows-bucket-policy')).toBeVisible();
+    await expect(
+      page.getByTestId('access-key-type-principal').locator('input[type="radio"]'),
+    ).toBeChecked();
+    await expect(page.getByTestId('access-key-follows-bucket-policy')).toHaveCount(0);
     await expect(page.getByTestId('access-key-permissions')).toHaveCount(0);
   }
 

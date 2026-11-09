@@ -54,15 +54,24 @@ test.beforeAll(async () => {
   );
 });
 
+// A policy write revokes the grants of every live key its principals hold, so
+// the keys a test creates go when it ends.
+test.afterEach(async () => {
+  await runCleanup(
+    createdKeys
+      .splice(0)
+      .map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
+  );
+});
+
 test.afterAll(async () => {
-  // Every bucket and key the file made goes one at a time, each several calls.
+  // Every bucket the file made goes one at a time, each several calls.
   test.setTimeout(180_000);
   await runCleanup([
     ...buckets.map((bucket) => ({
       label: `bucket ${bucket}`,
       run: () => emptyAndDeleteBucket(apiByRole.owner, userIdByRole.owner, bucket),
     })),
-    ...createdKeys.map(({ api, id }) => ({ label: `key ${id}`, run: () => api.deleteKey(id) })),
   ]);
   await Promise.all(ROLES.map((r) => apiByRole[r].dispose()));
 });

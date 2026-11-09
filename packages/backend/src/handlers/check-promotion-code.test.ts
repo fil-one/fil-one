@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ApiErrorCode } from '@filone/shared';
 
 vi.mock('sst', () => ({
@@ -20,6 +20,12 @@ const mockGetSubscription = vi.fn();
 
 vi.mock('../lib/subscription-store.ts', () => ({
   getSubscription: (...args: unknown[]) => mockGetSubscription(...args),
+}));
+
+const mockTakePromotionCodeCheck = vi.fn();
+
+vi.mock('../lib/promotion-code-rate-limit.ts', () => ({
+  takePromotionCodeCheck: (...args: unknown[]) => mockTakePromotionCodeCheck(...args),
 }));
 
 import { baseHandler } from './check-promotion-code.ts';
@@ -72,6 +78,8 @@ describe('check-promotion-code baseHandler', () => {
     mockPromotionCodesList.mockReset();
     mockGetSubscription.mockReset();
     mockGetSubscription.mockResolvedValue({ stripeCustomerId: 'cus_this_org' });
+    mockTakePromotionCodeCheck.mockReset();
+    mockTakePromotionCodeCheck.mockResolvedValue({ allowed: true });
   });
 
   it('reports what an active code takes off, for how long', async () => {
@@ -165,5 +173,55 @@ describe('check-promotion-code baseHandler', () => {
 
     expect(result).toMatchObject({ statusCode: 400 });
     expect(mockPromotionCodesList).not.toHaveBeenCalled();
+  });
+
+  describe('the hourly allowance', () => {
+    const NOW = new Date('2026-11-09T12:00:00.000Z');
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('refuses with 429 and when to try again once the org has spent it, without asking Stripe', async () => {
+      const retryAt = new Date(NOW.getTime() + 40 * 60 * 1000);
+      mockTakePromotionCodeCheck.mockResolvedValue({ allowed: false, retryAt });
+
+      expect(await checkCode(JSON.stringify({ promotionCode: 'ANY-CODE' }))).toStrictEqual({
+        statusCode: 429,
+        body: {
+          message: 'Too many promo code attempts. Try again in 40 minutes.',
+          code: ApiErrorCode.PROMOTION_CODE_RATE_LIMITED,
+          retryAt: retryAt.toISOString(),
+        },
+      });
+      expect(mockPromotionCodesList).not.toHaveBeenCalled();
+    });
+
+    it('says one minute, not zero, when the window is about to close', async () => {
+      mockTakePromotionCodeCheck.mockResolvedValue({
+        allowed: false,
+        retryAt: new Date(NOW.getTime() + 10 * 1000),
+      });
+
+      expect(await checkCode(JSON.stringify({ promotionCode: 'ANY-CODE' }))).toMatchObject({
+        body: { message: 'Too many promo code attempts. Try again in 1 minute.' },
+      });
+    });
+
+    it('spends from the caller org’s allowance', async () => {
+      mockPromotionCodesList.mockResolvedValue({ data: [] });
+
+      await checkCode(JSON.stringify({ promotionCode: 'ANY-CODE' }));
+
+      expect(mockTakePromotionCodeCheck).toHaveBeenCalledWith('any-org');
+    });
+
+    it('spends nothing on a malformed request', async () => {
+      // Not JSON, so it never reaches Stripe.
+      await checkCode('not json');
+
+      expect(mockTakePromotionCodeCheck).not.toHaveBeenCalled();
+    });
   });
 });

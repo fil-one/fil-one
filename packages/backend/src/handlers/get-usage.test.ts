@@ -126,6 +126,19 @@ describe('get-usage baseHandler', () => {
     expect(body.buckets).toEqual({ count: 5 });
   });
 
+  it('leaves Bucket Intelligence companion buckets out of the bucket count', async () => {
+    const forge = fakeOrchestrator('forge', {
+      region: S3Region.EuCentral3,
+      buckets: ['docs', 'filone-rag-0123456789abcdef0123456789abcdef01234567'],
+      info: { bucketCount: 2, bucketLimit: 100, keyCount: 0, accessKeyLimit: 300 },
+    });
+    mockGetAvailableOrchestrators.mockReturnValue([forge]);
+
+    const body = await run();
+
+    expect(body.buckets).toEqual({ count: 1 });
+  });
+
   it('counts access keys from stored rows, not the orchestrator key count', async () => {
     const aurora = fakeOrchestrator('aurora', {
       region: S3Region.EuWest1,

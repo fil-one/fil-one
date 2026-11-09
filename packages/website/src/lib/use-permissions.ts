@@ -42,16 +42,6 @@ export function usePermissions(): {
    */
   role: OrgRole | undefined;
   /**
-   * Whether the active org is in the organizations beta, which is not a
-   * permission: the role registry says who may invite, and this says whether
-   * the org may have invitations at all. `POST /api/org/invitations` checks
-   * both, so a surface that offers the form has to as well.
-   *
-   * It rides along here for the same reason `userId` does — one set of query
-   * options for `/me` — and false until `/me` answers, which fails closed.
-   */
-  orgsBeta: boolean;
-  /**
    * Whether the active org has usable billing. Unlike everything else here,
    * defaults *open* (true) rather than closed: this gates the whole console
    * behind an "add a card" page, and blocking every account for the brief
@@ -83,7 +73,6 @@ export function usePermissions(): {
     has: (permission: Permission) => permissions?.includes(permission) ?? false,
     userId: me?.userId,
     role: me?.role,
-    orgsBeta: me?.orgsBeta ?? false,
     billingActive: me?.billingActive ?? true,
     isPending,
     isError,

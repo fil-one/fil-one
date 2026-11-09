@@ -160,6 +160,24 @@ describe('get-activity baseHandler', () => {
     );
   });
 
+  it('leaves Bucket Intelligence companion buckets out of the feed', async () => {
+    mockListBuckets.mockResolvedValue([
+      { bucketName: 'photos', createdAt: '2026-01-01T00:00:00Z' },
+      {
+        bucketName: 'filone-rag-0123456789abcdef0123456789abcdef01234567',
+        createdAt: '2026-01-02T00:00:00Z',
+      },
+    ]);
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    const body = JSON.parse(String(result.body));
+    expect(body.activities.map((a: { resourceName: string }) => a.resourceName)).toStrictEqual([
+      'photos',
+    ]);
+  });
+
   it('respects the limit query parameter', async () => {
     mockListBuckets.mockResolvedValue([
       { bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' },

@@ -27,6 +27,8 @@ export interface CheckPromotionCodeResponse {
 export const PlanId = {
   FreeTrial: 'free_trial',
   PayAsYouGo: 'pay_as_you_go',
+  /** Billed by hand under a sales agreement; see `SubscriptionStatus.Manual`. */
+  Manual: 'manual',
   /**
    * Read-model value only: reported by `GET /api/billing` when the account has
    * no entitlement (no billing record, or a record without a subscription
@@ -42,6 +44,12 @@ export const SubscriptionStatus = {
   PastDue: 'past_due',
   Canceled: 'canceled',
   GracePeriod: 'grace_period',
+  /**
+   * Billed by hand under a sales agreement, outside Stripe. Set only by ops
+   * (`bin/set-manual-billing.ts`), never by a Stripe event, and never returned
+   * by `mapStripeStatus`.
+   */
+  Manual: 'manual',
   /**
    * Read-model value only: the subscription-guard denies these accounts with
    * `SUBSCRIPTION_INACTIVE`, and `GET /api/billing` reports the same state
@@ -88,8 +96,8 @@ export interface Subscription {
    * named it). Absent when Stripe could not be reached and nothing was cached,
    * and for an account with no subscription at all.
    *
-   * Reported rather than inferred from `planId`: `planId` has three values and
-   * a negotiated quote is none of them, so a console reading the enum would
+   * Reported rather than inferred from `planId`: a quote negotiated in Stripe
+   * is none of `planId`'s values, so a console reading the enum would
    * call every paying customer "Pay as you go" — including the ones on a
    * contract that says otherwise.
    */
