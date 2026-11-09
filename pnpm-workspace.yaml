@@ -23,11 +23,11 @@ trustPolicyExclude:
   - 'react-redux@9.2.0'
   - 'reselect@5.1.1'
 
-# Dependencies allowed to run postinstall/build scripts
-onlyBuiltDependencies:
-  - esbuild
-  - '@pulumi/command'
-  - protobufjs
+# Dependencies allowed (true) or denied (false) to run postinstall/build scripts
+allowBuilds:
+  esbuild: true
+  '@pulumi/command': true
+  protobufjs: true
 
 # @lancedb/lancedb lists the OpenAI SDK and Hugging Face transformers (with
 # onnxruntime and sharp) as optional dependencies for its embedding helpers.
