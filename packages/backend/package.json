@@ -23,7 +23,7 @@
     "@filone/shared": "workspace:*",
     "@middy/core": "^7.9.2",
     "@middy/http-header-normalizer": "^7.9.2",
-    "disposable-domains": "^2.0.1",
+    "disposable-domains": "^2.0.7",
     "jose": "^6.2.12",
     "p-map": "^7.1.1",
     "p-retry": "^8.0.0",
