@@ -41,7 +41,7 @@ export async function baseHandler(
 
   const bucket = await orchestrator.getBucket(
     tenantId,
-    bucketName,
+    { region, bucketName },
     getScopedMemberId(membership?.role, userId),
     { signal },
   );

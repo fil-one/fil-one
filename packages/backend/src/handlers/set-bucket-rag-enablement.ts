@@ -122,7 +122,7 @@ export async function baseHandler(
   const memberId = getScopedMemberId(membership?.role, userId);
   // Enforce tenant/org scope: a bucket the caller's tenant does not own, or a
   // scoped member cannot reach, is 404.
-  if (!(await orchestrator.getBucket(tenantId, bucketName, memberId))) {
+  if (!(await orchestrator.getBucket(tenantId, { region, bucketName }, memberId))) {
     return new ResponseBuilder()
       .status(404)
       .body<ErrorResponse>({ message: 'Bucket not found' })

@@ -54,3 +54,18 @@ export function orchestratorSupportsIamMethods(orchestrator: {
 }): boolean {
   return supportsIamMethods(orchestrator.regions[0]);
 }
+
+/**
+ * Refuses a region the network does not serve. Every caller is expected to name
+ * one of the network's own regions; one that does not is a routing bug upstream,
+ * and acting on it would reach the wrong gateway. A single-region network uses
+ * this to catch the mistake at the call rather than somewhere downstream.
+ */
+export function assertServesRegion(
+  network: { id: string; regions: readonly S3Region[] },
+  region: S3Region,
+): void {
+  if (!network.regions.includes(region)) {
+    throw new Error(`Orchestrator "${network.id}" does not serve region "${region}".`);
+  }
+}

@@ -46,7 +46,7 @@ export async function baseHandler(
   if (!tenantId) return tenantNotReadyResponse();
 
   try {
-    const stored = await orchestrator.getBucketPolicy(tenantId, bucketName);
+    const stored = await orchestrator.getBucketPolicy(tenantId, { region, bucketName });
     if (!stored) return policyNotFoundResponse();
     return new ResponseBuilder()
       .status(200)

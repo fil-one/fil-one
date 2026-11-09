@@ -1,3 +1,4 @@
+import { S3Region } from '@filone/shared';
 import { describe, it, expect } from 'vitest';
 import { PolicyValidationError } from '../lib/errors.ts';
 import { FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
@@ -29,7 +30,9 @@ describe('FakeIamOrchestrator policy writes', () => {
     const policy = policyOf(statement('photos', 'Allow', ['u2'], ['s3:GetObject']));
     const etag = fake.seedPolicy('t1', 'photos', policy);
     await fake.removeMember('t1', 'u1');
-    await expect(fake.getBucketPolicy('t1', 'photos')).resolves.toStrictEqual({ policy, etag });
+    await expect(
+      fake.getBucketPolicy('t1', { region: S3Region.UsEast1, bucketName: 'photos' }),
+    ).resolves.toStrictEqual({ policy, etag });
   });
 
   it('removeMember keeps an everyone statement and drops the member from a named one', async () => {
@@ -43,7 +46,9 @@ describe('FakeIamOrchestrator policy writes', () => {
       policyOf(readByEveryone, statement('photos', 'Allow', ['u1', 'u2'], ['s3:PutObject'])),
     );
     await fake.removeMember('t1', 'u1');
-    await expect(fake.getBucketPolicy('t1', 'photos')).resolves.toMatchObject({
+    await expect(
+      fake.getBucketPolicy('t1', { region: S3Region.UsEast1, bucketName: 'photos' }),
+    ).resolves.toMatchObject({
       policy: policyOf(readByEveryone, statement('photos', 'Allow', ['u2'], ['s3:PutObject'])),
     });
   });
@@ -52,7 +57,9 @@ describe('FakeIamOrchestrator policy writes', () => {
     const fake = new FakeIamOrchestrator();
     const policy = policyOf(statement('photos', 'Allow', ['ghost'], ['s3:GetObject']));
     await expect(
-      fake.putBucketPolicy('t1', 'photos', policy, { ifNoneMatch: '*' }),
+      fake.putBucketPolicy('t1', { region: S3Region.UsEast1, bucketName: 'photos' }, policy, {
+        ifNoneMatch: '*',
+      }),
     ).rejects.toBeInstanceOf(PolicyValidationError);
   });
 });

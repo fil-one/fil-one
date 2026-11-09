@@ -45,6 +45,8 @@ export interface BucketDetails extends BucketProtection {
 
 export interface CreateBucketArgs {
   bucketName: string;
+  /** The region that will serve the bucket, which must be one the network serves. */
+  region: S3Region;
   versioning?: boolean;
   lock?: boolean;
   /**
@@ -61,6 +63,15 @@ export interface CreateBucketArgs {
 }
 
 /** Bucket lifecycle, and the S3 client context object requests sign with. */
+/**
+ * A bucket as callers address it. A bucket is served by exactly one region, and
+ * only that region's gateway can act on it, so the region travels with the name.
+ */
+export interface BucketRef {
+  region: S3Region;
+  bucketName: string;
+}
+
 export interface BucketOrchestrator {
   createBucket(
     tenantId: string,
@@ -69,11 +80,12 @@ export interface BucketOrchestrator {
   ): Promise<void>;
   deleteBucket(
     tenantId: string,
-    bucketName: string,
+    bucket: BucketRef,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<void>;
   /**
-   * The tenant's buckets, or with `memberId` only the ones that member can
+   * Every bucket the tenant holds on this network, each labelled with the
+   * region serving it, or with `memberId` only the ones that member can
    * access. Tenant-wide callers omit it. A region serving the `iam` access
    * model honours it and every other region ignores it, so a region that
    * flips models cannot break its callers in either direction.
@@ -90,13 +102,19 @@ export interface BucketOrchestrator {
    */
   getBucket(
     tenantId: string,
-    bucketName: string,
+    bucket: BucketRef,
     memberId?: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<BucketDetails | null>;
 
+  /**
+   * Credentials and endpoint for the S3 gateway of `region`, which must be one
+   * the network serves. The credential is the tenant's console key, the same at
+   * every region; the endpoint and signing region are the region's.
+   */
   getS3ClientContext(
     tenantId: string,
+    region: S3Region,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<S3ClientContext>;
 }

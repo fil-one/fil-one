@@ -62,7 +62,7 @@ export async function baseHandler(
   if (!tenantId) return tenantNotReadyResponse();
 
   const memberId = getScopedMemberId(membership?.role, userId);
-  if (!(await orchestrator.getBucket(tenantId, bucketName, memberId))) {
+  if (!(await orchestrator.getBucket(tenantId, { region, bucketName }, memberId))) {
     return new ResponseBuilder()
       .status(404)
       .body<ErrorResponse>({ message: 'Bucket not found' })

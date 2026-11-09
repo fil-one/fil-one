@@ -216,7 +216,7 @@ describe('rag-indexer-worker', () => {
 
     expect(mockGetProvisionedRegions).toHaveBeenCalledWith('org-1');
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.EuWest1);
-    expect(aurora.getS3ClientContext).toHaveBeenCalledWith('tenant-a');
+    expect(aurora.getS3ClientContext).toHaveBeenCalledWith('tenant-a', S3Region.EuWest1);
     expect(mockCreateS3Client).toHaveBeenCalledWith(S3_CTX);
   });
 
@@ -253,8 +253,8 @@ describe('rag-indexer-worker', () => {
     );
 
     expect(mockIndexBucket).toHaveBeenCalledTimes(2);
-    expect(aurora.getS3ClientContext).toHaveBeenCalledWith('tenant-a');
-    expect(fth.getS3ClientContext).toHaveBeenCalledWith('tenant-f');
+    expect(aurora.getS3ClientContext).toHaveBeenCalledWith('tenant-a', S3Region.EuWest1);
+    expect(fth.getS3ClientContext).toHaveBeenCalledWith('tenant-f', S3Region.UsEast1);
   });
 
   it('skips a bucket whose region is not provisioned for the org', async () => {
@@ -603,7 +603,7 @@ describe('rag-indexer-worker on Forge regions (Bucket Intelligence engine)', () 
 
     expect(mockIndexBucket).not.toHaveBeenCalled();
     expect(mockCreateS3Client).not.toHaveBeenCalled();
-    expect(forge.getS3ClientContext).toHaveBeenCalledWith('tenant-forge');
+    expect(forge.getS3ClientContext).toHaveBeenCalledWith('tenant-forge', S3Region.EuCentral3);
     expect(mockEngineSync.mock.calls.map(([target]) => target)).toStrictEqual([
       {
         orgId: 'org-1',

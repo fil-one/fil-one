@@ -16,8 +16,7 @@
 // are linked only on non-production stages, so eager construction would crash
 // production at import time.
 
-import { getS3Endpoint, S3Region } from '@filone/shared';
-import type { NonEmptyArray } from '@filone/shared';
+import type { NonEmptyArray, S3Region } from '@filone/shared';
 import { FilOneOrchestrator } from '../orchestrator/orchestrator.ts';
 import type { ServiceOrchestrator } from '../service-orchestrator.ts';
 
@@ -47,7 +46,7 @@ export function createForgeOrchestrator(
     id,
     regions,
     stage,
-    s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(regions[0], stage),
+    ...(s3.endpointUrl && { s3EndpointUrl: s3.endpointUrl }),
     s3PresignEndpointUrl: s3.presignEndpointUrl,
     api,
   });
