@@ -40,6 +40,11 @@ const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const USER_ID = '22222222-3333-4444-5555-666666666666';
 const EMAIL = 'admin@example.com';
 
+/** An instant inside the retention window, in the form the stored bounds take. */
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 function storedEvent(createdAt: string, eventId: string) {
   return marshall({
     pk: `ORG#${ORG_ID}`,
@@ -193,9 +198,12 @@ describe('GET /api/audit handler', () => {
   });
 
   it('resumes from a cursor it accepts', async () => {
-    const cursor = Buffer.from('2026-08-10T00:00:00.000Z#evt-1', 'utf8').toString('base64url');
+    // Both instants are relative to now, so they stay inside the retention
+    // window the read is clamped to. A literal date leaves that window as it
+    // moves, and the cursor is then correctly refused.
+    const cursor = Buffer.from(`${daysAgo(30)}#evt-1`, 'utf8').toString('base64url');
 
-    const result = await invoke({ from: '2026-08-01T00:00:00.000Z', cursor });
+    const result = await invoke({ from: daysAgo(60), cursor });
 
     expect(result.statusCode).toBe(200);
     expect(auditQuery().ExclusiveStartKey).toBeDefined();
