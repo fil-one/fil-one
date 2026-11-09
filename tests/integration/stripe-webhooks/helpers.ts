@@ -15,6 +15,7 @@ export {
 } from '../helpers.js';
 
 import { GetItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import {
   getStripeClient,
   getDynamoClient,
@@ -360,4 +361,34 @@ export async function createTestClock(name: string): Promise<string> {
     name: `${name}-${crypto.randomUUID()}`,
   });
   return clock.id;
+}
+
+// =============================================================================
+// Direct delivery to the worker
+// =============================================================================
+
+const lambda = new LambdaClient({ region: process.env.AWS_REGION ?? 'us-east-2' });
+
+/**
+ * Hand one event to the deployed StripeEventWorker the way its queue does, and
+ * wait for the worker to finish. Bypassing Stripe and the queue lets a test fix
+ * the order in which the worker sees events, which Stripe does not guarantee.
+ */
+export async function deliverToStripeEventWorker(event: {
+  id: string;
+  type: string;
+  data: { object: Record<string, unknown> };
+}): Promise<void> {
+  const result = await lambda.send(
+    new InvokeCommand({
+      FunctionName: (Resource as unknown as Record<string, { name: string }>).StripeEventWorker
+        .name,
+      InvocationType: 'RequestResponse',
+      Payload: Buffer.from(JSON.stringify({ Records: [{ body: JSON.stringify(event) }] })),
+    }),
+  );
+  if (result.FunctionError) {
+    const payload = result.Payload ? new TextDecoder().decode(result.Payload) : '';
+    throw new Error(`StripeEventWorker failed on ${event.type}: ${payload}`);
+  }
 }
