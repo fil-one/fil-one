@@ -10,22 +10,37 @@ import { RadioOption } from './RadioOption';
 import { FactList } from './ColdStorageFacts';
 import { useToast } from './Toast';
 import {
+  COLD_PRICE_PER_TB_MONTH,
   MAX_RESTORE_DAYS,
+  MIN_TERM_DAYS,
   WARM_MIN_DAYS,
   WARM_PRICE_PER_TB_MONTH,
   formatMoment,
   formatRate,
+  isColdFile,
+  isInMinimumTerm,
   isValidRestoreDays,
   restoreFiles,
+  restorePermanently,
   trackColdStorage,
   useClock,
+  useColdFiles,
   useLastNonNull,
 } from '../lib/cold-storage-prototype.js';
+import { findRuleAbove } from '../lib/cold-storage-files.js';
+
+type RestoreLength = 'period' | 'permanent';
 
 /** One choice of what to restore: a file, the selection, a folder or the whole bucket. */
 export interface RestoreScope {
   id: string;
   label: string;
+  /**
+   * The folder the scope covers, `''` for the whole bucket; absent for picked
+   * files. A permanent restore of a folder or the bucket also ends the freeze
+   * rules there.
+   */
+  prefix?: string;
   /** The frozen and restored files in the scope; restored ones get their copy extended. */
   versions: S3ObjectVersion[];
 }
@@ -44,9 +59,12 @@ function countFiles(count: number): string {
 }
 
 /**
- * Confirms a restore: what to restore, for how many days, when downloads
- * work and until when, with billing as a footnote. Every scope runs as one
- * restore job, so a folder or a bucket is one confirmation, not one per file.
+ * Confirms a restore: what to restore, and for how long. For a period of time
+ * the files get a copy to download for the days chosen, and the originals
+ * stay frozen. Permanently, they go back to Standard for good, and for a
+ * folder or the bucket the freeze rule there ends, so new uploads stay in
+ * Standard. Every scope runs as one job, so a folder or a bucket is one
+ * confirmation, not one per file.
  */
 export function RestoreFilesDialog({
   target,
@@ -66,11 +84,37 @@ export function RestoreFilesDialog({
   );
 }
 
+/** The dialog's words, which turn on whether it adds days or restores, and for how long. */
+function describeRestore(
+  target: RestoreTarget,
+  scope: RestoreScope,
+  permanent: boolean,
+): { title: string; description: string; confirm: string } {
+  const files = countFiles(scope.versions.length);
+  if (target.extend) {
+    return {
+      title: `Add days to ${scope.versions.length === 1 ? scope.label : files}`,
+      description: 'Keep the copy available for longer. The original stays frozen.',
+      confirm: 'Add days',
+    };
+  }
+  const single = target.scopes.length === 1 && scope.versions.length === 1;
+  return {
+    title: single ? `Restore ${scope.label}` : `Restore files from ${target.bucketName}`,
+    description: permanent
+      ? 'The files go back to Standard storage for good.'
+      : 'You get a copy to download and share. The originals stay frozen.',
+    confirm: permanent ? `Unfreeze ${files}` : `Restore ${files}`,
+  };
+}
+
 function RestoreForm({ target, onClose }: { target: RestoreTarget; onClose: () => void }) {
   const { bucketName, region, scopes, extend = false } = target;
   const [scopeId, setScopeId] = useState(scopes[0]?.id);
+  const [length, setLength] = useState<RestoreLength>('period');
   const [daysText, setDaysText] = useState(String(WARM_MIN_DAYS));
   const clock = useClock();
+  const cold = useColdFiles(bucketName, region);
   const { toast } = useToast();
   const scope = scopes.find((s) => s.id === scopeId) ?? scopes[0];
   const days = Number(daysText);
@@ -79,40 +123,43 @@ function RestoreForm({ target, onClose }: { target: RestoreTarget; onClose: () =
   const validDays = isValidRestoreDays(days) && days >= WARM_MIN_DAYS;
   if (!scope) return null;
 
-  const readyAt = Date.now() + clock.restoreWaitMs;
-  const until = readyAt + (validDays ? days : WARM_MIN_DAYS) * clock.dayMs;
-
-  function handleRestore() {
-    if (!scope || !validDays) return;
-    restoreFiles(bucketName, region, { versions: scope.versions, days, label: scope.label });
+  // Adding days to copies that exist has no permanent side: Unfreeze does that.
+  const permanent = !extend && length === 'permanent';
+  const until = Date.now() + clock.restoreWaitMs + (validDays ? days : WARM_MIN_DAYS) * clock.dayMs;
+  const copy = describeRestore(target, scope, permanent);
+  const files = countFiles(scope.versions.length);
+  const track = (restoreLength: string) =>
     trackColdStorage('restore confirmed', {
       scope: scope.id,
       files: String(scope.versions.length),
-      days: String(days),
+      days: restoreLength,
     });
-    toast.success(
-      extend
-        ? `Copy available until ${formatMoment(until)}`
-        : `Restoring ${countFiles(scope.versions.length)}. We’ll email you when downloads work.`,
-    );
+
+  function handleRestore() {
+    if (!scope) return;
+    if (permanent) {
+      restorePermanently(bucketName, region, {
+        keys: scope.versions.map((v) => v.key),
+        prefix: scope.prefix,
+      });
+      track('permanent');
+      toast.success(`${files} unfrozen`);
+    } else {
+      restoreFiles(bucketName, region, { versions: scope.versions, days, label: scope.label });
+      track(String(days));
+      toast.success(
+        extend
+          ? `Copy available until ${formatMoment(until)}`
+          : `Restoring ${files}. We’ll email you when downloads work.`,
+      );
+    }
     onClose();
   }
 
   return (
     <>
-      <ModalHeader
-        onClose={onClose}
-        description={
-          extend
-            ? 'Keep the copy available for longer. The original stays frozen.'
-            : 'You get a copy to download and share. The originals stay frozen.'
-        }
-      >
-        {extend
-          ? `Add days to ${scope.versions.length === 1 ? scope.label : countFiles(scope.versions.length)}`
-          : scopes.length === 1 && scope.versions.length === 1
-            ? `Restore ${scope.label}`
-            : `Restore files from ${bucketName}`}
+      <ModalHeader onClose={onClose} description={copy.description}>
+        {copy.title}
       </ModalHeader>
       <ModalBody>
         <div className="flex flex-col gap-4">
@@ -133,38 +180,18 @@ function RestoreForm({ target, onClose }: { target: RestoreTarget; onClose: () =
               ))}
             </fieldset>
           )}
-          <FormField
-            label="Keep the copy for"
-            htmlFor="restore-days"
-            description={`Days, from ${WARM_MIN_DAYS} to ${MAX_RESTORE_DAYS}.`}
-            error={
-              validDays
-                ? undefined
-                : `Enter a whole number of days from ${WARM_MIN_DAYS} to ${MAX_RESTORE_DAYS}.`
-            }
-          >
-            <Input
-              id="restore-days"
-              type="number"
-              inputMode="numeric"
-              min={WARM_MIN_DAYS}
-              max={MAX_RESTORE_DAYS}
-              value={daysText}
-              onChange={setDaysText}
-              invalid={!validDays}
+          {!extend && <RestoreLengthField value={length} onChange={setLength} />}
+          {permanent ? (
+            <PermanentFacts scope={scope} cold={cold} />
+          ) : (
+            <PeriodFields
+              daysText={daysText}
+              onDaysChange={setDaysText}
+              validDays={validDays}
+              until={until}
+              extend={extend}
             />
-          </FormField>
-          <FactList
-            facts={[
-              // An extension adds days to a copy that is already there.
-              ...(extend ? [] : [{ label: 'Ready in', value: 'About an hour' }]),
-              { label: 'Available until', value: formatMoment(until) },
-            ]}
-          />
-          <p className="text-xs text-(--color-paragraph-text-subtle)">
-            {extend ? '' : 'We’ll email you when it’s ready. '}The copy bills at{' '}
-            {formatRate(WARM_PRICE_PER_TB_MONTH)} on top of frozen storage.
-          </p>
+          )}
         </div>
       </ModalBody>
       <ModalFooter fullWidth>
@@ -174,12 +201,144 @@ function RestoreForm({ target, onClose }: { target: RestoreTarget; onClose: () =
         <Button
           id="restore-files-confirm-button"
           variant="primary"
-          disabled={!validDays}
+          disabled={!permanent && !validDays}
           onClick={handleRestore}
         >
-          {extend ? 'Add days' : `Restore ${countFiles(scope.versions.length)}`}
+          {copy.confirm}
         </Button>
       </ModalFooter>
+    </>
+  );
+}
+
+function RestoreLengthField({
+  value,
+  onChange,
+}: {
+  value: RestoreLength;
+  onChange: (value: RestoreLength) => void;
+}) {
+  // Side by side from `sm`: two short options stacked made the dialog scroll.
+  // The header says what each means in full, so the descriptions stay short.
+  return (
+    <fieldset className="grid gap-2 sm:grid-cols-2">
+      <legend className="mb-2 text-sm font-medium text-zinc-900">How long</legend>
+      <RadioOption
+        name="restore-length"
+        value="period"
+        checked={value === 'period'}
+        onChange={() => onChange('period')}
+        description="A copy to download"
+      >
+        For a period of time
+      </RadioOption>
+      <RadioOption
+        name="restore-length"
+        value="permanent"
+        checked={value === 'permanent'}
+        onChange={() => onChange('permanent')}
+        description="Back to Standard"
+      >
+        Permanently
+      </RadioOption>
+    </fieldset>
+  );
+}
+
+/** A restore for a period of time: the days to keep the copy, when it is ready and until when. */
+function PeriodFields({
+  daysText,
+  onDaysChange,
+  validDays,
+  until,
+  extend,
+}: {
+  daysText: string;
+  onDaysChange: (text: string) => void;
+  validDays: boolean;
+  until: number;
+  extend: boolean;
+}) {
+  return (
+    <>
+      <FormField
+        label="Keep the copy for"
+        htmlFor="restore-days"
+        description={`Days, from ${WARM_MIN_DAYS} to ${MAX_RESTORE_DAYS}.`}
+        error={
+          validDays
+            ? undefined
+            : `Enter a whole number of days from ${WARM_MIN_DAYS} to ${MAX_RESTORE_DAYS}.`
+        }
+      >
+        <Input
+          id="restore-days"
+          type="number"
+          inputMode="numeric"
+          min={WARM_MIN_DAYS}
+          max={MAX_RESTORE_DAYS}
+          value={daysText}
+          onChange={onDaysChange}
+          invalid={!validDays}
+        />
+      </FormField>
+      <FactList
+        facts={[
+          // An extension adds days to a copy that is already there.
+          ...(extend ? [] : [{ label: 'Ready in', value: 'About an hour' }]),
+          { label: 'Available until', value: formatMoment(until) },
+        ]}
+      />
+      <p className="text-xs text-(--color-paragraph-text-subtle)">
+        {extend ? '' : 'We’ll email you when it’s ready. '}The copy bills at{' '}
+        {formatRate(WARM_PRICE_PER_TB_MONTH)} on top of frozen storage.
+      </p>
+    </>
+  );
+}
+
+/**
+ * What a permanent restore changes: the rate the files move to, whether new
+ * uploads freeze, and, as a footnote, the frozen days still billed.
+ */
+function PermanentFacts({
+  scope,
+  cold,
+}: {
+  scope: RestoreScope;
+  cold: ReturnType<typeof useColdFiles>;
+}) {
+  const inTerm = scope.versions.filter((version) => {
+    const state = cold.getState(version);
+    return isColdFile(state) && isInMinimumTerm(state, cold.now);
+  }).length;
+  const ruleAbove =
+    scope.prefix === undefined
+      ? undefined
+      : findRuleAbove(cold.record?.policies ?? [], scope.prefix);
+  const uploads =
+    scope.prefix === undefined
+      ? null
+      : ruleAbove
+        ? `Still freeze, under the rule on ${ruleAbove.prefix === '' ? 'the whole bucket' : ruleAbove.prefix}`
+        : 'Stay in Standard';
+  const termNote =
+    inTerm === 0
+      ? 'Freeze them again any time from the file menu.'
+      : `${inTerm === scope.versions.length ? 'Every one is' : `${countFiles(inTerm)} are`} inside the ${MIN_TERM_DAYS}-day frozen term, which still bills its remaining days at ${formatRate(COLD_PRICE_PER_TB_MONTH)}.`;
+  return (
+    <>
+      <FactList
+        facts={[
+          {
+            label: 'Storage',
+            value: 'Standard',
+            detail: formatRate(WARM_PRICE_PER_TB_MONTH),
+          },
+          ...(uploads ? [{ label: 'New uploads', value: uploads }] : []),
+        ]}
+      />
+      <p className="text-xs text-(--color-paragraph-text-subtle)">{termNote}</p>
     </>
   );
 }

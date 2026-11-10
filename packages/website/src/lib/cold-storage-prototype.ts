@@ -28,6 +28,7 @@ import {
   doesPolicyCover,
   getFileColdState,
   getNextRunAt,
+  getRecordAfterPermanentRestore,
   isFilePolicy,
   isColdFile,
   isFolderPolicy,
@@ -348,6 +349,20 @@ export function keepInStandard(bucketName: string, region: string, keys: string[
     }
     return { ...record, kept, restores };
   });
+}
+
+/**
+ * Restores files permanently: back to Standard for good. With a `prefix`, a
+ * folder or `''` for the whole bucket, the freeze rules there go too, so new
+ * uploads stay in Standard. See `getRecordAfterPermanentRestore`.
+ */
+export function restorePermanently(
+  bucketName: string,
+  region: string,
+  change: { keys: string[]; prefix?: string },
+) {
+  const now = Date.now();
+  updateRecord(bucketName, region, (record) => getRecordAfterPermanentRestore(record, change, now));
 }
 
 /** Clears the keep mark, so the files freeze again at the next daily run. */

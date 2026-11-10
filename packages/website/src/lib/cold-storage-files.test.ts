@@ -6,11 +6,13 @@ import {
   EMPTY_COLD_RECORD,
   MIN_FREEZE_FILE_BYTES,
   countFilesTooSmallToFreeze,
+  findRuleAbove,
   findReplacedColdFiles,
   getFileColdState,
   getFolderColdState,
   getJobProgress,
   getNextRunAt,
+  getRecordAfterPermanentRestore,
   getRestoreAfterRequest,
   getStaggeredWaitMs,
   getStorageBreakdown,
@@ -381,5 +383,60 @@ describe('getFolderColdState', () => {
     ).toStrictEqual({
       status: 'standard',
     });
+  });
+});
+
+describe('getRecordAfterPermanentRestore', () => {
+  const restore = { lastModified: 'any-time', readyAt: 1, expiresAt: 2 };
+  const record: BucketColdRecord = {
+    ...EMPTY_COLD_RECORD,
+    policies: [
+      { prefix: 'any-folder/', createdAt: 0 },
+      { prefix: 'other-folder/', createdAt: 0 },
+      { key: 'any-folder/single-file', createdAt: 0 },
+    ],
+    restores: { 'any-folder/a': restore },
+  };
+
+  it('keeps the files in Standard and drops their copies', () => {
+    const { kept, restores } = getRecordAfterPermanentRestore(
+      record,
+      { keys: ['any-folder/a'] },
+      7_000,
+    );
+    expect({ kept, restores }).toStrictEqual({ kept: { 'any-folder/a': 7_000 }, restores: {} });
+  });
+
+  it('leaves the rules as they are for a selection of files', () => {
+    expect(
+      getRecordAfterPermanentRestore(record, { keys: ['any-folder/a'] }, 7_000).policies,
+    ).toStrictEqual(record.policies);
+  });
+
+  it('removes the rules in and under the folder, and only those', () => {
+    expect(
+      getRecordAfterPermanentRestore(record, { keys: [], prefix: 'any-folder/' }, 7_000).policies,
+    ).toStrictEqual([{ prefix: 'other-folder/', createdAt: 0 }]);
+  });
+
+  it('removes every rule for the whole bucket', () => {
+    expect(
+      getRecordAfterPermanentRestore(record, { keys: [], prefix: '' }, 7_000).policies,
+    ).toStrictEqual([]);
+  });
+});
+
+describe('findRuleAbove', () => {
+  const parent = { prefix: 'any-folder/', createdAt: 0 };
+
+  it('returns the rule on a parent folder', () => {
+    expect(findRuleAbove([parent], 'any-folder/sub/')).toBe(parent);
+  });
+
+  it.each([
+    ['on the folder itself', 'any-folder/'],
+    ['on another folder', 'other-folder/'],
+  ])('returns nothing for a rule %s', (_, prefix) => {
+    expect(findRuleAbove([parent], prefix)).toBeUndefined();
   });
 });

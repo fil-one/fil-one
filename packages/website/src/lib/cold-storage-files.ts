@@ -396,3 +396,45 @@ export function findReplacedColdFiles(
 export function isInMinimumTerm(state: ColdFile, now: number): boolean {
   return now < state.termEndsAt;
 }
+
+/**
+ * A permanent restore: the files go back to Standard for good, with the keep
+ * mark that makes the daily run skip their names, and any copy dropped since
+ * the files are now readable. With a `prefix`, a folder or `''` for the whole
+ * bucket, it also removes every freeze rule there and below, so files
+ * uploaded there later stay in Standard too.
+ */
+export function getRecordAfterPermanentRestore(
+  record: BucketColdRecord,
+  change: { keys: string[]; prefix?: string },
+  now: number,
+): BucketColdRecord {
+  const { keys, prefix } = change;
+  const kept = { ...record.kept };
+  const restores = { ...record.restores };
+  for (const key of keys) {
+    kept[key] = now;
+    delete restores[key];
+  }
+  const policies =
+    prefix === undefined
+      ? record.policies
+      : record.policies.filter(
+          (policy) => !(isFilePolicy(policy) ? policy.key : policy.prefix).startsWith(prefix),
+        );
+  return { ...record, kept, restores, policies };
+}
+
+/**
+ * The folder rule that still covers `prefix` from above it, if any: after a
+ * permanent restore of the folder, files uploaded there later still freeze
+ * under it.
+ */
+export function findRuleAbove(
+  policies: FreezePolicy[],
+  prefix: string,
+): FolderFreezePolicy | undefined {
+  return policies
+    .filter(isFolderPolicy)
+    .find((policy) => policy.prefix.length < prefix.length && prefix.startsWith(policy.prefix));
+}

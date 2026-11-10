@@ -103,10 +103,16 @@ export const Restore: Story = {
         region: REGION,
         scopes: [
           { id: 'selection', label: 'final-cut.mov', versions: FRAMES.slice(0, 1) },
-          { id: 'folder', label: 'Everything in 2025/acme/', versions: FRAMES },
+          {
+            id: 'folder',
+            label: 'Everything in 2025/acme/',
+            prefix: '2025/acme/',
+            versions: FRAMES,
+          },
           {
             id: 'bucket',
             label: 'The whole bucket',
+            prefix: '',
             versions: [...FRAMES, file('2024/zeta/master.mov', 380e9)],
           },
         ],

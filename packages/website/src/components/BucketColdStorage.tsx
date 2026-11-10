@@ -59,10 +59,11 @@ function buildRestoreScopes(
       ? {
           id: 'folder',
           label: `Everything in ${currentPrefix}`,
+          prefix: currentPrefix,
           versions: coldVersions.filter((v) => v.key.startsWith(currentPrefix)),
         }
       : null,
-    { id: 'bucket', label: 'The whole bucket', versions: coldVersions },
+    { id: 'bucket', label: 'The whole bucket', prefix: '', versions: coldVersions },
   ];
   const scopes: RestoreScope[] = [];
   for (const scope of candidates) {
