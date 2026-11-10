@@ -559,10 +559,12 @@ export function formatUsd(amount: number): string {
 
 /**
  * "$2.99/TB-month". The console quotes only the per-TB rate, never a bucket's
- * total or what it saves, so every price in the flow goes through this.
+ * total or what it saves, so every price in the flow goes through this. The
+ * hyphen is non-breaking (U+2011), so a narrow dialog never wraps a rate
+ * after "TB-" and leaves "month" on a line of its own.
  */
 export function formatRate(pricePerTbMonth: number): string {
-  return `${formatUsd(pricePerTbMonth)}/TB-month`;
+  return `${formatUsd(pricePerTbMonth)}/TB‑month`;
 }
 
 /** A date for long spans; a time when the moment falls today, which short waits make common. */

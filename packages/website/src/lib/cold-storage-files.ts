@@ -288,6 +288,21 @@ function getBreakdownSlot(
   }
 }
 
+/**
+ * How many files under `prefix` a freeze policy there would leave in Standard
+ * for being under 128 KB. Only the latest version of a file can freeze, so
+ * older versions and delete markers don't count.
+ */
+export function countFilesTooSmallToFreeze(versions: S3ObjectVersion[], prefix: string): number {
+  return versions.filter(
+    (version) =>
+      version.isLatest &&
+      !version.isDeleteMarker &&
+      version.key.startsWith(prefix) &&
+      version.sizeBytes < MIN_FREEZE_FILE_BYTES,
+  ).length;
+}
+
 export function getStorageBreakdown(
   record: BucketColdRecord,
   versions: S3ObjectVersion[],

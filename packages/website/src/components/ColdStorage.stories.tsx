@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { S3Region, type S3ObjectVersion } from '@filone/shared';
+import { useQueryClient } from '@tanstack/react-query';
+import { S3Region, type ListObjectVersionsResponse, type S3ObjectVersion } from '@filone/shared';
 
 import { BucketDetailsDrawer } from './BucketDetailsDrawer';
 import { ColdStorageAnnouncementDialog } from './ColdStorageAnnouncement';
@@ -10,6 +12,7 @@ import { KeepInStandardDialog } from './KeepInStandardDialog';
 import { RestoreFilesDialog } from './RestoreFilesDialog';
 import { RestoreProgress } from './RestoreProgress';
 import { describeColdDelete } from '../lib/cold-storage-prototype.js';
+import { queryKeys } from '../lib/query-client.js';
 
 /**
  * The cold storage prototype (FIL-1608), one story per screen and state.
@@ -47,11 +50,38 @@ export const Announcement: Story = {
   render: () => <ColdStorageAnnouncementDialog open onClose={() => {}} onViewBuckets={() => {}} />,
 };
 
-/** The freeze review. Opened from a bucket page it also offers each folder. */
+/**
+ * The freeze review before the bucket page has listed the files, as from the
+ * Buckets table: the small-file term states the rule without a count.
+ */
 export const FreezeReview: Story = {
   render: () => (
     <FreezeBucketDialog target={{ bucketName: BUCKET, region: REGION }} onClose={() => {}} />
   ),
+};
+
+// The listing goes into the preview's client, seeded before the first render
+// and never stale, since no server answers a refetch.
+function FreezeReviewWithListing({ versions }: { versions: S3ObjectVersion[] }) {
+  const queryClient = useQueryClient();
+  useState(() => {
+    const key = queryKeys.objects(BUCKET, REGION);
+    queryClient.setQueryDefaults(key, { staleTime: Infinity });
+    queryClient.setQueryData<ListObjectVersionsResponse>(key, { versions, isTruncated: false });
+  });
+  return <FreezeBucketDialog target={{ bucketName: BUCKET, region: REGION }} onClose={() => {}} />;
+}
+
+const SMALL_FILES = Array.from({ length: 214 }, (_, i) => file(`2025/acme/stills/${i}.jpg`, 90e3));
+
+/** The freeze review from a bucket page, counting the files too small to freeze. */
+export const FreezeReviewSmallFiles: Story = {
+  render: () => <FreezeReviewWithListing versions={[...FRAMES, ...SMALL_FILES]} />,
+};
+
+/** No file is under 128 KB, so the small-file term doesn't show. */
+export const FreezeReviewNoSmallFiles: Story = {
+  render: () => <FreezeReviewWithListing versions={FRAMES} />,
 };
 
 /** Freezing one file picked in the table. */

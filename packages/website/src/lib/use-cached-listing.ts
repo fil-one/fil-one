@@ -18,7 +18,12 @@ import { queryKeys } from './query-client.js';
 export function useCachedListing(
   bucketName: string,
   region: S3Region,
-): { versions: S3ObjectVersion[] | undefined; versioned: boolean } {
+): {
+  versions: S3ObjectVersion[] | undefined;
+  /** False until a listing loads, and when S3 cut it off at its page size. */
+  isComplete: boolean;
+  versioned: boolean;
+} {
   const { data: bucket } = useQuery<GetBucketResponse>({
     queryKey: queryKeys.bucket(bucketName, region),
     queryFn: skipToken,
@@ -27,7 +32,11 @@ export function useCachedListing(
     queryKey: queryKeys.objects(bucketName, region),
     queryFn: skipToken,
   });
-  return { versions: listing?.versions, versioned: bucket?.bucket.versioning ?? false };
+  return {
+    versions: listing?.versions,
+    isComplete: listing !== undefined && !listing.isTruncated,
+    versioned: bucket?.bucket.versioning ?? false,
+  };
 }
 
 /** Every folder in a listing, shallowest first: `a/`, `a/b/`, and so on. */

@@ -5,6 +5,7 @@ import type { S3ObjectVersion } from '@filone/shared';
 import {
   EMPTY_COLD_RECORD,
   MIN_FREEZE_FILE_BYTES,
+  countFilesTooSmallToFreeze,
   findReplacedColdFiles,
   getFileColdState,
   getJobProgress,
@@ -301,5 +302,26 @@ describe('getJobProgress', () => {
       c: undefined,
     };
     expect(getJobProgress(job, (key) => states[key])).toStrictEqual({ ready: 2, total: 3 });
+  });
+});
+
+describe('countFilesTooSmallToFreeze', () => {
+  const small = MIN_FREEZE_FILE_BYTES - 1;
+
+  it('counts the latest files under 128 KB inside the prefix', () => {
+    const versions = [
+      version({ key: 'any-folder/a', sizeBytes: small }),
+      version({ key: 'any-folder/b', sizeBytes: small }),
+      version({ key: 'any-folder/c', sizeBytes: MIN_FREEZE_FILE_BYTES }),
+    ];
+    expect(countFilesTooSmallToFreeze(versions, 'any-folder/')).toBe(2);
+  });
+
+  it.each([
+    ['a file outside the prefix', version({ key: 'other-folder/a', sizeBytes: small })],
+    ['an older version', version({ sizeBytes: small, isLatest: false })],
+    ['a delete marker', version({ sizeBytes: 0, isDeleteMarker: true })],
+  ])('leaves out %s', (_, excluded) => {
+    expect(countFilesTooSmallToFreeze([excluded], 'any-folder/')).toBe(0);
   });
 });

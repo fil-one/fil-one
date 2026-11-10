@@ -1,14 +1,13 @@
-import { useState } from 'react';
-import { CalendarBlankIcon, ClockIcon, FileIcon, TagIcon } from '@phosphor-icons/react/dist/ssr';
+import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import type { S3Region } from '@filone/shared';
 
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal';
-import { Alert } from './Alert';
 import { Button } from './Button';
 import { FormField } from './FormField';
 import { Select } from './Select';
-import { RateComparison, Term, TermList } from './ColdStorageFacts';
+import { FactList } from './ColdStorageFacts';
 import { useToast } from './Toast';
 import {
   COLD_PRICE_PER_TB_MONTH,
@@ -21,8 +20,9 @@ import {
   useColdFiles,
   useLastNonNull,
 } from '../lib/cold-storage-prototype.js';
+import { getBucketListing } from '../lib/object-listing.js';
 import { getFolderPrefixes, useCachedListing } from '../lib/use-cached-listing.js';
-import { isFilePolicy } from '../lib/cold-storage-files.js';
+import { countFilesTooSmallToFreeze, isFilePolicy } from '../lib/cold-storage-files.js';
 
 export type ColdStorageTarget = {
   bucketName: string;
@@ -43,26 +43,26 @@ const WHOLE_BUCKET = '';
 
 interface FreezeCopy {
   title: string;
+  /** What stops working, first thing under the title: it changes how these files can be used. */
   description: string;
-  termTitle: string;
-  termBody: string;
-  restoreBody: string;
-  warning: string;
+  freezes: string;
+  term: string;
+  /** What the lower rate commits to, below the facts as the restore dialog sets its billing. */
+  footnote: string;
   confirm: string;
   toast: string;
 }
 
-const RESTORE_COPY_BILLING = 'The copy is billed at the standard rate for at least 2 weeks.';
+const RESTORE_BILLING = `A restored copy bills at ${formatRate(WARM_PRICE_PER_TB_MONTH)} for at least 2 weeks.`;
 
 /** The review's words for a bucket or a folder: everything in it, now and later. */
-function describeScope(name: string, isBucket: boolean): FreezeCopy {
+function describeScope(name: string): FreezeCopy {
   return {
     title: `Freeze all files in ${name}`,
-    description: `Every file in this ${isBucket ? 'bucket' : 'folder'} freezes at the next daily run. If you upload a new file, it starts at the standard rate and freezes at the next run.`,
-    termTitle: `Each file stays frozen for at least ${MIN_TERM_DAYS} days`,
-    termBody: `Deleting or replacing a file sooner still bills the rest of its ${MIN_TERM_DAYS} days.`,
-    restoreBody: `Restore a file, a folder or the whole bucket. ${RESTORE_COPY_BILLING}`,
-    warning: 'Frozen files can’t be downloaded or shared until you restore them.',
+    description: 'Frozen files can’t be downloaded or shared until you restore them.',
+    freezes: 'At the next daily run, new uploads included',
+    term: `${MIN_TERM_DAYS} days per file`,
+    footnote: `Deleting or replacing a file within ${MIN_TERM_DAYS} days bills the rest of its term. ${RESTORE_BILLING}`,
     confirm: 'Freeze all files',
     toast: `Files in ${name} freeze at the next daily run.`,
   };
@@ -74,20 +74,21 @@ function describeFiles(keys: string[]): FreezeCopy {
   const name = one ? (keys[0].split('/').at(-1) ?? keys[0]) : `${keys.length} files`;
   return {
     title: `Freeze ${name}`,
-    description: `${one ? 'It freezes' : 'They freeze'} at the next daily run. Until then, ${one ? 'it works' : 'they work'} as usual.`,
-    termTitle: one
-      ? `It stays frozen for at least ${MIN_TERM_DAYS} days`
-      : `Each stays frozen for at least ${MIN_TERM_DAYS} days`,
-    termBody: one
-      ? `Deleting or replacing it sooner still bills the rest of its ${MIN_TERM_DAYS} days.`
-      : `Deleting or replacing one sooner still bills the rest of its ${MIN_TERM_DAYS} days.`,
-    restoreBody: `Restore ${one ? 'it' : 'them'} when you need ${one ? 'it' : 'them'}. ${RESTORE_COPY_BILLING}`,
-    warning: one
+    description: one
       ? 'Once frozen, it can’t be downloaded or shared until you restore it.'
       : 'Once frozen, they can’t be downloaded or shared until you restore them.',
+    freezes: 'At the next daily run',
+    term: one ? `${MIN_TERM_DAYS} days` : `${MIN_TERM_DAYS} days per file`,
+    footnote: `Deleting or replacing ${one ? 'it' : 'one'} within ${MIN_TERM_DAYS} days bills the rest of its term. ${RESTORE_BILLING}`,
     confirm: one ? 'Freeze file' : 'Freeze files',
-    toast: `${one ? name : `${keys.length} files`} ${one ? 'freezes' : 'freeze'} at the next daily run.`,
+    toast: `${name} ${one ? 'freezes' : 'freeze'} at the next daily run.`,
   };
+}
+
+/** The small files left in Standard: how many when the listing says, the rule alone when it can't (`null`). */
+function describeSmallFiles(count: number | null): string {
+  if (count === null) return 'Files under 128 KB';
+  return `${count === 1 ? '1 file' : `${count.toLocaleString('en-US')} files`} under 128 KB`;
 }
 
 /**
@@ -114,7 +115,15 @@ export function FreezeBucketDialog({ target, onClose }: FreezeBucketDialogProps)
 
 function FreezeForm({ target, onClose }: { target: ColdStorageTarget; onClose: () => void }) {
   const { bucketName, region } = target;
-  const { versions } = useCachedListing(bucketName, region);
+  const { versions, isComplete } = useCachedListing(bucketName, region);
+  const queryClient = useQueryClient();
+  // Opened from the Buckets table, nothing has listed the bucket yet. Loading
+  // it fills the cache `useCachedListing` reads, so the folders and the
+  // small-file count appear once it lands; if it fails, the rule alone shows.
+  const isListed = versions !== undefined;
+  useEffect(() => {
+    if (!isListed) getBucketListing(queryClient, bucketName, region).catch(() => {});
+  }, [isListed, queryClient, bucketName, region]);
   const { record } = useColdFiles(bucketName, region);
   const covered = (prefix: string) =>
     record?.policies.some((policy) => !isFilePolicy(policy) && prefix.startsWith(policy.prefix)) ??
@@ -126,7 +135,11 @@ function FreezeForm({ target, onClose }: { target: ColdStorageTarget; onClose: (
   const { toast } = useToast();
   const isBucket = scope === WHOLE_BUCKET;
   const keys = target.keys;
-  const copy = keys ? describeFiles(keys) : describeScope(isBucket ? bucketName : scope, isBucket);
+  const copy = keys ? describeFiles(keys) : describeScope(isBucket ? bucketName : scope);
+  // A count from part of the bucket would understate it, so without the full
+  // listing the dialog states the rule instead.
+  const smallFileCount =
+    versions && isComplete ? countFilesTooSmallToFreeze(versions, scope) : null;
 
   function handleFreeze() {
     if (keys) addFileFreezePolicies(bucketName, region, keys);
@@ -149,7 +162,7 @@ function FreezeForm({ target, onClose }: { target: ColdStorageTarget; onClose: (
         {copy.title}
       </ModalHeader>
       <ModalBody>
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-4">
           {!keys && folders.length > 0 && (
             <FormField label="What to freeze" htmlFor="freeze-scope">
               <Select id="freeze-scope" value={scope} onChange={setScope}>
@@ -162,43 +175,36 @@ function FreezeForm({ target, onClose }: { target: ColdStorageTarget; onClose: (
               </Select>
             </FormField>
           )}
-          {/* A folder or a bucket is a big enough move to set the two rates side
-              by side; for picked files the rate is one line among the terms. */}
-          {!keys && (
-            <RateComparison
-              cells={[
-                { label: 'Standard', pricePerTbMonth: WARM_PRICE_PER_TB_MONTH },
-                { label: 'Frozen', pricePerTbMonth: COLD_PRICE_PER_TB_MONTH },
-              ]}
-            />
-          )}
-          <TermList>
-            {/* One sentence each, with no rates: both sit in the comparison
-                above, so the terms say only what the rates don't. */}
-            {keys && (
-              <Term
-                icon={TagIcon}
-                title={`${formatRate(COLD_PRICE_PER_TB_MONTH)} instead of ${formatRate(WARM_PRICE_PER_TB_MONTH)}`}
-              >
-                {keys.length === 1 ? 'Its' : 'Their'} storage bills at the frozen rate from the next
-                daily run.
-              </Term>
-            )}
-            <Term icon={CalendarBlankIcon} title={copy.termTitle}>
-              {copy.termBody}
-            </Term>
-            <Term icon={ClockIcon} title="Restoring takes about an hour">
-              {copy.restoreBody}
-            </Term>
-            {/* Picked files are all 128 KB or more, so the rule only matters
-                when freezing a folder or a bucket. */}
-            {!keys && (
-              <Term icon={FileIcon} title="Files under 128 KB aren’t frozen">
-                They stay in standard storage, at the standard rate.
-              </Term>
-            )}
-          </TermList>
-          <Alert variant="amber" assertive={false} description={copy.warning} />
+          {/* The restore dialog's fact list, so freezing and restoring read as
+              one flow. The small files sit under the rate, since they are the
+              ones that don't get it. Picked files are all 128 KB or more, so
+              that row shows only for a folder or a bucket with small files. */}
+          <FactList
+            facts={[
+              {
+                label: 'Frozen rate',
+                value: formatRate(COLD_PRICE_PER_TB_MONTH),
+                detail: `Instead of ${formatRate(WARM_PRICE_PER_TB_MONTH)}`,
+              },
+              ...(!keys && smallFileCount !== 0
+                ? [
+                    {
+                      label: 'Not frozen',
+                      value: describeSmallFiles(smallFileCount),
+                      detail: 'Billed at the standard rate',
+                    },
+                  ]
+                : []),
+              { label: 'Freezes', value: copy.freezes },
+              { label: 'Minimum term', value: copy.term },
+              {
+                label: 'Restore time',
+                value: 'About an hour',
+                detail: 'Before a frozen file can be downloaded again',
+              },
+            ]}
+          />
+          <p className="text-xs text-(--color-paragraph-text-subtle)">{copy.footnote}</p>
         </div>
       </ModalBody>
       <ModalFooter fullWidth>
