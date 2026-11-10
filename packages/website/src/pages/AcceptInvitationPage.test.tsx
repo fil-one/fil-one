@@ -95,6 +95,8 @@ const deletionInProgress = apiError(
   ApiErrorCode.DELETION_IN_PROGRESS,
 );
 
+const csrfInvalid = apiError('CSRF validation failed', 403, ApiErrorCode.CSRF_INVALID);
+
 async function resetMocks() {
   vi.clearAllMocks();
   // A queued answer a failed test never consumed must not reach the next one.
@@ -248,15 +250,28 @@ describe('AcceptInvitationPage', () => {
     expect(panel).toHaveTextContent('Ask an administrator for a new invitation.');
   });
 
-  it('sends the invitee back to the email link when the CSRF check refuses', async () => {
-    mockAccept.mockRejectedValue(
-      apiError('CSRF validation failed', 403, ApiErrorCode.CSRF_INVALID),
-    );
+  it('explains a CSRF refusal without naming CSRF', async () => {
+    mockAccept.mockRejectedValue(csrfInvalid);
     renderPage();
 
     const panel = await screen.findByTestId('accept-session-changed');
-    expect(panel).toHaveTextContent('Open your invitation link again');
+    expect(panel).toHaveTextContent('Your session changed');
     expect(panel).not.toHaveTextContent('CSRF');
+  });
+
+  it('redeems the same token again when the caller tries again after a CSRF refusal', async () => {
+    mockAccept.mockRejectedValueOnce(csrfInvalid).mockResolvedValueOnce({
+      orgId: 'org-9',
+      orgName: 'Acme',
+      role: OrgRole.Member,
+      alreadyMember: false,
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByTestId('accept-success')).toHaveTextContent('Welcome to Acme');
+    expect(mockAccept.mock.calls).toStrictEqual([[TOKEN], [TOKEN]]);
   });
 
   it('renders the server’s sentence for a refusal it has no state for', async () => {

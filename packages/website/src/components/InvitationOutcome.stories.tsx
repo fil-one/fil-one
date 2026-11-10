@@ -114,7 +114,7 @@ export const NoLongerValid: Story = {
 
 /**
  * The CSRF check refused even after the console's retry. Nothing ran, so the
- * token is still good, but it has left the URL, so the way back is the email.
+ * token is still good and the page offers to send it again.
  */
 export const SessionChanged: Story = {
   args: {

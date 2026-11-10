@@ -167,22 +167,26 @@ function Refused({
     );
   }
 
-  // The CSRF check refuses before the handler runs, so the token was not spent.
-  // The generic advice to reload does not fit this page: the token left the URL
-  // on arrival, and a reload lands on the no-token panel.
+  // The CSRF check refuses before the handler runs, so the token was not spent
+  // and the page can send it again. A reload would not: the token left the URL
+  // on arrival, and a reload lands on the no-token panel. The email link stays
+  // the fallback for a retry that is refused too.
   if (code === ApiErrorCode.CSRF_INVALID) {
     return (
       <Panel
-        title="Open your invitation link again"
+        title="Your session changed"
         icon={WarningCircleIcon}
         iconColor="amber"
         testId="accept-session-changed"
         takeFocus
       >
         <p>
-          Your session changed while this page was loading. Your invitation is still valid, so open
-          the link from the email again to accept it.
+          It changed while this page was loading. Your invitation is still valid, so try again or
+          open the link from the email.
         </p>
+        <Button variant="primary" onClick={onRetry}>
+          Try again
+        </Button>
       </Panel>
     );
   }
