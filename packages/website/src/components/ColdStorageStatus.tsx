@@ -1,6 +1,8 @@
 import { ClockIcon, SnowflakeIcon, ThermometerIcon } from '@phosphor-icons/react/dist/ssr';
+import clsx from 'clsx';
 
 import { Badge, type BadgeColor, type BadgeStrength } from './Badge';
+import { Button } from './Button';
 import { Spinner } from './Spinner';
 import {
   MIN_TERM_DAYS,
@@ -204,27 +206,94 @@ function describeBucket(summary: BucketColdSummary): BadgeContent {
 }
 
 /**
- * A bucket's freeze policy as a pill beside its name in the Buckets table.
- * Freezing happens file by file, so the pill says what the policy covers:
- * the whole bucket, some folders, or nothing yet until the first daily run.
+ * A bucket's freeze policy as a pill beside its name, in the Buckets table and
+ * on the bucket page. Freezing happens file by file, so the pill says what the
+ * policy covers: the whole bucket, some folders, or nothing yet until the
+ * first daily run.
+ *
+ * With `onRestore`, once files have frozen, the pill is also the way to
+ * restore them: with a mouse it turns into Restore on hover or keyboard
+ * focus, and on a touch screen, which has no hover, a Restore button sits
+ * beside it. Either way the restore dialog confirms before anything bills.
  */
-export function ColdStorageBadge({ summary }: { summary: BucketColdSummary }) {
-  const { color, strength, icon, text, detail } = describeBucket(summary);
+export function ColdStorageBadge({
+  summary,
+  onRestore,
+}: {
+  summary: BucketColdSummary;
+  onRestore?: () => void;
+}) {
+  const content = describeBucket(summary);
+  if (!onRestore || summary.scheduled) return <BucketBadge content={content} />;
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onRestore}
+        aria-label={`${content.text}. Restore files`}
+        className="group hidden shrink-0 rounded-full focus-visible:brand-outline pointer-fine:inline-flex"
+      >
+        <BucketBadge
+          content={content}
+          hoverClassName={
+            content.strength === 'strong' ? 'group-hover:bg-brand-200' : 'group-hover:bg-brand-100'
+          }
+        >
+          {/* Both labels share one grid cell, so the pill keeps the width of
+              the wider one and doesn't shift as they swap. */}
+          <span className="grid">
+            <span className="col-start-1 row-start-1 inline-flex items-center gap-1 group-hover:invisible group-focus-visible:invisible">
+              {content.icon}
+              {content.text}
+            </span>
+            <span className="invisible col-start-1 row-start-1 inline-flex items-center gap-1 group-hover:visible group-focus-visible:visible">
+              <ThermometerIcon size={11} className="text-brand-600" aria-hidden="true" />
+              Restore
+            </span>
+          </span>
+        </BucketBadge>
+      </button>
+      <span className="flex shrink-0 items-center gap-2 pointer-fine:hidden">
+        <BucketBadge content={content} />
+        <Button variant="ghost" size="sm" icon={ThermometerIcon} onClick={onRestore}>
+          Restore
+        </Button>
+      </span>
+    </>
+  );
+}
+
+function BucketBadge({
+  content,
+  hoverClassName,
+  children,
+}: {
+  content: BadgeContent;
+  hoverClassName?: string;
+  children?: React.ReactNode;
+}) {
   return (
     <Badge
-      color={color}
-      strength={strength}
+      color={content.color}
+      strength={content.strength}
       size="xs"
-      description={detail}
+      description={content.detail}
       // The pill is 20px tall and a table row's name line 17.5px; pulling it
       // out of the line's height keeps cold rows the same height as their
       // neighbours.
       // `cold-storage-badge` is the hook the freeze animation in cold-storage.css targets.
-      className="cold-storage-badge -my-0.5 shrink-0"
+      className={clsx(
+        'cold-storage-badge -my-0.5 shrink-0 transition-colors duration-150',
+        hoverClassName,
+      )}
       data-testid="cold-storage-badge"
     >
-      {icon}
-      {text}
+      {children ?? (
+        <>
+          {content.icon}
+          {content.text}
+        </>
+      )}
     </Badge>
   );
 }

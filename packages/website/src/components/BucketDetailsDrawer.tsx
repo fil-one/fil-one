@@ -7,7 +7,7 @@ import {
   Transition,
   TransitionChild,
 } from '@headlessui/react';
-import { XIcon } from '@phosphor-icons/react/dist/ssr';
+import { ThermometerIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
 
 import {
   formatBytes,
@@ -17,6 +17,7 @@ import {
   type S3Region,
 } from '@filone/shared';
 
+import { Button } from './Button';
 import { describeCoverage } from './ColdStorageStatus';
 import { CopyButton } from './CopyButton';
 import { RegionFlag } from './RegionFlag';
@@ -32,6 +33,8 @@ export type BucketDetailsDrawerProps = {
   bytesUsed: number | undefined;
   objectCount: number | undefined;
   onClose: () => void;
+  /** Cold storage prototype: opens the restore over the whole bucket; absent while nothing is frozen. */
+  onRestoreFiles?: () => void;
 };
 
 /**
@@ -50,6 +53,7 @@ export function BucketDetailsDrawer({
   bytesUsed,
   objectCount,
   onClose,
+  onRestoreFiles,
 }: BucketDetailsDrawerProps) {
   // Mounted open; closing plays the slide-out, then tells the page to unmount.
   const [open, setOpen] = useState(true);
@@ -136,7 +140,11 @@ export function BucketDetailsDrawer({
                       ) ?? 'None'}
                     </Fact>
                   </Section>
-                  <ColdStorageSection bucketName={bucket.bucketName} region={region} />
+                  <ColdStorageSection
+                    bucketName={bucket.bucketName}
+                    region={region}
+                    onRestoreFiles={onRestoreFiles}
+                  />
                 </div>
               </div>
             </DialogPanel>
@@ -152,7 +160,15 @@ export function BucketDetailsDrawer({
  * where its bytes bill, by state. States with nothing in them are left out.
  * Sizes only, never costs: the console quotes rates, not totals.
  */
-function ColdStorageSection({ bucketName, region }: { bucketName: string; region: S3Region }) {
+function ColdStorageSection({
+  bucketName,
+  region,
+  onRestoreFiles,
+}: {
+  bucketName: string;
+  region: S3Region;
+  onRestoreFiles?: () => void;
+}) {
   const summary = useBucketColdSummary(bucketName, region);
   const cold = useColdFiles(bucketName, region);
   const { versions, versioned } = useCachedListing(bucketName, region);
@@ -182,6 +198,14 @@ function ColdStorageSection({ bucketName, region }: { bucketName: string; region
           </span>
         </Fact>
       ))}
+      {onRestoreFiles && (
+        // Under the facts, in the value column, so it reads as acting on them.
+        <div className="col-start-2">
+          <Button variant="ghost" size="sm" icon={ThermometerIcon} onClick={onRestoreFiles}>
+            Restore files
+          </Button>
+        </div>
+      )}
     </Section>
   );
 }

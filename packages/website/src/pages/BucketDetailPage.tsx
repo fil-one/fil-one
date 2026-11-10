@@ -7,7 +7,6 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Alert } from '../components/Alert';
 import { Skeleton } from '../components/Skeleton';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
-import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { countObjects } from '../components/ObjectBrowser';
 import { ObjectsPanel } from './BucketObjectsPanel';
 import { useBucketTabs } from '../lib/use-bucket-tabs.js';
@@ -35,6 +34,7 @@ import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import { fetchObjectListing } from '../lib/object-listing.js';
+import { describeRetention } from '../lib/retention.js';
 
 function formatStorage(bytesUsed: number | undefined): string {
   if (bytesUsed === undefined) return '—';
@@ -103,26 +103,35 @@ function BucketOverview({
   const simulated = useSimulatedAnalytics(bucket?.bucketName ?? '', region);
   if (!bucket) return null;
 
+  // The one setting that changes what can be done in the table: retention
+  // blocks deletes. Bucket details lists every setting, on or off.
+  const retention = bucket.objectLockEnabled
+    ? describeRetention(
+        bucket.defaultRetention,
+        bucket.retentionDuration,
+        bucket.retentionDurationType,
+      )
+    : null;
   return (
-    <>
-      <p className="mb-6 text-sm">
-        <span className="text-zinc-700">{region}</span>
-        <span className="mx-2 text-zinc-400">&bull;</span>
-        <span className="text-xs text-zinc-500">
-          {formatStorage(simulated?.bytesUsed ?? bytesUsed)} used
-        </span>
-      </p>
-      {/* Only the settings that are on; Bucket details lists them all. */}
-      <BucketPropertyCards bucket={bucket} />
-    </>
+    <p className="mb-6 text-sm">
+      <span className="text-zinc-700">{region}</span>
+      <span className="mx-2 text-zinc-400">&bull;</span>
+      <span className="text-xs text-zinc-500">
+        {formatStorage(simulated?.bytesUsed ?? bytesUsed)} used
+      </span>
+      {retention && (
+        <>
+          <span className="mx-2 text-zinc-400">&bull;</span>
+          <span className="text-xs text-zinc-500">{retention}</span>
+        </>
+      )}
+    </p>
   );
 }
 
 /**
  * The overview's own placeholder, shown while the bucket metadata is in flight:
- * the one line of meta. The property cards appear only for settings that are
- * on, which most buckets have none of, so reserving their row would make the
- * common page jump up when metadata lands.
+ * the one line of meta.
  */
 function BucketOverviewSkeleton() {
   return (
@@ -357,6 +366,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         mayUpload={mayUpload}
         onEmptied={refreshAfterBulkDelete}
         coldMenuActions={cold.menuActions}
+        onRestoreFiles={cold.onRestoreFiles}
       />
 
       {bucketQuery.isPending ? (

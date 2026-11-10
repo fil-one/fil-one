@@ -171,6 +171,28 @@ export const FolderStates: Story = {
   ),
 };
 
+/**
+ * On the bucket page the pill also restores: with a mouse it turns into
+ * Restore on hover; on a touch screen a Restore button sits beside it.
+ */
+export const BucketBadgeRestore: Story = {
+  render: () => {
+    const base = { prefixes: [], fileCount: 0, firstRunAt: now - DAY, activeRestores: 0 };
+    return (
+      <div className="flex flex-col items-start gap-3">
+        <ColdStorageBadge
+          summary={{ ...base, scope: 'bucket', scheduled: false }}
+          onRestore={() => {}}
+        />
+        <ColdStorageBadge
+          summary={{ ...base, scope: 'folders', prefixes: ['2025/'], scheduled: false }}
+          onRestore={() => {}}
+        />
+      </div>
+    );
+  },
+};
+
 /** A bucket's pill in the Buckets table and on its page, by what its policy covers. */
 export const BucketStates: Story = {
   render: () => {

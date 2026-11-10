@@ -212,6 +212,8 @@ export function useBucketColdStorage(bucketName: string, region: S3Region, curre
         ? [{ label: 'Restore files', icon: ThermometerIcon, onSelect: () => openRestore(null) }]
         : []),
     ] satisfies BucketAction[],
+    /** Restores from the whole bucket, for the title badge and the details panel; absent while nothing is frozen. */
+    onRestoreFiles: hasColdFiles ? () => openRestore(null) : undefined,
     overlays: (
       <>
         <FreezeBucketDialog target={freezeTarget} onClose={() => setFreezeTarget(null)} />

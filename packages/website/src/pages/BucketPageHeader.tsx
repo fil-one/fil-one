@@ -92,6 +92,7 @@ export function BucketPageHeader({
   mayUpload,
   onEmptied,
   coldMenuActions,
+  onRestoreFiles,
 }: {
   bucketName: string;
   bucket: BucketDetails | null;
@@ -103,6 +104,8 @@ export function BucketPageHeader({
   onEmptied: () => void;
   /** Cold storage prototype: Freeze files and Restore files, when they apply. */
   coldMenuActions: BucketAction[];
+  /** Cold storage prototype: opens the restore over the whole bucket; absent while nothing is frozen. */
+  onRestoreFiles?: () => void;
 }) {
   const navigate = useNavigate();
   const coldSummary = useBucketColdSummary(bucketName, region);
@@ -115,7 +118,7 @@ export function BucketPageHeader({
         </Heading>
         {/* Cold storage prototype: the Buckets table's pill, so a bucket frozen
             as a whole says so on its own page, new uploads included. */}
-        {coldSummary && <ColdStorageBadge summary={coldSummary} />}
+        {coldSummary && <ColdStorageBadge summary={coldSummary} onRestore={onRestoreFiles} />}
       </div>
       <BucketHeaderActions
         bucketName={bucketName}
@@ -142,6 +145,13 @@ export function BucketPageHeader({
           bytesUsed={analytics?.bytesUsed}
           objectCount={analytics?.objectCount}
           onClose={() => setDetailsOpen(false)}
+          onRestoreFiles={
+            onRestoreFiles &&
+            (() => {
+              setDetailsOpen(false);
+              onRestoreFiles();
+            })
+          }
         />
       )}
     </div>
