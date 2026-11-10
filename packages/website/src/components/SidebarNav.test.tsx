@@ -131,6 +131,7 @@ const UNIQUE_TESTIDS = [
   'nav-dashboard',
   'nav-buckets',
   'nav-api-keys',
+  'nav-bucket-intelligence',
   'org-switcher-button',
   'user-menu-button',
 ];
@@ -212,6 +213,20 @@ describe('SidebarNav — the API Keys entry', () => {
     expect(container.querySelectorAll('[data-testid="nav-api-keys"]')).toHaveLength(0);
     // Buckets carries no permission — every role browses.
     expect(container.querySelectorAll('[data-testid="nav-buckets"]')).toHaveLength(1);
+  });
+});
+
+describe('SidebarNav, the Bucket Intelligence entry', () => {
+  it('renders for a user on the Bucket Intelligence allowlist', () => {
+    const { container } = renderBothSidebars(OrgRole.Owner, { ragAccess: true });
+
+    expect(container.querySelectorAll('[data-testid="nav-bucket-intelligence"]')).toHaveLength(1);
+  });
+
+  it('is absent for a user off the allowlist', () => {
+    const { container } = renderBothSidebars(OrgRole.Owner, { ragAccess: false });
+
+    expect(container.querySelectorAll('[data-testid="nav-bucket-intelligence"]')).toHaveLength(0);
   });
 });
 
