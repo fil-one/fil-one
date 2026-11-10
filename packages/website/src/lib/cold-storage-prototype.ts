@@ -32,6 +32,8 @@ import {
   isFilePolicy,
   isColdFile,
   isFolderPolicy,
+  isLockedFile,
+  getRestoreAfterExtension,
   getRestoreAfterRequest,
   getStaggeredWaitMs,
   type BucketColdRecord,
@@ -46,6 +48,7 @@ export {
   MAX_RESTORE_DAYS,
   MIN_TERM_DAYS,
   WARM_MIN_DAYS,
+  getMaxExtensionDays,
   isColdFile,
   isInMinimumTerm,
   isLockedFile,
@@ -294,6 +297,23 @@ export function addFileFreezePolicies(bucketName: string, region: string, keys: 
   });
 }
 
+/** Adds `days` to each restored copy in `keys`, from when it would have expired. */
+export function extendRestores(
+  bucketName: string,
+  region: string,
+  change: { keys: string[]; days: number },
+) {
+  const clock = getClock(store.settings);
+  updateRecord(bucketName, region, (record) => {
+    const restores = { ...record.restores };
+    for (const key of change.keys) {
+      const existing = restores[key];
+      if (existing) restores[key] = getRestoreAfterExtension(existing, change.days, clock);
+    }
+    return { ...record, restores };
+  });
+}
+
 /** Starts one restore job over `versions`, each kept readable for `days` (at least 14). */
 export function restoreFiles(
   bucketName: string,
@@ -340,29 +360,53 @@ export function restoreFiles(
  */
 export function keepInStandard(bucketName: string, region: string, keys: string[]) {
   const now = Date.now();
-  updateRecord(bucketName, region, (record) => {
-    const kept = { ...record.kept };
-    const restores = { ...record.restores };
-    for (const key of keys) {
-      kept[key] = now;
-      delete restores[key];
-    }
-    return { ...record, kept, restores };
-  });
+  updateRecord(bucketName, region, (record) =>
+    getRecordAfterPermanentRestore(record, { keys }, now),
+  );
 }
 
 /**
  * Restores files permanently: back to Standard for good. With a `prefix`, a
  * folder or `''` for the whole bucket, the freeze rules there go too, so new
  * uploads stay in Standard. See `getRecordAfterPermanentRestore`.
+ *
+ * A frozen file has no readable copy, so it stays locked through the restore
+ * wait, staggered as in `restoreFiles`; a restored one is readable already
+ * and moves at once. Several waiting files run as one job with a progress
+ * count. Returns how many files wait.
  */
 export function restorePermanently(
   bucketName: string,
   region: string,
-  change: { keys: string[]; prefix?: string },
-) {
+  change: { versions: S3ObjectVersion[]; prefix?: string; label: string },
+): number {
   const now = Date.now();
-  updateRecord(bucketName, region, (record) => getRecordAfterPermanentRestore(record, change, now));
+  const clock = getClock(store.settings);
+  const { versions, prefix, label } = change;
+  let waiting: S3ObjectVersion[] = [];
+  updateRecord(bucketName, region, (record) => {
+    waiting = versions.filter((version) =>
+      isLockedFile(getFileColdState(record, version, now, clock)),
+    );
+    const next = getRecordAfterPermanentRestore(
+      record,
+      { keys: versions.map((v) => v.key), prefix },
+      now,
+    );
+    const unfreezing = { ...next.unfreezing };
+    waiting.forEach((version, index) => {
+      unfreezing[version.key] = now + getStaggeredWaitMs(index, waiting.length, clock);
+    });
+    const restoreJobs =
+      waiting.length > 1
+        ? [
+            ...next.restoreJobs.slice(-4),
+            { id: `${now}`, label, keys: waiting.map((v) => v.key), startedAt: now },
+          ]
+        : next.restoreJobs;
+    return { ...next, unfreezing, restoreJobs };
+  });
+  return waiting.length;
 }
 
 /** Clears the keep mark, so the files freeze again at the next daily run. */

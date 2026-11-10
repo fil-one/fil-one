@@ -78,6 +78,8 @@ export interface BucketColdRecord {
   kept: Record<string, number>;
   /** When "Freeze again" cleared a file's keep mark, by key: it freezes at the next run after. */
   refrozen: Record<string, number>;
+  /** When a frozen file's permanent restore finishes, by key: until then it stays locked. */
+  unfreezing: Record<string, number>;
 }
 
 export const EMPTY_COLD_RECORD: BucketColdRecord = {
@@ -86,6 +88,7 @@ export const EMPTY_COLD_RECORD: BucketColdRecord = {
   restores: {},
   kept: {},
   refrozen: {},
+  unfreezing: {},
 };
 
 export interface StandardFile {
@@ -118,6 +121,12 @@ export interface RestoringFile extends FrozenTerm {
   expiresAt: number;
 }
 
+/** A frozen file on its way back to Standard for good: locked until `readyAt`. */
+export interface UnfreezingFile {
+  status: 'unfreezing';
+  readyAt: number;
+}
+
 export interface RestoredFile extends FrozenTerm {
   status: 'restored';
   expiresAt: number;
@@ -129,7 +138,8 @@ export type FileColdState =
   | ScheduledFile
   | FrozenFile
   | RestoringFile
-  | RestoredFile;
+  | RestoredFile
+  | UnfreezingFile;
 
 /** A file with a frozen copy, whether or not a readable copy sits beside it. */
 export type ColdFile = FrozenFile | RestoringFile | RestoredFile;
@@ -140,7 +150,7 @@ export function isColdFile(state: FileColdState): state is ColdFile {
 
 /** Frozen or still restoring: no readable copy yet, so download and share wait. */
 export function isLockedFile(state: FileColdState): boolean {
-  return state.status === 'frozen' || state.status === 'restoring';
+  return state.status === 'frozen' || state.status === 'restoring' || state.status === 'unfreezing';
 }
 
 const STANDARD: StandardFile = { status: 'standard', belowMinimum: false };
@@ -176,6 +186,10 @@ export function getFileColdState(
   clock: Clock,
 ): FileColdState {
   if (!version.isLatest || version.isDeleteMarker) return STANDARD;
+  const unfreezesAt = record.unfreezing[version.key];
+  if (unfreezesAt !== undefined && now < unfreezesAt) {
+    return { status: 'unfreezing', readyAt: unfreezesAt };
+  }
   const policy = findCoveringPolicy(record.policies, version.key);
   if (!policy) return STANDARD;
   if (Object.hasOwn(record.kept, version.key)) return { status: 'kept' };
@@ -267,6 +281,28 @@ export function getRestoreAfterRequest(
 }
 
 /**
+ * Adds `days` to a readable copy, from the day it would have expired. The
+ * copy has already been kept the 14-day minimum, so a single day is enough.
+ */
+export function getRestoreAfterExtension(
+  existing: FileRestore,
+  days: number,
+  clock: Clock,
+): FileRestore {
+  return { ...existing, expiresAt: existing.expiresAt + days * clock.dayMs };
+}
+
+/**
+ * The most whole days that can be added to copies expiring at `expiries`:
+ * RestoreObject takes at most 365 days from the request, so the copy that
+ * lasts longest sets the limit.
+ */
+export function getMaxExtensionDays(expiries: number[], now: number, clock: Clock): number {
+  const latest = Math.max(now, ...expiries);
+  return Math.floor((now + MAX_RESTORE_DAYS * clock.dayMs - latest) / clock.dayMs);
+}
+
+/**
  * How long the file at `index` of a `count`-file job waits: the first about
  * half the full wait, the last the full wait, the rest spread between. A real
  * bulk restore finishes file by file, which is what its progress count shows.
@@ -285,7 +321,10 @@ export function getJobProgress(
   job: RestoreJob,
   getStateByKey: (key: string) => FileColdState | undefined,
 ): JobProgress {
-  const ready = job.keys.filter((key) => getStateByKey(key)?.status !== 'restoring').length;
+  const ready = job.keys.filter((key) => {
+    const status = getStateByKey(key)?.status;
+    return status !== 'restoring' && status !== 'unfreezing';
+  }).length;
   return { ready, total: job.keys.length };
 }
 
@@ -317,7 +356,9 @@ function getBreakdownSlot(
   if (version.isDeleteMarker) return null;
   if (!version.isLatest) return 'olderVersions';
   switch (state.status) {
+    // Billed as frozen until its permanent restore finishes.
     case 'frozen':
+    case 'unfreezing':
       return 'frozen';
     case 'restoring':
     case 'restored':
@@ -398,11 +439,12 @@ export function isInMinimumTerm(state: ColdFile, now: number): boolean {
 }
 
 /**
- * A permanent restore: the files go back to Standard for good, with the keep
- * mark that makes the daily run skip their names, and any copy dropped since
- * the files are now readable. With a `prefix`, a folder or `''` for the whole
- * bucket, it also removes every freeze rule there and below, so files
- * uploaded there later stay in Standard too.
+ * A permanent restore: the files go back to Standard for good, and any copy
+ * is dropped since the files are now readable. A file's own freeze rule goes,
+ * and with a `prefix`, a folder or `''` for the whole bucket, so does every
+ * rule there and below, so files uploaded there later stay in Standard too. A
+ * file a rule above still covers gets the keep mark instead, which makes the
+ * daily run skip its name.
  */
 export function getRecordAfterPermanentRestore(
   record: BucketColdRecord,
@@ -410,18 +452,18 @@ export function getRecordAfterPermanentRestore(
   now: number,
 ): BucketColdRecord {
   const { keys, prefix } = change;
+  const policies = record.policies.filter((policy) =>
+    isFilePolicy(policy)
+      ? !keys.includes(policy.key) && (prefix === undefined || !policy.key.startsWith(prefix))
+      : prefix === undefined || !policy.prefix.startsWith(prefix),
+  );
   const kept = { ...record.kept };
   const restores = { ...record.restores };
   for (const key of keys) {
-    kept[key] = now;
     delete restores[key];
+    if (findCoveringPolicy(policies, key)) kept[key] = now;
+    else delete kept[key];
   }
-  const policies =
-    prefix === undefined
-      ? record.policies
-      : record.policies.filter(
-          (policy) => !(isFilePolicy(policy) ? policy.key : policy.prefix).startsWith(prefix),
-        );
   return { ...record, kept, restores, policies };
 }
 

@@ -128,7 +128,11 @@ export function useBucketColdStorage(bucketName: string, region: S3Region, curre
     .filter(({ progress }) => progress.ready < progress.total);
 
   const objectColdStorage: ObjectColdStorage = {
-    showColumn: cold.record !== null,
+    // A permanent restore removes the rules at once, so the column stays
+    // until its files are back in Standard and their Restoring pills end.
+    showColumn:
+      (cold.record?.policies.length ?? 0) > 0 ||
+      Object.values(cold.record?.unfreezing ?? {}).some((readyAt) => cold.now < readyAt),
     restoreProgress: <RestoreProgress jobs={activeJobs} />,
     getState: cold.getState,
     getFolderState: (prefix) =>

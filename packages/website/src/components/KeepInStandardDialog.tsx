@@ -2,6 +2,7 @@ import type { S3Region } from '@filone/shared';
 
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './Modal';
 import { Button } from './Button';
+import { FactList } from './ColdStorageFacts';
 import { useToast } from './Toast';
 import {
   COLD_PRICE_PER_TB_MONTH,
@@ -41,36 +42,54 @@ export function KeepInStandardDialog({
   const shown = useLastNonNull(target);
   const { toast } = useToast();
   if (!shown) return null;
+  const one = shown.keys.length === 1;
   const files = countFiles(shown.keys.length);
   const termNote =
-    shown.inTermCount > 0
-      ? ` ${shown.inTermCount === shown.keys.length ? (shown.keys.length === 1 ? 'It is' : 'They are') : `${shown.inTermCount} of them are`} inside the ${MIN_TERM_DAYS}-day term, which still bills its remaining days at ${formatRate(COLD_PRICE_PER_TB_MONTH)}.`
-      : '';
+    shown.inTermCount === 0
+      ? null
+      : `${shown.inTermCount === shown.keys.length ? (one ? 'It is' : 'They are') : `${shown.inTermCount} of them are`} inside the ${MIN_TERM_DAYS}-day frozen term, which still bills its remaining days at ${formatRate(COLD_PRICE_PER_TB_MONTH)}.`;
 
   const { bucketName, region, keys } = shown;
   const handleKeep = () => {
     keepInStandard(bucketName, region, keys);
     trackColdStorage('kept in standard', { files: String(keys.length) });
-    toast.success(`${files} unfrozen`);
+    toast.success(`${files} back in Standard`);
     onClose();
   };
 
   return (
     <Modal open={target !== null} onClose={onClose} size="sm" testId="keep-in-standard-dialog">
-      <ModalHeader onClose={onClose}>Unfreeze {files}?</ModalHeader>
+      <ModalHeader
+        onClose={onClose}
+        description={
+          // One line per sentence, as in the restore dialog.
+          <>
+            <span className="block">
+              {one ? 'The file stays' : 'The files stay'} in Standard for good.
+            </span>
+            <span className="block">Freeze {one ? 'it' : 'them'} again any time.</span>
+          </>
+        }
+      >
+        Keep {files} in Standard?
+      </ModalHeader>
       <ModalBody>
-        <p className="text-sm leading-relaxed text-(--color-paragraph-text)">
-          {shown.keys.length === 1
-            ? `The file moves back to standard storage for good, at ${formatRate(WARM_PRICE_PER_TB_MONTH)}, and the daily run stops freezing it. You can freeze it again at any time.${termNote}`
-            : `The files move back to standard storage for good, at ${formatRate(WARM_PRICE_PER_TB_MONTH)}, and the daily run stops freezing them. You can freeze them again at any time.${termNote}`}
-        </p>
+        <div className="flex flex-col gap-4">
+          <FactList
+            facts={[
+              { label: 'Storage', value: 'Standard', detail: formatRate(WARM_PRICE_PER_TB_MONTH) },
+              { label: 'Daily run', value: `Skips ${one ? 'this file' : 'these files'}` },
+            ]}
+          />
+          {termNote && <p className="text-xs text-(--color-paragraph-text-subtle)">{termNote}</p>}
+        </div>
       </ModalBody>
       <ModalFooter fullWidth>
         <Button id="keep-in-standard-cancel-button" variant="ghost" onClick={onClose}>
           Cancel
         </Button>
         <Button id="keep-in-standard-confirm-button" variant="primary" onClick={handleKeep}>
-          Unfreeze
+          Keep in Standard
         </Button>
       </ModalFooter>
     </Modal>

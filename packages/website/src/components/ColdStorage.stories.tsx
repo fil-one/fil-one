@@ -11,13 +11,14 @@ import { FreezeBucketDialog } from './FreezeBucketDialog';
 import { KeepInStandardDialog } from './KeepInStandardDialog';
 import { RestoreFilesDialog } from './RestoreFilesDialog';
 import { RestoreProgress } from './RestoreProgress';
-import { describeColdDelete } from '../lib/cold-storage-prototype.js';
+import { EMPTY_COLD_RECORD } from '../lib/cold-storage-files.js';
+import { describeColdDelete, setColdRecord, useClock } from '../lib/cold-storage-prototype.js';
 import { queryKeys } from '../lib/query-client.js';
 
 /**
  * The cold storage prototype (FIL-1608), one story per screen and state.
  * Freezing is per file: a bucket holds freeze policies, and each file is
- * Standard, scheduled, frozen, restoring, restored or unfrozen.
+ * Standard, scheduled, frozen, restoring, restored or kept in Standard.
  */
 const meta: Meta = {
   title: 'Prototypes/Cold storage',
@@ -120,6 +121,56 @@ export const Restore: Story = {
       onClose={() => {}}
     />
   ),
+};
+
+/** Adding days to a restored copy: the new date, with the current one under it. */
+export const AddDays: Story = {
+  render: function Render() {
+    // Seeded once, in the clock the prototype controls have set: a frozen
+    // folder whose first file has a copy for 10 more days.
+    const { dayMs } = useClock();
+    useState(() =>
+      setColdRecord(BUCKET, REGION, {
+        ...EMPTY_COLD_RECORD,
+        policies: [{ prefix: '2025/', createdAt: now - 40 * DAY }],
+        restores: {
+          [FRAMES[0].key]: {
+            lastModified: FRAMES[0].lastModified,
+            readyAt: now - dayMs,
+            expiresAt: now + 10 * dayMs,
+          },
+        },
+      }),
+    );
+    return (
+      <RestoreFilesDialog
+        target={{
+          bucketName: BUCKET,
+          region: REGION,
+          scopes: [{ id: 'file', label: 'final-cut.mov', versions: FRAMES.slice(0, 1) }],
+          extend: true,
+        }}
+        onClose={() => {}}
+      />
+    );
+  },
+};
+
+/** One file with a long name, the title the header has to fit. */
+export const RestoreLongFileName: Story = {
+  render: () => {
+    const name = 'UXIT_Update_August_2025_final_review_export_v3_with_comments.png';
+    return (
+      <RestoreFilesDialog
+        target={{
+          bucketName: BUCKET,
+          region: REGION,
+          scopes: [{ id: 'selection', label: name, versions: [file(`2025/${name}`, 2e12)] }],
+        }}
+        onClose={() => {}}
+      />
+    );
+  },
 };
 
 /** Keeping a restored file in Standard for good, inside its minimum term. */

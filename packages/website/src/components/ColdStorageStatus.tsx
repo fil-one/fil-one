@@ -30,9 +30,9 @@ function describeFile(state: FileColdState, now: number): BadgeContent | null {
         color: 'grey',
         strength: 'subtle',
         icon: null,
-        text: 'Unfrozen',
+        text: 'Standard',
         detail:
-          'Back in standard storage for good. The daily run skips it until you freeze it again.',
+          'Back in Standard for good. The freeze rule here skips it until you freeze it again.',
       };
     case 'scheduled':
       return {
@@ -57,6 +57,14 @@ function describeFile(state: FileColdState, now: number): BadgeContent | null {
         icon: <Spinner ariaLabel="Restoring" size={9} colorClassName="text-amber-600" />,
         text: 'Restoring',
         detail: `Downloads work in ${formatWaitLeft(state.readyAt, now)}. The frozen copy stays as it is.`,
+      };
+    case 'unfreezing':
+      return {
+        color: 'amber',
+        strength: 'subtle',
+        icon: <Spinner ariaLabel="Restoring" size={9} colorClassName="text-amber-600" />,
+        text: 'Restoring',
+        detail: `Back in Standard for good in ${formatWaitLeft(state.readyAt, now)}. Until then it stays frozen.`,
       };
     case 'restored':
       return {

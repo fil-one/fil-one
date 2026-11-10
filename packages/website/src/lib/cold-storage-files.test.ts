@@ -13,6 +13,8 @@ import {
   getJobProgress,
   getNextRunAt,
   getRecordAfterPermanentRestore,
+  getMaxExtensionDays,
+  getRestoreAfterExtension,
   getRestoreAfterRequest,
   getStaggeredWaitMs,
   getStorageBreakdown,
@@ -73,6 +75,19 @@ describe('getFileColdState', () => {
     ).toMatchObject({
       status: 'standard',
     });
+  });
+
+  it.each([
+    [
+      'restoring until its permanent restore finishes',
+      10_000,
+      { status: 'unfreezing', readyAt: 10_100 },
+    ],
+    ['Standard once it has', 10_100, { status: 'standard', belowMinimum: false }],
+  ])('returns %s', (_, now, expected) => {
+    // No policy covers the file any more; only the restore wait is pending.
+    const record = { ...EMPTY_COLD_RECORD, unfreezing: { 'any-folder/any-file': 10_100 } };
+    expect(getFileColdState(record, version(), now, CLOCK)).toStrictEqual(expected);
   });
 
   describe('with a policy for one file', () => {
@@ -240,6 +255,24 @@ describe('getRestoreAfterRequest', () => {
   });
 });
 
+describe('getRestoreAfterExtension', () => {
+  it('adds the days to when the copy would have expired', () => {
+    const existing = restoreOf(version(), { readyAt: 10_100, expiresAt: 24_100 });
+    // One day is allowed: the copy has had its 14-day minimum already.
+    expect(getRestoreAfterExtension(existing, 1, CLOCK)).toStrictEqual({
+      ...existing,
+      expiresAt: 25_100,
+    });
+  });
+});
+
+describe('getMaxExtensionDays', () => {
+  it('keeps the latest copy within 365 days from now', () => {
+    // At 15_000 with 1_000ms days, 365 days reach 380_000; the later copy ends at 30_000.
+    expect(getMaxExtensionDays([24_100, 30_000], 15_000, CLOCK)).toBe(350);
+  });
+});
+
 describe('getStorageBreakdown', () => {
   it('counts files and bytes by where they bill', () => {
     const record = bucketFrozenAt5500();
@@ -398,6 +431,30 @@ describe('getRecordAfterPermanentRestore', () => {
     restores: { 'any-folder/a': restore },
   };
 
+  it('removes the own rule of a file a folder rule still covers, and marks it kept', () => {
+    const { policies, kept } = getRecordAfterPermanentRestore(
+      record,
+      { keys: ['any-folder/single-file'] },
+      7_000,
+    );
+    expect({ policies, kept }).toStrictEqual({
+      // Only the file's own rule goes; the folder rule still covers its name.
+      policies: [
+        { prefix: 'any-folder/', createdAt: 0 },
+        { prefix: 'other-folder/', createdAt: 0 },
+      ],
+      kept: { 'any-folder/single-file': 7_000 },
+    });
+  });
+
+  it('marks no keep for a file no rule covers after the restore', () => {
+    const own = { ...EMPTY_COLD_RECORD, policies: [{ key: 'any-file', createdAt: 0 }] };
+    expect(getRecordAfterPermanentRestore(own, { keys: ['any-file'] }, 7_000)).toMatchObject({
+      policies: [],
+      kept: {},
+    });
+  });
+
   it('keeps the files in Standard and drops their copies', () => {
     const { kept, restores } = getRecordAfterPermanentRestore(
       record,
@@ -407,7 +464,7 @@ describe('getRecordAfterPermanentRestore', () => {
     expect({ kept, restores }).toStrictEqual({ kept: { 'any-folder/a': 7_000 }, restores: {} });
   });
 
-  it('leaves the rules as they are for a selection of files', () => {
+  it('leaves folder rules as they are for files without a rule of their own', () => {
     expect(
       getRecordAfterPermanentRestore(record, { keys: ['any-folder/a'] }, 7_000).policies,
     ).toStrictEqual(record.policies);

@@ -17,7 +17,10 @@ import type { FolderColdState } from '../lib/cold-storage-files.js';
 
 /** Cold storage prototype (FIL-1608): each file's state and the actions on it. */
 export interface ObjectColdStorage {
-  /** Whether the bucket has any freeze rule, which is when the Storage column shows. */
+  /**
+   * Whether the Storage column shows: while the bucket has a freeze rule, or
+   * files are still on their way back to Standard.
+   */
   showColumn: boolean;
   /** Restores of several files still running, counted, shown above the table. */
   restoreProgress?: React.ReactNode;
@@ -31,7 +34,7 @@ export interface ObjectColdStorage {
   onRestore: (versions: S3ObjectVersion[]) => void;
   /** Opens the unfreeze confirmation over these files. */
   onKeepInStandard: (versions: S3ObjectVersion[]) => void;
-  /** Freezes an unfrozen file again at the next daily run; absent for an account that can't. */
+  /** Freezes a file kept in Standard again at the next daily run; absent for an account that can't. */
   onFreezeAgain?: (versions: S3ObjectVersion[]) => void;
   /** What deleting these versions still bills, for the delete confirmation; `undefined` when nothing. */
   describeDeleteCharge: (versions: S3ObjectVersion[]) => string | undefined;
@@ -40,7 +43,7 @@ export interface ObjectColdStorage {
 /**
  * A file's cold storage actions beyond Restore, as the row's icons: more
  * days or unfreezing for a restored file, freezing for a Standard one, and
- * freezing again for an unfrozen one.
+ * freezing again for one kept in Standard.
  */
 export function getColdRowActions(
   version: S3ObjectVersion,
