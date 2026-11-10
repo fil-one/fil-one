@@ -84,7 +84,7 @@ function RestoreForm({ target, onClose }: { target: RestoreTarget; onClose: () =
 
   function handleRestore() {
     if (!scope || !validDays) return;
-    restoreFiles(bucketName, region, scope.versions, days);
+    restoreFiles(bucketName, region, { versions: scope.versions, days, label: scope.label });
     trackColdStorage('restore confirmed', {
       scope: scope.id,
       files: String(scope.versions.length),

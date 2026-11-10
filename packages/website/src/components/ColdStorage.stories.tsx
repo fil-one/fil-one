@@ -8,6 +8,7 @@ import { ColdStorageBadge, FileStorageBadge } from './ColdStorageStatus';
 import { FreezeBucketDialog } from './FreezeBucketDialog';
 import { KeepInStandardDialog } from './KeepInStandardDialog';
 import { RestoreFilesDialog } from './RestoreFilesDialog';
+import { RestoreProgress } from './RestoreProgress';
 import { describeColdDelete } from '../lib/cold-storage-prototype.js';
 
 /**
@@ -168,6 +169,20 @@ export const DeleteRestoredFile: Story = {
       description="This object will be permanently deleted. This action cannot be undone."
       notice={describeColdDelete([{ status: 'restored', ...term, expiresAt: now + 13 * DAY }], now)}
       confirmLabel="Delete"
+    />
+  ),
+};
+
+/** A folder restore part-way through, counted above the file list. */
+export const RestoreInProgress: Story = {
+  render: () => (
+    <RestoreProgress
+      jobs={[
+        {
+          job: { id: 'any-job', label: 'Everything in 2025/acme/', keys: [], startedAt: now },
+          progress: { ready: 12, total: 40 },
+        },
+      ]}
     />
   ),
 };

@@ -18,6 +18,8 @@ import { isColdFile, type FileColdState } from '../lib/cold-storage-prototype.js
 export interface ObjectColdStorage {
   /** Whether the bucket has any freeze rule, which is when the Storage column shows. */
   showColumn: boolean;
+  /** Restores of several files still running, counted, shown above the table. */
+  restoreProgress?: React.ReactNode;
   getState: (version: S3ObjectVersion) => FileColdState;
   now: number;
   /** Opens the freeze review for these files; absent for an account that can't freeze. */

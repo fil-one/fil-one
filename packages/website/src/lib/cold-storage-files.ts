@@ -60,8 +60,18 @@ export interface FileRestore {
   expiresAt: number;
 }
 
+/** One restore of several files, run as a single job so its progress can be counted. */
+export interface RestoreJob {
+  id: string;
+  /** What was restored, for the progress line: a folder, "the whole bucket" or "3 files". */
+  label: string;
+  keys: string[];
+  startedAt: number;
+}
+
 export interface BucketColdRecord {
   policies: FreezePolicy[];
+  restoreJobs: RestoreJob[];
   /** By file key. */
   restores: Record<string, FileRestore>;
   /** Files kept in Standard by a permanent restore, by key, with when. */
@@ -72,6 +82,7 @@ export interface BucketColdRecord {
 
 export const EMPTY_COLD_RECORD: BucketColdRecord = {
   policies: [],
+  restoreJobs: [],
   restores: {},
   kept: {},
   refrozen: {},
@@ -200,7 +211,8 @@ export function isValidRestoreDays(days: number): boolean {
  */
 export function getRestoreAfterRequest(
   existing: FileRestore | undefined,
-  request: { lastModified: string; days: number },
+  /** `waitMs` overrides the clock's restore wait, so files in one job finish one after another. */
+  request: { lastModified: string; days: number; waitMs?: number },
   now: number,
   clock: Clock,
 ): FileRestore {
@@ -209,8 +221,31 @@ export function getRestoreAfterRequest(
     const from = Math.max(now, existing.readyAt);
     return { ...existing, expiresAt: Math.max(existing.expiresAt, from + keptMs) };
   }
-  const readyAt = now + clock.restoreWaitMs;
+  const readyAt = now + (request.waitMs ?? clock.restoreWaitMs);
   return { lastModified: request.lastModified, readyAt, expiresAt: readyAt + keptMs };
+}
+
+/**
+ * How long the file at `index` of a `count`-file job waits: the first about
+ * half the full wait, the last the full wait, the rest spread between. A real
+ * bulk restore finishes file by file, which is what its progress count shows.
+ */
+export function getStaggeredWaitMs(index: number, count: number, clock: Clock): number {
+  return Math.round(clock.restoreWaitMs * (0.5 + (0.5 * (index + 1)) / count));
+}
+
+export interface JobProgress {
+  ready: number;
+  total: number;
+}
+
+/** How many of a job's files have a readable copy; a file no longer cold counts as done. */
+export function getJobProgress(
+  job: RestoreJob,
+  getStateByKey: (key: string) => FileColdState | undefined,
+): JobProgress {
+  const ready = job.keys.filter((key) => getStateByKey(key)?.status !== 'restoring').length;
+  return { ready, total: job.keys.length };
 }
 
 export interface Tally {

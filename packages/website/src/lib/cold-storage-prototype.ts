@@ -32,6 +32,7 @@ import {
   isColdFile,
   isFolderPolicy,
   getRestoreAfterRequest,
+  getStaggeredWaitMs,
   type BucketColdRecord,
   type Clock,
   type ColdFile,
@@ -296,22 +297,39 @@ export function addFileFreezePolicies(bucketName: string, region: string, keys: 
 export function restoreFiles(
   bucketName: string,
   region: string,
-  versions: Pick<S3ObjectVersion, 'key' | 'lastModified'>[],
-  days: number,
+  job: {
+    versions: Pick<S3ObjectVersion, 'key' | 'lastModified'>[];
+    days: number;
+    /** What is being restored, for the progress line. */
+    label: string;
+  },
 ) {
   const now = Date.now();
   const clock = getClock(store.settings);
+  const { versions, days, label } = job;
   updateRecord(bucketName, region, (record) => {
     const restores = { ...record.restores };
-    for (const version of versions) {
+    versions.forEach((version, index) => {
       restores[version.key] = getRestoreAfterRequest(
         restores[version.key],
-        { lastModified: version.lastModified, days },
+        {
+          lastModified: version.lastModified,
+          days,
+          waitMs: getStaggeredWaitMs(index, versions.length, clock),
+        },
         now,
         clock,
       );
-    }
-    return { ...record, restores };
+    });
+    // A single file needs no count: its own Restoring pill says it all.
+    const restoreJobs =
+      versions.length > 1
+        ? [
+            ...record.restoreJobs.slice(-4),
+            { id: `${now}`, label, keys: versions.map((v) => v.key), startedAt: now },
+          ]
+        : record.restoreJobs;
+    return { ...record, restores, restoreJobs };
   });
 }
 

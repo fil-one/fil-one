@@ -7,8 +7,10 @@ import {
   MIN_FREEZE_FILE_BYTES,
   findReplacedColdFiles,
   getFileColdState,
+  getJobProgress,
   getNextRunAt,
   getRestoreAfterRequest,
+  getStaggeredWaitMs,
   getStorageBreakdown,
   isValidRestoreDays,
   type BucketColdRecord,
@@ -197,6 +199,17 @@ describe('getRestoreAfterRequest', () => {
     });
   });
 
+  it('waits the time given for a file in a job instead of the full restore time', () => {
+    expect(
+      getRestoreAfterRequest(
+        undefined,
+        { lastModified: v.lastModified, days: 14, waitMs: 40 },
+        10_000,
+        CLOCK,
+      ),
+    ).toMatchObject({ readyAt: 10_040 });
+  });
+
   it('keeps the copy for 14 days when fewer are asked', () => {
     expect(
       getRestoreAfterRequest(undefined, { lastModified: v.lastModified, days: 3 }, 10_000, CLOCK),
@@ -264,5 +277,29 @@ describe('findReplacedColdFiles', () => {
         stateAt(bucketFrozenAt5500(), 5_900),
       ),
     ).toStrictEqual([]);
+  });
+});
+
+describe('getStaggeredWaitMs', () => {
+  it.each([
+    [0, 75],
+    // The last file of the job waits the full restore time.
+    [1, 100],
+  ])('gives file %i of a 2-file job a %ims wait', (index, expected) => {
+    expect(getStaggeredWaitMs(index, 2, CLOCK)).toBe(expected);
+  });
+});
+
+describe('getJobProgress', () => {
+  const job = { id: 'any-job', label: 'any-label', keys: ['a', 'b', 'c'], startedAt: 0 };
+
+  it('counts a file as ready once it is no longer restoring', () => {
+    const states: Record<string, ReturnType<typeof getFileColdState> | undefined> = {
+      a: { status: 'restored', frozenAt: 0, termEndsAt: 1, expiresAt: 2 },
+      b: { status: 'restoring', frozenAt: 0, termEndsAt: 1, readyAt: 2, expiresAt: 3 },
+      // Deleted or replaced since the restore started: nothing left to wait for.
+      c: undefined,
+    };
+    expect(getJobProgress(job, (key) => states[key])).toStrictEqual({ ready: 2, total: 3 });
   });
 });

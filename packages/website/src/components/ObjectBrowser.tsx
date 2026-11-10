@@ -455,6 +455,8 @@ export function ObjectBrowser({
         />
       )}
 
+      {coldStorage?.restoreProgress}
+
       {rowSelection.selectable && selectedCount > 0 && (
         <BulkActionsBar
           count={selectedCount}

@@ -8,6 +8,7 @@ import { ColdStoragePrototypeControls } from './ColdStoragePrototypeControls';
 import { useToast } from './Toast';
 import { FreezeBucketDialog, type ColdStorageTarget } from './FreezeBucketDialog';
 import { KeepInStandardDialog, type KeepInStandardTarget } from './KeepInStandardDialog';
+import { RestoreProgress } from './RestoreProgress';
 import { RestoreFilesDialog, type RestoreScope, type RestoreTarget } from './RestoreFilesDialog';
 import type { ObjectColdStorage } from './ObjectBrowserRows';
 import {
@@ -23,7 +24,7 @@ import {
   type ColdFiles,
 } from '../lib/cold-storage-prototype.js';
 import { useCachedListing } from '../lib/use-cached-listing.js';
-import { isFilePolicy } from '../lib/cold-storage-files.js';
+import { getJobProgress, isFilePolicy } from '../lib/cold-storage-files.js';
 
 function getColdStates(
   versions: S3ObjectVersion[],
@@ -112,8 +113,17 @@ export function useBucketColdStorage(bucketName: string, region: S3Region, curre
     }
   };
 
+  // Latest versions by key, so a job's files are counted by their current state.
+  const stateByKey = new Map(
+    versions.filter((v) => v.isLatest).map((v) => [v.key, cold.getState(v)] as const),
+  );
+  const activeJobs = (cold.record?.restoreJobs ?? [])
+    .map((job) => ({ job, progress: getJobProgress(job, (key) => stateByKey.get(key)) }))
+    .filter(({ progress }) => progress.ready < progress.total);
+
   const objectColdStorage: ObjectColdStorage = {
     showColumn: cold.record !== null,
+    restoreProgress: <RestoreProgress jobs={activeJobs} />,
     getState: cold.getState,
     now: cold.now,
     onFreeze:
