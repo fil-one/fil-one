@@ -17,6 +17,7 @@ import {
   MAX_VERIFY_ATTEMPTS,
 } from './deletion-challenge.ts';
 import { DELETION_STATUS, DELETION_TRIGGER, type DeletionTrigger } from './deletion-record.ts';
+import { NOT_BILLED_MANUALLY, SubscriptionKeys } from './subscription-store.ts';
 
 /** Matches the budget sendDeletionGuardedWrite uses for the same conflict. */
 const CONFLICT_RETRY = { retries: 2, minTimeout: 50, randomize: true } as const;
@@ -87,7 +88,7 @@ export async function confirmAccountDeletion(
  */
 export async function commitStripeTriggeredDeletion(
   orgId: string,
-): Promise<{ outcome: 'confirmed' | 'already_deleting' }> {
+): Promise<{ outcome: 'confirmed' | 'already_deleting' | 'billed_manually' }> {
   const now = new Date().toISOString();
 
   try {
@@ -98,22 +99,35 @@ export async function commitStripeTriggeredDeletion(
             TransactItems: [
               createDeletionRecordItem(orgId, DELETION_TRIGGER.stripeCustomerDeleted, now),
               createOrgFenceItem(orgId, now),
+              createNotBilledManuallyCheck(orgId),
             ],
           }),
         ),
       { ...CONFLICT_RETRY, shouldRetry: ({ error }) => isTransactionConflict(error) },
     );
   } catch (err) {
-    if (
-      err instanceof TransactionCanceledException &&
-      err.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed'
-    ) {
-      return { outcome: 'already_deleting' };
+    if (err instanceof TransactionCanceledException) {
+      const [record, , billing] = err.CancellationReasons ?? [];
+      if (record?.Code === 'ConditionalCheckFailed') return { outcome: 'already_deleting' };
+      if (billing?.Code === 'ConditionalCheckFailed') return { outcome: 'billed_manually' };
     }
     throw err;
   }
 
   return { outcome: 'confirmed' };
+}
+
+// An org billed by hand is not paying through Stripe, so deleting the Stripe
+// customer it signed up with says nothing about whether the account should go.
+function createNotBilledManuallyCheck(orgId: string): TransactWriteItem {
+  return {
+    ConditionCheck: {
+      TableName: Resource.BillingTable.name,
+      Key: { pk: { S: SubscriptionKeys.orgPk(orgId) }, sk: { S: SubscriptionKeys.sk() } },
+      ConditionExpression: NOT_BILLED_MANUALLY.condition,
+      ExpressionAttributeValues: NOT_BILLED_MANUALLY.values,
+    },
+  };
 }
 
 // Item 0 — the code. Conditional delete rather than read-then-write, so two

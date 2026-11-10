@@ -1,11 +1,12 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyResultV2 } from 'aws-lambda';
+import { SubscriptionStatus } from '@filone/shared';
 import type { CreatePortalSessionResponse } from '@filone/shared';
 import { getStripeClient } from '../lib/stripe-client.ts';
 import { resolveOrigin } from '../lib/resolve-origin.ts';
 import { getSubscription } from '../lib/subscription-store.ts';
-import { ResponseBuilder } from '../lib/response-builder.ts';
+import { billedManuallyResponse, ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
@@ -28,6 +29,8 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   if (!record) {
     return new ResponseBuilder().status(400).body({ message: 'No billing record found.' }).build();
   }
+
+  if (record.subscriptionStatus === SubscriptionStatus.Manual) return billedManuallyResponse();
 
   const { stripeCustomerId } = record;
 

@@ -3,13 +3,15 @@ import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { MeResponse } from '@filone/shared';
 
-// Stub the two branches so this test targets the ragAccess routing only — not
-// the functional page's data deps or the waitlist's full marketing markup.
+// Stub both outcomes so this test targets the ragAccess routing only, not the
+// functional page's data deps or a mounted router.
 vi.mock('./RagPipelinePage.js', () => ({
   RagPipelinePage: () => <div data-testid="functional-stub" />,
 }));
-vi.mock('../components/ComingSoonPage.js', () => ({
-  ComingSoonPage: () => <div data-testid="waitlist-stub" />,
+vi.mock('@tanstack/react-router', () => ({
+  Navigate: ({ to, replace }: { to: string; replace?: boolean }) => (
+    <div data-testid="redirect-stub" data-to={to} data-replace={String(replace)} />
+  ),
 }));
 
 const mockGetMe = vi.fn();
@@ -29,7 +31,6 @@ function me(ragAccess: boolean): MeResponse {
     name: 'User',
     mfaEnrollments: [],
     ragAccess,
-    orgsBeta: false,
     billingActive: true,
   };
 }
@@ -53,24 +54,26 @@ describe('BucketIntelligencePage', () => {
     renderPage();
 
     expect(await screen.findByTestId('functional-stub')).toBeInTheDocument();
-    expect(screen.queryByTestId('waitlist-stub')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('redirect-stub')).not.toBeInTheDocument();
   });
 
-  it('renders the waitlist for non-allowlisted users', async () => {
+  it('sends a user off the allowlist to the dashboard, replacing the history entry', async () => {
     mockGetMe.mockResolvedValue(me(false));
     renderPage();
 
-    expect(await screen.findByTestId('waitlist-stub')).toBeInTheDocument();
+    expect(await screen.findByTestId('redirect-stub')).toMatchObject({
+      dataset: { to: '/dashboard', replace: 'true' },
+    });
     expect(screen.queryByTestId('functional-stub')).not.toBeInTheDocument();
   });
 
-  it('shows neither branch while /me is loading (no waitlist flash)', () => {
+  it('neither shows the feature nor redirects while /me is loading', () => {
     // Never resolves — keeps the query pending.
     mockGetMe.mockReturnValue(new Promise(() => {}));
     renderPage();
 
     expect(screen.getByRole('status')).toBeInTheDocument();
-    expect(screen.queryByTestId('waitlist-stub')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('redirect-stub')).not.toBeInTheDocument();
     expect(screen.queryByTestId('functional-stub')).not.toBeInTheDocument();
   });
 });

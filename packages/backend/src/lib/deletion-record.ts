@@ -62,12 +62,20 @@ export interface DeletionMember {
    * org can never log in again.
    *
    * Set only for a member whose account outlives the org (`deleteIdentity` is
-   * false) and who has another membership to move to: the one they joined
-   * earliest, and the smallest org id among those they joined at the same
-   * moment. Chosen here so both rows move to the same org and a re-driven pass
-   * makes the same choice.
+   * false) and who has another membership, in an org not being deleted, to move
+   * to: the one they joined earliest, and the smallest org id among those they
+   * joined at the same moment. Chosen here so both rows move to the same org and
+   * a re-driven pass makes the same choice.
    */
   homeOrgId?: string;
+  /**
+   * Set for a member whose account outlives the org but who has no other
+   * membership to move to, or only ones in orgs also being deleted: one who was
+   * only ever invited here, most often. The scrub gives
+   * them a floor org, as a removal from their last org does, so they are not
+   * fenced out by an org that no longer exists.
+   */
+  needsFloorOrg?: boolean;
   /**
    * Every census condition that kept this account, in the order they are
    * tested. Empty when `deleteIdentity` is true. More than one can hold at

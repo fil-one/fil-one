@@ -22,7 +22,6 @@ const me: MeResponse = {
   connectionType: 'auth0',
   mfaEnrollments: [],
   passkeys: [],
-  orgsBeta: true,
   billingActive: true,
   ragAccess: false,
   userId: 'user-1',

@@ -178,29 +178,6 @@ describe('MembersInvitations', () => {
     expect(await openInviteDialog()).toBeInTheDocument();
   });
 
-  it('drops the empty state call to action outside the beta', async () => {
-    renderSection(OrgRole.Owner, [], { orgsBeta: false });
-
-    const card = await screen.findByTestId('invitations-empty');
-    expect(within(card).queryByRole('button', { name: 'Invite member' })).toBeNull();
-  });
-
-  it('withdraws the form outside the beta and keeps the list that revokes', async () => {
-    renderSection(OrgRole.Owner, [invitation({ email: 'waiting@example.com' })], {
-      orgsBeta: false,
-    });
-
-    // `accept-invitation` carries no beta gate, so the tokens this org already
-    // issued stay redeemable after the flag goes. The form is the only half the
-    // flag decides; the revoke button is the only way to withdraw a live token.
-    expect(await screen.findAllByTestId('invitation-row')).toHaveLength(1);
-    expect(
-      screen.getByRole('button', { name: 'Revoke invitation for waiting@example.com' }),
-    ).toBeInTheDocument();
-    expect(screen.queryByLabelText('Email address')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Send invitation' })).not.toBeInTheDocument();
-  });
-
   it('tells an expired invitation from one nobody received', async () => {
     renderSection(OrgRole.Owner, [
       invitation({ inviteId: 'inv-1', email: 'waiting@example.com' }),
@@ -346,32 +323,9 @@ describe('MembersInvitations — when the server refuses or the list goes stale'
     vi.clearAllMocks();
   });
 
-  it('renders the beta refusal as a state on the form, not an error', async () => {
-    mockCreate.mockRejectedValue(
-      apiError(
-        'Inviting teammates is not enabled for this organization yet.',
-        403,
-        ApiErrorCode.INVITES_NOT_ENABLED,
-      ),
-    );
-    renderSection();
-
-    await typeEmail('new@example.com');
-    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
-
-    const state = await screen.findByTestId('invite-not-enabled');
-    expect(state).toHaveTextContent('not enabled for this organization yet');
-    // The section says so and stops opening the dialog at all.
-    requestInvite();
-    expect(screen.queryByRole('button', { name: 'Invite member' })).not.toBeInTheDocument();
-    // The dialog goes with it: nothing on that form would work.
-    await waitFor(() => expect(screen.queryByTestId('invite-form')).not.toBeInTheDocument());
-  });
-
   it('leaves the form up for a 403 that names no refusal', async () => {
     // An expired CSRF cookie answers this way, and it is the routine one: the
-    // next attempt works. Reading a code-less 403 as the beta gate took the
-    // form off the page for the rest of the visit.
+    // next attempt works.
     mockCreate.mockRejectedValue(apiError('Invalid CSRF token', 403));
     renderSection();
 
@@ -379,7 +333,6 @@ describe('MembersInvitations — when the server refuses or the list goes stale'
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     expect(await screen.findByTestId('toast')).toHaveTextContent('Invalid CSRF token');
-    expect(screen.queryByTestId('invite-not-enabled')).not.toBeInTheDocument();
     expect(screen.getByTestId('invite-form')).toBeInTheDocument();
   });
 

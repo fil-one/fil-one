@@ -50,8 +50,8 @@ describe('the app layout’s beforeLoad', () => {
     expect((thrown as { options: { href?: string } }).options.href).toBe('/login');
   });
 
-  // Every account has an unnamed personal org from signup, including one that
-  // joined by invitation and only works in the team org.
+  // Accounts that signed up before an invitation could create one hold an
+  // unnamed personal org, including those that only work in a team org.
   describe('an unnamed org', () => {
     function meWith(memberships: string[]) {
       vi.spyOn(queryClient, 'fetchQuery').mockResolvedValue({
@@ -61,6 +61,7 @@ describe('the app layout’s beforeLoad', () => {
         emailVerified: true,
         email: 'user@example.com',
         mfaEnrollments: [],
+        permissions: ['org.rename'],
         memberships: memberships.map((orgId) => ({ orgId, orgName: orgId, role: 'owner' })),
       } as unknown as MeResponse);
     }
@@ -94,6 +95,7 @@ describe('the app layout’s beforeLoad', () => {
         email: 'user@example.com',
         mfaEnrollments: [],
         nameConfirmed: false,
+        permissions: ['org.rename'],
         ...overrides,
       } as MeResponse);
     }
@@ -114,6 +116,14 @@ describe('the app layout’s beforeLoad', () => {
       const thrown = await runBeforeLoad().catch((err: unknown) => err);
 
       expect((thrown as { options: { to?: string } }).options.to).toBe('/left-organization');
+    });
+
+    // An account an invitation created belongs to the inviting org alone, and
+    // naming it is that org's Owners' call.
+    it('lets a caller who may not rename it through', async () => {
+      meWith({ permissions: ['buckets.read'] });
+
+      await expect(runBeforeLoad()).resolves.toBeUndefined();
     });
   });
 });

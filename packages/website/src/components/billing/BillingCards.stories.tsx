@@ -234,6 +234,28 @@ export const SelfServeAndContracted: StoryObj = {
   ),
 };
 
+/** A sales agreement invoiced outside Stripe: no price, no renewal, no controls. */
+const MANUAL = subscription({ planId: PlanId.Manual, status: SubscriptionStatus.Manual });
+
+export const BilledManually: StoryObj = {
+  render: () => (
+    <Stack>
+      <PlanCard subscription={MANUAL} mayManage onManage={noop} onChoosePlan={noop} />
+      <UsageCard
+        subscription={MANUAL}
+        storageBytesUsed={412 * TB_BYTES}
+        egressBytesUsed={38 * TB_BYTES}
+      />
+      <PaymentMethodCard
+        billing={{ subscription: MANUAL }}
+        mayManage
+        onManage={noop}
+        onAddCard={noop}
+      />
+    </Stack>
+  ),
+};
+
 export const Trialing: StoryObj = {
   render: () => (
     <Stack>

@@ -26,6 +26,7 @@ export interface StatusBadge {
 export function statusBadge(status: SubscriptionStatus): StatusBadge {
   switch (status) {
     case SubscriptionStatus.Active:
+    case SubscriptionStatus.Manual:
       return { label: 'Active', tone: 'green', dot: true };
     // Past due is active access with a failed payment. The banner above the
     // cards is what says so; a red pill here would read as cancelled.
@@ -69,13 +70,15 @@ export function planTitle(subscription: Subscription): string {
       break;
   }
 
-  // The enum, for an account Stripe has not named. It carries three values and
-  // a negotiated quote is none of them, so it answers only where it can.
+  // The enum, for an account Stripe has not named. A quote negotiated in Stripe
+  // is none of its values, so it answers only where it can.
   switch (subscription.planId) {
     case PlanId.FreeTrial:
       return 'Free trial';
     case PlanId.PayAsYouGo:
       return 'Pay as you go';
+    case PlanId.Manual:
+      return 'Custom plan';
     case PlanId.None:
       return 'No plan';
     default:
@@ -118,6 +121,7 @@ export function pricingLine(subscription: Subscription): string {
   const { pricePerTbCents, status } = subscription;
 
   if (status === SubscriptionStatus.Trialing) return '';
+  if (status === SubscriptionStatus.Manual) return 'Billed manually';
   if (pricePerTbCents) return `${formatCents(pricePerTbCents)}/TB per month`;
   if (status === SubscriptionStatus.Inactive) return 'Choose a plan to start storing data';
 
@@ -256,6 +260,7 @@ export function costDisclosure(
 function isBilling(status: SubscriptionStatus): boolean {
   return (
     status === SubscriptionStatus.Active ||
+    status === SubscriptionStatus.Manual ||
     status === SubscriptionStatus.PastDue ||
     status === SubscriptionStatus.GracePeriod
   );

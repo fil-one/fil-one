@@ -6,4 +6,4 @@
  * importantly that scanned PDFs have no text layer and are skipped without an
  * error, so the file-type copy in the indexing dialog points here.
  */
-export const RAG_DOCS_URL = 'https://docs.fil.one/bucket-intelligence';
+export const RAG_DOCS_URL = 'https://docs.filone.com/bucket-intelligence';

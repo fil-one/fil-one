@@ -8,6 +8,7 @@ import {
   daysLeftLabel,
   storageCostCents,
   paymentPosture,
+  planMetaLine,
   planTitle,
   pricingLine,
   showsSalesPitch,
@@ -299,11 +300,40 @@ describe('statusBadge', () => {
     }
   });
 
+  it('reads an org billed manually as active and in good standing', () => {
+    expect(statusBadge(SubscriptionStatus.Manual)).toStrictEqual({
+      label: 'Active',
+      tone: 'green',
+      dot: true,
+    });
+  });
+
   it('reads past due as a payment problem, not as a cancellation', () => {
     expect(statusBadge(SubscriptionStatus.PastDue)).toEqual({
       label: 'Payment failed',
       tone: 'amber',
       dot: false,
     });
+  });
+});
+
+// What get-billing reports for an org on a sales agreement invoiced by hand.
+describe('an org billed manually', () => {
+  const MANUAL = subscription({ planId: PlanId.Manual, status: SubscriptionStatus.Manual });
+
+  it('is called a custom plan', () => {
+    expect(planTitle(MANUAL)).toBe('Custom plan');
+  });
+
+  it('says it is billed manually instead of stating a price or a renewal', () => {
+    expect(planMetaLine(MANUAL)).toBe('Billed manually');
+  });
+
+  it('points at the agreement instead of estimating a bill', () => {
+    expect(costDisclosure(MANUAL, TB_BYTES)).toStrictEqual({ kind: 'agreement' });
+  });
+
+  it('is invoiced rather than missing a card', () => {
+    expect(paymentPosture({ subscription: MANUAL })).toBe('invoiced');
   });
 });

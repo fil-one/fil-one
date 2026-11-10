@@ -36,6 +36,7 @@ vi.mock('@filone/shared', () => ({
     Trialing: 'trialing',
     PastDue: 'past_due',
     Active: 'active',
+    Manual: 'manual',
     GracePeriod: 'grace_period',
     Inactive: 'inactive',
   },
@@ -221,6 +222,18 @@ describe('useSidebarData', () => {
       expect(result.current.storageUsed).toBe(250);
       expect(result.current.storagePct).toBe(0);
       expect(result.current.egressPct).toBe(0);
+    });
+
+    it('measures an org billed manually against the paid allowance, not the trial one', () => {
+      setQueries({
+        me: billingViewer,
+        billing: { subscription: { status: 'manual' } },
+        usage: { storage: { usedBytes: 250 }, egress: { usedBytes: 500 } },
+      });
+
+      renderHook(() => useSidebarData());
+
+      expect(vi.mocked(getUsageLimits).mock.calls).toStrictEqual([[true]]);
     });
 
     it('avoids divide-by-zero, returning 0% when limits are 0', () => {

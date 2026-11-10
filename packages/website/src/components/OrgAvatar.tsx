@@ -8,7 +8,7 @@ type OrgAvatarProps = {
   name: string;
   /** Real logo, once uploaded. Falls back to the monogram when absent or broken. */
   logoUrl?: string;
-  /** `sm` (default) matches `UserAvatar`'s size, for the sidebar. `md` matches `UserAvatar`'s own settings-page size (Edit organization's Identity picker). `lg` is the create-organization dialog's picker. `xs` is for a dense list, like the org switcher's rows. */
+  /** `sm` (default) matches `UserAvatar`'s size; the sidebar's org switcher narrows it to 24px with `className` to sit with its 13px name. `md` matches `UserAvatar`'s own settings-page size (Edit organization's Identity picker). `lg` is the create-organization dialog's picker. `xs` is for a dense list, like the org switcher's rows. */
   size?: OrgAvatarSize;
   className?: string;
 };

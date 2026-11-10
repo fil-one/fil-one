@@ -88,6 +88,27 @@ describe('claimTrialIfEligible', () => {
     expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
   });
 
+  it('claims in an org the caller created while they belong to other orgs too', async () => {
+    mockListMemberships.mockResolvedValue([
+      { orgId: 'any-team-org', role: OrgRole.Member, joinedAt: '' },
+      { orgId: ORG_ID, role: OrgRole.Owner, joinedAt: '' },
+    ]);
+    const created = soloOwner({
+      membership: { orgId: ORG_ID, userId: USER_ID, role: OrgRole.Owner, source: 'manual' },
+    } as Partial<UserInfo>);
+
+    await expect(claimTrialIfEligible(created)).resolves.toBe('claimed');
+  });
+
+  it('does not claim in an org the caller created once they no longer own it', async () => {
+    const transferred = soloOwner({
+      membership: { orgId: ORG_ID, userId: USER_ID, role: OrgRole.Admin, source: 'manual' },
+    } as Partial<UserInfo>);
+
+    await expect(claimTrialIfEligible(transferred)).resolves.toBe('not-own-org');
+    expect(mockEnsureTrialEntitlement).not.toHaveBeenCalled();
+  });
+
   // Solo in an org they created, or the floor org a removal made: the
   // entitlement decides, and is told the org did not come with the account.
   it('hands the membership source to the entitlement for a solo manual org', async () => {
