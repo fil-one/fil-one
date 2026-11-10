@@ -9,6 +9,7 @@ import {
   type BucketColdSummary,
   type FileColdState,
 } from '../lib/cold-storage-prototype.js';
+import type { FolderColdState } from '../lib/cold-storage-files.js';
 
 interface BadgeContent {
   color: BadgeColor;
@@ -95,6 +96,64 @@ export function FileStorageBadge({ state, now }: { state: FileColdState; now: nu
       description={content.detail}
       className="shrink-0 whitespace-nowrap"
       data-testid="file-storage-badge"
+    >
+      {content.icon}
+      {content.text}
+    </Badge>
+  );
+}
+
+function describeFolder(state: FolderColdState): BadgeContent | null {
+  switch (state.status) {
+    case 'standard':
+      return null;
+    case 'scheduled':
+      return {
+        color: 'grey',
+        strength: 'subtle',
+        icon: <ClockIcon size={11} className="text-zinc-500" aria-hidden="true" />,
+        text: 'Freezing scheduled',
+        detail: `Files here freeze at the next daily run, ${formatMoment(state.freezesAt)}, new uploads included.`,
+      };
+    case 'frozen':
+      return {
+        color: 'blue',
+        strength: 'strong',
+        icon: <SnowflakeIcon size={11} className="text-brand-600" aria-hidden="true" />,
+        text: 'Frozen',
+        detail: `Files here freeze at each daily run, new uploads included. Files under 128 KB stay in Standard.${
+          state.restoredCount > 0
+            ? ` ${state.restoredCount} ${state.restoredCount === 1 ? 'file has' : 'files have'} a restored copy.`
+            : ''
+        }`,
+      };
+    case 'partly-frozen':
+      return {
+        color: 'blue',
+        strength: 'subtle',
+        icon: <SnowflakeIcon size={11} className="text-brand-600" aria-hidden="true" />,
+        text: 'Partly frozen',
+        detail: 'Some files or folders inside are frozen. Open the folder to see which.',
+      };
+  }
+}
+
+/**
+ * A folder's storage in the Storage column: the freeze rule over it, in the
+ * bucket's words. A folder holds no data of its own, so with no rule it shows
+ * the column's dash, never "Standard".
+ */
+export function FolderStorageBadge({ state }: { state: FolderColdState }) {
+  const content = describeFolder(state);
+  if (!content) return <span className="text-zinc-400">&mdash;</span>;
+  return (
+    <Badge
+      color={content.color}
+      strength={content.strength}
+      size="xs"
+      description={content.detail}
+      className="shrink-0 whitespace-nowrap"
+      data-testid="folder-storage-badge"
     >
       {content.icon}
       {content.text}

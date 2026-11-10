@@ -8,6 +8,7 @@ import {
   countFilesTooSmallToFreeze,
   findReplacedColdFiles,
   getFileColdState,
+  getFolderColdState,
   getJobProgress,
   getNextRunAt,
   getRestoreAfterRequest,
@@ -323,5 +324,62 @@ describe('countFilesTooSmallToFreeze', () => {
     ['a delete marker', version({ sizeBytes: 0, isDeleteMarker: true })],
   ])('leaves out %s', (_, excluded) => {
     expect(countFilesTooSmallToFreeze([excluded], 'any-folder/')).toBe(0);
+  });
+});
+
+describe('getFolderColdState', () => {
+  const file = version();
+
+  it('returns scheduled for a folder a rule covers, before its first run', () => {
+    expect(
+      getFolderColdState(
+        bucketFrozenAt5500(),
+        { prefix: 'any-folder/', versions: [file] },
+        5_800,
+        CLOCK,
+      ),
+    ).toStrictEqual({ status: 'scheduled', freezesAt: 6_000 });
+  });
+
+  it('returns frozen with its restored files counted, after the first run', () => {
+    const record = bucketFrozenAt5500({
+      restores: { [file.key]: restoreOf(file, { readyAt: 6_100, expiresAt: 20_000 }) },
+    });
+    expect(
+      getFolderColdState(record, { prefix: 'any-folder/', versions: [file] }, 7_000, CLOCK),
+    ).toStrictEqual({
+      status: 'frozen',
+      restoredCount: 1,
+    });
+  });
+
+  it('returns frozen for a folder under a frozen parent folder', () => {
+    const record = { ...EMPTY_COLD_RECORD, policies: [{ prefix: 'any-folder/', createdAt: 0 }] };
+    expect(
+      getFolderColdState(record, { prefix: 'any-folder/sub/', versions: [] }, 7_000, CLOCK),
+    ).toMatchObject({
+      status: 'frozen',
+    });
+  });
+
+  it.each([
+    ['a frozen file', { policies: [{ key: file.key, createdAt: 0 }] }],
+    ['a rule on a subfolder', { policies: [{ prefix: 'any-folder/sub/', createdAt: 0 }] }],
+  ])('returns partly frozen for a folder holding %s', (_, overrides) => {
+    const record = { ...EMPTY_COLD_RECORD, ...overrides };
+    expect(
+      getFolderColdState(record, { prefix: 'any-folder/', versions: [file] }, 7_000, CLOCK),
+    ).toStrictEqual({
+      status: 'partly-frozen',
+    });
+  });
+
+  it('returns Standard for a folder with no rule over or inside it', () => {
+    const record = { ...EMPTY_COLD_RECORD, policies: [{ prefix: 'other-folder/', createdAt: 0 }] };
+    expect(
+      getFolderColdState(record, { prefix: 'any-folder/', versions: [file] }, 7_000, CLOCK),
+    ).toStrictEqual({
+      status: 'standard',
+    });
   });
 });

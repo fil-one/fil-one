@@ -24,7 +24,12 @@ import {
   type ColdFiles,
 } from '../lib/cold-storage-prototype.js';
 import { useCachedListing } from '../lib/use-cached-listing.js';
-import { getJobProgress, isFilePolicy } from '../lib/cold-storage-files.js';
+import {
+  EMPTY_COLD_RECORD,
+  getFolderColdState,
+  getJobProgress,
+  isFilePolicy,
+} from '../lib/cold-storage-files.js';
 
 function getColdStates(
   versions: S3ObjectVersion[],
@@ -125,6 +130,13 @@ export function useBucketColdStorage(bucketName: string, region: S3Region, curre
     showColumn: cold.record !== null,
     restoreProgress: <RestoreProgress jobs={activeJobs} />,
     getState: cold.getState,
+    getFolderState: (prefix) =>
+      getFolderColdState(
+        cold.record ?? EMPTY_COLD_RECORD,
+        { prefix, versions },
+        cold.now,
+        cold.clock,
+      ),
     now: cold.now,
     onFreeze:
       freezeBlock === null

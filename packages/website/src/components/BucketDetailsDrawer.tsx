@@ -7,7 +7,7 @@ import {
   Transition,
   TransitionChild,
 } from '@headlessui/react';
-import { InfoIcon, XIcon } from '@phosphor-icons/react/dist/ssr';
+import { XIcon } from '@phosphor-icons/react/dist/ssr';
 
 import {
   formatBytes,
@@ -19,7 +19,6 @@ import {
 
 import { describeCoverage } from './ColdStorageStatus';
 import { CopyButton } from './CopyButton';
-import { IconButton } from './IconButton';
 import { RegionFlag } from './RegionFlag';
 import { FILONE_STAGE } from '../env';
 import { formatRetention } from '../lib/retention.js';
@@ -203,32 +202,6 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
     <>
       <dt className="text-zinc-500">{label}</dt>
       <dd className="min-w-0 text-zinc-900">{children}</dd>
-    </>
-  );
-}
-
-/**
- * The info button beside the bucket's name, opening Bucket details directly.
- * It owns the drawer it opens, so the page only places the button.
- */
-export function BucketDetailsButton({
-  bucket,
-  ...details
-}: Omit<BucketDetailsDrawerProps, 'onClose' | 'bucket'> & { bucket: BucketDetails | null }) {
-  const [open, setOpen] = useState(false);
-  if (!bucket) return null;
-  return (
-    <>
-      <IconButton
-        id="bucket-details-button"
-        icon={InfoIcon}
-        aria-label="Bucket details"
-        tooltip="Bucket details"
-        tooltipSide="bottom"
-        size="md"
-        onClick={() => setOpen(true)}
-      />
-      {open && <BucketDetailsDrawer {...details} bucket={bucket} onClose={() => setOpen(false)} />}
     </>
   );
 }

@@ -10,6 +10,7 @@ import type { S3ObjectVersion } from '@filone/shared';
 import { Button } from './Button';
 import type { RowAction } from './RowActionsMenu';
 import { isColdFile, type FileColdState } from '../lib/cold-storage-prototype.js';
+import type { FolderColdState } from '../lib/cold-storage-files.js';
 
 // The object browser's pieces for the cold storage prototype (FIL-1608), kept
 // apart so the browser itself stays about listing and selecting objects.
@@ -21,6 +22,8 @@ export interface ObjectColdStorage {
   /** Restores of several files still running, counted, shown above the table. */
   restoreProgress?: React.ReactNode;
   getState: (version: S3ObjectVersion) => FileColdState;
+  /** A folder's state, from the freeze rules over and inside it. */
+  getFolderState: (prefix: string) => FolderColdState;
   now: number;
   /** Opens the freeze review for these files; absent for an account that can't freeze. */
   onFreeze?: (versions: S3ObjectVersion[]) => void;

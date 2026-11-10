@@ -199,6 +199,47 @@ export function getFileColdState(
     : { ...term, status: 'restored', expiresAt: restore.expiresAt };
 }
 
+/**
+ * Where a folder stands. A folder has no storage of its own, so its state is
+ * the freeze rule over it: scheduled or frozen when a rule covers the folder,
+ * partly frozen when only some files or subfolders inside have one.
+ */
+export type FolderColdState =
+  | { status: 'standard' }
+  | { status: 'scheduled'; freezesAt: number }
+  | { status: 'frozen'; restoredCount: number }
+  | { status: 'partly-frozen' };
+
+/** A folder as `getFolderColdState` reads it: its prefix and the bucket listing it sits in. */
+export interface FolderInListing {
+  prefix: string;
+  versions: S3ObjectVersion[];
+}
+
+export function getFolderColdState(
+  record: BucketColdRecord,
+  { prefix, versions }: FolderInListing,
+  now: number,
+  clock: Clock,
+): FolderColdState {
+  const inside = versions.filter((version) => version.isLatest && version.key.startsWith(prefix));
+  const states = inside.map((version) => getFileColdState(record, version, now, clock));
+  const rule = findCoveringPolicy(record.policies.filter(isFolderPolicy), prefix);
+  if (rule) {
+    const freezesAt = getNextRunAt(rule.createdAt, clock);
+    if (now < freezesAt) return { status: 'scheduled', freezesAt };
+    const restoredCount = states.filter(
+      (state) => state.status === 'restoring' || state.status === 'restored',
+    ).length;
+    return { status: 'frozen', restoredCount };
+  }
+  const hasRuleInside = record.policies.some(
+    (policy) => isFolderPolicy(policy) && policy.prefix.startsWith(prefix),
+  );
+  const hasColdFile = states.some((state) => state.status === 'scheduled' || isColdFile(state));
+  return hasRuleInside || hasColdFile ? { status: 'partly-frozen' } : { status: 'standard' };
+}
+
 /** RestoreObject's Days: a whole number from 1 to 365. */
 export function isValidRestoreDays(days: number): boolean {
   return Number.isInteger(days) && days >= 1 && days <= MAX_RESTORE_DAYS;

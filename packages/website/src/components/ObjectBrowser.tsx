@@ -241,12 +241,6 @@ function ObjectTable({
             />
           )}
           <Table.Head>Name</Table.Head>
-          {versioningEnabled && (
-            <>
-              <Table.Head className={SECONDARY_COLUMN}>Version</Table.Head>
-              <Table.Head className={SECONDARY_COLUMN}>Status</Table.Head>
-            </>
-          )}
           {actions.coldStorage?.showColumn && (
             <Table.Head className={SECONDARY_COLUMN}>Storage</Table.Head>
           )}
@@ -265,8 +259,7 @@ function ObjectTable({
                 key={`folder:${entry.prefix}`}
                 name={entry.name}
                 prefix={entry.prefix}
-                versioningEnabled={versioningEnabled}
-                hasStorageColumn={actions.coldStorage?.showColumn ?? false}
+                coldStorage={actions.coldStorage}
                 onPrefixChange={onPrefixChange}
                 selectable={rowSelection.selectable}
                 isSelected={folderSelected}

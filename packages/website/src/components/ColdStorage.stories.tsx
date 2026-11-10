@@ -6,7 +6,7 @@ import { S3Region, type ListObjectVersionsResponse, type S3ObjectVersion } from 
 import { BucketDetailsDrawer } from './BucketDetailsDrawer';
 import { ColdStorageAnnouncementDialog } from './ColdStorageAnnouncement';
 import { ConfirmDialog } from './ConfirmDialog';
-import { ColdStorageBadge, FileStorageBadge } from './ColdStorageStatus';
+import { ColdStorageBadge, FileStorageBadge, FolderStorageBadge } from './ColdStorageStatus';
 import { FreezeBucketDialog } from './FreezeBucketDialog';
 import { KeepInStandardDialog } from './KeepInStandardDialog';
 import { RestoreFilesDialog } from './RestoreFilesDialog';
@@ -159,7 +159,19 @@ export const FileStates: Story = {
   ),
 };
 
-/** A bucket's pill in the Buckets table, by what its policy covers. */
+/** Every folder state as the Storage column shows it. A folder with no rule shows a dash. */
+export const FolderStates: Story = {
+  render: () => (
+    <div className="flex flex-col items-start gap-3">
+      <FolderStorageBadge state={{ status: 'standard' }} />
+      <FolderStorageBadge state={{ status: 'scheduled', freezesAt: now + 6 * 60 * 60 * 1000 }} />
+      <FolderStorageBadge state={{ status: 'frozen', restoredCount: 2 }} />
+      <FolderStorageBadge state={{ status: 'partly-frozen' }} />
+    </div>
+  ),
+};
+
+/** A bucket's pill in the Buckets table and on its page, by what its policy covers. */
 export const BucketStates: Story = {
   render: () => {
     const base = { prefixes: [], fileCount: 0, firstRunAt: now + DAY, activeRestores: 0 };

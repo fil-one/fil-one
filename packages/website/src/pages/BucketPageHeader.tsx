@@ -1,19 +1,22 @@
+import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { CloudArrowUpIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
+import { CloudArrowUpIcon, InfoIcon, TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { BucketAnalyticsResponse, BucketDetails, S3Region } from '@filone/shared';
 
 import { BucketActionMenu, type BucketAction } from '../components/BucketActionMenu';
-import { BucketDetailsButton } from '../components/BucketDetailsDrawer';
+import { BucketDetailsDrawer } from '../components/BucketDetailsDrawer';
+import { ColdStorageBadge } from '../components/ColdStorageStatus';
+import { useBucketColdSummary } from '../lib/cold-storage-prototype.js';
 import { Button } from '../components/Button';
 import { useEmptyBucketAction } from '../components/EmptyBucketAction';
 import { Heading } from '../components/Heading/Heading';
 
 /**
  * The action bar beside the bucket heading: Upload as the one button, and the
- * rare actions in a "…" menu, Freeze files and Restore files (cold storage
- * prototype) and Empty bucket, so the destructive one is a deliberate step
- * away. Each goes with its permission: emptying is a bulk `objects.delete`,
+ * rare actions in a "…" menu: Bucket details, Freeze files and Restore files
+ * (cold storage prototype), and Empty bucket last, so the destructive one is a
+ * deliberate step away. Each goes with its permission: emptying is a bulk `objects.delete`,
  * uploading is `objects.write`. An empty bucket has nothing to empty and
  * carries its upload in the empty state, so it shows neither.
  */
@@ -26,6 +29,7 @@ export function BucketHeaderActions({
   totalObjectCount,
   onEmptied,
   onUpload,
+  onOpenDetails,
   coldMenuActions,
 }: {
   bucketName: string;
@@ -36,6 +40,8 @@ export function BucketHeaderActions({
   totalObjectCount: number | undefined;
   onEmptied: () => void;
   onUpload: () => void;
+  /** Opens the bucket details panel; absent until the bucket has loaded. */
+  onOpenDetails?: () => void;
   /** Cold storage prototype: Freeze files and Restore files, when they apply. */
   coldMenuActions: BucketAction[];
 }) {
@@ -46,6 +52,9 @@ export function BucketHeaderActions({
     onFinished: onEmptied,
   });
   const menuActions: BucketAction[] = [
+    ...(onOpenDetails
+      ? [{ label: 'Bucket details', icon: InfoIcon, onSelect: onOpenDetails }]
+      : []),
     ...coldMenuActions,
     ...(hasObjects && mayDelete
       ? [{ label: 'Empty bucket', icon: TrashIcon, onSelect: emptyBucket.open }]
@@ -96,18 +105,17 @@ export function BucketPageHeader({
   coldMenuActions: BucketAction[];
 }) {
   const navigate = useNavigate();
+  const coldSummary = useBucketColdSummary(bucketName, region);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   return (
     <div className="mt-4 mb-2 flex flex-wrap items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-2">
         <Heading id="bucket-detail-heading" tag="h1" size="xl">
           {bucketName}
         </Heading>
-        <BucketDetailsButton
-          bucket={bucket}
-          region={region}
-          bytesUsed={analytics?.bytesUsed}
-          objectCount={analytics?.objectCount}
-        />
+        {/* Cold storage prototype: the Buckets table's pill, so a bucket frozen
+            as a whole says so on its own page, new uploads included. */}
+        {coldSummary && <ColdStorageBadge summary={coldSummary} />}
       </div>
       <BucketHeaderActions
         bucketName={bucketName}
@@ -124,8 +132,18 @@ export function BucketPageHeader({
             search: { region },
           })
         }
+        onOpenDetails={bucket ? () => setDetailsOpen(true) : undefined}
         coldMenuActions={coldMenuActions}
       />
+      {bucket && detailsOpen && (
+        <BucketDetailsDrawer
+          bucket={bucket}
+          region={region}
+          bytesUsed={analytics?.bytesUsed}
+          objectCount={analytics?.objectCount}
+          onClose={() => setDetailsOpen(false)}
+        />
+      )}
     </div>
   );
 }

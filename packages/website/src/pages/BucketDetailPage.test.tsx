@@ -349,8 +349,10 @@ describe('BucketDetailPage — the object controls', () => {
 
     expect(await screen.findByTestId('object-row')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: `Delete ${OBJECT_KEY}` })).not.toBeInTheDocument();
-    // Without delete there is nothing in the header's menu, so it isn't there.
-    expect(screen.queryByRole('button', { name: 'Bucket actions' })).not.toBeInTheDocument();
+    // The header's menu still holds Bucket details, but not Empty bucket.
+    fireEvent.click(screen.getByRole('button', { name: 'Bucket actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Bucket details' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Empty bucket' })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 });
@@ -481,5 +483,17 @@ describe('BucketDetailPage — sharing from a row', () => {
 
     const share = await screen.findByRole('button', { name: `Share ${OBJECT_KEY}` });
     await waitFor(() => expect(share).toBeEnabled());
+  });
+});
+
+describe('BucketDetailPage — bucket details', () => {
+  it('opens the bucket details panel from the header menu', async () => {
+    renderPage(OrgRole.ReadOnly);
+    await screen.findByTestId('object-row');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bucket actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Bucket details' }));
+
+    expect(await screen.findByTestId('bucket-details-drawer')).toBeInTheDocument();
   });
 });
