@@ -3,12 +3,12 @@ import {
   DatabaseIcon,
   KeyIcon,
   ChatTeardropDotsIcon,
-  RobotIcon,
 } from '@phosphor-icons/react/dist/ssr';
 import { Link, useMatchRoute } from '@tanstack/react-router';
 
 import type { Permission } from '@filone/shared';
 import { usePermissions } from '../lib/use-permissions.js';
+import { useRagAccess } from '../lib/use-rag-access.js';
 import { useSidebarData } from './use-sidebar-data.js';
 
 import { OrgSwitcherMenu } from './OrgSwitcherMenu.js';
@@ -35,6 +35,8 @@ type NavItem = {
   testId: string;
   /** What the destination needs. Omitted, every member sees the entry. */
   permission?: Permission;
+  /** Shown only to users on the Bucket Intelligence allowlist (`ragAccess`). */
+  ragOnly?: boolean;
 };
 
 type NavGroup = {
@@ -44,13 +46,9 @@ type NavGroup = {
 
 const navGroups: NavGroup[] = [
   {
+    // Unlabelled: a heading over three or four workspace pages only added noise.
     items: [
       { path: '/dashboard', icon: SquaresFourIcon, label: 'Dashboard', testId: 'nav-dashboard' },
-    ],
-  },
-  {
-    label: 'Storage',
-    items: [
       { path: '/buckets', icon: DatabaseIcon, label: 'Buckets', testId: 'nav-buckets' },
       {
         path: '/api-keys',
@@ -61,22 +59,12 @@ const navGroups: NavGroup[] = [
         // page has nothing but the connection reference to offer.
         permission: 'keys.manage_own',
       },
-    ],
-  },
-  {
-    label: 'AI Tools',
-    items: [
       {
         path: '/bucket-intelligence',
         icon: ChatTeardropDotsIcon,
         label: 'Bucket Intelligence',
         testId: 'nav-bucket-intelligence',
-      },
-      {
-        path: '/ai-agent-toolkit',
-        icon: RobotIcon,
-        label: 'AI Agent Toolkit',
-        testId: 'nav-ai-agent-toolkit',
+        ragOnly: true,
       },
     ],
   },
@@ -93,6 +81,7 @@ type NavLinksProps = {
 
 function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps) {
   const { has } = usePermissions();
+  const ragAccess = useRagAccess();
   return (
     <div className="flex flex-col p-2">
       {navGroups.map((group, gi) => (
@@ -104,7 +93,10 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
           )}
           <div className="flex flex-col gap-0.5">
             {group.items
-              .filter((item) => !item.permission || has(item.permission))
+              .filter(
+                (item) =>
+                  (!item.permission || has(item.permission)) && (ragAccess || !item.ragOnly),
+              )
               .map(({ path, icon: Icon, label, testId }) => {
                 const isActive = Boolean(matchRoute({ to: path, fuzzy: path === '/buckets' }));
                 const link = (
