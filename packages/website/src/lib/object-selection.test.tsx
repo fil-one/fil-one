@@ -3,12 +3,7 @@ import { renderHook, act } from '@testing-library/react';
 
 import type { S3ObjectVersion } from '@filone/shared';
 
-import {
-  descendantSelectionIds,
-  parseSelectionId,
-  selectionId,
-  useObjectSelection,
-} from './object-selection.js';
+import { parseSelectionId, selectionId, useObjectSelection } from './object-selection.js';
 
 function version(
   overrides: Partial<S3ObjectVersion> & Pick<S3ObjectVersion, 'key'>,
@@ -35,29 +30,6 @@ describe('selectionId / parseSelectionId', () => {
   it('round-trips a key containing a newline', () => {
     const key = 'weird\nname.txt';
     expect(parseSelectionId(selectionId(key, 'v1'))).toEqual({ key, versionId: 'v1' });
-  });
-});
-
-describe('descendantSelectionIds', () => {
-  const latest = [
-    { key: 'a.txt', versionId: 'v1' },
-    { key: 'photos/one.png', versionId: 'v2' },
-    { key: 'photos/nested/two.png', versionId: 'v3' },
-  ];
-
-  it('returns every object at the root prefix', () => {
-    expect(descendantSelectionIds(latest, '')).toHaveLength(3);
-  });
-
-  it('includes objects nested below a folder prefix', () => {
-    expect(descendantSelectionIds(latest, 'photos/')).toEqual([
-      selectionId('photos/one.png', 'v2'),
-      selectionId('photos/nested/two.png', 'v3'),
-    ]);
-  });
-
-  it('returns nothing for a prefix with no objects', () => {
-    expect(descendantSelectionIds(latest, 'docs/')).toEqual([]);
   });
 });
 

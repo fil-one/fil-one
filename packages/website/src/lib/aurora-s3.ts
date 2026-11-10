@@ -13,6 +13,20 @@ function getText(parent: Element, tag: string): string | undefined {
 }
 
 /**
+ * The `<CommonPrefixes><Prefix>` entries of a delimited listing: the folders
+ * directly under the listed prefix. Read through `<CommonPrefixes>` because the
+ * root carries a `<Prefix>` of its own, the prefix that was listed.
+ */
+function getCommonPrefixes(doc: Document): string[] {
+  const prefixes: string[] = [];
+  for (const group of doc.getElementsByTagName('CommonPrefixes')) {
+    const prefix = getText(group, 'Prefix');
+    if (prefix) prefixes.push(prefix);
+  }
+  return prefixes;
+}
+
+/**
  * Parse an S3 ListObjectsV2 XML response into our ListObjectsResponse shape.
  */
 export function parseListObjectsResponse(xml: string): ListObjectsResponse {
@@ -44,7 +58,7 @@ export function parseListObjectsResponse(xml: string): ListObjectsResponse {
   const nextToken = getText(doc.documentElement, 'NextContinuationToken');
   const isTruncated = getText(doc.documentElement, 'IsTruncated') === 'true';
 
-  return { objects, nextToken, isTruncated };
+  return { objects, commonPrefixes: getCommonPrefixes(doc), nextToken, isTruncated };
 }
 
 function parseVersionElements(doc: Document): S3ObjectVersion[] {
@@ -116,6 +130,7 @@ export function parseListObjectVersionsResponse(xml: string): ListObjectVersions
 
   return {
     versions,
+    commonPrefixes: getCommonPrefixes(doc),
     ...(nextKeyMarker && { nextKeyMarker }),
     ...(nextVersionIdMarker && { nextVersionIdMarker }),
     isTruncated,
