@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import type { S3ObjectVersion } from '@filone/shared';
 
-import { countObjects } from './ObjectBrowser.js';
+import { countObjects, describeListingCount } from './ObjectBrowser.js';
 
 function version(
   overrides: Partial<S3ObjectVersion> & Pick<S3ObjectVersion, 'key'>,
@@ -55,5 +55,48 @@ describe('countObjects', () => {
 
   it('returns 0 for an empty list', () => {
     expect(countObjects([])).toBe(0);
+  });
+});
+
+describe('describeListingCount', () => {
+  it.each([
+    {
+      case: 'an exact count once the listing is complete',
+      reached: 3,
+      hasMore: false,
+      searching: false,
+      text: '3 items',
+    },
+    {
+      case: 'one item in the singular',
+      reached: 1,
+      hasMore: false,
+      searching: false,
+      text: '1 item',
+    },
+    {
+      case: 'a floor while more pages remain',
+      reached: 100,
+      hasMore: true,
+      searching: false,
+      text: '100+ items',
+    },
+    {
+      case: 'matches while searching',
+      reached: 2,
+      hasMore: false,
+      searching: true,
+      text: '2 matches',
+    },
+    {
+      case: 'one match in the singular',
+      reached: 1,
+      hasMore: false,
+      searching: true,
+      text: '1 match',
+    },
+    { case: 'no rows as zero', reached: 0, hasMore: false, searching: true, text: '0 matches' },
+  ])('says $case', ({ reached, hasMore, searching, text }) => {
+    expect(describeListingCount({ reached, hasMore, searching })).toBe(text);
   });
 });

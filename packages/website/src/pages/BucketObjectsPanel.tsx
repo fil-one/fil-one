@@ -117,6 +117,8 @@ export function ObjectsPanel({
   onAddKeyOpenChange: (open: boolean) => void;
   onShowKeys: () => void;
   paging: ObjectBrowserProps['paging'];
+  search: string;
+  onSearchChange: (search: string) => void;
 }) {
   // An empty bucket's next steps depend on its keys and the caller's permissions, so its
   // empty state waits for both and appears once, in its final form; a bucket with objects
@@ -126,7 +128,8 @@ export function ObjectsPanel({
   }
 
   const isEmptyStateUnsettled = accessKeysLoading || permissionsLoading;
-  const looksEmpty = browser.versions.length === 0 && browser.folders.length === 0;
+  const looksEmpty =
+    browser.versions.length === 0 && browser.folders.length === 0 && browser.search === '';
   if (loading || (looksEmpty && isEmptyStateUnsettled)) {
     return <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />;
   }
