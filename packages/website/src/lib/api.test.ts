@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ApiErrorCode, ORG_ID_HEADER } from '@filone/shared';
+import { ApiErrorCode, CSRF_COOKIE_NAME, ORG_ID_HEADER } from '@filone/shared';
 
 import { apiRequest, ForbiddenRoleError, getMe, NotAMemberError } from './api.js';
 import { setActiveOrgId } from './active-org.js';
@@ -98,11 +98,83 @@ describe('apiRequest — 403 handling', () => {
   });
 
   it('falls back to the server message for an unrecognized 403', async () => {
-    respondWith(forbiddenResponse(undefined, 'CSRF validation failed'));
+    respondWith(forbiddenResponse(undefined, 'Any unrecognized refusal'));
 
     const error = await apiRequest('/buckets').catch((err: unknown) => err);
 
-    expect((error as Error).message).toBe('CSRF validation failed');
+    expect((error as Error).message).toBe('Any unrecognized refusal');
+  });
+});
+
+describe('apiRequest — a stale CSRF cookie', () => {
+  const CSRF_COOKIE = `${CSRF_COOKIE_NAME}=`;
+
+  function setCsrfCookie(value: string) {
+    document.cookie = `${CSRF_COOKIE}${value}; path=/`;
+  }
+
+  /** The `X-CSRF-Token` each fetch carried, in order. */
+  function sentTokens(): (string | null)[] {
+    return vi
+      .mocked(fetch)
+      .mock.calls.map(([, init]) => new Headers(init?.headers).get('X-CSRF-Token'));
+  }
+
+  /** A CSRF refusal that, like the server's, sets a new cookie as it lands. */
+  function refuseAndRotateTo(newToken: string) {
+    return () => {
+      setCsrfCookie(newToken);
+      return Promise.resolve(
+        forbiddenResponse(ApiErrorCode.CSRF_INVALID, 'CSRF validation failed'),
+      );
+    };
+  }
+
+  beforeEach(() => {
+    document.cookie = `${CSRF_COOKIE}; max-age=0; path=/`;
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('retries a write once with the cookie the refusal set', async () => {
+    vi.mocked(fetch)
+      .mockImplementationOnce(refuseAndRotateTo('any-new-token'))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+
+    await expect(apiRequest('/any-write', { method: 'POST', body: '{}' })).resolves.toStrictEqual({
+      ok: true,
+    });
+    expect(sentTokens()).toStrictEqual([null, 'any-new-token']);
+  });
+
+  it('does not retry when the refusal left the cookie as it was', async () => {
+    setCsrfCookie('any-token');
+    vi.mocked(fetch).mockResolvedValue(
+      forbiddenResponse(ApiErrorCode.CSRF_INVALID, 'CSRF validation failed'),
+    );
+
+    const error = await apiRequest('/any-write', { method: 'POST' }).catch((err: unknown) => err);
+
+    expect(sentTokens()).toStrictEqual(['any-token']);
+    expect(error).toMatchObject({
+      status: 403,
+      code: ApiErrorCode.CSRF_INVALID,
+      message: 'Your session changed while this page was open. Reload the page and try again.',
+    });
+  });
+
+  it('does not retry a 403 that is not a CSRF refusal, even when the cookie changed', async () => {
+    vi.mocked(fetch).mockImplementation(() => {
+      setCsrfCookie('any-new-token');
+      return Promise.resolve(forbiddenResponse(ApiErrorCode.FORBIDDEN_ROLE));
+    });
+
+    await apiRequest('/any-write', { method: 'POST' }).catch(() => {});
+
+    expect(sentTokens()).toStrictEqual([null]);
   });
 });
 

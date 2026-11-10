@@ -112,6 +112,17 @@ export const NoLongerValid: Story = {
   },
 };
 
+/**
+ * The CSRF check refused even after the console's retry. Nothing ran, so the
+ * token is still good and the page offers to send it again.
+ */
+export const SessionChanged: Story = {
+  args: {
+    status: 'refused',
+    error: apiError('CSRF validation failed', 403, ApiErrorCode.CSRF_INVALID),
+  },
+};
+
 /** A refusal with no state of its own renders the server's own sentence. */
 export const InviterLostAuthority: Story = {
   args: {
