@@ -316,6 +316,18 @@ function describeListing(
   };
 }
 
+/**
+ * Lists the bucket again after a server-side deletion (emptying it, or deleting
+ * folders), along with the analytics that count its objects.
+ */
+function useRefreshAfterBulkDelete(bucketName: string, region: S3Region) {
+  const queryClient = useQueryClient();
+  return useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
+  }, [queryClient, bucketName, region]);
+}
+
 export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
@@ -381,10 +393,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     : displayObjectCount(analyticsData, page, listing.coversBucket);
   const keyCount = accessKeysLoading ? undefined : accessKeys.length;
 
-  const refreshAfterBulkDelete = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
-  }, [queryClient, bucketName, region]);
+  const refreshAfterBulkDelete = useRefreshAfterBulkDelete(bucketName, region);
 
   const invalidateObjectsCache = useCallback(
     (key: string, versionId?: string) => {
@@ -516,6 +525,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               paging={listing.paging}
               search={folderSearch.text}
               onSearchChange={folderSearch.setText}
+              onFoldersDeleted={refreshAfterBulkDelete}
             />
           </TabPanel>
 

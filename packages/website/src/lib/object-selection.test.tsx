@@ -3,7 +3,12 @@ import { renderHook, act } from '@testing-library/react';
 
 import type { S3ObjectVersion } from '@filone/shared';
 
-import { parseSelectionId, selectionId, useObjectSelection } from './object-selection.js';
+import {
+  folderSelectionId,
+  parseSelectionId,
+  selectionId,
+  useObjectSelection,
+} from './object-selection.js';
 
 function version(
   overrides: Partial<S3ObjectVersion> & Pick<S3ObjectVersion, 'key'>,
@@ -66,7 +71,49 @@ describe('useObjectSelection', () => {
   it('converts the selection into delete targets', () => {
     const { result } = renderHook(() => useObjectSelection(versions));
     act(() => result.current.toggle(selectionId('a.txt', 'v1')));
-    expect(result.current.targets()).toEqual([{ key: 'a.txt', versionId: 'v1' }]);
+    expect(result.current.targets()).toStrictEqual({
+      objects: [{ key: 'a.txt', versionId: 'v1' }],
+      folderPrefixes: [],
+    });
+  });
+
+  it('returns selected folders as prefixes, apart from the objects', () => {
+    const { result } = renderHook(() => useObjectSelection(versions, ['any-folder/']));
+    act(() => result.current.setMany([idA, folderSelectionId('any-folder/')], true));
+    expect(result.current.targets()).toStrictEqual({
+      objects: [{ key: 'a.txt' }],
+      folderPrefixes: ['any-folder/'],
+    });
+  });
+
+  // An unversioned object's id starts with the separator, so a folder id built
+  // the same way could read as an object whose key starts with the prefix.
+  it('keeps a folder apart from an unversioned object whose key is the same text', () => {
+    const { result } = renderHook(() =>
+      useObjectSelection([version({ key: 'any-name/' })], ['any-name/']),
+    );
+    act(() => result.current.toggle(folderSelectionId('any-name/')));
+    expect(result.current.targets()).toStrictEqual({
+      objects: [],
+      folderPrefixes: ['any-name/'],
+    });
+  });
+
+  it('drops folders that are no longer listed', () => {
+    const { result, rerender } = renderHook(
+      ({ folders }) => useObjectSelection(versions, folders),
+      { initialProps: { folders: ['any-folder/', 'other-folder/'] } },
+    );
+
+    act(() =>
+      result.current.setMany(
+        [folderSelectionId('any-folder/'), folderSelectionId('other-folder/')],
+        true,
+      ),
+    );
+    rerender({ folders: ['other-folder/'] });
+
+    expect(result.current.selected).toEqual(new Set([folderSelectionId('other-folder/')]));
   });
 
   it('drops ids for objects that no longer exist', () => {
