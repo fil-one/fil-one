@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -545,5 +545,106 @@ describe('BucketDetailPage: searching a folder', () => {
     fireEvent.click(within(emptyState).getByRole('button', { name: 'Clear search' }));
 
     expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+  });
+});
+
+describe('BucketDetailPage: deleting a folder', () => {
+  const FOLDER_LISTING: ListObjectsResponse = {
+    ...ONE_OBJECT_LISTING,
+    commonPrefixes: ['any-folder/'],
+  };
+
+  beforeEach(() => {
+    mockParseListObjects.mockReturnValue(FOLDER_LISTING);
+    vi.stubGlobal('crypto', { randomUUID: () => '3f1a6b2c-8d4e-4f0a-9b3c-1d2e3f4a5b6c' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Ticks the folder, then confirms the delete from the selection bar. */
+  async function deleteSelectedFolder() {
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Select folder any-folder' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByTestId('delete-folders-dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    return dialog;
+  }
+
+  it('offers no folder checkbox to a role without objects.delete', async () => {
+    renderPage(OrgRole.ReadOnly);
+
+    expect(await screen.findByTestId('folder-row')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('checkbox', { name: 'Select folder any-folder' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('confirms by naming the folder and saying everything in it goes', async () => {
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Select folder any-folder' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    expect(await screen.findByTestId('delete-folders-dialog')).toHaveTextContent(
+      'Everything in any-folder/ will be permanently deleted',
+    );
+  });
+
+  it('starts a server-side deletion of the folder by its prefix', async () => {
+    mockApiRequest.mockImplementation((path: string) =>
+      path.includes('/bulk-delete')
+        ? new Promise(() => {}) // the job's start is what this test reads
+        : respond(path),
+    );
+    renderPage(OrgRole.Owner);
+
+    await deleteSelectedFolder();
+
+    await waitFor(() =>
+      expect(
+        mockApiRequest.mock.calls.filter(([path]) => String(path).includes('/bulk-delete')),
+      ).toMatchObject([
+        [
+          `/buckets/${BUCKET}/bulk-delete?region=${REGION}`,
+          { method: 'POST', body: expect.stringContaining('"prefix":"any-folder/"') },
+        ],
+      ]),
+    );
+  });
+
+  it('lists the bucket and its analytics again once the deletion finishes', async () => {
+    mockApiRequest.mockImplementation((path: string) =>
+      path.includes('/bulk-delete')
+        ? Promise.resolve({
+            job: {
+              jobId: 'any-job',
+              bucketName: BUCKET,
+              region: REGION,
+              prefix: 'any-folder/',
+              scope: 'allVersions',
+              status: 'completed',
+              deletedCount: 2,
+              failedCount: 0,
+              failures: [],
+              startedAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+            },
+          })
+        : respond(path),
+    );
+    const { client } = renderPage(OrgRole.Owner);
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    const dialog = await deleteSelectedFolder();
+
+    expect(await within(dialog).findByText('Folder deleted')).toBeInTheDocument();
+    expect(invalidate.mock.calls).toEqual(
+      expect.arrayContaining([
+        [{ queryKey: queryKeys.objects(BUCKET, REGION) }],
+        [{ queryKey: queryKeys.bucketAnalytics(BUCKET, REGION) }],
+      ]),
+    );
   });
 });

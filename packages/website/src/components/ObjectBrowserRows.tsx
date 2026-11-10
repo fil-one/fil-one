@@ -18,7 +18,7 @@ import { RowActionsMenu, type RowAction } from './RowActionsMenu';
 import { Spinner } from './Spinner';
 import { Table } from './Table/Table';
 import type { VersionGroup } from '../lib/object-grouping.js';
-import { selectionId } from '../lib/object-selection.js';
+import { folderSelectionId, selectionId } from '../lib/object-selection.js';
 import { formatDate } from '../lib/time.js';
 
 /**
@@ -419,25 +419,33 @@ export function FolderRow({
   name,
   prefix,
   onPrefixChange,
-  selectable,
+  selection,
 }: {
   name: string;
   prefix: string;
   onPrefixChange: (prefix: string) => void;
-  /** Whether the table has a selection column, which this row leaves empty. */
-  selectable: boolean;
+  selection: RowSelection;
 }) {
+  const id = folderSelectionId(prefix);
+  const isSelected = selection.isSelected(id);
+
   return (
     <Table.Row
       data-testid="folder-row"
       data-folder-prefix={prefix}
+      selected={isSelected}
       className="group cursor-pointer"
       onClick={() => onPrefixChange(prefix)}
     >
-      {/* A folder is listed one page at a time, so the browser never holds
-          everything inside it and cannot offer to select it. The empty cell
-          keeps the name column aligned with the object rows. */}
-      {selectable && <Table.Cell className="w-0 pr-0" />}
+      {/* Selecting a folder selects everything inside it, which the server
+          deletes by prefix: the browser holds only one page of one folder. */}
+      {selection.selectable && (
+        <Table.SelectCell
+          checked={isSelected}
+          onChange={() => selection.onToggle(id)}
+          label={`Select folder ${name}`}
+        />
+      )}
       <Table.Cell className={NAME_CELL}>
         <div className="flex items-center gap-2 font-medium text-zinc-900" title={name}>
           <FolderIcon size={16} className="shrink-0 text-zinc-400" aria-hidden="true" />

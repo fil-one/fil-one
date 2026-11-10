@@ -13,7 +13,7 @@ import { useToast } from '../components/Toast/index.js';
 import { apiRequest } from './api.js';
 
 /** How often to ask the API for job progress while it runs. */
-const POLL_INTERVAL_MS = 2000;
+export const POLL_INTERVAL_MS = 2000;
 
 export type UseBulkDeleteJobOptions = {
   bucketName: string;
@@ -26,6 +26,37 @@ export type StartBulkDeleteArgs = {
   prefix?: string;
   scope?: BulkDeleteScope;
 };
+
+/** Asks the API to start a bulk deletion, and returns the job it created. */
+export async function createBulkDeleteJob(
+  bucketName: string,
+  region: S3Region,
+  { prefix = '', scope = BulkDeleteScope.AllVersions }: StartBulkDeleteArgs,
+): Promise<BulkDeleteJob> {
+  const params = new URLSearchParams({ region });
+  const response = await apiRequest<CreateBulkDeleteJobResponse>(
+    `/buckets/${encodeURIComponent(bucketName)}/bulk-delete?${params.toString()}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        prefix,
+        scope,
+        // Makes a retried submit resolve to the same job rather than
+        // starting a second deletion.
+        idempotencyKey: crypto.randomUUID(),
+      }),
+    },
+  );
+  return response.job;
+}
+
+/** Reads a bulk deletion's latest progress. */
+export async function readBulkDeleteJob(jobId: string): Promise<BulkDeleteJob> {
+  const response = await apiRequest<GetBulkDeleteJobResponse>(
+    `/bulk-delete-jobs/${encodeURIComponent(jobId)}`,
+  );
+  return response.job;
+}
 
 /**
  * Drives a server-side bulk deletion: creates the job, then polls it to
@@ -42,25 +73,12 @@ export function useBulkDeleteJob({ bucketName, region, onFinished }: UseBulkDele
   onFinishedRef.current = onFinished;
 
   const start = useCallback(
-    async ({ prefix = '', scope = BulkDeleteScope.AllVersions }: StartBulkDeleteArgs = {}) => {
+    async (args: StartBulkDeleteArgs = {}) => {
       setStarting(true);
       try {
-        const params = new URLSearchParams({ region });
-        const response = await apiRequest<CreateBulkDeleteJobResponse>(
-          `/buckets/${encodeURIComponent(bucketName)}/bulk-delete?${params.toString()}`,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              prefix,
-              scope,
-              // Makes a retried submit resolve to the same job rather than
-              // starting a second deletion.
-              idempotencyKey: crypto.randomUUID(),
-            }),
-          },
-        );
-        setJob(response.job);
-        return response.job;
+        const created = await createBulkDeleteJob(bucketName, region, args);
+        setJob(created);
+        return created;
       } catch (err) {
         console.error('Failed to start bulk delete:', err);
         toast.error(err instanceof Error ? err.message : 'Failed to start deletion');
@@ -81,13 +99,11 @@ export function useBulkDeleteJob({ bucketName, region, onFinished }: UseBulkDele
     const timer = setInterval(() => {
       void (async () => {
         try {
-          const response = await apiRequest<GetBulkDeleteJobResponse>(
-            `/bulk-delete-jobs/${encodeURIComponent(job.jobId)}`,
-          );
+          const latest = await readBulkDeleteJob(job.jobId);
           if (cancelled) return;
-          setJob(response.job);
-          if (isTerminalBulkDeleteStatus(response.job.status)) {
-            onFinishedRef.current?.(response.job);
+          setJob(latest);
+          if (isTerminalBulkDeleteStatus(latest.status)) {
+            onFinishedRef.current?.(latest);
           }
         } catch (err) {
           // A transient poll failure is not a job failure; keep watching.
