@@ -230,11 +230,9 @@ test('multipart parts listing and abort are granted on their own', { tag: '@api'
   ]).toEqual(['ok', 'ok']);
 });
 
-// Quarantined: on staging, GetBucketVersioning is refused even with
-// s3:ListBucket (FIL-1673). Restore with `test` once that's resolved.
-test.fixme('versions are read and deleted under their own actions', { tag: '@api' }, async () => {
+test('versions are read and deleted under their own actions', { tag: '@api' }, async () => {
   const bucket = await createBucketWithStatements(
-    [allow([memberId], ['s3:GetObject', 's3:DeleteObject', 's3:ListBucket'])],
+    [allow([memberId], ['s3:GetObject', 's3:DeleteObject', 's3:GetBucketVersioning'])],
     { versioning: true },
   );
   const { VersionId } = await ownerS3.send(
@@ -251,8 +249,8 @@ test.fixme('versions are read and deleted under their own actions', { tag: '@api
   ]).toEqual(['ok', '403 AccessDenied', '403 AccessDenied', 'ok']);
 });
 
-test('GetBucketVersioning is refused without s3:ListBucket', { tag: '@api' }, async () => {
-  const bucket = await createBucketWithStatements([allow([memberId], ['s3:GetObject'])]);
+test('GetBucketVersioning is refused with s3:ListBucket alone', { tag: '@api' }, async () => {
+  const bucket = await createBucketWithStatements([allow([memberId], ['s3:ListBucket'])]);
   expect(
     await getS3Outcome(
       (await createS3ClientWithNewKey(member, testKeys)).send(
