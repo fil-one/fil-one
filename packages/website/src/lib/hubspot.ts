@@ -53,113 +53,56 @@ export async function submitContactSalesForm(fields: ContactSalesFields): Promis
 }
 
 type SupportFields = {
-  firstName: string;
-  lastName: string;
-  company: string;
+  /**
+   * The signed-in user's full name. Absent when their sign-in method gave none,
+   * and the email address itself for a password account that never set one.
+   */
+  name?: string;
+  /**
+   * The active organization's name and id. Both go on the ticket rather than
+   * the contact: one person can write in from several organizations, and a
+   * contact property such as `company` would hold only the latest. Absent when
+   * the console could not load the profile.
+   *
+   * The browser posts to HubSpot's public forms endpoint, so anyone can send
+   * any value here. They help support find the account; they do not prove the
+   * sender belongs to it.
+   */
+  organization?: { name: string; id: string };
   email: string;
   categories: string[];
   message: string;
 };
 
 export async function submitSupportForm(fields: SupportFields): Promise<void> {
-  const hubspotFields: HubSpotField[] = [
-    { objectTypeId: '0-1', name: 'firstname', value: fields.firstName },
-    { objectTypeId: '0-1', name: 'lastname', value: fields.lastName },
-    { objectTypeId: '0-1', name: 'company', value: fields.company },
+  const hubspotFields: HubSpotField[] = [];
+  // A name holding an @ is an email address standing in for a name, and would
+  // show on the ticket as the person's first name. HubSpot's First Name is
+  // optional, so the contact is created from the email alone. A one-word name
+  // sends no last name.
+  const name = fields.name?.trim();
+  if (name && !name.includes('@')) {
+    const [firstName, ...lastName] = name.split(/\s+/);
+    hubspotFields.push({ objectTypeId: '0-1', name: 'firstname', value: firstName });
+    if (lastName.length > 0) {
+      hubspotFields.push({ objectTypeId: '0-1', name: 'lastname', value: lastName.join(' ') });
+    }
+  }
+  hubspotFields.push(
     { objectTypeId: '0-1', name: 'email', value: fields.email },
     { objectTypeId: '0-5', name: 'hs_ticket_category', value: fields.categories.join(';') },
     { objectTypeId: '0-5', name: 'content', value: fields.message },
-  ];
+  );
+  if (fields.organization) {
+    hubspotFields.push(
+      { objectTypeId: '0-5', name: 'filone_org_name', value: fields.organization.name },
+      { objectTypeId: '0-5', name: 'filone_org_id', value: fields.organization.id },
+    );
+  }
+  // No `filone_user_id`: the backend's contact sync owns it and addresses
+  // contacts by it, and HubSpot keeps it unique. A form submission matches its
+  // contact by email, so after an email change it could claim the id for a
+  // second contact and be refused.
 
   return submitToHubSpot(HUBSPOT_SUPPORT_FORM_ID, hubspotFields, 'Support');
-}
-
-export type WaitlistFields = {
-  formId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  primaryUseCase: string;
-  ragProvider: string;
-  timeline: string;
-  teamSize: string;
-  storageAmount: string;
-  notes: string;
-};
-
-// Shared submit for waitlist forms. Forwards the HubSpot tracking cookie when present
-// so submissions link to an existing visitor's analytics session.
-async function submitWaitlistToHubSpot(
-  formId: string,
-  fields: { name: string; value: string }[],
-): Promise<void> {
-  const hutk = document.cookie
-    .split('; ')
-    .find((row) => row.startsWith('hubspotutk='))
-    ?.split('=')[1];
-
-  const res = await fetch(
-    `https://api.hsforms.com/submissions/v3/integration/submit/${HUBSPOT_PORTAL_ID}/${formId}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fields,
-        context: {
-          pageUri: window.location.href,
-          ...(hutk ? { hutk } : {}),
-        },
-      }),
-    },
-  );
-
-  if (!res.ok) throw new Error('Waitlist submission failed');
-}
-
-export async function submitWaitlistForm(fields: WaitlistFields): Promise<void> {
-  return submitWaitlistToHubSpot(fields.formId, [
-    { name: 'firstname', value: fields.firstName },
-    { name: 'lastname', value: fields.lastName },
-    { name: 'email', value: fields.email },
-    { name: 'primary_use_case', value: fields.primaryUseCase },
-    { name: 'how_are_you_handling_rag_today', value: fields.ragProvider },
-    { name: 'timeline', value: fields.timeline },
-    { name: 'team_size', value: fields.teamSize },
-    { name: 'amount_of_storage_rag', value: fields.storageAmount },
-    { name: 'notes', value: fields.notes },
-  ]);
-}
-
-export type AgentToolkitWaitlistFields = {
-  formId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  tools: string[];
-  otherTool: string;
-  timeline: string;
-  teamSize: string;
-  notes: string;
-};
-
-export async function submitAgentToolkitWaitlistForm(
-  fields: AgentToolkitWaitlistFields,
-): Promise<void> {
-  const hubspotFields = [
-    { name: 'firstname', value: fields.firstName },
-    { name: 'lastname', value: fields.lastName },
-    { name: 'email', value: fields.email },
-    { name: 'ai_tools', value: fields.tools.join(';') },
-    { name: 'ai_toolkit_timeline', value: fields.timeline },
-    { name: 'team_size', value: fields.teamSize },
-    { name: 'ai_toolkit_notes', value: fields.notes },
-  ];
-
-  // Free-text tool name goes to its own property; the checkbox field keeps the literal "Other".
-  const otherTool = fields.otherTool.trim();
-  if (otherTool) {
-    hubspotFields.push({ name: 'other_tool', value: otherTool });
-  }
-
-  return submitWaitlistToHubSpot(fields.formId, hubspotFields);
 }

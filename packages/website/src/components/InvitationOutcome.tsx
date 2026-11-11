@@ -94,12 +94,31 @@ function Refused({
   error,
   sessionEmail,
   onLogOut,
+  onRetry,
 }: {
   error: unknown;
   sessionEmail?: string;
   onLogOut: () => void;
+  onRetry: () => void;
 }) {
   const code = errorCodeOf(error);
+
+  if (code === ApiErrorCode.DELETION_IN_PROGRESS) {
+    return (
+      <Panel
+        title="This invitation is on hold"
+        icon={WarningIcon}
+        iconColor="amber"
+        testId="accept-deletion-in-progress"
+        takeFocus
+      >
+        <p>{errorMessageOf(error, 'A deletion is still running. Try again in a few minutes.')}</p>
+        <Button variant="primary" onClick={onRetry}>
+          Try again
+        </Button>
+      </Panel>
+    );
+  }
 
   if (code === ApiErrorCode.INVITE_EMAIL_MISMATCH) {
     return (
@@ -143,6 +162,30 @@ function Refused({
         </p>
         <Button id="accept-verify-email-button" variant="primary" href="/verify-email">
           Verify your email
+        </Button>
+      </Panel>
+    );
+  }
+
+  // The CSRF check refuses before the handler runs, so the token was not spent
+  // and the page can send it again. A reload would not: the token left the URL
+  // on arrival, and a reload lands on the no-token panel. The email link stays
+  // the fallback for a retry that is refused too.
+  if (code === ApiErrorCode.CSRF_INVALID) {
+    return (
+      <Panel
+        title="Your session changed"
+        icon={WarningCircleIcon}
+        iconColor="amber"
+        testId="accept-session-changed"
+        takeFocus
+      >
+        <p>
+          It changed while this page was loading. Your invitation is still valid, so try again or
+          open the link from the email.
+        </p>
+        <Button variant="primary" onClick={onRetry}>
+          Try again
         </Button>
       </Panel>
     );
@@ -224,6 +267,8 @@ export type InvitationOutcomeProps = {
   sessionEmail?: string;
   onContinue: (orgId: string) => void;
   onLogOut: () => void;
+  /** Redeem the same token again, after a refusal that left the invitation pending. */
+  onRetry: () => void;
 };
 
 /**
@@ -240,13 +285,14 @@ export function InvitationOutcome({
   sessionEmail,
   onContinue,
   onLogOut,
+  onRetry,
 }: InvitationOutcomeProps) {
   return (
     <div
       aria-live="polite"
       className="flex min-h-screen items-center justify-center bg-zinc-50 px-6"
     >
-      {panelFor({ status, result, error, sessionEmail, onContinue, onLogOut })}
+      {panelFor({ status, result, error, sessionEmail, onContinue, onLogOut, onRetry })}
     </div>
   );
 }
@@ -258,6 +304,7 @@ function panelFor({
   sessionEmail,
   onContinue,
   onLogOut,
+  onRetry,
 }: InvitationOutcomeProps) {
   if (status === 'no-token') {
     return (
@@ -280,7 +327,9 @@ function panelFor({
   }
 
   if (status === 'refused') {
-    return <Refused error={error} sessionEmail={sessionEmail} onLogOut={onLogOut} />;
+    return (
+      <Refused error={error} sessionEmail={sessionEmail} onLogOut={onLogOut} onRetry={onRetry} />
+    );
   }
 
   return (

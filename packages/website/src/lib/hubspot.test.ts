@@ -1,10 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import {
-  submitAgentToolkitWaitlistForm,
-  submitContactSalesForm,
-  submitSupportForm,
-  submitWaitlistForm,
-} from './hubspot.js';
+import { submitContactSalesForm, submitSupportForm } from './hubspot.js';
 
 // ---------------------------------------------------------------------------
 // Setup — mock fetch to prevent real API calls
@@ -39,9 +34,8 @@ describe('submitSupportForm', () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
     await submitSupportForm({
-      firstName: 'Jane',
-      lastName: 'Doe',
-      company: 'Acme Inc',
+      name: 'Jane Doe',
+      organization: { name: 'Acme Inc', id: 'any-org-id' },
       email: 'jane@acme.com',
       categories: ['PRODUCT_ISSUE'],
       message: 'Help needed',
@@ -55,10 +49,11 @@ describe('submitSupportForm', () => {
         fields: [
           { objectTypeId: '0-1', name: 'firstname', value: 'Jane' },
           { objectTypeId: '0-1', name: 'lastname', value: 'Doe' },
-          { objectTypeId: '0-1', name: 'company', value: 'Acme Inc' },
           { objectTypeId: '0-1', name: 'email', value: 'jane@acme.com' },
           { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'PRODUCT_ISSUE' },
           { objectTypeId: '0-5', name: 'content', value: 'Help needed' },
+          { objectTypeId: '0-5', name: 'filone_org_name', value: 'Acme Inc' },
+          { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
         ],
         context: {
           pageUri: 'https://app.fil.one/support',
@@ -68,13 +63,111 @@ describe('submitSupportForm', () => {
     });
   });
 
+  it('puts everything after the first word of the name into the last name', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      name: 'any first multi-part last',
+      organization: { name: 'any-org', id: 'any-org-id' },
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toEqual(
+      expect.arrayContaining([
+        { objectTypeId: '0-1', name: 'firstname', value: 'any' },
+        { objectTypeId: '0-1', name: 'lastname', value: 'first multi-part last' },
+      ]),
+    );
+  });
+
+  it('splits the name on any run of spaces, ignoring spaces around it', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      name: '  any   name ',
+      organization: { name: 'any-org', id: 'any-org-id' },
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toEqual(
+      expect.arrayContaining([
+        { objectTypeId: '0-1', name: 'firstname', value: 'any' },
+        { objectTypeId: '0-1', name: 'lastname', value: 'name' },
+      ]),
+    );
+  });
+
+  it('sends a one-word name as the first name only', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      name: 'any',
+      organization: { name: 'any-org', id: 'any-org-id' },
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toStrictEqual([
+      { objectTypeId: '0-1', name: 'firstname', value: 'any' },
+      { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
+      { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
+      { objectTypeId: '0-5', name: 'content', value: 'any message' },
+      { objectTypeId: '0-5', name: 'filone_org_name', value: 'any-org' },
+      { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
+    ]);
+  });
+
+  it.each([
+    { condition: 'the user has no name', name: undefined },
+    { condition: 'the name is an email address', name: 'any@example.com' },
+    { condition: 'the name is only spaces', name: '   ' },
+  ])('leaves out the name fields when $condition', async ({ name }) => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      name,
+      organization: { name: 'any-org', id: 'any-org-id' },
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toStrictEqual([
+      { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
+      { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
+      { objectTypeId: '0-5', name: 'content', value: 'any message' },
+      { objectTypeId: '0-5', name: 'filone_org_name', value: 'any-org' },
+      { objectTypeId: '0-5', name: 'filone_org_id', value: 'any-org-id' },
+    ]);
+  });
+
+  it('leaves out the organization fields when the profile has none', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    await submitSupportForm({
+      email: 'any@example.com',
+      categories: ['GENERAL_INQUIRY'],
+      message: 'any message',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).fields).toStrictEqual([
+      { objectTypeId: '0-1', name: 'email', value: 'any@example.com' },
+      { objectTypeId: '0-5', name: 'hs_ticket_category', value: 'GENERAL_INQUIRY' },
+      { objectTypeId: '0-5', name: 'content', value: 'any message' },
+    ]);
+  });
+
   it('joins multiple categories with semicolons', async () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
     await submitSupportForm({
-      firstName: 'John',
-      lastName: 'Smith',
-      company: 'Test Corp',
+      name: 'John Smith',
+      organization: { name: 'Test Corp', id: 'any-org-id' },
       email: 'john@test.com',
       categories: ['PRODUCT_ISSUE', 'BILLING_ISSUE', 'FEATURE_REQUEST'],
       message: 'Multiple issues',
@@ -93,9 +186,8 @@ describe('submitSupportForm', () => {
     fetchMock.mockResolvedValueOnce({ ok: true });
 
     await submitSupportForm({
-      firstName: 'Test',
-      lastName: 'User',
-      company: 'Company',
+      name: 'Test User',
+      organization: { name: 'Company', id: 'any-org-id' },
       email: 'test@example.com',
       categories: [],
       message: 'No category',
@@ -115,9 +207,8 @@ describe('submitSupportForm', () => {
 
     await expect(
       submitSupportForm({
-        firstName: 'Jane',
-        lastName: 'Doe',
-        company: 'Acme',
+        name: 'Jane Doe',
+        organization: { name: 'Acme', id: 'any-org-id' },
         email: 'jane@acme.com',
         categories: ['GENERAL_INQUIRY'],
         message: 'Test',
@@ -130,9 +221,8 @@ describe('submitSupportForm', () => {
 
     await expect(
       submitSupportForm({
-        firstName: 'Jane',
-        lastName: 'Doe',
-        company: 'Acme',
+        name: 'Jane Doe',
+        organization: { name: 'Acme', id: 'any-org-id' },
         email: 'jane@acme.com',
         categories: ['PRODUCT_ISSUE'],
         message: 'Test',
@@ -260,152 +350,5 @@ describe('submitContactSalesForm', () => {
         email: 'jane@acme.com',
       }),
     ).rejects.toThrow('HubSpot submission failed (422)');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Waitlist forms (read document.cookie for the HubSpot tracking cookie)
-// ---------------------------------------------------------------------------
-
-const WAITLIST_FORM_ID = '39527548-1773-4541-beed-eee6225ae3b2';
-const TOOLKIT_FORM_ID = '4857a0c6-a4a5-459c-bf37-a56d452c7442';
-
-describe('submitWaitlistForm (Bucket Intelligence)', () => {
-  beforeEach(() => {
-    vi.stubGlobal('document', { cookie: '' });
-  });
-
-  it('sends the correct RAG payload with all fields in order', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true });
-
-    await submitWaitlistForm({
-      formId: WAITLIST_FORM_ID,
-      firstName: 'Jane',
-      lastName: 'Doe',
-      email: 'jane@acme.com',
-      primaryUseCase: 'Document Q&A',
-      ragProvider: 'LangChain',
-      timeline: 'Actively building now',
-      teamSize: '2-10 people',
-      storageAmount: '25 - 50 TB',
-      notes: 'Some notes',
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(hubspotUrl(WAITLIST_FORM_ID), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fields: [
-          { name: 'firstname', value: 'Jane' },
-          { name: 'lastname', value: 'Doe' },
-          { name: 'email', value: 'jane@acme.com' },
-          { name: 'primary_use_case', value: 'Document Q&A' },
-          { name: 'how_are_you_handling_rag_today', value: 'LangChain' },
-          { name: 'timeline', value: 'Actively building now' },
-          { name: 'team_size', value: '2-10 people' },
-          { name: 'amount_of_storage_rag', value: '25 - 50 TB' },
-          { name: 'notes', value: 'Some notes' },
-        ],
-        context: { pageUri: 'https://app.fil.one/support' },
-      }),
-    });
-  });
-
-  it('throws when the response is not ok', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 400 });
-
-    await expect(
-      submitWaitlistForm({
-        formId: WAITLIST_FORM_ID,
-        firstName: 'Jane',
-        lastName: 'Doe',
-        email: 'jane@acme.com',
-        primaryUseCase: '',
-        ragProvider: '',
-        timeline: '',
-        teamSize: '',
-        storageAmount: '',
-        notes: '',
-      }),
-    ).rejects.toThrow('Waitlist submission failed');
-  });
-});
-
-describe('submitAgentToolkitWaitlistForm', () => {
-  beforeEach(() => {
-    vi.stubGlobal('document', { cookie: '' });
-  });
-
-  it('sends the correct payload, joining tools and including other_tool', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true });
-
-    await submitAgentToolkitWaitlistForm({
-      formId: TOOLKIT_FORM_ID,
-      firstName: 'Jane',
-      lastName: 'Doe',
-      email: 'jane@acme.com',
-      tools: ['Claude', 'Cursor', 'Other'],
-      otherTool: 'Windsurf',
-      timeline: 'Actively building now',
-      teamSize: '2-10 people',
-      notes: 'Building an agent',
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(hubspotUrl(TOOLKIT_FORM_ID), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fields: [
-          { name: 'firstname', value: 'Jane' },
-          { name: 'lastname', value: 'Doe' },
-          { name: 'email', value: 'jane@acme.com' },
-          { name: 'ai_tools', value: 'Claude;Cursor;Other' },
-          { name: 'ai_toolkit_timeline', value: 'Actively building now' },
-          { name: 'team_size', value: '2-10 people' },
-          { name: 'ai_toolkit_notes', value: 'Building an agent' },
-          { name: 'other_tool', value: 'Windsurf' },
-        ],
-        context: { pageUri: 'https://app.fil.one/support' },
-      }),
-    });
-  });
-
-  it('omits other_tool when the value is empty or whitespace', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: true });
-
-    await submitAgentToolkitWaitlistForm({
-      formId: TOOLKIT_FORM_ID,
-      firstName: 'Jane',
-      lastName: 'Doe',
-      email: 'jane@acme.com',
-      tools: ['Claude'],
-      otherTool: '   ',
-      timeline: 'Just exploring',
-      teamSize: 'Just me',
-      notes: '',
-    });
-
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    const otherToolField = body.fields.find((f: { name: string }) => f.name === 'other_tool');
-
-    expect(otherToolField).toBeUndefined();
-  });
-
-  it('throws when the response is not ok', async () => {
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 500 });
-
-    await expect(
-      submitAgentToolkitWaitlistForm({
-        formId: TOOLKIT_FORM_ID,
-        firstName: 'Jane',
-        lastName: 'Doe',
-        email: 'jane@acme.com',
-        tools: [],
-        otherTool: '',
-        timeline: '',
-        teamSize: '',
-        notes: '',
-      }),
-    ).rejects.toThrow('Waitlist submission failed');
   });
 });

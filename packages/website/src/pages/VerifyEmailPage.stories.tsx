@@ -11,7 +11,6 @@ const me: MeResponse = {
   email: 'jane@acme.com',
   mfaEnrollments: [],
   ragAccess: false,
-  orgsBeta: false,
   billingActive: true,
 };
 

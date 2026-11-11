@@ -40,8 +40,8 @@ export const Sending: Story = {
 
 /**
  * A refusal the dialog keeps rather than toasts, beside the controls that
- * caused it. The pending cap and the beta gate are not among these: both make
- * the whole dialog pointless, so the section closes it and says so on the page.
+ * caused it. The pending cap is not among these: it makes the whole dialog
+ * pointless, so the section closes it and says so on the page.
  */
 export const Refused: Story = {
   args: { errorMessage: 'That address is already a member of this organization.' },

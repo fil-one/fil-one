@@ -47,6 +47,26 @@ describe('ToggleConfirmModal', () => {
     expect(screen.getByRole('button', { name: 'Stop indexing' })).toBeInTheDocument();
   });
 
+  it('says indexing starts on confirm and where the index lives for a Forge bucket', () => {
+    render(
+      <ToggleConfirmModal
+        enabled={false}
+        bucketName="my-docs"
+        pending={false}
+        open
+        engine
+        onClose={() => {}}
+        onConfirm={() => {}}
+      />,
+    );
+    expect(screen.getByText(/starts as soon as you confirm/)).toBeInTheDocument();
+    expect(screen.getByText(/Lance dataset in your own Forge storage/)).toBeInTheDocument();
+    expect(screen.queryByText(/Up to 6 hours/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/PDF, Word, PowerPoint, Markdown, HTML, plain text/),
+    ).toBeInTheDocument();
+  });
+
   it('renders nothing when closed', () => {
     render(
       <ToggleConfirmModal

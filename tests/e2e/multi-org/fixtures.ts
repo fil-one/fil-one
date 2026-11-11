@@ -35,7 +35,7 @@ export type { Page } from '@playwright/test';
 /** `/api` calls from the test, with the session's cookies and CSRF header. */
 export async function api(
   page: Page,
-  method: 'GET' | 'POST' | 'PATCH',
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   path: string,
   data?: unknown,
 ) {

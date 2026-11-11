@@ -31,6 +31,10 @@ export function UserAvatar({ src, initial, className }: UserAvatarProps) {
         // console's established, AA-passing grey (well past 4.5:1).
         'relative flex h-7 w-7 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-zinc-200 text-xs font-medium text-zinc-800',
         className,
+        // The fill is for the initial. Behind a loaded picture it bleeds
+        // through the anti-aliased edge of the rounded clip as a dark hairline,
+        // so it goes, after `className` so it also wins over a caller's fill.
+        status === 'loaded' && 'bg-transparent',
       )}
     >
       {/* Hidden once the picture is up, so a transparent avatar does not show it through. */}

@@ -29,11 +29,7 @@ export function seedPermissions(
     email: 'user@example.com',
     mfaEnrollments: [],
     ragAccess: true,
-    // On by default, like `ragAccess` above: a test about a gated surface should
-    // not have to switch the feature on before it can render the thing it is
-    // about. The surface tests override it.
-    orgsBeta: true,
-    // On by default too — the whole-console billing gate has its own tests,
+    // On by default — the whole-console billing gate has its own tests,
     // and every other test here is about a page that gate would otherwise hide.
     billingActive: true,
     userId: USER_1,
