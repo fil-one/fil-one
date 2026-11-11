@@ -1,0 +1,47 @@
+name: Docs impact
+
+# A PR that changes user-facing code must say what happens to docs.filone.com:
+# link a filone-docs PR, give a reason no docs change is needed, or carry the
+# docs:gated label (feature-flagged work; docs ship at launch).
+# No secrets, no model calls: it makes the decision visible, it doesn't make it.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  docs-impact:
+    if: github.event.pull_request.draft == false && github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Require a docs decision for user-facing changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          GATED: ${{ contains(github.event.pull_request.labels.*.name, 'docs:gated') }}
+          SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'docs:skip') }}
+        run: |
+          paths=(); while IFS= read -r p; do [ -n "$p" ] && paths+=("$p"); done < .github/docs-impact-paths.txt
+          # Template placeholders (<!-- ... -->) don't count as a reason.
+          body=$(printf '%s' "$PR_BODY" | perl -0pe 's/<!--.*?-->//gs')
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD -- "${paths[@]}")
+          if [ -z "$changed" ]; then echo "No user-facing paths changed."; exit 0; fi
+          echo "User-facing paths changed:"; echo "$changed" | sed 's/^/  /' | head -30
+          if [ "$GATED" = true ] || [ "$SKIP" = true ]; then echo "Labelled docs:gated / docs:skip."; exit 0; fi
+          if grep -qE 'github\.com/FilecoinFoundationWeb/filone-docs/pull/[0-9]+|FilecoinFoundationWeb/filone-docs#[0-9]+' <<<"$body"; then
+            echo "Links a filone-docs PR."; exit 0
+          fi
+          if grep -qiE '^\s*-\s*\[x\]\s*No docs change needed:\s*\S' <<<"$body"; then
+            echo "Author says no docs change is needed."; exit 0
+          fi
+          echo "::error::This PR changes user-facing code. In the description, link the filone-docs PR, or tick 'No docs change needed:' and say why, or add the docs:gated label."
+          exit 1
