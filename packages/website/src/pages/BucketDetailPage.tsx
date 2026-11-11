@@ -13,6 +13,7 @@ import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { countObjects } from '../components/ObjectBrowser';
 import { ObjectsPanel } from './BucketObjectsPanel';
+import type { OpenObject } from './BucketObjectDrawer';
 import { useBucketTabs } from '../lib/use-bucket-tabs.js';
 import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
@@ -335,9 +336,16 @@ export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
   region: S3Region;
+  /** The object open in the details panel, from the URL. */
+  openObject?: OpenObject;
 };
 
-export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPageProps) {
+export function BucketDetailPage({
+  bucketName,
+  prefix,
+  region,
+  openObject,
+}: BucketDetailPageProps) {
   const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -517,6 +525,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onShowKeys={tabs.showKeysTab}
               listingTruncated={isTruncated}
               totalObjectCount={analyticsData?.objectCount}
+              openObject={openObject}
+              objectLockEnabled={bucket?.objectLockEnabled ?? false}
+              onObjectDeleted={invalidateObjectsCache}
             />
           </TabPanel>
 

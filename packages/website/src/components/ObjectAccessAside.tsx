@@ -8,7 +8,7 @@ import { FILONE_STAGE } from '../env';
 /**
  * How to reach the object from code: a ready-to-run AWS CLI command, and the
  * region's endpoint for any other S3 client, laid out alike. The S3 URI is inside the command
- * and in the header's Copy S3 URI, so it is not printed a third time. Stacked
+ * and has its own row in the Details card, so it is not printed on its own here. Stacked
  * under the cards below `xl`, a sticky column beside them from `xl`, laid out
  * like `InfoAside` but wider, so the command wraps less. `InfoAside` takes a
  * paragraph per item, which cannot hold a code block.

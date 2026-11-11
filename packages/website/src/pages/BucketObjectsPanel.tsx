@@ -3,6 +3,7 @@ import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { ObjectBrowser, type EmptyBucketKeyAction } from '../components/ObjectBrowser';
 import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import type { useObjectActions } from '../lib/use-object-actions.js';
+import { useBucketObjectDrawer, type OpenObject } from './BucketObjectDrawer';
 
 // Mirrors ObjectBrowser's columns so the placeholder holds the same shape as the
 // table it stands in for. The Version and Status pair is versioning-only, and
@@ -59,6 +60,9 @@ export function ObjectsPanel({
   mayCreateKeys,
   onAddKeyOpenChange,
   onShowKeys,
+  openObject,
+  objectLockEnabled,
+  onObjectDeleted,
   ...browser
 }: {
   loading: boolean;
@@ -80,30 +84,52 @@ export function ObjectsPanel({
   onShowKeys: () => void;
   listingTruncated: boolean;
   totalObjectCount: number | undefined;
+  /** The object open in the details panel, from the URL. */
+  openObject?: OpenObject;
+  objectLockEnabled: boolean;
+  onObjectDeleted: (key: string, versionId?: string) => void;
 }) {
   // An empty bucket's next steps depend on its keys and the caller's permissions, so its
   // empty state waits for both and appears once, in its final form; a bucket with objects
   // does not wait.
+  const objectDrawer = useBucketObjectDrawer({
+    ...browser,
+    openObject,
+    objectLockEnabled,
+    onDownload: objectActions.downloadObject,
+    onDeleted: onObjectDeleted,
+  });
+
   const isEmptyStateUnsettled = accessKeysLoading || permissionsLoading;
   if (loading || (browser.versions.length === 0 && isEmptyStateUnsettled)) {
-    return <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />;
+    // A reload or a link with an object open shows the panel while the list loads
+    return (
+      <>
+        <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />
+        {objectDrawer.drawer}
+      </>
+    );
   }
 
   return (
-    <ObjectBrowser
-      {...browser}
-      onDownload={objectActions.downloadObject}
-      downloading={objectActions.downloading}
-      canUpload={mayUpload}
-      keyAction={getEmptyBucketKeyAction({
-        activeAccessKeyCount,
-        accessKeysFailed,
-        mayCreateKeys,
-        onAddKeyOpenChange,
-        onShowKeys,
-      })}
-      onDelete={mayDelete ? objectActions.deleteObject : undefined}
-      onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
-    />
+    <>
+      <ObjectBrowser
+        {...browser}
+        {...objectDrawer.browserProps}
+        onDownload={objectActions.downloadObject}
+        downloading={objectActions.downloading}
+        canUpload={mayUpload}
+        keyAction={getEmptyBucketKeyAction({
+          activeAccessKeyCount,
+          accessKeysFailed,
+          mayCreateKeys,
+          onAddKeyOpenChange,
+          onShowKeys,
+        })}
+        onDelete={mayDelete ? objectActions.deleteObject : undefined}
+        onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
+      />
+      {objectDrawer.drawer}
+    </>
   );
 }
