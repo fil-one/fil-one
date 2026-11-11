@@ -13,12 +13,19 @@ export type CodeBlockProps = {
    * supplies the surrounding chrome.
    */
   minimal?: boolean;
+  /**
+   * Wraps long lines instead of scrolling them sideways, for prose such as
+   * instructions to paste. Code keeps scrolling, since a wrapped command reads
+   * as two. Copying gives the text as written either way.
+   */
+  wrap?: boolean;
 };
 
-export function CodeBlock({ code, language, className, minimal }: CodeBlockProps) {
+export function CodeBlock({ code, language, className, minimal, wrap }: CodeBlockProps) {
   const { copied, copy } = useCopyToClipboard();
 
   const CopyIcon = copied ? CheckIcon : CopySimpleIcon;
+  const overflow = wrap ? 'whitespace-pre-wrap break-words' : 'overflow-x-auto';
 
   if (minimal) {
     return (
@@ -38,7 +45,7 @@ export function CodeBlock({ code, language, className, minimal }: CodeBlockProps
         >
           <CopyIcon width={14} height={14} />
         </button>
-        <pre className="overflow-x-auto">
+        <pre className={overflow}>
           <code>{code}</code>
         </pre>
       </div>
@@ -67,7 +74,7 @@ export function CodeBlock({ code, language, className, minimal }: CodeBlockProps
       </div>
 
       {/* Code content */}
-      <pre className="overflow-x-auto rounded-md focus-visible:brand-outline" tabIndex={0}>
+      <pre className={clsx(overflow, 'rounded-md focus-visible:brand-outline')} tabIndex={0}>
         <code>{code}</code>
       </pre>
     </div>
