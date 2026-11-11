@@ -22,16 +22,18 @@ export function formatBytesShort(bytes: number): string {
  * magnitudes between neighbours and repeating `2M` for 1.5 MB and 2 MB. Ticks
  * are read against each other, so they need a shared unit, taken here from the
  * top of the domain, and a decimal place when the step lands between whole
- * units.
+ * units. The unit is spelled out (`20 MB`): a bare `20M` reads as a count of
+ * millions. A non-breaking space joins number and unit, so a chart that wraps
+ * long tick labels at spaces (Recharts does) keeps them on one line.
  */
 export function bytesAxisFormatter(domainMax: number): (bytes: number) => string {
   const i =
     domainMax > 0 ? Math.min(Math.floor(Math.log(domainMax) / Math.log(K)), SIZES.length - 1) : 0;
   const divisor = Math.pow(K, i);
-  const unit = SHORT_SIZES[i];
+  const unit = SIZES[i];
   return (bytes: number) => {
     if (bytes === 0) return '0';
     const scaled = bytes / divisor;
-    return `${Number.isInteger(scaled) ? scaled : scaled.toFixed(1)}${unit}`;
+    return `${Number.isInteger(scaled) ? scaled : scaled.toFixed(1)}\u00A0${unit}`;
   };
 }
