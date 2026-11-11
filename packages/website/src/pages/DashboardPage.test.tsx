@@ -190,3 +190,16 @@ describe('DashboardPage — bucket buttons', () => {
     },
   );
 });
+
+describe('DashboardPage — resource counts', () => {
+  it.each([
+    ['buckets', { buckets: { count: 1_234 } }, '1,234'],
+    ['objects', { objects: { count: 342_236 } }, '342,236'],
+    ['access keys', { accessKeys: { count: 5_678 } }, '5,678'],
+  ])('groups the %s count by thousands', async (_label, counts, expected) => {
+    mockGetUsage.mockResolvedValue({ ...USAGE, ...counts });
+    renderPage();
+
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+  });
+});
