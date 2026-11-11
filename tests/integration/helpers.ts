@@ -126,7 +126,10 @@ export async function seedBillingRecord(
   );
 }
 
-/** The row the application would read. */
+/**
+ * The row the application would read. Consistent, so a test that asserts on it
+ * right after a poll sees the write the poll saw, not an older replica.
+ */
 export async function getBillingRecord(
   userId: string,
   orgId?: string,
@@ -135,6 +138,7 @@ export async function getBillingRecord(
     new GetItemCommand({
       TableName: getBillingTableName(),
       Key: subscriptionKey(userId, orgId),
+      ConsistentRead: true,
     }),
   );
   return result.Item ?? null;

@@ -97,6 +97,7 @@ describe('the layout after /me lands on an unnamed only org', () => {
     renderNotAMember({
       ...account([{ orgId: 'org-1', orgName: 'Acme', role: OrgRole.Owner }]),
       nameConfirmed: false,
+      permissions: ['org.rename'],
       floorOrg,
     });
 

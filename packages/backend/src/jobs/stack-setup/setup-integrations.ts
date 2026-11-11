@@ -22,8 +22,8 @@ import { throwIfNotOk } from '../../lib/auth0-management.ts';
 interface SetupProperties {
   SiteUrl: string;
   /**
-   * Comma-joined extra origins the same deployment is served from (the FIL-897
-   * demo aliases). Optional so stacks deployed before it existed still update
+   * Comma-joined extra origins the same deployment is served from (its alias
+   * hosts). Optional so stacks deployed before it existed still update
    * cleanly — CloudFormation custom-resource properties are always strings.
    */
   SiteAliasUrls?: string;

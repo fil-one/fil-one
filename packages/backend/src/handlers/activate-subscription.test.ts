@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
-import { SubscriptionStatus } from '@filone/shared';
+import { ApiErrorCode, SubscriptionStatus } from '@filone/shared';
 import { FINAL_SETUP_STATUS } from '../lib/org-setup-status.ts';
 import { buildEvent } from '../test/lambda-test-utilities.ts';
 
@@ -154,6 +154,24 @@ describe('activate-subscription baseHandler', () => {
     const result = await baseHandler(event);
 
     expect((result as { statusCode: number }).statusCode).toBe(410);
+    expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  // Card checkout would put a second, Stripe-billed plan on top of the agreement.
+  it('refuses with 409 BILLED_MANUALLY without touching Stripe when the org is billed manually', async () => {
+    ddbMock
+      .on(GetItemCommand)
+      .resolves({ Item: buildBillingRecord({ subscriptionStatus: SubscriptionStatus.Manual }) });
+
+    const result = await baseHandler(
+      buildEvent({ userInfo: { userId: 'user-1', orgId: 'org-1' }, body: JSON.stringify({}) }),
+    );
+
+    expect(result).toMatchObject({
+      statusCode: 409,
+      body: expect.stringContaining(ApiErrorCode.BILLED_MANUALLY),
+    });
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
   });

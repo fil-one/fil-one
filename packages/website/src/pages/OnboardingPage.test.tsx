@@ -46,7 +46,7 @@ describe('OnboardingPage', () => {
     );
     expect(screen.getByRole('link', { name: 'Explore the documentation' })).toHaveAttribute(
       'href',
-      'https://docs.fil.one',
+      'https://docs.filone.com',
     );
     expect(screen.getByRole('link', { name: 'Contact support' })).toHaveAttribute(
       'href',

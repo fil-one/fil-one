@@ -1,3 +1,4 @@
+import { SubscriptionStatus } from '@filone/shared';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { scanSubscriptions } from '../lib/subscription-store.ts';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
@@ -72,12 +73,14 @@ async function scanActiveSubscriptionRecords(): Promise<SubscriptionRecord[]> {
     job: 'usage-orchestrator',
     // attribute_not_exists(deletedAt) is redundant against the status a scrub
     // writes, and deliberately so: either alone keeps a torn-down org out.
+    // An org billed manually is invoiced by hand, so Stripe gets none of its usage.
     filterExpression:
-      'sk = :sk AND subscriptionStatus <> :canceled AND attribute_exists(subscriptionId) ' +
-      'AND attribute_not_exists(deletedAt)',
+      'sk = :sk AND subscriptionStatus <> :canceled AND subscriptionStatus <> :manual ' +
+      'AND attribute_exists(subscriptionId) AND attribute_not_exists(deletedAt)',
     expressionAttributeValues: {
       ':sk': { S: 'SUBSCRIPTION' },
-      ':canceled': { S: 'canceled' },
+      ':canceled': { S: SubscriptionStatus.Canceled },
+      ':manual': { S: SubscriptionStatus.Manual },
     },
     select: (record, owner) => {
       if (!record.currentPeriodStart) {

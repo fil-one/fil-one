@@ -226,6 +226,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "GetBucketRagEngine": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "GetBulkDeleteJob": {
       "name": string
       "type": "sst.aws.Function"
@@ -334,6 +338,14 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "RagEngineToken": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "RagEngineUrl": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "RagIndexerOrchestrator": {
       "name": string
       "type": "sst.aws.Function"
@@ -408,6 +420,10 @@ declare module "sst" {
       "value": string
     }
     "StripeWebhook": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
+    "SyncBucketRag": {
       "name": string
       "type": "sst.aws.Function"
     }

@@ -13,7 +13,6 @@ import { ApiErrorCode, OrgRole } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 import { hasPendingInviteToken } from '../lib/invite-token.js';
-import { seedPermissions } from '../lib/test-permissions.js';
 import { AcceptInvitationPage } from './AcceptInvitationPage.js';
 
 // ---------------------------------------------------------------------------
@@ -71,9 +70,6 @@ function withRouter(token: string | null) {
  */
 function renderPage(token: string | null = TOKEN) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  // `/me` is seeded rather than fetched: the page reads it only to name the
-  // address this session carries, and only when the invitation names another.
-  seedPermissions(client, OrgRole.Member, { email: 'wrong@example.com' });
   return render(
     <StrictMode>
       <QueryClientProvider client={client}>
@@ -84,17 +80,34 @@ function renderPage(token: string | null = TOKEN) {
 }
 
 /** An error shaped the way `apiRequest` throws one. */
-function apiError(message: string, status: number, code?: string): Error {
-  return Object.assign(new Error(message), { status, code });
+function apiError(
+  message: string,
+  status: number,
+  code?: string,
+  extra: Record<string, unknown> = {},
+): Error {
+  return Object.assign(new Error(message), { status, code, ...extra });
+}
+
+const deletionInProgress = apiError(
+  'Your organization is being deleted. Try again in a few minutes.',
+  409,
+  ApiErrorCode.DELETION_IN_PROGRESS,
+);
+
+const csrfInvalid = apiError('CSRF validation failed', 403, ApiErrorCode.CSRF_INVALID);
+
+async function resetMocks() {
+  vi.clearAllMocks();
+  // A queued answer a failed test never consumed must not reach the next one.
+  mockAccept.mockReset();
+  // An answer one test gives `/me` must not reach the next one.
+  const { getMe } = await import('../lib/api.js');
+  vi.mocked(getMe).mockReset();
 }
 
 describe('AcceptInvitationPage', () => {
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    // An answer one test gives `/me` must not reach the next one.
-    const { getMe } = await import('../lib/api.js');
-    vi.mocked(getMe).mockReset();
-  });
+  beforeEach(resetMocks);
 
   it('says the link is no longer valid when there is no token to redeem', async () => {
     renderPage(null);
@@ -195,6 +208,7 @@ describe('AcceptInvitationPage', () => {
         'This invitation was sent to a different email address than the one you signed in with.',
         403,
         ApiErrorCode.INVITE_EMAIL_MISMATCH,
+        { sessionEmail: 'wrong@example.com' },
       ),
     );
     renderPage();
@@ -234,6 +248,30 @@ describe('AcceptInvitationPage', () => {
     const panel = await screen.findByTestId('accept-invalid');
     expect(panel).toHaveTextContent('This invitation is no longer valid');
     expect(panel).toHaveTextContent('Ask an administrator for a new invitation.');
+  });
+
+  it('explains a CSRF refusal without naming CSRF', async () => {
+    mockAccept.mockRejectedValue(csrfInvalid);
+    renderPage();
+
+    const panel = await screen.findByTestId('accept-session-changed');
+    expect(panel).toHaveTextContent('Your session changed');
+    expect(panel).not.toHaveTextContent('CSRF');
+  });
+
+  it('redeems the same token again when the caller tries again after a CSRF refusal', async () => {
+    mockAccept.mockRejectedValueOnce(csrfInvalid).mockResolvedValueOnce({
+      orgId: 'org-9',
+      orgName: 'Acme',
+      role: OrgRole.Member,
+      alreadyMember: false,
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByTestId('accept-success')).toHaveTextContent('Welcome to Acme');
+    expect(mockAccept.mock.calls).toStrictEqual([[TOKEN], [TOKEN]]);
   });
 
   it('renders the server’s sentence for a refusal it has no state for', async () => {
@@ -298,23 +336,55 @@ describe('AcceptInvitationPage', () => {
     await waitFor(() => expect(hasPendingInviteToken()).toBe(true));
   });
 
-  it('reads /me without the reconciliation that would reload the page', async () => {
-    mockAccept.mockRejectedValue(
-      apiError('Sent to another address', 403, ApiErrorCode.INVITE_EMAIL_MISMATCH),
-    );
+  it('offers to try again when a deletion still running refuses the accept', async () => {
+    mockAccept.mockRejectedValue(deletionInProgress);
+    renderPage();
+
+    const panel = await screen.findByTestId('accept-deletion-in-progress');
+    expect(panel).toHaveTextContent('Your organization is being deleted.');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('redeems the same token again when the caller tries again', async () => {
+    mockAccept.mockRejectedValueOnce(deletionInProgress).mockResolvedValueOnce({
+      orgId: 'org-9',
+      orgName: 'Acme',
+      role: OrgRole.Member,
+      alreadyMember: false,
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByTestId('accept-success')).toHaveTextContent('Welcome to Acme');
+    expect(mockAccept.mock.calls).toStrictEqual([[TOKEN], [TOKEN]]);
+  });
+});
+
+// `/me` is read only after a successful accept, to refresh the session's claims.
+// A refusal never reads it: a caller with no account yet would get one from it,
+// with the personal org the accept exists to avoid, and a deleted account would
+// be sent to /account-deleted over the refusal.
+describe('AcceptInvitationPage reading /me', () => {
+  beforeEach(resetMocks);
+
+  it.each([
+    [
+      'an email mismatch',
+      apiError('Sent to another address', 403, ApiErrorCode.INVITE_EMAIL_MISMATCH, {
+        sessionEmail: 'any-signed-in@example.com',
+      }),
+      'accept-mismatch',
+    ],
+    ['a deletion still running', deletionInProgress, 'accept-deletion-in-progress'],
+  ])('does not read /me to explain %s', async (_label, error, panel) => {
+    mockAccept.mockRejectedValue(error);
     const { getMe } = await import('../lib/api.js');
-    vi.mocked(getMe).mockResolvedValue({ email: 'invitee@example.com' } as never);
 
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={client}>
-        <ToastProvider>{withRouter(TOKEN)}</ToastProvider>
-      </QueryClientProvider>,
-    );
+    renderPage();
 
-    // The reload the reconcile performs would destroy the token this page is
-    // holding, and the org it is joining is not the org the stash is about.
-    await waitFor(() => expect(getMe).toHaveBeenCalledWith({ skipOrgReconcile: true }));
+    expect(await screen.findByTestId(panel)).toBeInTheDocument();
+    expect(getMe).not.toHaveBeenCalled();
   });
 
   it('does not put /me in flight beside the accept it explains', async () => {

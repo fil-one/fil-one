@@ -107,13 +107,7 @@ export function Alert({
           </span>
         )}
         {description && (
-          <span
-            className={clsx(
-              'text-xs leading-[18px]',
-              centered && 'text-center',
-              textStyles[variant],
-            )}
-          >
+          <span className={clsx('text-xs', centered && 'text-center', textStyles[variant])}>
             {description}
           </span>
         )}
