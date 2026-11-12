@@ -1,0 +1,75 @@
+@layer components {
+  /*
+   * A bucket row the moment it freezes (FIL-1608 prototype). A white band with
+   * a soft left edge, as wide as the row, slides off to the right over the
+   * row's frozen wash, so the frost sweeps across the row left to right; then
+   * the Frozen pill pops in. The band is a background image on the row, so it
+   * sits under the text rather than over it.
+   *
+   * The sweep runs 500ms, past the 150/200ms budget in DESIGN.md: a deliberate
+   * exception for a one-off moment the user triggers, which at 200ms read as a
+   * flicker rather than a freeze. It waits 200ms for the freeze dialog to
+   * finish leaving. The pill keeps the standard 200ms entrance.
+   */
+  [data-freezing] {
+    /* The image is three rows wide: white on its right third, clear on its
+       left third, a row-wide fade between. Sliding it from its right end to
+       its left end moves the fade across the row. */
+    background-image: linear-gradient(90deg, transparent 33.3%, var(--color-card-background) 66.6%);
+    background-size: 300% 100%;
+    background-repeat: no-repeat;
+    animation: frost-sweep 0.5s ease-in-out 0.2s both;
+  }
+
+  [data-freezing] .cold-storage-badge {
+    animation: frost-badge-in 0.2s ease-out 0.6s backwards;
+  }
+
+  /* Without movement: the wash fades in where it stands, and the pill fades
+     without growing. */
+  @media (prefers-reduced-motion: reduce) {
+    [data-freezing] {
+      background-image: none;
+      animation: frost-fade 0.2s ease-out 0.2s backwards;
+    }
+
+    [data-freezing] .cold-storage-badge {
+      animation-name: frost-fade-in;
+    }
+  }
+
+  @keyframes frost-sweep {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: 0 0;
+    }
+  }
+
+  @keyframes frost-fade {
+    from {
+      background-color: var(--color-card-background);
+    }
+  }
+
+  @keyframes frost-badge-in {
+    from {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes frost-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}

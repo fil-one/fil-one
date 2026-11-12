@@ -32,11 +32,14 @@
   }
 
   .modal-header-content {
-    @apply flex flex-col gap-1;
+    /* `min-w-0` lets the content shrink beside the close button, so a long
+       title wraps instead of pushing the button out of the dialog. */
+    @apply flex min-w-0 flex-col gap-1;
   }
 
   .modal-header-title {
-    @apply text-base font-medium text-(--color-text-base);
+    /* A file name has no spaces to break at, so it may break anywhere. */
+    @apply text-base font-medium wrap-anywhere text-(--color-text-base);
   }
 
   .modal-header-description {
@@ -44,7 +47,7 @@
   }
 
   .modal-header-close {
-    @apply flex cursor-pointer items-center justify-center rounded-md p-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950;
+    @apply flex shrink-0 cursor-pointer items-center justify-center rounded-md p-1 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-950;
 
     &:focus-visible {
       @apply brand-outline;

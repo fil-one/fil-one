@@ -322,7 +322,10 @@ describe('BucketDetailPage — the object controls', () => {
     expect(screen.getByRole('button', { name: 'Upload object' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `Delete ${OBJECT_KEY}` })).toBeInTheDocument();
     // The server-side job, which empties the whole bucket rather than a selection.
-    expect(screen.getByRole('button', { name: 'Empty bucket' })).toBeInTheDocument();
+    // A rare, destructive action, so it sits in the header's menu.
+    fireEvent.click(screen.getByRole('button', { name: 'Bucket actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Empty bucket' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Bucket actions' }));
 
     // Selecting a row is the only way to the bulk bar, so it stands in for both.
     fireEvent.click(screen.getByRole('checkbox', { name: `Select ${OBJECT_KEY}` }));
@@ -346,7 +349,10 @@ describe('BucketDetailPage — the object controls', () => {
 
     expect(await screen.findByTestId('object-row')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: `Delete ${OBJECT_KEY}` })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Empty bucket' })).not.toBeInTheDocument();
+    // The header's menu still holds Bucket details, but not Empty bucket.
+    fireEvent.click(screen.getByRole('button', { name: 'Bucket actions' }));
+    expect(screen.getByRole('menuitem', { name: 'Bucket details' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Empty bucket' })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 });
@@ -477,5 +483,17 @@ describe('BucketDetailPage — sharing from a row', () => {
 
     const share = await screen.findByRole('button', { name: `Share ${OBJECT_KEY}` });
     await waitFor(() => expect(share).toBeEnabled());
+  });
+});
+
+describe('BucketDetailPage — bucket details', () => {
+  it('opens the bucket details panel from the header menu', async () => {
+    renderPage(OrgRole.ReadOnly);
+    await screen.findByTestId('object-row');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bucket actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Bucket details' }));
+
+    expect(await screen.findByTestId('bucket-details-drawer')).toBeInTheDocument();
   });
 });

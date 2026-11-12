@@ -12,7 +12,8 @@ import { EmptyStateCard } from './EmptyStateCard';
 import { Table } from './Table/Table';
 import { FolderRow, ObjectEntryRows, SECONDARY_COLUMN } from './ObjectBrowserRows';
 import { BulkActionsBar } from './BulkActionsBar';
-import type { RowActions, RowSelection } from './ObjectBrowserRows';
+import type { ObjectColdStorage, RowActions, RowSelection } from './ObjectBrowserRows';
+import { ColdBulkActions, findVersions, type SelectionTarget } from './ObjectBrowserColdStorage';
 import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
 import type { BrowseEntry } from '../lib/object-grouping.js';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
@@ -240,11 +241,8 @@ function ObjectTable({
             />
           )}
           <Table.Head>Name</Table.Head>
-          {versioningEnabled && (
-            <>
-              <Table.Head className={SECONDARY_COLUMN}>Version</Table.Head>
-              <Table.Head className={SECONDARY_COLUMN}>Status</Table.Head>
-            </>
+          {actions.coldStorage?.showColumn && (
+            <Table.Head className={SECONDARY_COLUMN}>Storage</Table.Head>
           )}
           <Table.Head className={SECONDARY_COLUMN}>Size</Table.Head>
           <Table.Head className={SECONDARY_COLUMN}>Last Modified</Table.Head>
@@ -261,7 +259,7 @@ function ObjectTable({
                 key={`folder:${entry.prefix}`}
                 name={entry.name}
                 prefix={entry.prefix}
-                versioningEnabled={versioningEnabled}
+                coldStorage={actions.coldStorage}
                 onPrefixChange={onPrefixChange}
                 selectable={rowSelection.selectable}
                 isSelected={folderSelected}
@@ -320,6 +318,8 @@ export type ObjectBrowserProps = {
   listingTruncated?: boolean;
   /** Full bucket object count from analytics, shown alongside the loaded count. */
   totalObjectCount?: number;
+  /** Cold storage prototype: each file's storage; see `RowActions.coldStorage`. */
+  coldStorage?: ObjectColdStorage;
 };
 
 /** The share dialog a row's Share button opens, and whether the plan allows it. */
@@ -357,6 +357,7 @@ export function ObjectBrowser({
   keyAction,
   listingTruncated = false,
   totalObjectCount,
+  coldStorage,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState<{
@@ -387,6 +388,7 @@ export function ObjectBrowser({
     onDownload,
     canShare: share.canShare,
     onShare: share.request,
+    coldStorage,
     // Without a delete handler no row renders the control, so nothing reaches
     // the confirmation dialog below either.
     ...(onDelete && { onRequestDelete: requestDelete }),
@@ -424,6 +426,10 @@ export function ObjectBrowser({
   }));
   const idsAtPrefix = descendantSelectionIds(latestVersions, currentPrefix);
 
+  // Cold storage prototype: what a delete does to frozen files, as a notice.
+  const coldNotice = (targets: SelectionTarget[]) =>
+    coldStorage?.describeDeleteCharge(findVersions(versions, targets));
+
   return (
     <div className="mt-4">
       {currentPrefix && (
@@ -442,12 +448,22 @@ export function ObjectBrowser({
         />
       )}
 
+      {coldStorage?.restoreProgress}
+
       {rowSelection.selectable && selectedCount > 0 && (
         <BulkActionsBar
           count={selectedCount}
           onClear={selection.clear}
           onDelete={() => setConfirmBulkDelete(true)}
           deleteButtonId="object-browser-bulk-delete-button"
+          extraActions={
+            coldStorage && (
+              <ColdBulkActions
+                coldStorage={coldStorage}
+                selected={findVersions(versions, selection.targets())}
+              />
+            )
+          }
         />
       )}
 
@@ -489,6 +505,7 @@ export function ObjectBrowser({
         }}
         title="Delete object"
         description="This object will be permanently deleted. This action cannot be undone."
+        notice={coldNotice(confirmDelete ? [confirmDelete] : [])}
         confirmLabel="Delete"
       />
 
@@ -501,6 +518,7 @@ export function ObjectBrowser({
         }}
         title={`Delete ${selectedCount} ${selectedCount === 1 ? 'item' : 'items'}`}
         description={`${selectedCount === 1 ? 'This item' : `These ${selectedCount} items`} will be permanently deleted. This action cannot be undone.`}
+        notice={coldNotice(selection.targets())}
         confirmLabel="Delete"
       />
     </div>

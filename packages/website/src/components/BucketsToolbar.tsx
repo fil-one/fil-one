@@ -3,6 +3,7 @@ import { getRegionLabel } from '@filone/shared';
 import { SearchInput } from './SearchInput';
 import { Select } from './Select';
 import { ALL_REGIONS, type BucketFilters, hasActiveFilters } from '../lib/bucket-table.js';
+import { STORAGE_FILTER_LABELS, type StorageFilter } from '../lib/cold-storage-prototype.js';
 
 type BucketsToolbarProps = {
   filters: BucketFilters;
@@ -12,6 +13,8 @@ type BucketsToolbarProps = {
   /** Rows matching the current filters, for the result count. */
   matchCount: number;
   totalCount: number;
+  /** Cold storage prototype: the storage filter, omitted while no bucket is in cold storage. */
+  storageFilter?: { value: StorageFilter; onChange: (value: StorageFilter) => void };
 };
 
 /**
@@ -27,9 +30,11 @@ export function BucketsToolbar({
   regions,
   matchCount,
   totalCount,
+  storageFilter,
 }: BucketsToolbarProps) {
   const showRegionFilter = regions.length > 1;
-  const filtering = hasActiveFilters(filters);
+  const filtering =
+    hasActiveFilters(filters) || (storageFilter !== undefined && storageFilter.value !== 'all');
 
   return (
     // Wraps rather than squeezes: at 375px the search takes the full width and
@@ -55,6 +60,24 @@ export function BucketsToolbar({
           {regions.map((region) => (
             <option key={region} value={region}>
               {getRegionLabel(region)}
+            </option>
+          ))}
+        </Select>
+      )}
+
+      {storageFilter && (
+        <Select
+          value={storageFilter.value}
+          // The options below are exactly the StorageFilter values, so the
+          // chosen option's value is always one of them.
+          onChange={(value) => storageFilter.onChange(value as StorageFilter)}
+          aria-label="Filter buckets by storage"
+          selectSize="sm"
+          className="w-auto"
+        >
+          {Object.entries(STORAGE_FILTER_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
             </option>
           ))}
         </Select>
