@@ -6,10 +6,19 @@ import { BulkDeleteJobStatus, BulkDeleteScope, S3Region, type BulkDeleteJob } fr
 import { ToastProvider } from '../components/Toast/index.js';
 import { useBulkDeleteJob } from './use-bulk-delete-job.js';
 
-vi.mock('./api.js', () => ({ apiRequest: vi.fn() }));
+// The hook branches on `instanceof StepUpRequiredError`, so the mock supplies a
+// real class rather than a stub: the test constructs the same symbol the hook
+// imports, which is what makes the check meaningful.
+vi.mock('./api.js', () => ({
+  apiRequest: vi.fn(),
+  StepUpRequiredError: class StepUpRequiredError extends Error {},
+}));
+vi.mock('./step-up.js', () => ({ redirectToStepUp: vi.fn() }));
 
-import { apiRequest } from './api.js';
+import { apiRequest, StepUpRequiredError } from './api.js';
+import { redirectToStepUp } from './step-up.js';
 const mockApiRequest = vi.mocked(apiRequest);
+const mockRedirectToStepUp = vi.mocked(redirectToStepUp);
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return <ToastProvider>{children}</ToastProvider>;
@@ -100,6 +109,29 @@ describe('useBulkDeleteJob — start', () => {
 
     expect(result.current.job).toBeNull();
     expect(result.current.isRunning).toBe(false);
+  });
+
+  it('sends the caller through step-up when the gate asks for a second factor', async () => {
+    mockApiRequest.mockRejectedValueOnce(new StepUpRequiredError());
+
+    const { result } = render();
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(mockRedirectToStepUp).toHaveBeenCalledWith('bulk-delete');
+    expect(result.current.job).toBeNull();
+  });
+
+  it('does not send the caller through step-up for an ordinary failure', async () => {
+    mockApiRequest.mockRejectedValueOnce(new Error('network down'));
+
+    const { result } = render();
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(mockRedirectToStepUp).not.toHaveBeenCalled();
   });
 
   it('does not treat a finished job as running', async () => {

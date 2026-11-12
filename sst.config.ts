@@ -1254,9 +1254,14 @@ export default $config({
         ],
       },
       'create-bulk-delete-job': {
-        extraEnv: { ...fthEnv, ...forgeEnv },
-        // Linking the queue grants the send; the handler only enqueues the job.
-        extraLink: [bulkDeleteQueue],
+        extraEnv: { ...fthEnv, ...forgeEnv, AUTH0_MGMT_DOMAIN: auth0MgmtDomain },
+        // The queue link grants the send; the handler only enqueues the job.
+        // The Management API resources are what the route's step-up gate reads
+        // to decide whether the caller has a second factor enrolled. Without
+        // them the lookup throws, and `hasMfaEnrolled` reports false on a
+        // failure, which opens the gate rather than closing it — so the links
+        // are part of the gate, not incidental to it.
+        extraLink: [bulkDeleteQueue, ...mgmtRuntimeResources],
         // Reads the bucket's versioning with the tenant's console S3 key.
         permissions: s3DataPlanePermissions,
       },
