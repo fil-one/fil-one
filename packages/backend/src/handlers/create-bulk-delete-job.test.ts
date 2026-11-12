@@ -20,9 +20,22 @@ vi.mock('sst', () => ({
   },
 }));
 
-vi.mock('../middleware/auth.ts', async () =>
-  (await import('../test/auth-partial-mock.ts')).authPartialMock(),
-);
+// The step-up gate reads these two, so both are controllable per test. The
+// default is the partial mock's: no `amr`, which fails the gate closed.
+const { idTokenClaims, mockGetMfaEnrollments } = vi.hoisted(() => ({
+  idTokenClaims: vi.fn(),
+  mockGetMfaEnrollments: vi.fn(),
+}));
+vi.mock('../middleware/auth.ts', async () => {
+  const partial = (await import('../test/auth-partial-mock.ts')).authPartialMock();
+  return {
+    ...partial,
+    getVerifiedIdTokenClaims: () => idTokenClaims() ?? partial.getVerifiedIdTokenClaims(),
+  };
+});
+vi.mock('../lib/auth0-management.ts', () => ({
+  getMfaEnrollments: (...args: unknown[]) => mockGetMfaEnrollments(...args),
+}));
 // Pass-through, so in the tests that run the whole chain the role gate is the
 // only middleware that can refuse the request.
 vi.mock('../middleware/csrf.ts', () => ({
@@ -73,6 +86,16 @@ const mockPutJob = vi.mocked(putBulkDeleteJob);
 const mockEnqueue = vi.mocked(enqueueBulkDeleteJob);
 
 const idempotencyKey = '3f1a6b2c-8d4e-4f0a-9b3c-1d2e3f4a5b6c';
+
+/** The claim shape the step-up gate reads, with nothing that satisfies it. */
+const EMPTY_CLAIMS = {
+  email: null,
+  emailVerified: false,
+  name: null,
+  picture: null,
+  amr: [],
+  authTime: null,
+};
 
 function record(overrides: Partial<BulkDeleteJobRecord> = {}): BulkDeleteJobRecord {
   return {
@@ -440,6 +463,67 @@ describe('create-bulk-delete-job', () => {
         expect(mockEnqueue).not.toHaveBeenCalled();
       },
     );
+
+    describe('the step-up gate', () => {
+      /**
+       * Bulk delete is an irreversible-destruction path — AllVersions bypasses
+       * versioning entirely — so it takes a second factor, the rule
+       * confirm-account-deletion already applies. The gate sits after the role
+       * check, so a caller refused for their role is still told that first.
+       */
+      function invokeAsMember() {
+        const built = buildEvent({
+          method: 'POST',
+          queryStringParameters: { region: S3Region.UsEast9 },
+          body: JSON.stringify({ idempotencyKey, scope: BulkDeleteScope.AllVersions }),
+          userInfo: {
+            orgId: 'org-1',
+            userId: 'any-user',
+            sub: 'auth0|any-user',
+            membership: membershipFor('org-1', 'any-user', OrgRole.Admin),
+          },
+        });
+        built.pathParameters = { name: 'my-bucket' };
+        return handler(built, buildContext()) as Promise<APIGatewayProxyStructuredResultV2>;
+      }
+
+      const RECENT_AUTH = { authTime: Math.floor(Date.now() / 1000) - 60 };
+
+      it('returns 401 step_up_required when MFA is enrolled and amr carries no strong factor', async () => {
+        idTokenClaims.mockReturnValue({ ...EMPTY_CLAIMS, ...RECENT_AUTH, amr: ['pwd'] });
+        mockGetMfaEnrollments.mockResolvedValue([{ id: 'any-enrollment', confirmed: true }]);
+
+        const result = await invokeAsMember();
+
+        expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toMatchObject({
+          statusCode: 401,
+          body: { error: 'step_up_required' },
+        });
+        expect(mockCreate).not.toHaveBeenCalled();
+        expect(mockEnqueue).not.toHaveBeenCalled();
+      });
+
+      it.each([['mfa'], ['phr']])(
+        'lets the request through when amr carries %s',
+        async (factor) => {
+          idTokenClaims.mockReturnValue({ ...EMPTY_CLAIMS, ...RECENT_AUTH, amr: [factor] });
+
+          const result = await invokeAsMember();
+
+          expect(result.statusCode).not.toBe(401);
+          expect(mockGetMfaEnrollments).not.toHaveBeenCalled();
+        },
+      );
+
+      it('lets the request through when the caller has enrolled no second factor', async () => {
+        idTokenClaims.mockReturnValue({ ...EMPTY_CLAIMS, ...RECENT_AUTH, amr: ['pwd'] });
+        mockGetMfaEnrollments.mockResolvedValue([]);
+
+        const result = await invokeAsMember();
+
+        expect(result.statusCode).not.toBe(401);
+      });
+    });
 
     it('is refused even when a bucket policy grants it every delete action', async () => {
       // The role gate is the console's, and no bucket policy widens it.
