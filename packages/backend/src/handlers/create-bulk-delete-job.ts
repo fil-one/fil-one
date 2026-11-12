@@ -44,6 +44,7 @@ import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
+import { requireMfaIfEnrolled } from '../middleware/require-mfa.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 function buildBucketNotFoundResponse(): APIGatewayProxyStructuredResultV2 {
@@ -188,6 +189,11 @@ export const handler = middy(baseHandler)
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
   .use(authorize('objects.delete'))
+  // Irreversible destruction takes a second factor, the same rule
+  // confirm-account-deletion applies. Unconditional rather than scoped to
+  // AllVersions: the other scopes delete every live object under a prefix, and
+  // a restore from non-current versions is a recovery procedure, not an undo.
+  .use(requireMfaIfEnrolled())
   .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Write))
   .use(errorHandlerMiddleware());
