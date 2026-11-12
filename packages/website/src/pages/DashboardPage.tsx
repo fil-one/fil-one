@@ -321,7 +321,7 @@ export function DashboardPage() {
         padding="none"
         className="mb-5 grid grid-cols-1 divide-y divide-zinc-200 lg:grid-cols-3 lg:divide-x lg:divide-y-0"
       >
-        <div className="px-5 py-4">
+        <div className="min-w-0 px-5 py-4">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-meta font-medium uppercase tracking-wider text-zinc-500">
               BUCKETS
@@ -330,21 +330,25 @@ export function DashboardPage() {
               View all
             </AppLink>
           </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-xl font-medium text-zinc-900">{usage.buckets.count}</span>
+          <div className="flex flex-wrap items-baseline gap-x-1">
+            <span className="min-w-0 text-xl font-medium text-zinc-900 wrap-anywhere">
+              {usage.buckets.count.toLocaleString()}
+            </span>
             <span className="text-meta text-zinc-500">total</span>
           </div>
         </div>
-        <div className="px-5 py-4">
+        <div className="min-w-0 px-5 py-4">
           <span className="mb-1.5 block text-meta font-medium uppercase tracking-wider text-zinc-500">
             OBJECTS
           </span>
-          <div className="flex items-baseline gap-1">
-            <span className="text-xl font-medium text-zinc-900">{usage.objects.count}</span>
+          <div className="flex flex-wrap items-baseline gap-x-1">
+            <span className="min-w-0 text-xl font-medium text-zinc-900 wrap-anywhere">
+              {usage.objects.count.toLocaleString()}
+            </span>
             <span className="text-meta text-zinc-500">total</span>
           </div>
         </div>
-        <div className="px-5 py-4">
+        <div className="min-w-0 px-5 py-4">
           <div className="mb-1.5 flex items-center justify-between">
             <span className="text-meta font-medium uppercase tracking-wider text-zinc-500">
               API KEYS
@@ -353,8 +357,10 @@ export function DashboardPage() {
               View all
             </AppLink>
           </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-xl font-medium text-zinc-900">{usage.accessKeys.count}</span>
+          <div className="flex flex-wrap items-baseline gap-x-1">
+            <span className="min-w-0 text-xl font-medium text-zinc-900 wrap-anywhere">
+              {usage.accessKeys.count.toLocaleString()}
+            </span>
             <span className="text-meta text-zinc-500">total</span>
           </div>
         </div>
