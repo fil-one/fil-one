@@ -6,7 +6,7 @@
 // steps in order into one file (or one shell).
 
 import type { S3Region } from '@filone/shared';
-import { supportsBucketManagement } from '@filone/shared';
+import { DOCS_URL, supportsBucketManagement } from '@filone/shared';
 
 /**
  * The AWS CLI profile the snippets configure. A named profile, so setting up
@@ -146,4 +146,32 @@ func newClient(ctx context.Context) *s3.Client {
 }`,
     },
   };
+}
+
+/**
+ * Instructions for an AI coding agent, to paste into `AGENTS.md`, `CLAUDE.md`
+ * or a system prompt. They name the CLI profile instead of carrying the keys,
+ * so the file holding them is safe to commit. They list only what an agent gets
+ * wrong against Fil One and leave everything else to `llms.txt`, which the docs
+ * keep current.
+ */
+export function getAgentInstructions(region: S3Region, endpoint: string): string {
+  const rules = [
+    `- Endpoint: ${endpoint}`,
+    `- Region: ${region}. The access key works in this region only.`,
+    `- Credentials: the \`${CLI_PROFILE}\` AWS profile. Pass \`--profile ${CLI_PROFILE}\` to the AWS CLI, or set \`AWS_PROFILE=${CLI_PROFILE}\` for an SDK. Never print, log or commit the keys.`,
+    '- Use path-style addressing; virtual-hosted-style URLs fail. The profile sets it for the AWS CLI and boto3. In JavaScript set `forcePathStyle: true`, in Go `UsePathStyle = true`.',
+    '- Send no server-side encryption headers. Data is already encrypted at rest, and SSE-KMS and SSE-C requests are rejected.',
+    ...(supportsBucketManagement(region)
+      ? []
+      : [
+          '- Buckets cannot be created or deleted over S3 in this region. Ask the user to create one in the Fil One console.',
+        ]),
+    `- Full reference: ${DOCS_URL}/llms.txt`,
+  ];
+  return `## Object storage: Fil One
+
+Fil One is S3-compatible object storage. Use any S3 client.
+
+${rules.join('\n')}`;
 }

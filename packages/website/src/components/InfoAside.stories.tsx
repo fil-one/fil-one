@@ -27,7 +27,7 @@ export const LongDescriptions: Story = {
       {
         title: 'Keep your secret safe',
         description:
-          'Your secret access key grants full access to your data. Never share it with anyone, including support. Store it in a secure location like a password manager or secrets vault.',
+          'Anyone who has your secret access key can do everything this key is allowed to do. Never share it with anyone, including support. Store it in a secure location like a password manager or secrets vault.',
       },
       {
         title: 'Scope by bucket',
