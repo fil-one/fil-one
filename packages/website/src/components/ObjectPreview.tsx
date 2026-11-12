@@ -68,7 +68,11 @@ function ObjectPreviewBody(props: ObjectPreviewProps) {
   if (props.kind === 'text') {
     return <TextPreview text={props.text} truncated={props.truncated} />;
   }
-  return <MediaPreview kind={props.kind} url={props.url} fileName={props.fileName} />;
+  // A failure belongs to one URL. Keyed by it, the preview starts afresh when a
+  // panel steps to another object instead of keeping the last one's failure.
+  return (
+    <MediaPreview key={props.url} kind={props.kind} url={props.url} fileName={props.fileName} />
+  );
 }
 
 function MediaPreview({

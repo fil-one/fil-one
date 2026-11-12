@@ -17,6 +17,7 @@ import type { S3Region } from '@filone/shared';
 import {
   bucketQueryOptions,
   getDeleteCopy,
+  invalidateObjectMetadata,
   isRetentionActive,
   useObjectMetadata,
 } from '../lib/object-metadata.js';
@@ -81,7 +82,7 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
   // top, leaves nothing here to show.
   const afterDelete = () => {
     void queryClient.invalidateQueries({ queryKey: ['objects', bucketName, region] });
-    void queryClient.invalidateQueries({ queryKey: ['object-metadata', bucketName, objectKey] });
+    invalidateObjectMetadata(bucketName, objectKey);
     if (versionId && hasReadableLatestAfterDeleting(versions, versionId)) {
       void navigate({
         to: '/buckets/$bucketName/objects',

@@ -6,7 +6,7 @@ import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { ObjectDetailsDrawer, type ObjectDrawerSiblings } from '../components/ObjectDetailsDrawer';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
 import type { VersionGroup } from '../lib/object-grouping.js';
-import { prefetchObjectMetadata } from '../lib/object-metadata.js';
+import { invalidateObjectMetadata, prefetchObjectMetadata } from '../lib/object-metadata.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 
 /** The object open in the details panel. No version means the object itself, its latest. */
@@ -175,6 +175,7 @@ export function BucketObjectDrawer({
     bucketName,
     region,
     onDeleted: (deletedKey, deletedVersionId) => {
+      invalidateObjectMetadata(bucketName, deletedKey);
       onDeleted(deletedKey, deletedVersionId);
       navigation.close();
     },

@@ -136,6 +136,14 @@ export function useObjectMetadata(ref: ObjectRef) {
 }
 
 /** Starts loading an object's details ahead of a click that is likely to come. */
+/**
+ * Marks every version's details of an object as stale, so a view opened after
+ * deleting it asks S3 again rather than showing what was cached before.
+ */
+export function invalidateObjectMetadata(bucketName: string, objectKey: string): void {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.objectMetadata(bucketName, objectKey) });
+}
+
 export function prefetchObjectMetadata(ref: ObjectRef): void {
   void queryClient.prefetchQuery(objectMetadataQueryOptions(ref));
 }
