@@ -31,7 +31,8 @@ const RETENTION_MODE_OPTIONS: {
   {
     value: 'governance',
     label: 'Governance',
-    description: 'Users with special permissions can delete or modify protected objects.',
+    description:
+      'Objects cannot be deleted or modified until the retention period ends. No access key can be granted permission to bypass it.',
   },
   {
     value: 'compliance',

@@ -83,8 +83,9 @@ export function AddBucketKeyModal({
                 <div>
                   <p className="mb-1 font-medium text-zinc-800">Keep your secret safe</p>
                   <p>
-                    Your secret access key grants full access to your data. Never share it with
-                    anyone, including support. Store it in a password manager or secrets vault.
+                    Anyone who has your secret access key can do everything this key is allowed to
+                    do. Never share it with anyone, including support. Store it in a password
+                    manager or secrets vault.
                   </p>
                 </div>
                 {form.keyType === 'principal' ? (
