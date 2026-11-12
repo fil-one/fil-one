@@ -4,6 +4,10 @@ name: Docs impact
 # link a filone-docs PR, give a reason no docs change is needed, or carry the
 # docs:gated label (feature-flagged work; docs ship at launch).
 # No secrets, no model calls: it makes the decision visible, it doesn't make it.
+#
+# Drafts and PRs opened by bots (Dependabot) skip the job. GitHub reports a job
+# skipped by its `if` as successful, so this never blocks them, even as a
+# required check.
 
 on:
   pull_request:
@@ -43,5 +47,5 @@ jobs:
           if grep -qiE '^\s*-\s*\[x\]\s*No docs change needed:\s*\S' <<<"$body"; then
             echo "Author says no docs change is needed."; exit 0
           fi
-          echo "::error::This PR changes user-facing code. In the description, link the filone-docs PR, or tick 'No docs change needed:' and say why, or add the docs:gated label."
+          echo "::error::This PR changes user-facing code. In the description, link the docs PR (https://github.com/FilecoinFoundationWeb/filone-docs), or tick 'No docs change needed:' and say why, or add the docs:gated label."
           exit 1

@@ -1,4 +1,6 @@
 packages/website/src
+packages/website/public
+packages/website/index.html
 packages/shared/src
 packages/backend/src
 sst.config.ts
