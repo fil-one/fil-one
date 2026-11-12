@@ -19,7 +19,6 @@ import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
-import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 const dynamo = getDynamoClient();
 
@@ -88,5 +87,9 @@ export const handler = middy(baseHandler)
   .use(authMiddleware())
   .use(authorize('keys.manage_own'))
   .use(csrfMiddleware())
-  .use(subscriptionGuardMiddleware(AccessLevel.Write))
+  // No subscription guard. Revocation and rotation remove or replace authority;
+  // gating them on billing health inverts the guard's intent, leaving an org in
+  // grace, past due or canceled unable to cut off a compromised key while that
+  // key keeps reading. The sibling authority-removing routes — remove-member,
+  // update-member-role, transfer-ownership — carry no guard either.
   .use(errorHandlerMiddleware());
