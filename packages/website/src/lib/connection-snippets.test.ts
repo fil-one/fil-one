@@ -5,6 +5,7 @@ import { S3Region, supportsBucketManagement } from '@filone/shared';
 import {
   CLI_PROFILE,
   type ConnectionClient,
+  getAgentInstructions,
   getConnectionSnippets,
 } from './connection-snippets.js';
 
@@ -103,5 +104,49 @@ describe('getConnectionSnippets', () => {
   // `go get` needs a module to add to; in an empty folder it fails without one.
   it('starts the Go set-up by creating a module', () => {
     expect(snippets.go.setup.split('\n')[0]).toBe('go mod init filone-upload');
+  });
+});
+
+describe('getAgentInstructions', () => {
+  const instructions = getAgentInstructions(S3Region.EuWest1, ENDPOINT);
+
+  /** A region of each kind, so the bucket rule is tested both ways. */
+  function regionWhereS3BucketManagementIs(allowed: boolean): S3Region {
+    const region = Object.values(S3Region).find(
+      (candidate) => supportsBucketManagement(candidate) === allowed,
+    );
+    if (!region) throw new Error('No region of this kind to test with');
+    return region;
+  }
+
+  it.each([
+    ['endpoint', `- Endpoint: ${ENDPOINT}`],
+    ['region', `- Region: ${S3Region.EuWest1}.`],
+  ])('fills in the %s', (_fact, line) => {
+    expect(instructions).toContain(line);
+  });
+
+  // The instructions end up in a committed file or a prompt, so they point at
+  // the profile and carry no key, not even a placeholder to fill in.
+  it('names the CLI profile for credentials and carries no key', () => {
+    expect(instructions).toContain(`\`--profile ${CLI_PROFILE}\``);
+    expect(instructions).not.toMatch(/YOUR_ACCESS_KEY|YOUR_SECRET_KEY|aws_secret_access_key/);
+  });
+
+  it('tells the agent path-style addressing is required', () => {
+    expect(instructions).toContain('Use path-style addressing');
+  });
+
+  it('points the agent at llms.txt for everything else', () => {
+    expect(instructions).toContain('- Full reference: https://docs.filone.com/llms.txt');
+  });
+
+  it.each([
+    ['tells the agent to ask for a bucket where S3 cannot create one', false, true],
+    ['leaves the bucket rule out where S3 can create one', true, false],
+  ])('%s', (_case, s3CreatesBuckets, mentionsRule) => {
+    const text = getAgentInstructions(regionWhereS3BucketManagementIs(s3CreatesBuckets), ENDPOINT);
+
+    expect(text.includes('Buckets cannot be created or deleted over S3')).toBe(mentionsRule);
   });
 });
