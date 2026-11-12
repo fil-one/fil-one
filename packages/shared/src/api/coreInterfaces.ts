@@ -37,6 +37,8 @@ export const ApiErrorCode = {
   DELETION_RATE_LIMITED: 'DELETION_RATE_LIMITED',
   /** Too many image upload URLs (logos, avatars) requested in the last hour. */
   IMAGE_UPLOAD_RATE_LIMITED: 'IMAGE_UPLOAD_RATE_LIMITED',
+  /** Too many promo codes checked in the last hour — retry after `retryAt`. */
+  PROMOTION_CODE_RATE_LIMITED: 'PROMOTION_CODE_RATE_LIMITED',
   /** The account has been deleted; the session is dead and cannot be revived. */
   ACCOUNT_DELETED: 'ACCOUNT_DELETED',
   /**
