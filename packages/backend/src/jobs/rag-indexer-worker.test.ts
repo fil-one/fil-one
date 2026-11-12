@@ -68,6 +68,23 @@ vi.mock('@filone/rag-shared', () => ({
 
 vi.mock('../lib/metrics.ts', () => ({ reportMetric: vi.fn() }));
 
+// Forge regions sync on the Bucket Intelligence engine. The client is faked;
+// the real target builder runs.
+const engineState = vi.hoisted(() => ({ configured: true }));
+const mockEngineSync = vi.fn();
+vi.mock('../lib/rag-engine-client.ts', async () => {
+  const actual = await vi.importActual<typeof import('../lib/rag-engine-client.ts')>(
+    '../lib/rag-engine-client.ts',
+  );
+  return {
+    ...actual,
+    getRagEngineClient: () => {
+      if (!engineState.configured) throw new actual.RagEngineNotConfiguredError();
+      return { sync: mockEngineSync };
+    },
+  };
+});
+
 import { handler } from './rag-indexer-worker.ts';
 
 const reportMetricMock = vi.mocked(reportMetric);
@@ -552,5 +569,178 @@ describe('rag-indexer-worker', () => {
       RagIndexerWorkerInvocationFailure: 1,
       RagIndexerWorkerDuration: expect.any(Number),
     });
+  });
+});
+
+describe('rag-indexer-worker on Forge regions (Bucket Intelligence engine)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    engineState.configured = true;
+    mockIsOrgDeletedOrDeleting.mockResolvedValue(false);
+    mockCreateS3Client.mockReturnValue(fakeS3Client);
+    mockUpdateBucketTelemetry.mockResolvedValue(undefined);
+    mockEngineSync.mockResolvedValue({ syncState: 'syncing', filesIndexed: 0, indexedBytes: 0 });
+    mockIndexBucket.mockResolvedValue({
+      added: 1,
+      updated: 0,
+      removed: 0,
+      failed: 0,
+      completed: true,
+    });
+  });
+
+  it('asks the engine to sync each Forge bucket instead of indexing into S3 Vectors', async () => {
+    const forge = makeOrchestrator('forge', S3Region.EuCentral3);
+    useRegions([provisioned(forge, 'tenant-forge')]);
+
+    await handler(
+      payload([
+        { region: S3Region.EuCentral3, bucketName: 'docs' },
+        { region: S3Region.EuCentral3, bucketName: 'notes' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    expect(mockIndexBucket).not.toHaveBeenCalled();
+    expect(mockCreateS3Client).not.toHaveBeenCalled();
+    expect(forge.getS3ClientContext).toHaveBeenCalledWith('tenant-forge');
+    expect(mockEngineSync.mock.calls.map(([target]) => target)).toStrictEqual([
+      {
+        orgId: 'org-1',
+        region: S3Region.EuCentral3,
+        bucketName: 'docs',
+        s3: {
+          endpointUrl: 'https://s3.example',
+          region: 'eu-west-1',
+          accessKeyId: 'AK',
+          secretAccessKey: 'SK',
+        },
+      },
+      expect.objectContaining({ bucketName: 'notes' }),
+    ]);
+  });
+
+  it('keeps eu-west-1 and us-east-1 buckets on the S3 Vectors indexer in the same run', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    const fth = makeOrchestrator('fth', S3Region.UsEast1);
+    const forgeDev = makeOrchestrator('forgeDev', S3Region.UsEast9);
+    useRegions([
+      provisioned(aurora, 'tenant-aurora'),
+      provisioned(fth, 'tenant-fth'),
+      provisioned(forgeDev, 'tenant-forge-dev'),
+    ]);
+
+    await handler(
+      payload([
+        { region: S3Region.EuWest1, bucketName: 'eu' },
+        { region: S3Region.UsEast1, bucketName: 'us' },
+        { region: S3Region.UsEast9, bucketName: 'forge' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    const indexed = mockIndexBucket.mock.calls.map(([ctx]) => [ctx.region, ctx.bucketName]);
+    expect(indexed).toStrictEqual([
+      [S3Region.EuWest1, 'eu'],
+      [S3Region.UsEast1, 'us'],
+    ]);
+    expect(mockIndexBucket.mock.calls[0][0].vectorStore).toBeInstanceOf(mockS3VectorsStore);
+    expect(mockEngineSync).toHaveBeenCalledTimes(1);
+    expect(mockEngineSync.mock.calls[0][0]).toMatchObject({
+      region: S3Region.UsEast9,
+      bucketName: 'forge',
+    });
+  });
+
+  it('records a failed sync for a bucket whose engine sync could not start', async () => {
+    const forge = makeOrchestrator('forge', S3Region.EuCentral3);
+    useRegions([provisioned(forge, 'tenant-forge')]);
+    mockEngineSync
+      .mockRejectedValueOnce(new Error('engine unreachable'))
+      .mockResolvedValueOnce({ syncState: 'syncing' });
+
+    await handler(
+      payload([
+        { region: S3Region.EuCentral3, bucketName: 'bad' },
+        { region: S3Region.EuCentral3, bucketName: 'good' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    expect(mockUpdateBucketTelemetry).toHaveBeenCalledWith('org-1', S3Region.EuCentral3, 'bad', {
+      syncState: 'error',
+      lastSyncError: 'engine unreachable',
+    });
+    expect(mockEngineSync).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts no further engine syncs once the invocation deadline has passed', async () => {
+    const forge = makeOrchestrator('forge', S3Region.EuCentral3);
+    useRegions([provisioned(forge, 'tenant-forge')]);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // The first sync takes past the deadline (one second after the 60 s headroom).
+    mockEngineSync.mockImplementationOnce(async () => {
+      vi.setSystemTime(Date.now() + 5_000);
+      return { syncState: 'syncing' };
+    });
+
+    try {
+      await handler(
+        payload([
+          { region: S3Region.EuCentral3, bucketName: 'first' },
+          { region: S3Region.EuCentral3, bucketName: 'second' },
+        ]),
+        contextWithRemaining(61_000),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(mockEngineSync.mock.calls.map(([target]) => target.bucketName)).toStrictEqual(['first']);
+  });
+
+  it('starts engine syncs before an S3 Vectors backfill uses up the budget', async () => {
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    const forge = makeOrchestrator('forge', S3Region.EuCentral3);
+    useRegions([provisioned(aurora, 'tenant-aurora'), provisioned(forge, 'tenant-forge')]);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    // The eu-west-1 backfill works right up to the deadline, then checkpoints.
+    mockIndexBucket.mockImplementationOnce(async (_ctx, options) => {
+      vi.setSystemTime(options.deadlineEpochMs);
+      return { added: 0, updated: 0, removed: 0, failed: 0, completed: false };
+    });
+
+    try {
+      await handler(
+        payload([
+          { region: S3Region.EuWest1, bucketName: 'backfill' },
+          { region: S3Region.EuCentral3, bucketName: 'forge' },
+        ]),
+        contextWithRemaining(15 * 60 * 1000),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(mockIndexBucket).toHaveBeenCalledOnce();
+    expect(mockEngineSync.mock.calls.map(([target]) => target.bucketName)).toStrictEqual(['forge']);
+  });
+
+  it('fails only the Forge region when the stage has no engine', async () => {
+    engineState.configured = false;
+    const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
+    const forge = makeOrchestrator('forge', S3Region.EuCentral3);
+    useRegions([provisioned(aurora, 'tenant-aurora'), provisioned(forge, 'tenant-forge')]);
+
+    await handler(
+      payload([
+        { region: S3Region.EuCentral3, bucketName: 'forge' },
+        { region: S3Region.EuWest1, bucketName: 'eu' },
+      ]),
+      AMPLE_CONTEXT,
+    );
+
+    expect(mockIndexBucket).toHaveBeenCalledTimes(1);
+    expect(mockIndexBucket.mock.calls[0][0].bucketName).toBe('eu');
   });
 });

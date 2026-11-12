@@ -36,6 +36,26 @@ export function daysRemainingLabel(days: number): string {
   return `${pluralizeDays(days)} remaining`;
 }
 
+/**
+ * Countdown for a badge, e.g. "3 days left".
+ *
+ * As with `daysRemainingLabel`, 0 means the deadline falls later today, so it
+ * reads "Ends today" rather than "0 days left".
+ */
+export function formatDaysLeft(days: number): string {
+  if (days === 0) return 'Ends today';
+  return `${pluralizeDays(days)} left`;
+}
+
+/**
+ * The trial countdown where nothing nearby says "trial", e.g. "3 days left in
+ * trial".
+ */
+export function formatTrialDaysLeft(days: number): string {
+  if (days === 0) return 'Trial ends today';
+  return `${formatDaysLeft(days)} in trial`;
+}
+
 // ---------------------------------------------------------------------------
 // Locale-aware display
 // ---------------------------------------------------------------------------

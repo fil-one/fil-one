@@ -44,6 +44,25 @@ vi.mock('../lib/bucket-rag-enablement.ts', async () => {
   };
 });
 
+// Forge regions call the Bucket Intelligence engine. The client is faked;
+// the real target builder and response helpers run.
+let engine: FakeRagEngine = fakeRagEngine();
+let engineConfigured = true;
+vi.mock('../lib/rag-engine-client.ts', async () => {
+  const actual = await vi.importActual<typeof import('../lib/rag-engine-client.ts')>(
+    '../lib/rag-engine-client.ts',
+  );
+  return {
+    ...actual,
+    getRagEngineConfig: () =>
+      engineConfigured ? { baseUrl: 'https://engine.test.invalid', token: 't' } : undefined,
+    getRagEngineClient: () => {
+      if (!engineConfigured) throw new actual.RagEngineNotConfiguredError();
+      return engine;
+    },
+  };
+});
+
 process.env.FILONE_STAGE = 'test';
 
 import { baseHandler } from './set-bucket-rag-enablement.ts';
@@ -59,6 +78,8 @@ import {
 import { ApiErrorCode, OrgRole, S3Region, type PolicyAction } from '@filone/shared';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import type { BucketRAGEnablementRecord } from '../lib/dynamo-records.ts';
+import { expectedTarget, fakeRagEngine, type FakeRagEngine } from '../test/fake-rag-engine.ts';
+import { RagEngineRequestError } from '../lib/rag-engine-client.ts';
 
 const USER_1 = '00000000-0000-0000-0000-000000000001';
 
@@ -358,6 +379,93 @@ describe('set-bucket-rag-enablement member scope on an iam region', () => {
       const result = await baseHandler(event({ enabled: true }, role));
 
       expect(result.statusCode).toBe(200);
+    },
+  );
+});
+
+describe('set-bucket-rag-enablement on a Forge region (Bucket Intelligence engine)', () => {
+  function forgeEvent(body: unknown, region: S3Region = S3Region.EuCentral3): AuthenticatedEvent {
+    const e = event(body);
+    e.queryStringParameters = { region };
+    return e;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    engine = fakeRagEngine();
+    engineConfigured = true;
+    orch = fakeOrchestrator('forge', { bucket: BUCKET, region: S3Region.EuCentral3 });
+    mockGetOrchestratorForRegion.mockReturnValue(orch);
+    mockGetEnablement.mockResolvedValue(undefined);
+    mockSetEnablement.mockImplementation(async (args: { enabled: boolean }) =>
+      record({ status: args.enabled ? 'active' : 'disabled' }),
+    );
+    mockIsOrgDeleting.mockResolvedValue(false);
+  });
+
+  it('starts the first sync on the engine when indexing is turned on', async () => {
+    const result = await baseHandler(forgeEvent({ enabled: true }));
+
+    expect(result.statusCode).toBe(200);
+    expect(engine.sync).toHaveBeenCalledWith(
+      expectedTarget('forge', S3Region.EuCentral3, 'my-bucket'),
+    );
+    expect(JSON.parse(result.body!)).toMatchObject({
+      enabled: true,
+      status: 'active',
+      syncState: 'syncing',
+      filesIndexed: 3,
+      indexSize: 4096,
+    });
+  });
+
+  it('does not call the engine when indexing is turned off', async () => {
+    const result = await baseHandler(forgeEvent({ enabled: false }));
+
+    expect(result.statusCode).toBe(200);
+    expect(engine.sync).not.toHaveBeenCalled();
+  });
+
+  it('records the enablement and reports a failed sync when the engine fails', async () => {
+    engine.sync.mockRejectedValue(new RagEngineRequestError('down'));
+
+    const result = await baseHandler(forgeEvent({ enabled: true }));
+
+    expect(result.statusCode).toBe(200);
+    expect(mockSetEnablement).toHaveBeenCalled();
+    expect(JSON.parse(result.body!)).toMatchObject({
+      enabled: true,
+      syncState: 'error',
+      lastSyncError: 'The Bucket Intelligence engine could not be reached.',
+    });
+  });
+
+  it('returns 503 without writing the row when the stage has no engine', async () => {
+    engineConfigured = false;
+
+    const result = await baseHandler(forgeEvent({ enabled: true }, S3Region.UsEast9));
+
+    expect(result.statusCode).toBe(503);
+    expect(mockSetEnablement).not.toHaveBeenCalled();
+  });
+
+  it.each([S3Region.EuWest1, S3Region.UsEast1])(
+    'leaves %s on the indexer schedule without calling the engine',
+    async (region) => {
+      orch = fakeOrchestrator('aurora', { bucket: BUCKET, region });
+      mockGetOrchestratorForRegion.mockReturnValue(orch);
+      engineConfigured = false;
+
+      const result = await baseHandler(forgeEvent({ enabled: true }, region));
+
+      expect(result.statusCode).toBe(200);
+      expect(JSON.parse(result.body!)).toStrictEqual({
+        enabled: true,
+        status: 'active',
+        filesIndexed: 0,
+        indexSize: 0,
+      });
+      expect(engine.sync).not.toHaveBeenCalled();
     },
   );
 });

@@ -33,7 +33,7 @@ export function ReportBugButton({ variant }: ReportBugButtonProps) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 focus-visible:brand-outline"
+          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 focus-visible:brand-outline"
         >
           <BugBeetleIcon size={16} className="flex-shrink-0 text-zinc-400" aria-hidden="true" />
           Report a bug

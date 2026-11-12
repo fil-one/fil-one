@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { resolveOrigin } from './resolve-origin.ts';
 
-const CANONICAL = 'https://app.fil.one';
+const CANONICAL = 'https://app.filone.com';
 const ALIAS = 'https://app.filone.ai';
 const DEV = 'https://localhost:5173';
 
@@ -34,7 +34,7 @@ describe('resolveOrigin', () => {
   });
 
   it('follows the viewer host to the canonical origin', () => {
-    expect(resolveOrigin(eventWith({ 'x-forwarded-host': 'app.fil.one' }))).toBe(CANONICAL);
+    expect(resolveOrigin(eventWith({ 'x-forwarded-host': 'app.filone.com' }))).toBe(CANONICAL);
   });
 
   it('lowercases the viewer host before matching', () => {
@@ -61,7 +61,7 @@ describe('resolveOrigin', () => {
   describe('rejects hostile viewer hosts', () => {
     it.for([
       ['an unrelated host', 'attacker.example'],
-      ['a suffix attack on the canonical host', 'app.fil.one.attacker.example'],
+      ['a suffix attack on the canonical host', 'app.filone.com.attacker.example'],
       ['a suffix attack on the alias host', 'app.filone.ai.attacker.example'],
       ['a host that merely contains the alias', 'notapp.filone.ai'],
       ['comma-joined duplicate headers', 'app.filone.ai,attacker.example'],

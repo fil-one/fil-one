@@ -87,7 +87,7 @@ function getSubscriptionFacts(subscription: Subscription | undefined) {
   return {
     isTrialing,
     isPastDue: status === SubscriptionStatus.PastDue,
-    isActivePaid: status === SubscriptionStatus.Active,
+    isActivePaid: status === SubscriptionStatus.Active || status === SubscriptionStatus.Manual,
     isInactive: status === SubscriptionStatus.Inactive,
     trialDays: isTrialing && trialEndsAt ? daysUntil(trialEndsAt) : null,
     trialEndsLabel: trialEndsAt ? `Expires ${formatDateTime(trialEndsAt)}` : undefined,

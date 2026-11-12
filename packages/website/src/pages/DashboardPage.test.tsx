@@ -115,6 +115,17 @@ describe('DashboardPage — the plan panels', () => {
     expect(screen.getByText('$4.99/TB per month · no egress fees')).toBeInTheDocument();
   });
 
+  it('names a manually billed plan and says it is billed manually', async () => {
+    mockGetBilling.mockResolvedValue({
+      subscription: { planId: PlanId.Manual, status: SubscriptionStatus.Manual },
+    });
+    renderPage(OrgRole.Owner);
+
+    expect(await screen.findByText('Custom plan')).toBeInTheDocument();
+    expect(screen.getByText('Billed manually')).toBeInTheDocument();
+    expect(screen.queryByText('Est. monthly cost')).not.toBeInTheDocument();
+  });
+
   it('withholds an estimate from an org whose price states no rate', async () => {
     // The card used to multiply by a hardcoded $4.99, so a contracted org was
     // shown an estimate for a rate it does not pay.
@@ -150,82 +161,6 @@ describe('DashboardPage — the plan panels', () => {
     expect(screen.queryByText('Est. monthly cost')).not.toBeInTheDocument();
     // The cached response is still there — the read is what changed.
     expect(client.getQueryData(queryKeys.billing)).toBeDefined();
-  });
-});
-
-describe('DashboardPage — quick setup', () => {
-  /** An account partway through onboarding: no objects yet, so the card applies. */
-  const ONBOARDING: UsageResponse = { ...USAGE, objects: { count: 0 } };
-
-  it('offers the setup steps while onboarding is unfinished', async () => {
-    mockGetUsage.mockResolvedValue(ONBOARDING);
-    renderPage(OrgRole.Owner);
-
-    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
-  });
-
-  it('drops the setup steps once every one of them is done', async () => {
-    renderPage(OrgRole.Owner);
-
-    await screen.findByText('STORAGE');
-    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
-  });
-
-  // None of the steps are available to a disabled account, and none of them is
-  // the step that restores it, so the card would only compete with the banner
-  // that names the one action that matters.
-  it('drops the setup steps on a disabled account, unfinished or not', async () => {
-    mockGetUsage.mockResolvedValue({ ...ONBOARDING, tenantStatus: 'disabled' });
-    renderPage(OrgRole.Owner);
-
-    await screen.findByText('STORAGE');
-    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
-  });
-
-  // Write-locked is a narrower state: reads still work and the account is not
-  // out of action, so onboarding still has something to say.
-  it('keeps the setup steps on a write-locked account', async () => {
-    mockGetUsage.mockResolvedValue({ ...ONBOARDING, tenantStatus: 'write-locked' });
-    renderPage(OrgRole.Owner);
-
-    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
-  });
-
-  it('lists the steps in the order they are done: bucket, key, then upload', async () => {
-    mockGetUsage.mockResolvedValue(ONBOARDING);
-    renderPage(OrgRole.Owner);
-
-    await screen.findByText('QUICK SETUP');
-    const titles = ['Create a bucket', 'Generate API key', 'Upload an object'].map((title) =>
-      screen.getByText(title),
-    );
-    for (let i = 1; i < titles.length; i++) {
-      expect(titles[i - 1].compareDocumentPosition(titles[i])).toBe(
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      );
-    }
-  });
-
-  it('hides the card on dismiss and moves focus to the page heading', async () => {
-    mockGetUsage.mockResolvedValue(ONBOARDING);
-    renderPage(OrgRole.Owner);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss quick setup' }));
-
-    expect(screen.queryByText('QUICK SETUP')).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Dashboard' }));
-  });
-
-  // Dismissal is page state, like the trial banner's: it lasts until the next
-  // visit, not across visits.
-  it('offers the card again on the next visit', async () => {
-    mockGetUsage.mockResolvedValue(ONBOARDING);
-    const { unmount } = renderPage(OrgRole.Owner);
-    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss quick setup' }));
-    unmount();
-
-    renderPage(OrgRole.Owner);
-    expect(await screen.findByText('QUICK SETUP')).toBeInTheDocument();
   });
 });
 

@@ -60,8 +60,8 @@ export function LeftLastOrgPage({ email }: LeftLastOrgPageProps) {
 
       <p className="mt-3 text-center text-xs text-(--color-paragraph-text-subtle)">
         Don&rsquo;t want to keep using Fil One? Email{' '}
-        <a href="mailto:support@fil.one" className={textButtonClassName}>
-          support@fil.one
+        <a href="mailto:support@filone.com" className={textButtonClassName}>
+          support@filone.com
         </a>{' '}
         to delete your account instead.
       </p>

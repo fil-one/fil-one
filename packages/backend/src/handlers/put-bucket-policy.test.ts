@@ -129,6 +129,20 @@ describe('put-bucket-policy baseHandler', () => {
     );
   });
 
+  // CloudFront marks the ETag of a compressed read weak, so the browser sends it back that way.
+  it('replaces the policy under the weak form of the ETag it read', async () => {
+    const etag = iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
+
+    const result = await baseHandler(
+      buildPutEvent(denyDeleteToEveryone, { precondition: { ifMatch: `W/${etag}` } }),
+    );
+
+    expect({
+      statusCode: result.statusCode,
+      policy: iam.policies.get(TENANT_ID)?.get(BUCKET_NAME)?.policy,
+    }).toStrictEqual({ statusCode: 204, policy: denyDeleteToEveryone });
+  });
+
   it('creates the policy when no precondition header is sent', async () => {
     const result = await baseHandler(buildPutEvent(grantGetObjectToUser, { precondition: 'none' }));
 
@@ -158,6 +172,8 @@ describe('put-bucket-policy baseHandler', () => {
     ['If-None-Match is not *', { 'if-none-match': '"v1"' }, 'If-None-Match must be *'],
     // Header values are trimmed, so a blank one reads as empty.
     ['If-Match is blank', { 'if-match': ' ' }, 'If-Match and If-None-Match cannot be empty'],
+    // Only the weak marker, with no ETag after it.
+    ['If-Match is a bare W/', { 'if-match': 'W/' }, 'If-Match and If-None-Match cannot be empty'],
   ])('answers 400 without calling the storage system when %s', async (_when, headers, message) => {
     const event = buildPutEvent(grantGetObjectToUser, { precondition: 'none' });
     event.headers = headers;

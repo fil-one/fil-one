@@ -22,7 +22,7 @@ import { IconButton } from '../components/IconButton';
 import { ShareObjectModal } from '../components/ShareObjectModal';
 import { Skeleton } from '../components/Skeleton';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
-import { formatBytes, getS3Endpoint, S3_REGION } from '@filone/shared';
+import { formatBytes, getS3Endpoint } from '@filone/shared';
 
 import type {
   ObjectMetadataResponse,
@@ -288,7 +288,7 @@ export function ObjectDetailPage({
     />
   );
 
-  const s3Endpoint = getS3Endpoint(S3_REGION, FILONE_STAGE);
+  const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
 
   const apiExample = `# Retrieve via S3 API
 aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\

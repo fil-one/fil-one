@@ -145,6 +145,17 @@ describe('usage-reporting-orchestrator', () => {
     expect(lambdaMock.commandCalls(InvokeCommand)).toHaveLength(0);
   });
 
+  it('leaves orgs billed manually out of the scan, so their usage never reaches Stripe', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [] });
+
+    await handler();
+
+    expect(ddbMock.commandCalls(ScanCommand)[0].args[0].input).toMatchObject({
+      FilterExpression: expect.stringContaining('subscriptionStatus <> :manual'),
+      ExpressionAttributeValues: expect.objectContaining({ ':manual': { S: 'manual' } }),
+    });
+  });
+
   it('skips tenant with missing currentPeriodStart', async () => {
     ddbMock.on(ScanCommand).resolves({
       Items: [subscriptionItem('org-1', { currentPeriodStart: undefined })],

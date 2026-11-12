@@ -106,7 +106,7 @@ export function PolicyStatementCard({
 function StatementField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:gap-3">
-      <span className="w-16 shrink-0 pt-0.5 text-meta font-medium uppercase tracking-wider text-zinc-400">
+      <span className="w-16 shrink-0 pt-0.5 text-meta font-medium uppercase tracking-wider text-zinc-500">
         {label}
       </span>
       <div className="flex flex-wrap gap-1">{children}</div>

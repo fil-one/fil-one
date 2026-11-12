@@ -118,6 +118,8 @@ export async function getAuditRecord(
         pk: { S: `ORG#${orgId}` },
         sk: { S: `USAGE_REPORT#${reportDate}` },
       },
+      // Tests read the record once, right after the job that writes it returns.
+      ConsistentRead: true,
     }),
   );
   return result.Item ?? null;

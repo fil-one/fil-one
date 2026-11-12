@@ -31,7 +31,8 @@ export type AccountState =
   | 'trial'
   | 'disabled'
   | 'paid_grace_period'
-  | 'trial_grace_period';
+  | 'trial_grace_period'
+  | 'manual';
 
 export interface AccountStateTestHelperEvent {
   userId: string;
@@ -96,6 +97,12 @@ const ACCOUNT_STATES: Record<AccountState, AccountStateDefinition> = {
       gracePeriodEndsAt: formatIsoDate(now - DAY_MS + TRIAL_GRACE_DAYS * DAY_MS),
     }),
     tenantStatus: 'write-locked',
+  },
+  // Billed by hand under a sales agreement (bin/set-manual-billing.ts).
+  manual: {
+    subscriptionStatus: SubscriptionStatus.Manual,
+    getDates: () => ({}),
+    tenantStatus: 'active',
   },
 };
 

@@ -1,0 +1,14 @@
+# Build context is the repository root; send only what the image needs.
+**
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!packages/shared/package.json
+!packages/shared/src/**
+!packages/rag-shared/package.json
+!packages/rag-shared/src/**
+!packages/rag-engine/package.json
+!packages/rag-engine/src/**
+**/node_modules
+**/*.test.ts
+packages/rag-engine/src/testing

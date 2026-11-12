@@ -201,8 +201,8 @@ function DangerSection({ me }: { me: MeResponse }) {
           <p className="text-sm font-medium text-zinc-900">Delete organization</p>
           <p className="text-xs text-zinc-500">
             To delete {me.orgName}, please email{' '}
-            <Link href="mailto:support@fil.one" variant="accent">
-              support@fil.one
+            <Link href="mailto:support@filone.com" variant="accent">
+              support@filone.com
             </Link>
             .
           </p>

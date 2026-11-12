@@ -31,9 +31,11 @@ import { getDynamoClient } from '../lib/ddb-client.ts';
 import { getStripeClient } from '../lib/stripe-client.ts';
 import {
   GRACE_STATE_PROJECTION,
+  NOT_BILLED_MANUALLY,
   getSubscription,
   updateSubscriptionByUser,
 } from '../lib/subscription-store.ts';
+import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
 import {
   emitBillingRowMissing,
   emitDunningEscalation,
@@ -80,7 +82,17 @@ async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
       const subscription = stripeEvent.data.object as Stripe.Subscription;
-      await handleSubscriptionUpdate(subscription, stripeEvent.data.previous_attributes?.status);
+      await handleSubscriptionUpdate(subscription);
+      // The row is written from the subscription Stripe holds now, but the
+      // event records the transition Stripe made, even when it arrives after
+      // later ones. Emitted once the delivery can no longer fail, so a retried
+      // event counts once.
+      if (
+        stripeEvent.data.previous_attributes?.status === 'past_due' &&
+        subscription.status === 'active'
+      ) {
+        emitDunningEscalation({ stage: 'recovered', reason: 'past_due', attemptCount: 0 });
+      }
       return;
     }
     case 'customer.subscription.deleted': {
@@ -243,11 +255,29 @@ async function handleCustomerDeleted(customer: Stripe.Customer): Promise<void> {
   emitDunningEscalation({ stage: 'canceled', reason: 'customer_deleted', attemptCount: 0 });
 }
 
-async function handleSubscriptionUpdate(
-  subscription: Stripe.Subscription,
-  previousStatus: Stripe.Subscription.Status | undefined,
-): Promise<void> {
+async function handleSubscriptionUpdate(eventSubscription: Stripe.Subscription): Promise<void> {
+  // Events can reach this worker in a different order than Stripe generated
+  // them. Stripe does not guarantee delivery order (https://docs.stripe.com/webhooks,
+  // "Event ordering"), and two webhook invocations running at once can queue
+  // their events either way round. The event's copy of the subscription can
+  // therefore be older than what the row already holds. Upgrade sends a
+  // `trialing` update and an `active` one milliseconds apart; writing the
+  // `trialing` one last puts a paying org back on its trial. The row takes the
+  // subscription as Stripe holds it now, which a late event cannot make stale.
+  const stripe = getStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(eventSubscription.id);
   const customerId = getCustomerIdString(subscription.customer);
+
+  // The cancellation is customer.subscription.deleted's to write. Writing
+  // `canceled` here would drop canceledAt, and that event would then size a
+  // paying org's grace period as a trial's.
+  if (subscription.status === 'canceled') {
+    console.info('[stripe-webhook] Subscription already canceled; leaving it to the deletion', {
+      subscriptionId: subscription.id,
+      customerId,
+    });
+    return;
+  }
   const mappedStatus = mapStripeStatus(subscription.status);
 
   if (mappedStatus === null) {
@@ -265,15 +295,14 @@ async function handleSubscriptionUpdate(
   const eventUserId = subscription.metadata?.userId || undefined;
   const eventOrgId = resolveOrgId(subscription.metadata);
 
-  // The event already names the org the row is keyed by, so it addresses the
-  // write on its own and the Stripe call is skipped.
+  // The subscription already names the org the row is keyed by, so it
+  // addresses the write on its own and the customer lookup is skipped.
   if (eventUserId && eventOrgId) {
     await updateBillingRecord({
       userId: eventUserId,
       subscription,
       mappedStatus,
       orgId: eventOrgId,
-      previousStatus,
     });
     return;
   }
@@ -283,7 +312,6 @@ async function handleSubscriptionUpdate(
   // the org is the key the row is written under. Fetch the customer and resolve
   // against both — writing with no org resolves nothing and throws
   // MissingOrgIdError, which no retry can fix.
-  const stripe = getStripeClient();
   const customer = await stripe.customers.retrieve(customerId);
   if ('deleted' in customer && customer.deleted) {
     console.warn('[stripe-webhook] Customer deleted, skipping subscription update', {
@@ -302,7 +330,6 @@ async function handleSubscriptionUpdate(
     subscription,
     mappedStatus,
     orgId: resolveOrgId(subscription.metadata, customer.metadata),
-    previousStatus,
   });
 }
 
@@ -311,7 +338,6 @@ interface UpdateBillingRecordParams {
   subscription: Stripe.Subscription;
   mappedStatus: SubscriptionStatus;
   orgId: string | undefined;
-  previousStatus: Stripe.Subscription.Status | undefined;
 }
 
 async function updateBillingRecord({
@@ -319,7 +345,6 @@ async function updateBillingRecord({
   subscription,
   mappedStatus,
   orgId,
-  previousStatus,
 }: UpdateBillingRecordParams): Promise<void> {
   const backfill = orgIdBackfill(orgId);
   await updateSubscriptionByUser(
@@ -337,36 +362,24 @@ async function updateBillingRecord({
         },
         ':now': { S: new Date().toISOString() },
         ...backfill.values,
+        ...NOT_BILLED_MANUALLY.values,
       },
       // A late event for the subscription Stripe ended may not revive the row;
       // an event for a new subscription id, after reactivation, still writes.
-      ConditionExpression: 'attribute_not_exists(canceledAt) OR subscriptionId <> :subId',
+      ConditionExpression: `(attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND (${NOT_BILLED_MANUALLY.condition})`,
       guardAgainstScrub: { caller: 'subscription.updated' },
     },
   );
-
-  // Emitted once the delivery can no longer fail, so a retried event counts once.
-  if (previousStatus === 'past_due' && subscription.status === 'active') {
-    emitDunningEscalation({ stage: 'recovered', reason: 'past_due', attemptCount: 0 });
-  }
 }
 
 // The grace period a cancellation starts, sized by the row's status: a trial
 // gets 7 days, a paying org 30. A row with canceledAt keeps its dates, since an
 // earlier delivery of this event already set them.
-async function getGraceWindow(
+function getGraceWindow(
   subscription: Stripe.Subscription,
-  orgId: string | undefined,
+  stored: SubscriptionRecord | undefined,
   now: Date,
-): Promise<{ canceledAt: string; gracePeriodEndsAt: string }> {
-  // Consistent: an upgrade written a moment earlier has to be what this sees,
-  // or a paying org reads as `trialing`.
-  const stored = orgId
-    ? await getSubscription(orgId, {
-        projectionExpression: GRACE_STATE_PROJECTION,
-        consistentRead: true,
-      })
-    : undefined;
+): { canceledAt: string; gracePeriodEndsAt: string } {
   if (stored?.canceledAt && stored.gracePeriodEndsAt) {
     return { canceledAt: stored.canceledAt, gracePeriodEndsAt: stored.gracePeriodEndsAt };
   }
@@ -438,24 +451,52 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription): Pro
     return;
   }
 
+  // Consistent: an upgrade written a moment earlier has to be what this sees,
+  // or a paying org reads as `trialing`.
+  const stored = orgId
+    ? await getSubscription(orgId, {
+        projectionExpression: GRACE_STATE_PROJECTION,
+        consistentRead: true,
+      })
+    : undefined;
+  if (stored?.subscriptionStatus === SubscriptionStatus.Manual) {
+    console.warn('[stripe-webhook] Skipping a cancellation for an org billed manually', {
+      userId,
+      orgId,
+      subscriptionId: subscription.id,
+    });
+    return;
+  }
+
   const now = new Date();
-  const { canceledAt, gracePeriodEndsAt } = await getGraceWindow(subscription, orgId, now);
+  const { canceledAt, gracePeriodEndsAt } = getGraceWindow(subscription, stored, now);
 
   const backfill = orgIdBackfill(orgId);
-  await updateSubscriptionByUser(
+  const { refused } = await updateSubscriptionByUser(
     { userId, orgId },
     {
-      UpdateExpression: `SET subscriptionStatus = :status, canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
+      // A row that names no subscription gets this one's id, so the guard in
+      // updateBillingRecord can refuse a late created/updated event for it.
+      // Without the id, `subscriptionId <> :subId` holds and that event would
+      // put the row back to trialing or active.
+      UpdateExpression: `SET subscriptionStatus = :status, subscriptionId = if_not_exists(subscriptionId, :subId), canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now${backfill.clause}`,
       ExpressionAttributeValues: {
         ':status': { S: SubscriptionStatus.GracePeriod },
+        ':subId': { S: subscription.id },
         ':canceledAt': { S: canceledAt },
         ':now': { S: now.toISOString() },
         ':grace': { S: gracePeriodEndsAt },
         ...backfill.values,
+        ...NOT_BILLED_MANUALLY.values,
       },
+      // The status read above can be stale: ops may have moved the org to
+      // manual billing since.
+      ConditionExpression: NOT_BILLED_MANUALLY.condition,
       guardAgainstScrub: { caller: 'subscription.deleted' },
     },
   );
+  // A row that refused the grace period is not in one, so nothing is locked.
+  if (refused) return;
 
   // Write-lock the tenant on every orchestrator during grace period. A failure
   // fails the delivery, so SQS retries the event and parks it in the DLQ once

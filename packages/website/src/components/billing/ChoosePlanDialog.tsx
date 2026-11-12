@@ -16,13 +16,11 @@ const PAY_AS_YOU_GO_FEATURES = [
   '$5.99/month minimum',
   'No egress fees',
   'No API request fees',
-  'Data integrity guarantees',
 ];
 
 const BUSINESS_FEATURES = [
   'Purchase in 1, 3, or 5-year increments',
   'No egress or API request fees',
-  'Data integrity guarantees',
   'Capacity assurance and deployment SLAs',
 ];
 
@@ -30,7 +28,7 @@ function FeatureList({ features }: { features: string[] }) {
   return (
     <ul className="flex flex-col gap-2.5">
       {features.map((f) => (
-        <li key={f} className="flex items-center gap-2 text-xs leading-[18px] text-zinc-600">
+        <li key={f} className="flex items-center gap-2 text-xs text-zinc-600">
           <CheckIcon size={14} className="shrink-0 text-green-600" weight="bold" />
           {f}
         </li>
@@ -64,7 +62,7 @@ export function ChoosePlanDialog({
               <span className="text-2xl font-medium text-zinc-950">$5.99</span>
               <span className="text-sm text-zinc-500">TB/month</span>
             </div>
-            <p className="mt-2 text-xs leading-[18px] text-zinc-600">
+            <p className="mt-2 text-xs text-zinc-600">
               Ideal for dynamic workloads or teams getting started with scalable, verifiable
               storage.
             </p>
@@ -111,7 +109,7 @@ export function ChoosePlanDialog({
             <div className="mt-2">
               <span className="text-2xl font-medium text-zinc-950">Custom pricing</span>
             </div>
-            <p className="mt-2 text-xs leading-[18px] text-zinc-600">
+            <p className="mt-2 text-xs text-zinc-600">
               Ideal for enterprises with predictable storage needs or compliance-driven
               requirements.
             </p>
@@ -131,9 +129,7 @@ export function ChoosePlanDialog({
         </div>
       </ModalBody>
       <ModalFooter>
-        <p className="w-full text-center text-xs text-zinc-500">
-          All plans include unlimited buckets, API keys, and 24/7 support
-        </p>
+        <p className="w-full text-center text-xs text-zinc-500">All plans include 24/7 support</p>
       </ModalFooter>
     </Modal>
   );
