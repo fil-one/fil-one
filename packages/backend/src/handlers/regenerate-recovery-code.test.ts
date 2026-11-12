@@ -68,7 +68,7 @@ function regenerateEvent() {
 
 function setupAuthMocks(idTokenPayload: Record<string, unknown> = { amr: ['mfa'] }) {
   mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
-    payload: { email: MOCK_EMAIL, email_verified: true, ...idTokenPayload },
+    payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true, ...idTokenPayload },
   });
 
   ddbMock

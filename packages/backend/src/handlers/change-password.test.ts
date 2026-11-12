@@ -68,7 +68,7 @@ function changePasswordEvent(sub: string = MOCK_SUB) {
 function setupAuthMocks(sub: string = MOCK_SUB) {
   mockJwtVerify
     .mockResolvedValueOnce({ payload: { sub } })
-    .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+    .mockResolvedValueOnce({ payload: { sub, email: MOCK_EMAIL, email_verified: true } });
 
   ddbMock
     .on(GetItemCommand, {

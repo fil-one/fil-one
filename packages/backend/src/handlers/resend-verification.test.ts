@@ -77,9 +77,9 @@ describe('POST /api/me/resend-verification handler', () => {
     });
     mockSendVerificationEmail.mockResolvedValue(undefined);
 
-    mockJwtVerify
-      .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-      .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+    mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+      payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+    });
 
     ddbMock
       .on(GetItemCommand, {
@@ -116,9 +116,9 @@ describe('POST /api/me/resend-verification handler', () => {
 
   it('returns 400 when email is already verified', async () => {
     mockJwtVerify.mockReset();
-    mockJwtVerify
-      .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-      .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+    mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+      payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
+    });
 
     const result = await handler(resendEvent(true), buildContext());
 
