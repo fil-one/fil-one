@@ -7,6 +7,7 @@ import {
   getStripeClient,
   pollForBillingStatusChange,
   getBillingRecord,
+  pollUntil,
   testOrgId,
 } from './helpers.js';
 
@@ -19,7 +20,25 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
     userId = `test-tc-${crypto.randomUUID()}`;
     cusId = await createTestCustomer(userId);
     await seedBillingRecord(userId, cusId, 'trialing');
-  });
+
+    const sub = await getStripeClient().subscriptions.create({
+      customer: cusId,
+      items: [{ price: getStripePriceId() }],
+      trial_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+      metadata: { userId, orgId: testOrgId(userId) },
+      trial_settings: {
+        end_behavior: { missing_payment_method: 'cancel' },
+      },
+    });
+    subId = sub.id;
+    // A production trial row names its subscription before any webhook
+    // arrives. Waiting for customer.subscription.created to land puts the
+    // seeded row in the same state.
+    await pollUntil(
+      async () => ((await getBillingRecord(userId))?.subscriptionId?.S === subId ? true : null),
+      30_000,
+    );
+  }, 60_000);
 
   afterAll(async () => {
     await getStripeClient().customers.del(cusId);
@@ -27,20 +46,7 @@ describe('Trial Canceled (customer.subscription.deleted)', () => {
   });
 
   it('should set status to grace_period with ~7-day grace window', async () => {
-    const trialEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
-    const stripe = getStripeClient();
-    const sub = await stripe.subscriptions.create({
-      customer: cusId,
-      items: [{ price: getStripePriceId() }],
-      trial_end: trialEnd,
-      metadata: { userId, orgId: testOrgId(userId) },
-      trial_settings: {
-        end_behavior: { missing_payment_method: 'cancel' },
-      },
-    });
-    subId = sub.id;
-
-    await stripe.subscriptions.cancel(subId);
+    await getStripeClient().subscriptions.cancel(subId);
 
     await pollForBillingStatusChange({
       userId,

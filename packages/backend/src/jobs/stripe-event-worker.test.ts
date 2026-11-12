@@ -38,11 +38,13 @@ vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
 
 const mockCustomersRetrieve = vi.fn();
 const mockPaymentMethodsRetrieve = vi.fn();
+const mockSubscriptionsRetrieve = vi.fn();
 
 vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     customers: { retrieve: mockCustomersRetrieve },
     paymentMethods: { retrieve: mockPaymentMethodsRetrieve },
+    subscriptions: { retrieve: mockSubscriptionsRetrieve },
   }),
 }));
 
@@ -239,6 +241,12 @@ describe('stripe-event-worker handler', () => {
     currentEvent = {};
     mockCustomersRetrieve.mockReset();
     mockPaymentMethodsRetrieve.mockReset();
+    // Stripe holds the subscription as the event describes it, unless a test
+    // says the event is stale.
+    mockSubscriptionsRetrieve.mockReset();
+    mockSubscriptionsRetrieve.mockImplementation(
+      async () => (currentEvent as { data: { object: unknown } }).data.object,
+    );
     mockSyncTenantStatusInProvisionedRegions.mockReset();
     mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
     mockStartDeletion.mockReset();
@@ -481,6 +489,29 @@ describe('stripe-event-worker handler', () => {
         ConditionExpression:
           'attribute_exists(pk) AND (((attribute_not_exists(canceledAt) OR subscriptionId <> :subId) AND (attribute_not_exists(subscriptionStatus) OR subscriptionStatus <> :manual)) AND attribute_not_exists(deletedAt))',
       });
+    });
+
+    it('writes the status Stripe holds now when the event carries an older one', async () => {
+      // A late event from before the upgrade: Stripe has since ended the trial.
+      setupStripeEvent('customer.subscription.updated', mockSubscription({ status: 'trialing' }));
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'active' }));
+
+      await deliver();
+
+      expect(updateInputs()).toMatchObject([
+        { ExpressionAttributeValues: { ':status': { S: SubscriptionStatus.Active } } },
+      ]);
+    });
+
+    it('leaves the row to the deletion when Stripe has already canceled the subscription', async () => {
+      setupStripeEvent('customer.subscription.updated', mockSubscription({ status: 'active' }));
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'canceled' }));
+      const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      await deliver();
+
+      expect(updateInputs()).toStrictEqual([]);
+      infoSpy.mockRestore();
     });
 
     it('sets currentPeriodEnd from subscription.items.data[0].current_period_end', async () => {
@@ -836,9 +867,10 @@ describe('stripe-event-worker handler', () => {
         TableName: TABLE_NAME,
         Key: ORG_KEY,
         UpdateExpression:
-          'SET subscriptionStatus = :status, canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
+          'SET subscriptionStatus = :status, subscriptionId = if_not_exists(subscriptionId, :subId), canceledAt = :canceledAt, gracePeriodEndsAt = :grace, updatedAt = :now, orgId = if_not_exists(orgId, :orgId)',
         ExpressionAttributeValues: {
           ':status': { S: SubscriptionStatus.GracePeriod },
+          ':subId': { S: MOCK_SUBSCRIPTION_ID },
           ':canceledAt': { S: expect.any(String) },
           ':now': { S: expect.any(String) },
           ':grace': { S: expect.any(String) },
@@ -870,6 +902,21 @@ describe('stripe-event-worker handler', () => {
       expect(values).toMatchObject({
         ':canceledAt': { S: '2026-10-01T00:00:00.000Z' },
         ':grace': { S: '2026-10-31T00:00:00.000Z' },
+      });
+    });
+
+    it('records the ended subscription id on a row that names none', async () => {
+      setupStripeEvent('customer.subscription.deleted', mockSubscription({ id: 'sub_any' }));
+      setupCustomerRetrieve();
+
+      await deliver();
+
+      const input = ddbMock.commandCalls(UpdateItemCommand)[0].args[0].input;
+      expect(input).toMatchObject({
+        UpdateExpression: expect.stringContaining(
+          'subscriptionId = if_not_exists(subscriptionId, :subId)',
+        ),
+        ExpressionAttributeValues: { ':subId': { S: 'sub_any' } },
       });
     });
 
@@ -1481,6 +1528,39 @@ describe('stripe-event-worker handler', () => {
       expect(dunningEmissions()).toMatchObject([
         { stage: 'recovered', reason: 'past_due', attemptBucket: 'unknown' },
       ]);
+    });
+
+    it('emits stage=recovered for a recovery event that arrives after Stripe has canceled the subscription', async () => {
+      currentEvent = {
+        id: MOCK_EVENT_ID,
+        type: 'customer.subscription.updated',
+        data: { object: mockSubscription(), previous_attributes: { status: 'past_due' } },
+      };
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'canceled' }));
+      const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      await deliver();
+
+      expect(dunningEmissions()).toMatchObject([
+        { stage: 'recovered', reason: 'past_due', attemptBucket: 'unknown' },
+      ]);
+      infoSpy.mockRestore();
+    });
+
+    it('does NOT emit recovered for a late past_due-to-unpaid event after Stripe has recovered', async () => {
+      currentEvent = {
+        id: MOCK_EVENT_ID,
+        type: 'customer.subscription.updated',
+        data: {
+          object: mockSubscription({ status: 'unpaid' }),
+          previous_attributes: { status: 'past_due' },
+        },
+      };
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'active' }));
+
+      await deliver();
+
+      expect(dunningEmissions()).toStrictEqual([]);
     });
 
     it('does NOT emit recovered on an update that leaves the status unchanged', async () => {
