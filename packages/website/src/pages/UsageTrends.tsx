@@ -59,6 +59,13 @@ function formatCountTick(value: number): string {
 
 /** Shared axis and gridline styling, so the two charts cannot drift apart. */
 const AXIS_TICK = { fontSize: 10, fill: 'var(--color-zinc-500)' };
+/**
+ * Room for the widest tick label, `1000 TB` (about 39px at the 10px tick size),
+ * plus the 8px gap between label and plot. Labels never wrap (the formatter
+ * joins number and unit with a non-breaking space), so a narrower gutter clips
+ * them at the card's left edge.
+ */
+const Y_AXIS_WIDTH = 48;
 const GRID_STROKE = 'var(--color-zinc-200)';
 const SERIES_COLOR = 'var(--color-brand-600)';
 
@@ -408,7 +415,7 @@ export function UsageTrends() {
                 tick={AXIS_TICK}
                 axisLine={false}
                 tickLine={false}
-                width={40}
+                width={Y_AXIS_WIDTH}
                 domain={[0, storageScale.domainMax]}
                 ticks={storageScale.ticks}
                 tickFormatter={formatStorageTick}
@@ -461,7 +468,7 @@ export function UsageTrends() {
                 tick={AXIS_TICK}
                 axisLine={false}
                 tickLine={false}
-                width={40}
+                width={Y_AXIS_WIDTH}
                 domain={[0, secondary.scale.domainMax]}
                 ticks={secondary.scale.ticks}
                 tickFormatter={secondary.tickFormatter}
