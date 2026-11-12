@@ -44,10 +44,6 @@ const ddbMock = mockClient(DynamoDBClient);
 vi.mock('../middleware/csrf.js', () => ({
   csrfMiddleware: () => ({ before: () => undefined }),
 }));
-vi.mock('../middleware/subscription-guard.js', () => ({
-  AccessLevel: { Read: 'read', Write: 'write' },
-  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
-}));
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { baseHandler } from './rotate-access-key.ts';
