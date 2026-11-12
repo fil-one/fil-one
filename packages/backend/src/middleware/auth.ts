@@ -248,14 +248,23 @@ const EMPTY_ID_CLAIMS: IdTokenClaims = {
  * `amr: []`) if the token is missing or invalid — callers gating on `amr`
  * see an empty array, which fails their check just like a verified token
  * without `amr` would.
+ *
+ * `expectedSub` is the subject the access token just proved. A valid ID token
+ * is only this request's if it names the same principal: the two arrive as
+ * separate cookies, so without the comparison a token minted for one account
+ * supplies `email_verified` and `amr` for a session authenticated as another.
+ * A mismatch is never legitimate, so it is treated as no ID token at all,
+ * which fails the verified-email and step-up gates closed.
  */
 async function extractIdTokenClaims({
   idToken,
+  expectedSub,
   jwks,
   clientId,
   issuer,
 }: {
   idToken: string | undefined;
+  expectedSub: string;
   jwks: ReturnType<typeof createRemoteJWKSet>;
   clientId: string;
   issuer: string;
@@ -263,6 +272,12 @@ async function extractIdTokenClaims({
   if (!idToken) return EMPTY_ID_CLAIMS;
   try {
     const { payload } = await jwtVerify(idToken, jwks, { audience: clientId, issuer });
+    if (payload.sub !== expectedSub) {
+      console.warn(
+        '[auth] ID token subject does not match the access token, discarding its claims',
+      );
+      return EMPTY_ID_CLAIMS;
+    }
     const rawAmr = payload.amr;
     return {
       email: (payload.email as string) ?? null,
@@ -625,7 +640,13 @@ async function tryValidateAccessToken({
   try {
     const { payload } = await jwtVerify(accessToken, jwks, { audience, issuer });
     const sub = payload.sub!;
-    const idClaims = await extractIdTokenClaims({ idToken, jwks, clientId, issuer });
+    const idClaims = await extractIdTokenClaims({
+      idToken,
+      expectedSub: sub,
+      jwks,
+      clientId,
+      issuer,
+    });
     request.internal.idTokenClaims = idClaims;
     await attachIdentity({
       event: request.event,
@@ -695,6 +716,7 @@ async function tryRefreshTokens({
   const refreshedSub = refreshedPayload.sub!;
   const refreshedClaims = await extractIdTokenClaims({
     idToken: tokens.id_token,
+    expectedSub: refreshedSub,
     jwks,
     clientId,
     issuer,
