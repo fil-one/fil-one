@@ -213,8 +213,9 @@ export const EmptyWithoutKeyCreation: Story = {
 
 /**
  * A shared org, where the column says whose key each one is — the question an
- * operator asks after removing somebody, since removal does not revoke service
- * keys (FIL-1021). Key 3 predates attribution and carries no `createdBy`. Key 1 was
+ * operator asks before removing somebody, since removal revokes every key they
+ * created (FIL-1021). Key 3 predates attribution and carries no `createdBy`, so
+ * removal leaves it in place. Key 1 was
  * rotated by somebody other than its owner, which the column says beneath them.
  */
 export const WithCreators: Story = {
