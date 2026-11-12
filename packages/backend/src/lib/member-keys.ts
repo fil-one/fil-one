@@ -1,7 +1,13 @@
 import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { NO_ROLE, S3Region, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
+import {
+  NO_ROLE,
+  S3Region,
+  auditKeyIdSuffix,
+  canRetainAccessKey,
+  roleHasPermission,
+} from '@filone/shared';
 import type {
   AccessKeyRevocationReason,
   AccessKeySummary,
@@ -125,13 +131,21 @@ export function reviewAccessKeysForRole(
       continue;
     }
     if (accessKey.createdBy !== userId) continue;
-    // A principal-bound key follows the bucket policies, so a role change
-    // keeps it; removal, which leaves no role, revokes it.
+    // A principal-bound key carries no permissions of its own: the bucket
+    // policy statements naming its principal are its whole authority, and
+    // nothing on the role-change path rewrites them. So the only question the
+    // new role can answer about it is the one `canRetainAccessKey` asks first —
+    // could this role mint such a key at all. A role that could not leaves a
+    // holder who can neither list nor revoke it (`keys.manage_own` is what
+    // scopes both) while it keeps signing whatever those policies grant: a
+    // demotion to ReadOnly would otherwise keep working PutObject and
+    // DeleteObject. NO_ROLE holds no permission either, so removal still
+    // revokes, as it did before.
     if (accessKey.principalId) {
-      if (role === NO_ROLE) {
-        review.keysToRevoke.push({ ...accessKey, reason: 'role_cannot_mint', excess: [] });
-      } else {
+      if (roleHasPermission(role, 'keys.create')) {
         review.retainedKeyCount += 1;
+      } else {
+        review.keysToRevoke.push({ ...accessKey, reason: 'role_cannot_mint', excess: [] });
       }
       continue;
     }
@@ -169,10 +183,11 @@ export async function reviewMemberAccessKeysForRole(
  * landing between them is counted by the fence and missing from the list.
  *
  * Removal asks about `NO_ROLE`, the narrowing to nothing: no role is left to
- * mint under, so every attributed key is revoked: a service key because
- * `canRetainAccessKey` condemns it, a principal-bound key because its member is
- * gone. Any other role change keeps principal-bound keys. Rows with no recorded
- * creator are outside this rule, as they are outside every other.
+ * mint under, so every attributed key is revoked. A role that keeps
+ * `keys.create` keeps the member's principal-bound keys; one that does not —
+ * `NO_ROLE` and ReadOnly — takes them, since nothing here rewrites the bucket
+ * policies that are their authority. Rows with no recorded creator are outside
+ * this rule, as they are outside every other.
  */
 export async function reviewKeysForRoleChange(
   orgId: string,

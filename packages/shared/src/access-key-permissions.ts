@@ -176,8 +176,9 @@ export type KeyRetentionResult =
 
 /**
  * Whether a service key its holder already has may be kept once that holder
- * moves to `role`. Principal-bound keys are never revoked on a role change, so
- * callers do not ask about them.
+ * moves to `role`. Callers do not ask about principal-bound keys: those carry
+ * no permission set of their own, so only the `keys.create` test below applies
+ * to them and `reviewAccessKeysForRole` applies it directly.
  *
  * One test, and the same one {@link excessKeyPermissions} applies at creation:
  * a key is kept when its holder could mint it today. A role without

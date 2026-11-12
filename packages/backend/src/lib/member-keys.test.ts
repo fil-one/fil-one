@@ -169,14 +169,29 @@ describe('reviewAccessKeysForRole', () => {
 
   it.each([
     ['Member', OrgRole.Member],
-    ['ReadOnly', OrgRole.ReadOnly],
-  ] as const)('never revokes a principal-bound key when the role becomes %s', (_name, role) => {
-    // The key carries no authority of its own; bucket policies decide.
+    ['Admin', OrgRole.Admin],
+    ['Owner', OrgRole.Owner],
+  ] as const)('keeps a principal-bound key for a role that could mint one (%s)', (_name, role) => {
     const boundToPrincipal = [key({ permissions: undefined, principalId: MEMBER })];
 
     expect(reviewAccessKeysForRole(boundToPrincipal, MEMBER, role)).toStrictEqual({
       keysToRevoke: [],
       retainedKeyCount: 1,
+      unattributedKeyCount: 0,
+    });
+  });
+
+  it('revokes a principal-bound key on a demotion to ReadOnly', () => {
+    // The key carries no permissions of its own: the bucket policy statements
+    // naming its principal are its whole authority, and nothing on the role
+    // change path rewrites them. ReadOnly holds no `keys.create`, so its holder
+    // could not mint this key and cannot list or revoke it either, while it
+    // keeps signing whatever those policies grant.
+    const boundToPrincipal = key({ permissions: undefined, principalId: MEMBER });
+
+    expect(reviewAccessKeysForRole([boundToPrincipal], MEMBER, OrgRole.ReadOnly)).toStrictEqual({
+      keysToRevoke: [{ ...boundToPrincipal, reason: 'role_cannot_mint', excess: [] }],
+      retainedKeyCount: 0,
       unattributedKeyCount: 0,
     });
   });
