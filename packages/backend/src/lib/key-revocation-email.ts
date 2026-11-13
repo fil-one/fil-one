@@ -155,7 +155,7 @@ function nextStepSentence(cause: RevocationCause): string {
 /** A key as both bodies name it: what it was called, which one it was, and where. */
 function describeKey(key: AccessKeySummary): string {
   const suffix = key.accessKeyIdSuffix ? ` (…${key.accessKeyIdSuffix})` : '';
-  return `${key.keyName}${suffix} — ${formatRegion(key.region)}, created ${key.createdAt.slice(0, 10)}`;
+  return `${key.keyName}${suffix} — ${key.regions.map(formatRegion).join(', ')}, created ${key.createdAt.slice(0, 10)}`;
 }
 
 interface BodyLines {
@@ -207,7 +207,7 @@ function renderKeyList(keys: readonly AccessKeySummary[]): string {
       : '';
     return `<tr><td style="padding:10px 12px;${divider}">
 <div style="font-size:13px;line-height:19.5px;font-weight:500;color:${EMAIL_COLORS.zinc900};">${esc(key.keyName)}${suffix}</div>
-<div style="font-size:12px;line-height:16px;color:${EMAIL_COLORS.zinc500};">${esc(formatRegion(key.region))} · <span style="white-space:nowrap;">created ${esc(key.createdAt.slice(0, 10))}</span></div>
+<div style="font-size:12px;line-height:16px;color:${EMAIL_COLORS.zinc500};">${esc(key.regions.map(formatRegion).join(', '))} · <span style="white-space:nowrap;">created ${esc(key.createdAt.slice(0, 10))}</span></div>
 </td></tr>`;
   });
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px;border:1px solid ${EMAIL_COLORS.zinc200};border-radius:8px;border-collapse:separate;">

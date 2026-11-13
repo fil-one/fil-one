@@ -141,8 +141,12 @@ function requirementFor(
 export interface ServiceKeyGrant {
   permissions?: readonly string[] | undefined;
   granularPermissions?: readonly string[] | undefined;
-  /** Where the key lives. On an `iam` region a service key needs `keys.create_service`. */
-  region?: S3Region | undefined;
+  /**
+   * Every region the key works in, which is the regions of the network holding
+   * it. On a network serving the `iam` access model a service key needs
+   * `keys.create_service`; every region of a network reports the same model.
+   */
+  regions?: readonly S3Region[] | undefined;
 }
 
 /**
@@ -199,8 +203,7 @@ export function canRetainAccessKey(role: string, key: ServiceKeyGrant): KeyReten
     return { retained: false, reason: 'role_cannot_mint' };
   }
   if (
-    key.region &&
-    getRegionAccessModel(key.region) === 'iam' &&
+    key.regions?.some((region) => getRegionAccessModel(region) === 'iam') &&
     !roleHasPermission(role, 'keys.create_service')
   ) {
     return { retained: false, reason: 'role_cannot_mint' };

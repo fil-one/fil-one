@@ -19,7 +19,13 @@ import { isAccessKeyExpired } from '../lib/access-key-inventory.ts';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
-import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION, keyAttribution } from '../lib/dynamo-records.ts';
+import {
+  AccessKeyKeys,
+  DEFAULT_ACCESS_KEY_REGION,
+  keyAttribution,
+  getAccessKeyOrchestratorId,
+  getAccessKeyRegions,
+} from '../lib/dynamo-records.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
 import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
 import {
@@ -39,12 +45,13 @@ import { keyScope, notYourKeyResponse, withinScope } from '../lib/key-scope.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
+  accessKeyNetworkUnavailableResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
   unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import { vendorNameForRotation } from '../lib/rotation-key-name.ts';
-import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
+import { findOrchestratorById } from '../lib/service-orchestrator-registry.ts';
 import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
@@ -164,7 +171,11 @@ async function prepareRotation(
   // credential behind.
   if (await isOrgDeleting(orgId, { consistent: true })) return accountDeletedResponse();
 
-  const orchestrator = getOrchestratorForRegion(stored.region);
+  // The row names the network that holds the credential; an older row names
+  // only the region it was minted in, which resolves to the same network.
+  const orchestratorId = getAccessKeyOrchestratorId(stored);
+  const orchestrator = findOrchestratorById(orchestratorId);
+  if (!orchestrator) return accessKeyNetworkUnavailableResponse(orchestratorId);
   const tenantId = await orchestrator.ensureTenantReady(orgId);
   if (!tenantId) return tenantNotReadyResponse();
 
@@ -217,7 +228,7 @@ async function issueReplacement({
     details: {
       keyKind: 's3',
       keyName: stored.keyName,
-      region: stored.region,
+      orchestratorId: orchestrator.id,
       replacedKeyIdSuffix: auditKeyIdSuffix('s3', stored.accessKeyId ?? keyId),
       ...(stored.principalId ? { isPrincipalKey: true } : {}),
     },
@@ -239,7 +250,6 @@ async function issueReplacement({
     keyId: replacement.id,
     accessKeyId: replacement.accessKeyId,
     keyName: stored.keyName,
-    region: stored.region,
     orchestrator,
     tenantId,
   };
@@ -301,7 +311,7 @@ async function issueReplacement({
     // The name the vendor holds it under, which is what an operator reading the
     // event would search for. The two differ once a key has been rotated before.
     keyName: stored.vendorKeyName ?? stored.keyName,
-    region: stored.region,
+    orchestratorId: orchestrator.id,
     orchestrator,
     tenantId,
     actor,
@@ -386,7 +396,8 @@ function replacementRow({
     accessKeyId: replacement.accessKeyId,
     createdAt: replacement.createdAt,
     status: 'active',
-    region: stored.region,
+    // The replacement lives on the same network as the key it supersedes.
+    orchestratorId: getAccessKeyOrchestratorId(stored),
     ...(stored.permissions ? { permissions: stored.permissions } : {}),
     ...(stored.principalId ? { principalId: stored.principalId } : {}),
     vendorKeyName,
@@ -436,7 +447,7 @@ function canRoleRotateKey(role: string, stored: StoredKey): KeyRetentionResult {
   return canRetainAccessKey(role, {
     permissions: stored.permissions,
     granularPermissions: stored.granularPermissions,
-    region: stored.region,
+    regions: getAccessKeyRegions(stored, process.env.FILONE_STAGE!),
   });
 }
 
