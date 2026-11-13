@@ -169,6 +169,41 @@ function rowMenuFor(member: string): HTMLElement | null {
 // Tests
 // ---------------------------------------------------------------------------
 
+describe('MembersPage — while the roster loads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListInvitations.mockResolvedValue({ invitations: [] });
+  });
+
+  it.each([
+    // Owner and Admin get row actions, so the placeholder keeps their column.
+    [OrgRole.Owner, ['Member', 'Role', 'Joined', 'Actions']],
+    [OrgRole.Admin, ['Member', 'Role', 'Joined', 'Actions']],
+    [OrgRole.Member, ['Member', 'Role', 'Joined']],
+  ])('shows %s the roster column headers above placeholder rows', async (role, headers) => {
+    // Never settles, so the roster stays loading.
+    mockListMembers.mockReturnValue(new Promise(() => {}));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, role);
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <MembersRoster />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    const loading = await screen.findByRole('status', { name: 'Loading members' });
+    expect(
+      within(loading)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent),
+    ).toStrictEqual(headers);
+    // The header row, then three placeholder rows.
+    expect(within(loading).getAllByRole('row')).toHaveLength(4);
+  });
+});
+
 describe('MembersPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();

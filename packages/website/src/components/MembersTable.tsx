@@ -6,6 +6,7 @@ import { Badge } from './Badge';
 import { RoleSelect } from './RoleSelect';
 import { RowActionsMenu, type RowAction } from './RowActionsMenu';
 import { Table } from './Table/Table';
+import type { SkeletonColumn } from './Table/TableSkeleton';
 import { formatDate } from '../lib/time.js';
 import {
   canTransferTo,
@@ -28,6 +29,16 @@ const SOURCE_LABELS: Record<string, string> = {
   conversion: 'Original account',
   invitation: 'Invited',
 };
+
+/**
+ * The columns, shared with the loading skeleton so the placeholder drops the
+ * same column at the same breakpoint as the table it stands in for.
+ */
+export const MEMBER_COLUMNS: SkeletonColumn[] = [
+  { label: 'Member' },
+  { label: 'Role' },
+  { label: 'Joined', className: 'hidden md:table-cell' },
+];
 
 export type MembersTableProps = {
   members: MemberSummary[];
@@ -116,9 +127,11 @@ export function MembersTable({
     <Table>
       <Table.Header>
         <Table.Row>
-          <Table.Head>Member</Table.Head>
-          <Table.Head>Role</Table.Head>
-          <Table.Head className="hidden md:table-cell">Joined</Table.Head>
+          {MEMBER_COLUMNS.map(({ label, className }) => (
+            <Table.Head key={label} className={className}>
+              {label}
+            </Table.Head>
+          ))}
           {showActions && (
             <Table.Head>
               <span className="sr-only">Actions</span>

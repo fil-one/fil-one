@@ -4,6 +4,7 @@ import type { InvitationSummary } from '@filone/shared';
 import { Badge } from './Badge';
 import { Button } from './Button';
 import { Table } from './Table/Table';
+import type { SkeletonColumn } from './Table/TableSkeleton';
 import { formatDate } from '../lib/time.js';
 import { ROLE_LABELS } from '../lib/use-member-scope.js';
 
@@ -37,6 +38,17 @@ function InvitationStatus({ invitation }: { invitation: InvitationSummary }) {
     </Badge>
   );
 }
+
+/**
+ * The columns, shared with the loading skeleton so the placeholder drops the
+ * same column at the same breakpoint as the table it stands in for.
+ */
+export const INVITATION_COLUMNS: SkeletonColumn[] = [
+  { label: 'Email' },
+  { label: 'Role' },
+  { label: 'Status' },
+  { label: 'Expires', className: 'hidden md:table-cell' },
+];
 
 export type InvitationsTableProps = {
   invitations: InvitationSummary[];
@@ -84,10 +96,11 @@ export function InvitationsTable({
     <Table>
       <Table.Header>
         <Table.Row>
-          <Table.Head>Email</Table.Head>
-          <Table.Head>Role</Table.Head>
-          <Table.Head>Status</Table.Head>
-          <Table.Head className="hidden md:table-cell">Expires</Table.Head>
+          {INVITATION_COLUMNS.map(({ label, className }) => (
+            <Table.Head key={label} className={className}>
+              {label}
+            </Table.Head>
+          ))}
           {showActions && (
             <Table.Head>
               <span className="sr-only">Actions</span>
