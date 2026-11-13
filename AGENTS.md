@@ -6,6 +6,16 @@ Monorepo for the Fil One product and its supporting packages.
 
 For any UI work in `packages/website` (the console, the authenticated product; the directory name is legacy), follow [packages/website/DESIGN.md](packages/website/DESIGN.md) and the loader in [packages/website/CLAUDE.md](packages/website/CLAUDE.md).
 
+## Stories, branches and pull requests
+
+Work is tracked as stories in Shortcut. Shortcut links a branch or pull request to a story only when it mentions the story's Shortcut ID, such as `sc-847`, and then moves the story along the workflow as the pull request progresses.
+
+- Name the branch `<your-name>/sc-<id>/<short-description>`, such as `filipa/sc-847/secret-key-prompt`. The story's Git helpers in Shortcut copy a branch name in this shape.
+- Start the pull request title with the ID: `sc-847 fix(console): ask for the secret key at a prompt`.
+- When a pull request covers more than one story, name every ID in its description.
+
+`FIL-` IDs in older commits, comments and docs refer to Linear issues from before the move to Shortcut. Leave them as they are, and don't use `FIL-` IDs for new work: Shortcut does not recognize them.
+
 ## Code conventions
 
 ### Naming
