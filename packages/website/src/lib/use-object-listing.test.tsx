@@ -44,15 +44,16 @@ function renderListing(prefix = '') {
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
   return renderHook(
-    ({ prefix: currentPrefix }) =>
+    ({ prefix: currentPrefix, search: currentSearch }) =>
       useObjectListing({
         bucketName: 'any-bucket',
         region: S3Region.EuWest1,
         versioning: false,
         prefix: currentPrefix,
+        search: currentSearch,
         enabled: true,
       }),
-    { wrapper, initialProps: { prefix } },
+    { wrapper, initialProps: { prefix, search: '' } },
   );
 }
 
@@ -116,11 +117,34 @@ describe('useObjectListing', () => {
     act(() => result.current.goToNextPage());
     await waitFor(() => expect(result.current.page).toBe(secondPage));
 
-    rerender({ prefix: 'sub/' });
+    rerender({ prefix: 'sub/', search: '' });
 
     expect(result.current).toMatchObject({ rangeStart: 1, hasPrevious: false });
     expect(mockFetchPage).toHaveBeenLastCalledWith(
       expect.objectContaining({ prefix: 'sub/', cursor: undefined }),
     );
+  });
+
+  it('lists the folder narrowed to names that start with the search', async () => {
+    const { rerender } = renderListing('any-folder/');
+
+    rerender({ prefix: 'any-folder/', search: 'rep' });
+
+    await waitFor(() =>
+      expect(mockFetchPage).toHaveBeenLastCalledWith(
+        expect.objectContaining({ prefix: 'any-folder/rep', cursor: undefined }),
+      ),
+    );
+  });
+
+  it('starts a new search from its first page', async () => {
+    const { result, rerender } = renderListing();
+    await waitFor(() => expect(result.current.hasNext).toBe(true));
+    act(() => result.current.goToNextPage());
+    await waitFor(() => expect(result.current.page).toBe(secondPage));
+
+    rerender({ prefix: '', search: 'a' });
+
+    expect(result.current).toMatchObject({ rangeStart: 1, hasPrevious: false });
   });
 });
