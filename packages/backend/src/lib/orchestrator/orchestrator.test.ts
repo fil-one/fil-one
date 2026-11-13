@@ -111,7 +111,7 @@ function fail(status: number, message = 'error') {
 function buildOrchestrator(overrides?: Pick<Partial<FilOneOrchestratorConfig>, 'api'>) {
   return new FilOneOrchestrator({
     id: 'forge',
-    region: S3Region.UsEast1,
+    regions: [S3Region.UsEast1],
     stage: 'test',
     s3EndpointUrl: 'https://us-east-1.s3.test.example.com',
     api: overrides?.api ?? { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
@@ -147,7 +147,7 @@ beforeEach(() => {
 describe('FilOneOrchestrator config', () => {
   it('exposes the configured id and region', () => {
     expect(orchestrator.id).toBe('forge');
-    expect(orchestrator.region).toBe(S3Region.UsEast1);
+    expect(orchestrator.regions).toStrictEqual([S3Region.UsEast1]);
   });
 
   it('does not instrument an injected client', () => {

@@ -120,9 +120,12 @@ const forgeApi = await resolveForgeApi(
 
 const orchestrator = new FilOneOrchestrator({
   id: orchestratorId,
-  region,
+  // The script works one region at a time, so the orchestrator it builds serves
+  // only that one, whatever else the network does.
+  regions: [region],
   stage,
-  // Unused by deleteTenant; required by the config.
+  // Unused by deleteTenant; the config takes it to override the endpoint the
+  // region would otherwise give.
   s3EndpointUrl: forgeApi.s3EndpointUrl ?? getS3Endpoint(region, stage),
   // A pre-built client skips the metrics instrumentation the Lambdas get.
   api: { client: createClient({ baseUrl: forgeApi.baseUrl, auth: () => forgeApi.token }) },
