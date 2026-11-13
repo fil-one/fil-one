@@ -14,6 +14,10 @@ import { DOCS_URL, supportsBucketManagement } from '@filone/shared';
  */
 export const CLI_PROFILE = 'filone';
 
+/** What to do at the prompt the AWS CLI set-up ends with. */
+export const CLI_PROMPT_NOTE =
+  'The last command asks for your Access Key ID and Secret Access Key. Paste each when prompted, then press Enter to keep the region and output format.';
+
 export type ConnectionClient = 'cli' | 'python' | 'nodejs' | 'go';
 
 export type ConnectionSnippet = {
@@ -40,10 +44,13 @@ export function getConnectionSnippets(
   return {
     cli: {
       language: 'shell',
-      setup: `aws configure set aws_access_key_id YOUR_ACCESS_KEY --profile ${CLI_PROFILE}
-aws configure set aws_secret_access_key YOUR_SECRET_KEY --profile ${CLI_PROFILE}
-aws configure set region ${region} --profile ${CLI_PROFILE}
-aws configure set s3.addressing_style path --profile ${CLI_PROFILE}`,
+      // The keys are typed at `aws configure`'s prompt, never passed as
+      // arguments: a pasted `aws configure set aws_secret_access_key …` keeps
+      // the secret in shell history. The prompt runs last so that pasting the
+      // whole block doesn't feed the other commands to it as answers.
+      setup: `aws configure set region ${region} --profile ${CLI_PROFILE}
+aws configure set s3.addressing_style path --profile ${CLI_PROFILE}
+aws configure --profile ${CLI_PROFILE}`,
       ...(supportsBucketManagement(region)
         ? {
             createBucket: `aws s3 mb s3://my-bucket --endpoint-url ${endpoint} --profile ${CLI_PROFILE}`,
