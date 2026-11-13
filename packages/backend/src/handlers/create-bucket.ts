@@ -1,7 +1,7 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { CreateBucketResponse, ErrorResponse, S3Region } from '@filone/shared';
+import type { AuditOutcome, CreateBucketResponse, ErrorResponse, S3Region } from '@filone/shared';
 import {
   CreateBucketSchema,
   getCreatorBucketPolicy,
@@ -10,10 +10,12 @@ import {
 } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
+import { isOutcomeUnknown } from '../lib/audit-outcome.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import {
   BucketAlreadyExistsError,
   BucketConfigurationError,
+  BucketPolicyWriteError,
   PolicyValidationError,
 } from '../lib/errors.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
@@ -74,6 +76,16 @@ export async function baseHandler(
   const policy = supportsIamMethods(region)
     ? getCreatorBucketPolicy({ creatorId: userId, bucketName })
     : undefined;
+  const bucketAudit = await twoPhaseAudit({
+    type: 'bucket.created',
+    // Best-effort for the reason the policy event gives below: an audit outage
+    // must not stop buckets being created.
+    mode: 'best-effort',
+    actor: userActor({ userId, email: getVerifiedEmail(event) }),
+    orgId,
+    subject: AuditSubjects.bucket(region, bucketName),
+    details: { region, bucketName },
+  });
   const policyAudit = policy
     ? await auditDefaultBucketPolicy({ event, orgId, userId, region, bucketName })
     : undefined;
@@ -88,23 +100,24 @@ export async function baseHandler(
       retention,
       ...(policy ? { policy } : {}),
     });
-  } catch (err) {
+  } catch (thrown) {
+    await completeFailedCreateAudit({ thrown, bucketAudit, policyAudit, completionDetails });
+    // The refusal and the rethrow answer for the policy write's own error.
+    const err = unwrapPolicyWriteError(thrown);
     // The bucket was created but couldn't be fully configured. Surface the
     // actionable message so the caller can finish setup via the S3 API instead
-    // of getting the generic 500 from errorHandlerMiddleware. The orchestrator
-    // writes the policy before the configuration calls, so that write succeeded.
+    // of getting the generic 500 from errorHandlerMiddleware.
     if (err instanceof BucketConfigurationError) {
-      await policyAudit?.complete({ outcome: 'succeeded', details: completionDetails });
       return new ResponseBuilder()
         .status(500)
         .body<ErrorResponse>({ message: err.message })
         .build();
     }
-    await policyAudit?.complete({ outcome: 'failed' });
     const refusal = toCreateRefusalResponse(err, bucketName);
     if (!refusal) throw err;
     return refusal;
   }
+  await bucketAudit.complete({ outcome: 'succeeded' });
   await policyAudit?.complete({ outcome: 'succeeded', details: completionDetails });
 
   const now = new Date().toISOString();
@@ -160,6 +173,55 @@ export const handler = middy(baseHandler)
   .use(csrfMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Write))
   .use(errorHandlerMiddleware());
+
+/**
+ * Closes the create's audit events after the storage call threw. Both stay open
+ * when the outcome is unknown, for the reason {@link isOutcomeUnknown} gives.
+ */
+async function completeFailedCreateAudit({
+  thrown,
+  bucketAudit,
+  policyAudit,
+  completionDetails,
+}: {
+  thrown: unknown;
+  bucketAudit: AuditCorrelation<'bucket.created'>;
+  policyAudit: AuditCorrelation<'bucket_policy.created'> | undefined;
+  completionDetails: { statements: number | undefined };
+}): Promise<void> {
+  const bucketOutcome = getBucketOutcome(thrown);
+  if (!bucketOutcome) return;
+  await bucketAudit.complete({ outcome: bucketOutcome });
+  // The orchestrator writes the policy before the configuration calls, so a
+  // configuration failure means that write succeeded.
+  const err = unwrapPolicyWriteError(thrown);
+  if (err instanceof BucketConfigurationError) {
+    await policyAudit?.complete({ outcome: 'succeeded', details: completionDetails });
+  } else if (!isOutcomeUnknown(err)) {
+    // A policy write that timed out may have stored the policy, so its intent
+    // stays open even though the bucket is known to exist.
+    await policyAudit?.complete({ outcome: 'failed' });
+  }
+}
+
+/**
+ * How a failed create ends for the bucket itself, or undefined when that is not
+ * known. The orchestrator raises the first two only after the storage system
+ * created the bucket, so the bucket exists and its `bucket.created` succeeded
+ * even though the request did not. A timeout may or may not have created it,
+ * which {@link isOutcomeUnknown} explains.
+ */
+function getBucketOutcome(err: unknown): AuditOutcome | undefined {
+  if (err instanceof BucketConfigurationError || err instanceof BucketPolicyWriteError) {
+    return 'succeeded';
+  }
+  return isOutcomeUnknown(err) ? undefined : 'failed';
+}
+
+/** The policy write's own error when the create failed there, and the error itself otherwise. */
+function unwrapPolicyWriteError(err: unknown): unknown {
+  return err instanceof BucketPolicyWriteError ? err.cause : err;
+}
 
 /**
  * The console's answer to a refusal the create can raise, or undefined for an

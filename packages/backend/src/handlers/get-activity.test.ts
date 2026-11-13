@@ -1,108 +1,76 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OrgRole } from '@filone/shared';
-import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb';
-import { marshall } from '@aws-sdk/util-dynamodb';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { AUDIT_RETENTION_DAYS } from '@filone/shared';
+import type { AuditEvent, AuditEventType } from '@filone/shared';
 
 // ---------------------------------------------------------------------------
 // Mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('sst', () => ({
-  Resource: {
-    UserInfoTable: { name: 'UserInfoTable' },
-  },
+const mockQueryActivityEvents = vi.fn();
+vi.mock('../lib/audit-query.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/audit-query.ts')>()),
+  queryActivityEvents: (...args: unknown[]) => mockQueryActivityEvents(...args),
 }));
 
-const mockIsTenantReady = vi.fn();
 const mockListBuckets = vi.fn();
-
-const mockOrchestrator = {
-  id: 'aurora',
-  region: 'eu-west-1',
-  isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
-  listBuckets: (...args: unknown[]) => mockListBuckets(...args),
-};
-
-const mockGetAvailableOrchestrators = vi.fn();
-vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  getAvailableOrchestrators: (...args: unknown[]) => mockGetAvailableOrchestrators(...args),
+vi.mock('../lib/region-helpers.ts', () => ({
+  getProvisionedRegions: async () => [
+    {
+      orchestrator: { id: 'any-orchestrator', region: 'any-region', listBuckets: mockListBuckets },
+      tenantId: 'any-tenant',
+    },
+  ],
 }));
 
-vi.mock('../lib/org-profile.ts', () => ({
-  getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
+const mockReportAuditQuery = vi.fn();
+vi.mock('../lib/audit-metrics.ts', () => ({
+  reportAuditQuery: (...args: unknown[]) => mockReportAuditQuery(...args),
 }));
-
-const mockReportMetric = vi.fn();
-vi.mock('../lib/metrics.ts', () => ({
-  reportMetric: (...args: unknown[]) => mockReportMetric(...args),
-}));
-
-// Builds a fully self-contained fake orchestrator for multi-region tests.
-function createMockedOrchestrator(opts: {
-  id: string;
-  region: string;
-  tenantId: string | null;
-  buckets?: { bucketName: string; createdAt: string }[];
-}) {
-  return {
-    id: opts.id,
-    region: opts.region,
-    isTenantReady: vi.fn().mockReturnValue(opts.tenantId),
-    listBuckets: vi.fn().mockResolvedValue(opts.buckets ?? []),
-  };
-}
-
-process.env.FILONE_STAGE = 'test';
-
-const ddbMock = mockClient(DynamoDBClient);
 
 import { baseHandler } from './get-activity.ts';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const USER_INFO = { userId: 'user-1', orgId: 'org-1' };
-const AURORA_TENANT_ID = 'aurora-tenant-1';
+const USER_INFO = { userId: 'any-user', orgId: 'any-org' };
 
-function keyItem(id: string, keyName: string, createdAt: string, createdBy?: string) {
-  return marshall({
-    pk: `ORG#${USER_INFO.orgId}`,
-    sk: `ACCESSKEY#${id}`,
-    keyName,
-    accessKeyId: `AKIA-${id}`,
-    createdAt,
-    status: 'active',
-    ...(createdBy ? { createdBy } : {}),
-  });
+/** A succeeded completion, as the audit query hands it back. */
+function auditEvent(
+  type: AuditEventType,
+  details: Record<string, unknown>,
+  eventId = 'any-event',
+): AuditEvent {
+  return {
+    eventId,
+    type,
+    actor: { kind: 'user', id: 'any-user' },
+    orgId: USER_INFO.orgId,
+    subject: 'org:any-org',
+    details,
+    createdAt: '2026-10-01T00:00:00.000Z',
+    ttl: 1_800_000_000,
+    phase: 'completion',
+    correlationId: 'any-correlation',
+    outcome: 'succeeded',
+    // Each caller passes a payload that matches its type, a pairing TypeScript
+    // cannot check when `type` is any member of the union.
+  } as unknown as AuditEvent;
 }
 
-function setTenant(tenantId?: string) {
-  mockIsTenantReady.mockReturnValue(tenantId ?? null);
+function resolveEvents(...events: AuditEvent[]) {
+  mockQueryActivityEvents.mockResolvedValue({ events, cost: { pages: 1, rows: events.length } });
 }
 
-interface EmittedMetric {
-  _aws: {
-    Timestamp: number;
-    CloudWatchMetrics: {
-      Namespace: string;
-      Dimensions: string[][];
-      Metrics: { Name: string; Unit: string }[];
-    }[];
-  };
-  [key: string]: unknown;
+/** A bucket as the storage system lists it; only the name, region and creation time matter here. */
+function listedBucket(bucketName: string, createdAt: string, region = 'any-region') {
+  return { bucketName, region, createdAt, isPublic: false, encrypted: false };
 }
 
-function emittedMetrics(name: string): EmittedMetric[] {
-  return mockReportMetric.mock.calls
-    .map(([event]) => event as EmittedMetric)
-    .filter((event) => event._aws.CloudWatchMetrics[0].Metrics[0].Name === name);
-}
-
-function emittedPhases(): string[] {
-  return emittedMetrics('GetActivityPhaseDuration').map((event) => String(event.phase));
+async function getActivities(queryStringParameters?: Record<string, string>) {
+  const result = await baseHandler(buildEvent({ userInfo: USER_INFO, queryStringParameters }));
+  return { statusCode: result.statusCode, body: JSON.parse(String(result.body)) };
 }
 
 // ---------------------------------------------------------------------------
@@ -112,597 +80,275 @@ function emittedPhases(): string[] {
 describe('get-activity baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    ddbMock.reset();
+    resolveEvents();
     mockListBuckets.mockResolvedValue([]);
-    mockGetAvailableOrchestrators.mockReturnValue([mockOrchestrator]);
-    setTenant(AURORA_TENANT_ID);
   });
 
-  it('returns 200 with empty activities when no buckets exist', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const event = buildEvent({ userInfo: USER_INFO });
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(200);
-    const body = JSON.parse(String(result.body));
-    expect(body).toStrictEqual({ activities: [] });
+  it('returns no activities when the audit log holds no matching event', async () => {
+    expect(await getActivities()).toStrictEqual({ statusCode: 200, body: { activities: [] } });
   });
 
-  it('returns bucket activities without object activities', async () => {
-    mockListBuckets.mockResolvedValue([
-      { bucketName: 'photos', createdAt: '2026-01-01T00:00:00Z' },
-    ]);
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const event = buildEvent({ userInfo: USER_INFO });
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(200);
-    const body = JSON.parse(String(result.body));
-
-    expect(body).toStrictEqual({
-      activities: [
-        {
-          id: 'bucket-photos',
-          action: 'bucket.created',
-          resourceType: 'bucket',
-          resourceName: 'photos',
-          timestamp: '2026-01-01T00:00:00Z',
-        },
-      ],
-    });
-
-    expect(mockListBuckets).toHaveBeenCalledWith(
-      AURORA_TENANT_ID,
-      undefined,
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
-  });
-
-  it('leaves Bucket Intelligence companion buckets out of the feed', async () => {
-    mockListBuckets.mockResolvedValue([
-      { bucketName: 'photos', createdAt: '2026-01-01T00:00:00Z' },
-      {
-        bucketName: 'filone-rag-0123456789abcdef0123456789abcdef01234567',
-        createdAt: '2026-01-02T00:00:00Z',
-      },
-    ]);
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
-
-    const body = JSON.parse(String(result.body));
-    expect(body.activities.map((a: { resourceName: string }) => a.resourceName)).toStrictEqual([
-      'photos',
-    ]);
-  });
-
-  it('respects the limit query parameter', async () => {
-    mockListBuckets.mockResolvedValue([
-      { bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' },
-      { bucketName: 'b2', createdAt: '2026-01-02T00:00:00Z' },
-      { bucketName: 'b3', createdAt: '2026-01-03T00:00:00Z' },
-    ]);
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const event = buildEvent({
-      userInfo: USER_INFO,
-      queryStringParameters: { limit: '2' },
-    });
-    const result = await baseHandler(event);
-    const body = JSON.parse(String(result.body));
-
-    expect(body).toStrictEqual({
-      activities: [
-        {
-          id: 'bucket-b3',
-          action: 'bucket.created',
-          resourceType: 'bucket',
-          resourceName: 'b3',
-          timestamp: '2026-01-03T00:00:00Z',
-        },
-        {
-          id: 'bucket-b2',
-          action: 'bucket.created',
-          resourceType: 'bucket',
-          resourceName: 'b2',
-          timestamp: '2026-01-02T00:00:00Z',
-        },
-      ],
-    });
-  });
-
-  it('defaults limit to 10 when limit is non-numeric', async () => {
-    mockListBuckets.mockResolvedValue([{ bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const event = buildEvent({
-      userInfo: USER_INFO,
-      queryStringParameters: { limit: 'abc' },
-    });
-    const result = await baseHandler(event);
-    const body = JSON.parse(String(result.body));
-    // Should fall back to 10, not return empty due to NaN
-    expect(body.activities).toHaveLength(1);
-  });
-
-  it('defaults limit to 10 when limit is negative', async () => {
-    mockListBuckets.mockResolvedValue([{ bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const event = buildEvent({
-      userInfo: USER_INFO,
-      queryStringParameters: { limit: '-5' },
-    });
-    const result = await baseHandler(event);
-    const body = JSON.parse(String(result.body));
-
-    expect(body.activities.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('caps limit at 50', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const event = buildEvent({
-      userInfo: USER_INFO,
-      queryStringParameters: { limit: '999' },
-    });
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(200);
-    const body = JSON.parse(String(result.body));
-    expect(body.activities).toStrictEqual([]);
-  });
-
-  it('returns only bucket activity (no object activities)', async () => {
-    mockListBuckets.mockResolvedValue([{ bucketName: 'data', createdAt: '2025-01-01T00:00:00Z' }]);
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const event = buildEvent({ userInfo: USER_INFO });
-    const result = await baseHandler(event);
-    const body = JSON.parse(String(result.body));
-
-    expect(body).toStrictEqual({
-      activities: [
-        {
-          id: 'bucket-data',
-          action: 'bucket.created',
-          resourceType: 'bucket',
-          resourceName: 'data',
-          timestamp: '2025-01-01T00:00:00Z',
-        },
-      ],
-    });
-  });
-
-  it('includes key activities sorted with buckets and objects', async () => {
-    mockListBuckets.mockResolvedValue([{ bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
-
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: {
-          ':pk': { S: `ORG#${USER_INFO.orgId}` },
-          ':skPrefix': { S: 'ACCESSKEY#' },
-        },
-      })
-      .resolves({
-        Items: [keyItem('key-1', 'my-api-key', '2026-01-02T00:00:00Z')],
-      });
-
-    const event = buildEvent({ userInfo: USER_INFO });
-    const result = await baseHandler(event);
-    const body = JSON.parse(String(result.body));
-
-    expect(body.activities).toStrictEqual([
-      {
-        id: 'key-key-1',
-        action: 'key.created',
-        resourceType: 'key',
-        resourceName: 'my-api-key',
-        timestamp: '2026-01-02T00:00:00Z',
-      },
-      {
-        id: 'bucket-b1',
-        action: 'bucket.created',
-        resourceType: 'bucket',
-        resourceName: 'b1',
-        timestamp: '2026-01-01T00:00:00Z',
-      },
-    ]);
-  });
-
-  it('returns 200 with empty buckets when listBuckets throws AccessDenied', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const err = new Error('Access Denied.');
-    err.name = 'AccessDenied';
-    mockListBuckets.mockRejectedValue(err);
-
-    const event = buildEvent({ userInfo: USER_INFO });
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(200);
-    const body = JSON.parse(String(result.body));
-    expect(body.activities).toStrictEqual([]);
-  });
-
-  it('returns 200 with empty buckets when listBuckets throws AccessDenied via Code fallback', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    const err = new Error('Access Denied.');
-    Object.assign(err, { Code: 'AccessDenied' });
-    mockListBuckets.mockRejectedValue(err);
-
-    const event = buildEvent({ userInfo: USER_INFO });
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(200);
-    const body = JSON.parse(String(result.body));
-    expect(body.activities).toStrictEqual([]);
-  });
-
-  it('returns 200 with empty buckets when listBuckets throws a non-AccessDenied error', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-    mockListBuckets.mockRejectedValue(new Error('network timeout'));
-
-    const event = buildEvent({ userInfo: USER_INFO });
-    const result = await baseHandler(event);
-
-    expect(result.statusCode).toBe(200);
-    const body = JSON.parse(String(result.body));
-    expect(body.activities).toStrictEqual([]);
-  });
-  // Object activities are temporarily excluded from the feed.
-  // https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
-
-  describe('multi-region aggregation', () => {
-    it('merges bucket activities across all orchestrators', async () => {
-      ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-      const aurora = createMockedOrchestrator({
-        id: 'aurora',
-        region: 'eu-west-1',
-        tenantId: 'aurora-t',
-        buckets: [{ bucketName: 'eu-bucket', createdAt: '2026-01-01T00:00:00Z' }],
-      });
-      const fth = createMockedOrchestrator({
-        id: 'fth',
-        region: 'us-east-1',
-        tenantId: 'fth-t',
-        buckets: [{ bucketName: 'us-bucket', createdAt: '2026-01-01T06:00:00Z' }],
-      });
-      mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
-
-      const event = buildEvent({ userInfo: USER_INFO });
-      const result = await baseHandler(event);
-      const body = JSON.parse(String(result.body));
-
-      // Bucket activities from both regions appear.
-      expect(body.activities.map((a: { resourceName: string }) => a.resourceName).sort()).toEqual([
-        'eu-bucket',
-        'us-bucket',
-      ]);
-      expect(aurora.listBuckets).toHaveBeenCalledWith(
-        'aurora-t',
-        undefined,
-        expect.objectContaining({ signal: expect.any(AbortSignal) }),
-      );
-      expect(fth.listBuckets).toHaveBeenCalledWith(
-        'fth-t',
-        undefined,
-        expect.objectContaining({ signal: expect.any(AbortSignal) }),
-      );
-    });
-
-    it('skips orchestrators whose tenant is not ready', async () => {
-      ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-      const aurora = createMockedOrchestrator({
-        id: 'aurora',
-        region: 'eu-west-1',
-        tenantId: 'aurora-t',
-        buckets: [{ bucketName: 'eu-bucket', createdAt: '2026-01-01T00:00:00Z' }],
-      });
-      const fth = createMockedOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: null });
-      mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
-
-      const event = buildEvent({ userInfo: USER_INFO });
-      const result = await baseHandler(event);
-      const body = JSON.parse(String(result.body));
-
-      expect(body.activities.map((a: { resourceName: string }) => a.resourceName)).toEqual([
-        'eu-bucket',
-      ]);
-      // The unprovisioned region is never queried for buckets.
-      expect(fth.listBuckets).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('EMF metric emission', () => {
-    it('emits a well-formed EMF envelope for the total handler duration', async () => {
-      vi.setSystemTime(new Date('2026-01-08T12:00:00Z'));
-      ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-      await baseHandler(buildEvent({ userInfo: USER_INFO }));
-
-      const [total, ...rest] = emittedMetrics('GetActivityDuration');
-      expect(rest).toStrictEqual([]);
-      expect(total).toStrictEqual({
-        _aws: {
-          Timestamp: new Date('2026-01-08T12:00:00Z').getTime(),
-          CloudWatchMetrics: [
-            {
-              Namespace: 'FilOne',
-              Dimensions: [['handler']],
-              Metrics: [{ Name: 'GetActivityDuration', Unit: 'Milliseconds' }],
-            },
-          ],
-        },
-        handler: 'get-activity',
-        GetActivityDuration: expect.any(Number),
-      });
-      expect(total.GetActivityDuration).toBeGreaterThanOrEqual(0);
-    });
-
-    it('emits one phase duration per handler phase, dimensioned by handler and phase', async () => {
-      ddbMock.on(QueryCommand).resolves({ Items: [] });
-
-      await baseHandler(buildEvent({ userInfo: USER_INFO }));
-
-      expect(emittedPhases().sort()).toStrictEqual([
-        'fetchAccessKeyActivities',
-        'fetchBucketActivities',
-        'resolveRegions',
-      ]);
-      for (const event of emittedMetrics('GetActivityPhaseDuration')) {
-        expect(event._aws.CloudWatchMetrics[0].Dimensions).toStrictEqual([['handler', 'phase']]);
-        expect(event.handler).toBe('get-activity');
-        expect(event.GetActivityPhaseDuration).toBeGreaterThanOrEqual(0);
-      }
-    });
-
-    it('emits per-region listBuckets durations', async () => {
-      ddbMock.on(QueryCommand).resolves({ Items: [] });
-      const aurora = createMockedOrchestrator({
-        id: 'aurora',
-        region: 'eu-west-1',
-        tenantId: 'aurora-t',
-      });
-      const fth = createMockedOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: 'fth-t' });
-      mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
-
-      await baseHandler(buildEvent({ userInfo: USER_INFO }));
-
-      for (const name of ['ListBucketsDuration']) {
-        const events = emittedMetrics(name);
-        expect(events.map((e) => String(e.region)).sort()).toStrictEqual([
-          'eu-west-1',
-          'us-east-1',
-        ]);
-        for (const event of events) {
-          expect(event._aws.CloudWatchMetrics[0].Dimensions).toStrictEqual([['region']]);
-          expect(event[name]).toBeGreaterThanOrEqual(0);
-        }
-      }
-    });
-
-    it('tags a failing phase with an :error suffix and skips the total metric', async () => {
-      ddbMock.on(QueryCommand).rejects(new Error('dynamo down'));
-
-      await expect(baseHandler(buildEvent({ userInfo: USER_INFO }))).rejects.toThrow('dynamo down');
-
-      expect(emittedPhases()).toContain('fetchAccessKeyActivities:error');
-      expect(emittedPhases()).not.toContain('fetchAccessKeyActivities');
-      expect(emittedMetrics('GetActivityDuration')).toStrictEqual([]);
-    });
-
-    it('emits only the resolveRegions error phase when region resolution fails', async () => {
-      ddbMock.on(QueryCommand).resolves({ Items: [] });
-      mockGetAvailableOrchestrators.mockImplementation(() => {
-        throw new Error('registry down');
-      });
-
-      await expect(baseHandler(buildEvent({ userInfo: USER_INFO }))).rejects.toThrow(
-        'registry down',
-      );
-
-      expect(emittedPhases()).toStrictEqual(['resolveRegions:error']);
-      expect(emittedMetrics('GetActivityDuration')).toStrictEqual([]);
-    });
-
-    it('skips ListBucketsDuration for a region whose listBuckets fails', async () => {
-      ddbMock.on(QueryCommand).resolves({ Items: [] });
-      const aurora = createMockedOrchestrator({
-        id: 'aurora',
-        region: 'eu-west-1',
-        tenantId: 'aurora-t',
-      });
-      const fth = createMockedOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: 'fth-t' });
-      fth.listBuckets.mockRejectedValue(new Error('FTH down'));
-      mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
-
-      await baseHandler(buildEvent({ userInfo: USER_INFO }));
-
-      expect(emittedMetrics('ListBucketsDuration').map((e) => e.region)).toStrictEqual([
-        'eu-west-1',
-      ]);
-      // The error is swallowed per-region, so the surrounding phase still succeeds.
-      expect(emittedPhases()).toContain('fetchBucketActivities');
-    });
-  });
-});
-
-describe('key activity follows the keys pages scope', () => {
-  // The route requirement is only half the gate: this feed carries key
-  // lifecycle entries, and the dashboard must not show a caller keys the keys
-  // page would refuse to list.
-  beforeEach(() => {
-    vi.clearAllMocks();
-    ddbMock.reset();
-    mockListBuckets.mockResolvedValue([{ bucketName: 'b1', createdAt: '2026-01-01T00:00:00Z' }]);
-    mockGetAvailableOrchestrators.mockReturnValue([mockOrchestrator]);
-    setTenant(AURORA_TENANT_ID);
-    ddbMock
-      .on(QueryCommand, {
-        ExpressionAttributeValues: {
-          ':pk': { S: `ORG#${USER_INFO.orgId}` },
-          ':skPrefix': { S: 'ACCESSKEY#' },
-        },
-      })
-      .resolves({
-        Items: [
-          keyItem('key-own', 'my-api-key', '2026-01-02T00:00:00Z', USER_INFO.userId),
-          keyItem('key-other', 'their-api-key', '2026-01-03T00:00:00Z', 'user-2'),
-          // Minted before attribution shipped: nobody can claim it.
-          keyItem('key-legacy', 'legacy-api-key', '2026-01-04T00:00:00Z'),
+  it.each(['bucket.created', 'bucket.deleted'] as const)(
+    'renders a %s event as a bucket row named by the bucket',
+    async (type) => {
+      resolveEvents(auditEvent(type, { region: 'any-region', bucketName: 'any-bucket' }, 'e-1'));
+
+      expect((await getActivities()).body).toStrictEqual({
+        activities: [
+          {
+            id: 'e-1',
+            action: type,
+            resourceType: 'bucket',
+            resourceName: 'any-bucket',
+            timestamp: '2026-10-01T00:00:00.000Z',
+          },
         ],
       });
-  });
-
-  async function keyNamesFor(role: OrgRole) {
-    const event = buildEvent({
-      userInfo: {
-        ...USER_INFO,
-        membership: membershipFor(USER_INFO.orgId, USER_INFO.userId, role),
-      },
-    });
-    const result = await baseHandler(event);
-    const activities = JSON.parse(String(result.body)).activities as {
-      resourceType: string;
-      resourceName: string;
-    }[];
-    return activities.filter((a) => a.resourceType === 'key').map((a) => a.resourceName);
-  }
-
-  it.each([OrgRole.Owner, OrgRole.Admin])(
-    'shows %s the whole org, holding keys.manage_all',
-    async (role) => {
-      expect((await keyNamesFor(role)).sort()).toStrictEqual([
-        'legacy-api-key',
-        'my-api-key',
-        'their-api-key',
-      ]);
     },
   );
 
-  it('shows a Member only the keys they created', async () => {
-    // `keys.manage_own` and nothing more: the dashboard used to hand every
-    // member the org's key inventory, including keys they cannot revoke.
-    expect(await keyNamesFor(OrgRole.Member)).toStrictEqual(['my-api-key']);
+  it.each(['key.created', 'key.rotated', 'key.deleted'] as const)(
+    'renders a %s event as a key row named by the key',
+    async (type) => {
+      resolveEvents(auditEvent(type, { keyKind: 's3', keyName: 'any-key' }, 'e-1'));
+
+      expect((await getActivities()).body).toStrictEqual({
+        activities: [
+          {
+            id: 'e-1',
+            action: type,
+            resourceType: 'key',
+            resourceName: 'any-key',
+            timestamp: '2026-10-01T00:00:00.000Z',
+          },
+        ],
+      });
+    },
+  );
+
+  it('names a revoked key by its id suffix when the event recorded no name', async () => {
+    resolveEvents(auditEvent('key.deleted', { keyKind: 's3', keyIdSuffix: 'WXYZ' }));
+
+    expect((await getActivities()).body).toMatchObject({
+      activities: [{ resourceName: '…WXYZ' }],
+    });
   });
 
-  it('hides key activity from ReadOnly, who holds no keys.* permission', async () => {
-    expect(await keyNamesFor(OrgRole.ReadOnly)).toStrictEqual([]);
+  it('drops an event type the feed does not render', async () => {
+    resolveEvents(
+      // The feed renders bucket and key events only.
+      auditEvent('org.renamed', { name: 'any-name' }),
+      auditEvent('bucket.created', { region: 'any-region', bucketName: 'any-bucket' }, 'e-2'),
+    );
+
+    expect((await getActivities()).body).toMatchObject({ activities: [{ id: 'e-2' }] });
   });
 
-  it('does not even read the key rows for a caller who may not see them', async () => {
-    await keyNamesFor(OrgRole.ReadOnly);
+  it.each([
+    ['the requested limit', { limit: '3' }, 3],
+    ['10 when no limit is given', undefined, 10],
+    ['10 when the limit is not a number', { limit: 'abc' }, 10],
+    ['1 when the limit is negative', { limit: '-5' }, 1],
+    ['50 when the limit is above 50', { limit: '100' }, 50],
+  ])('asks the audit log for %s', async (_case, query, limit) => {
+    await getActivities(query);
 
-    // A read nobody may see is a read worth not making.
-    const keyQueries = ddbMock
-      .commandCalls(QueryCommand)
-      .filter(
-        (call) => call.args[0].input.ExpressionAttributeValues?.[':skPrefix']?.S === 'ACCESSKEY#',
+    expect(mockQueryActivityEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ orgId: USER_INFO.orgId, limit }),
+    );
+  });
+
+  describe('window', () => {
+    const NOW = '2026-10-15T12:00:00.000Z';
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(NOW));
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('asks the audit log for the whole retention window up to now', async () => {
+      await getActivities();
+
+      const earliest = new Date(
+        Date.parse(NOW) - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      expect(mockQueryActivityEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ from: earliest, to: NOW }),
       );
-    expect(keyQueries).toStrictEqual([]);
+    });
   });
 
-  it('does not time a fetch it never made', async () => {
-    // A phase duration for a skipped fetch reports a 0ms DynamoDB query that
-    // never happened, which is a lie the latency dashboard would average in.
-    await keyNamesFor(OrgRole.ReadOnly);
+  it('cancels the read with the request deadline', async () => {
+    const deadline = new AbortController().signal;
 
-    expect(emittedPhases()).not.toContain('fetchAccessKeyActivities');
+    await baseHandler(buildEvent({ userInfo: USER_INFO, requestContext: { deadline } }));
+
+    expect(mockQueryActivityEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: deadline }),
+    );
+  });
+
+  it('reports the read under the activity route', async () => {
+    resolveEvents(auditEvent('bucket.created', { region: 'any-region', bucketName: 'any-bucket' }));
+
+    await getActivities();
+
+    expect(mockReportAuditQuery).toHaveBeenCalledWith({
+      route: 'activity',
+      cost: { pages: 1, rows: 1 },
+      durationMs: expect.any(Number),
+      rowsReturned: 1,
+    });
   });
 });
 
-describe('get-activity baseHandler (request deadline)', () => {
-  const euBucket = { bucketName: 'eu-bucket', createdAt: '2026-01-01T00:00:00Z' };
-  let aurora: ReturnType<typeof createMockedOrchestrator>;
-  let fth: ReturnType<typeof createMockedOrchestrator>;
+describe('get-activity buckets created outside the console', () => {
+  const NOW = '2026-12-15T12:00:00.000Z';
+  const RECENT = '2026-12-10T00:00:00.000Z';
 
   beforeEach(() => {
     vi.clearAllMocks();
-    ddbMock.reset();
-    ddbMock.on(QueryCommand).resolves({ Items: [] });
-    aurora = createMockedOrchestrator({
-      id: 'aurora',
-      region: 'eu-west-1',
-      tenantId: 'aurora-t',
-      buckets: [euBucket],
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    resolveEvents();
+    mockListBuckets.mockResolvedValue([]);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  function created(bucketName: string, createdAt: string, region = 'any-region') {
+    return { ...auditEvent('bucket.created', { region, bucketName }), createdAt } as AuditEvent;
+  }
+
+  it('adds an unattributed creation row for a listed bucket the audit log has no creation for', async () => {
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
+
+    expect((await getActivities()).body).toStrictEqual({
+      activities: [
+        {
+          id: `unrecorded:any-region:any-bucket:${RECENT}`,
+          action: 'bucket.created',
+          resourceType: 'bucket',
+          resourceName: 'any-bucket',
+          timestamp: RECENT,
+          createdOutsideConsole: true,
+        },
+      ],
     });
-    fth = createMockedOrchestrator({ id: 'fth', region: 'us-east-1', tenantId: 'fth-t' });
-    mockGetAvailableOrchestrators.mockReturnValue([aurora, fth]);
   });
 
-  // One budget per request: every region gets the same signal, so the slowest
-  // region cannot hold the handler past what the fastest one saw.
-  it('hands every region the same deadline signal', async () => {
-    await baseHandler(buildEvent({ userInfo: USER_INFO }));
+  it('adds no row for a bucket whose creation the audit log recorded', async () => {
+    // The console writes the event a moment after the storage system made the bucket.
+    resolveEvents(created('any-bucket', '2026-12-10T00:00:01.000Z'));
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
 
-    const [, , auroraOpts] = aurora.listBuckets.mock.calls[0];
-    const [, , fthOpts] = fth.listBuckets.mock.calls[0];
-    // Identity, not deep equality: two separate signals compare as equal
-    // objects. The multi-region test above checks that each leg gets a signal.
-    expect(fthOpts.signal).toBe(auroraOpts.signal);
+    expect((await getActivities()).body).toStrictEqual({
+      activities: [
+        {
+          id: 'any-event',
+          action: 'bucket.created',
+          resourceType: 'bucket',
+          resourceName: 'any-bucket',
+          timestamp: '2026-12-10T00:00:01.000Z',
+        },
+      ],
+    });
   });
 
-  // A hung region used to hold the handler until the Lambda timeout killed it
-  // and the user got a 500. With a deadline the hung leg fails on its own and
-  // the other region still renders.
-  it("returns the healthy region's activities when the other region hits the deadline", async () => {
-    fth.listBuckets.mockRejectedValue(
-      new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
+  it('adds a row for a bucket of the same name in another region', async () => {
+    // Stamped just after the listed bucket, so only the region tells them apart.
+    resolveEvents(created('any-bucket', '2026-12-10T00:00:01.000Z', 'other-region'));
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
+
+    expect((await getActivities()).body.activities).toMatchObject([
+      { id: 'any-event' },
+      { createdOutsideConsole: true },
+    ]);
+  });
+
+  it('adds a row for a bucket made again outside the console after an older console creation', async () => {
+    // The console made the first `any-bucket`; it was deleted and made again
+    // with the S3 API a week later.
+    resolveEvents(created('any-bucket', '2026-12-03T00:00:00.000Z'));
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
+
+    expect((await getActivities()).body.activities).toMatchObject([
+      { createdOutsideConsole: true, timestamp: RECENT },
+      { id: 'any-event' },
+    ]);
+  });
+
+  it('adds a plain creation row for a bucket made before the console audited bucket creations', async () => {
+    // The log could not have recorded this one, whichever way it was made.
+    vi.setSystemTime(new Date('2026-11-20T12:00:00.000Z'));
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', '2026-11-05T00:00:00.000Z')]);
+
+    expect((await getActivities()).body).toStrictEqual({
+      activities: [
+        {
+          id: 'unrecorded:any-region:any-bucket:2026-11-05T00:00:00.000Z',
+          action: 'bucket.created',
+          resourceType: 'bucket',
+          resourceName: 'any-bucket',
+          timestamp: '2026-11-05T00:00:00.000Z',
+        },
+      ],
+    });
+  });
+
+  it('leaves out a bucket created before the retention window', async () => {
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', '2026-01-01T00:00:00.000Z')]);
+
+    expect((await getActivities()).body).toStrictEqual({ activities: [] });
+  });
+
+  it('leaves out a bucket created before the point the audit read stopped early', async () => {
+    // Older creations were left unread, so the log may hold this one's.
+    mockQueryActivityEvents.mockResolvedValue({
+      events: [],
+      cost: { pages: 3, rows: 300 },
+      completeSince: '2026-12-12T00:00:00.000Z',
+    });
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
+
+    expect((await getActivities()).body).toStrictEqual({ activities: [] });
+  });
+
+  it('leaves out Bucket Intelligence companion buckets', async () => {
+    mockListBuckets.mockResolvedValue([listedBucket(`filone-rag-${'a'.repeat(40)}`, RECENT)]);
+
+    expect((await getActivities()).body).toStrictEqual({ activities: [] });
+  });
+
+  it('merges both kinds of row newest first and cuts them to the limit', async () => {
+    resolveEvents(
+      created('console-new', '2026-12-12T00:00:00.000Z'),
+      created('console-old', '2026-12-08T00:00:00.000Z'),
     );
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockListBuckets.mockResolvedValue([
+      listedBucket('console-new', '2026-12-12T00:00:00.000Z'),
+      listedBucket('console-old', '2026-12-08T00:00:00.000Z'),
+      listedBucket('outside', RECENT),
+    ]);
 
-    try {
-      const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
-
-      expect({
-        statusCode: result.statusCode,
-        resourceNames: JSON.parse(String(result.body)).activities.map(
-          (a: { resourceName: string }) => a.resourceName,
-        ),
-      }).toStrictEqual({ statusCode: 200, resourceNames: ['eu-bucket'] });
-    } finally {
-      error.mockRestore();
-    }
+    expect((await getActivities({ limit: '2' })).body.activities).toMatchObject([
+      { resourceName: 'console-new' },
+      { resourceName: 'outside', createdOutsideConsole: true },
+    ]);
   });
 
-  // A call that ignores the deadline holds the handler until the Lambda timeout;
-  // the deadline log then names it among the steps still in flight.
-  it("names a region's listBuckets as in flight while it hangs after every other call has answered", async () => {
-    fth.listBuckets.mockReturnValue(new Promise(() => {}));
-    const event = buildEvent({ userInfo: USER_INFO });
+  it('still returns the audit events when a region fails to list its buckets', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    resolveEvents(created('any-bucket', RECENT));
+    mockListBuckets.mockRejectedValue(new Error('any-error'));
 
-    void baseHandler(event);
-
-    await vi.waitFor(() =>
-      expect([...(event.requestContext.deadlineStepsInFlight?.values() ?? [])]).toStrictEqual([
-        'fetchBucketActivities',
-        'listBuckets:us-east-1',
-      ]),
-    );
+    expect((await getActivities()).body).toMatchObject({ activities: [{ id: 'any-event' }] });
   });
 
-  it('logs the region that hit the deadline so the hang is not silent', async () => {
-    fth.listBuckets.mockRejectedValue(
-      new DOMException('The operation was aborted due to timeout', 'TimeoutError'),
-    );
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('lists every bucket in the tenant, under the request deadline', async () => {
+    const deadline = new AbortController().signal;
 
-    try {
-      await baseHandler(buildEvent({ userInfo: USER_INFO }));
+    await baseHandler(buildEvent({ userInfo: USER_INFO, requestContext: { deadline } }));
 
-      expect(error).toHaveBeenCalledWith(
-        '[get-activity] Failed to list buckets',
-        expect.objectContaining({ region: 'us-east-1', tenantId: 'fth-t' }),
-      );
-    } finally {
-      error.mockRestore();
-    }
+    expect(mockListBuckets).toHaveBeenCalledWith('any-tenant', undefined, { signal: deadline });
   });
 });

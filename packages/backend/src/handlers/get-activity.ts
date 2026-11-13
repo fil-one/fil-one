@@ -1,259 +1,213 @@
-import { QueryCommand } from '@aws-sdk/client-dynamodb';
-import { unmarshall } from '@aws-sdk/util-dynamodb';
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { RecentActivity, RecentActivityResponse } from '@filone/shared';
+import type { AuditEvent, RecentActivity, RecentActivityResponse } from '@filone/shared';
 import { isRagCompanionBucket } from '@filone/shared';
-import { Resource } from 'sst';
-import { getDynamoClient } from '../lib/ddb-client.ts';
-import { keyScope, withinScope } from '../lib/key-scope.ts';
-import type { KeyScope } from '../lib/key-scope.ts';
-import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
-import {
-  getRequestDeadline,
-  requestDeadlineMiddleware,
-  trackRequestStep,
-} from '../middleware/request-deadline.ts';
+import { queryActivityEvents, resolveWindow } from '../lib/audit-query.ts';
+import { reportAuditQuery } from '../lib/audit-metrics.ts';
+import type { BucketSummary } from '../lib/bucket-orchestrator.ts';
+import { getProvisionedRegions } from '../lib/region-helpers.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
-import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
-import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
-import { reportMetric } from '../lib/metrics.ts';
+import {
+  getRequestDeadline,
+  requestDeadlineMiddleware,
+  trackRequestStep,
+} from '../middleware/request-deadline.ts';
 
-const dynamo = getDynamoClient();
+/**
+ * How long before a bucket's creation time its `bucket.created` event may be
+ * stamped and still count as the record of it. The console writes the event
+ * after the storage system answers, so the event is normally the later of the
+ * two; the margin covers clock drift between the storage system and Lambda.
+ */
+const CREATION_MATCH_MARGIN_MS = 5 * 60 * 1000;
 
-// Emit a duration data point via EMF so per-phase / per-region latency can be
-// charted and alarmed on in CloudWatch (see the SLO on this handler). The keys
-// of `dimensions` become the metric's CloudWatch dimensions.
-function reportDuration(
-  metricName: string,
-  dimensions: Record<string, string>,
-  durationMs: number,
-): void {
-  reportMetric({
-    _aws: {
-      Timestamp: Date.now(),
-      CloudWatchMetrics: [
-        {
-          Namespace: 'FilOne',
-          Dimensions: [Object.keys(dimensions)],
-          Metrics: [{ Name: metricName, Unit: 'Milliseconds' }],
-        },
-      ],
-    },
-    ...dimensions,
-    [metricName]: durationMs,
-  });
-}
+/**
+ * When the console started writing `bucket.created`. A bucket made before it
+ * has no creation in the log whichever way it was made, so it gets a plain
+ * "Created" row, as the feed gave every bucket before it read the log. Must
+ * not be earlier than the production deploy of that change: a console bucket
+ * made between the two would read as created outside the console.
+ */
+export const BUCKET_CREATIONS_AUDITED_SINCE = '2026-11-10T00:00:00.000Z';
 
-// Times an awaited phase, emits its duration as a metric, and hands back both
-// the result and the elapsed ms so the caller can log a combined summary. The
-// phase is also a request step, so a deadline that fires during it names it.
-async function timed<T>(
-  event: AuthenticatedEvent,
-  phase: string,
-  fn: () => Promise<T>,
-): Promise<{ result: T; durationMs: number }> {
-  const start = performance.now();
-  try {
-    const result = await trackRequestStep(event, phase, fn);
-    const durationMs = performance.now() - start;
-    reportDuration('GetActivityPhaseDuration', { handler: 'get-activity', phase }, durationMs);
-    return { result, durationMs };
-  } catch (err) {
-    const durationMs = performance.now() - start;
-    reportDuration(
-      'GetActivityPhaseDuration',
-      { handler: 'get-activity', phase: `${phase}:error` },
-      durationMs,
-    );
-    throw err;
-  }
-}
-
+/**
+ * GET /api/activity — the dashboard's activity feed, for Owner and Admin.
+ *
+ * Read from the audit log, so the dashboard's "View all" lands on the same
+ * history, and gated on `audit.view` like the audit page it previews.
+ *
+ * The audit log records what the console did, so a bucket created with the
+ * S3 API directly is missing from it. The feed lists the org's buckets beside
+ * the read and adds a creation row for each bucket the log has no creation
+ * for. A bucket deleted with the S3 API leaves nothing to list, so that
+ * deletion never appears.
+ */
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
-  const handlerStart = performance.now();
   const { orgId } = getUserInfo(event);
   const limit = Math.min(
     Math.max(parseInt(event.queryStringParameters?.limit ?? '10', 10) || 10, 1),
     50,
   );
-  // The route requirement (`buckets.read`) is only half the gate: this feed
-  // carries key-lifecycle entries, and it shows them under the same scope the
-  // keys pages do — the whole org's under `keys.manage_all`, the caller's own
-  // under `keys.manage_own`, and none at all for a ReadOnly member who holds
-  // neither. The rows are not fetched at all in that last case: a read nobody
-  // may see is a read worth not making.
-  const scope = keyScope(event);
-  // One deadline for every upstream call this request makes. A hung region then
-  // fails its own leg (caught in listBucketActivities) instead of holding the
-  // whole handler until the Lambda timeout kills it with nothing logged.
   const signal = getRequestDeadline(event);
-  // The dashboard aggregates activity across every region the org is provisioned
-  // in, so resolve the ready tenant on each available orchestrator.
-  const { result: regions, durationMs: resolveRegionsMs } = await timed(
-    event,
-    'resolveRegions',
-    () => getProvisionedRegions(orgId),
-  );
 
-  const [
-    { result: bucketActivities, durationMs: bucketActivitiesMs },
-    { result: keyActivities, durationMs: keyActivitiesMs },
-  ] = await Promise.all([
-    timed(event, 'fetchBucketActivities', () =>
-      fetchBucketActivities(event, orgId, regions, signal),
+  // The whole retention window up to now: the feed takes no dates.
+  const { from, to } = resolveWindow({ to: new Date().toISOString() });
+  const start = performance.now();
+  // Named steps, so a read cut off by the deadline is logged by name.
+  const [read, buckets] = await Promise.all([
+    trackRequestStep(event, 'queryActivityEvents', () =>
+      queryActivityEvents({ orgId, from, to, limit, signal }),
     ),
-    // Timed only when it runs: a phase duration emitted for a fetch that was
-    // skipped reports a 0ms DynamoDB query that never happened.
-    scope.sees === 'none'
-      ? Promise.resolve({ result: [] as RecentActivity[], durationMs: 0 })
-      : timed(event, 'fetchAccessKeyActivities', () => fetchAccessKeyActivities(orgId, scope)),
+    trackRequestStep(event, 'listBuckets', () => listBuckets(orgId, signal)),
   ]);
 
-  // TODO: Re-add object activities once we have an event system with Aurora.
-  // https://linear.app/filecoin-foundation/issue/FIL-77/object-sealing-live-updates-dashboard
-
-  const activities = [...bucketActivities, ...keyActivities].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-  );
-
-  const response: RecentActivityResponse = {
-    activities: activities.slice(0, limit),
-  };
-
-  const totalMs = performance.now() - handlerStart;
-  reportDuration('GetActivityDuration', { handler: 'get-activity' }, totalMs);
-  // Single summary line so a slow request shows which phase dominated without
-  // stitching together the per-phase metrics. Phases run concurrently, so the
-  // total is ~max(phases), not their sum. This line ships only on
-  // non-production stages: production logs at WARN (sst.config.ts), so there
-  // the GetActivityPhaseDuration series emitted by timed() is the diagnostic,
-  // at one-minute granularity. A phase that never completes (Lambda timeout)
-  // emits neither the metric nor this line; the request-deadline log names it.
-  console.log('[get-activity] completed', {
-    orgId,
-    regionCount: regions.length,
-    regions: regions.map((r) => r.orchestrator.region),
-    bucketActivityCount: bucketActivities.length,
-    keyActivityCount: keyActivities.length,
-    durationsMs: {
-      total: Math.round(totalMs),
-      resolveRegions: Math.round(resolveRegionsMs),
-      fetchBucketActivities: Math.round(bucketActivitiesMs),
-      fetchAccessKeyActivities: Math.round(keyActivitiesMs),
-    },
+  const recorded = read.events.flatMap(mapToActivities);
+  reportAuditQuery({
+    route: 'activity',
+    cost: read.cost,
+    durationMs: performance.now() - start,
+    rowsReturned: recorded.length,
   });
 
-  return new ResponseBuilder().status(200).body(response).build();
+  const unrecorded = getUnrecordedCreations({
+    buckets,
+    events: read.events,
+    // Below the point the audit read stopped, the log's creations are not all
+    // in hand, so a bucket there cannot be told apart and is left out.
+    since: read.completeSince ?? from,
+  });
+  const activities = [...recorded, ...unrecorded]
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .slice(0, limit);
+
+  return new ResponseBuilder().status(200).body<RecentActivityResponse>({ activities }).build();
 }
 
-async function fetchBucketActivities(
-  event: AuthenticatedEvent,
-  orgId: string,
-  regions: ProvisionedRegion[],
-  signal: AbortSignal,
-): Promise<RecentActivity[]> {
-  const perRegion = await Promise.all(
+/**
+ * Every bucket in the org's provisioned regions. A region that fails to list
+ * is logged and skipped: its buckets then lack a creation row, and the audit
+ * events still show.
+ */
+async function listBuckets(orgId: string, signal: AbortSignal): Promise<BucketSummary[]> {
+  const regions = await getProvisionedRegions(orgId);
+  const settled = await Promise.allSettled(
+    // No member id: the feed is for Owner and Admin, who see every bucket.
     regions.map(({ orchestrator, tenantId }) =>
-      trackRequestStep(event, `listBuckets:${orchestrator.region}`, () =>
-        listBucketActivities(orgId, orchestrator, tenantId, signal),
-      ),
+      orchestrator.listBuckets(tenantId, undefined, { signal }),
     ),
   );
-  return perRegion.flat();
-}
-
-async function listBucketActivities(
-  orgId: string,
-  orchestrator: RegionOrchestrator,
-  tenantId: string,
-  signal: AbortSignal,
-): Promise<RecentActivity[]> {
-  // Swallow per-orchestrator errors so one region's outage still renders the rest.
-  const start = performance.now();
-  try {
-    const buckets = await orchestrator.listBuckets(tenantId, undefined, { signal });
-    const durationMs = performance.now() - start;
-    reportDuration('ListBucketsDuration', { region: orchestrator.region }, durationMs);
-    // bucketCount vs durationMs exposes the per-bucket cost: a duration that
-    // grows with bucketCount points at an N+1 in the orchestrator's listBuckets.
-    // This line ships only on non-production stages: production logs at WARN
-    // (sst.config.ts), so there ListBucketsDuration is the diagnostic, at
-    // one-minute granularity. A listBuckets that never returns (Lambda timeout)
-    // emits neither the metric nor this line; the request-deadline log names it.
-    console.log('[get-activity] listed buckets', {
-      orgId,
-      tenantId,
-      region: orchestrator.region,
-      bucketCount: buckets.length,
-      durationMs: Math.round(durationMs),
-    });
-    // Bucket Intelligence companion buckets hold the engine's index; the
-    // bucket list hides them, so the activity feed does too.
-    return buckets
-      .filter((bucket) => !isRagCompanionBucket(bucket.bucketName))
-      .map((bucket) => ({
-        id: `bucket-${bucket.bucketName}`,
-        action: 'bucket.created' as const,
-        resourceType: 'bucket' as const,
-        resourceName: bucket.bucketName,
-        timestamp: bucket.createdAt,
-      }));
-  } catch (err) {
-    const errName = (err as { name?: string }).name;
-    const errCode = (err as { Code?: string }).Code;
-    if (errName === 'AccessDenied' || errCode === 'AccessDenied') {
-      console.warn('[get-activity] AccessDenied listing buckets — tenant may have no buckets yet', {
-        orgId,
-        tenantId,
-        region: orchestrator.region,
-      });
-    } else {
-      console.error('[get-activity] Failed to list buckets', {
-        orgId,
-        tenantId,
-        region: orchestrator.region,
-        err,
-      });
+  return settled.flatMap((result, index) => {
+    if (result.status === 'fulfilled') {
+      // Companion buckets hold Bucket Intelligence's datasets, not user data.
+      return result.value.filter((bucket) => !isRagCompanionBucket(bucket.bucketName));
     }
+    const { orchestrator, tenantId } = regions[index];
+    console.error('[get-activity] Orchestrator listBuckets failed', {
+      orgId,
+      orchestratorId: orchestrator.id,
+      region: orchestrator.region,
+      tenantId,
+      error: result.reason,
+    });
     return [];
-  }
+  });
 }
 
-async function fetchAccessKeyActivities(orgId: string, scope: KeyScope): Promise<RecentActivity[]> {
-  const keysResult = await dynamo.send(
-    new QueryCommand({
-      TableName: Resource.UserInfoTable.name,
-      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :skPrefix)',
-      ExpressionAttributeValues: {
-        ':pk': { S: `ORG#${orgId}` },
-        ':skPrefix': { S: 'ACCESSKEY#' },
-      },
-    }),
+/**
+ * A creation row for each bucket made since `since` that the audit log has no
+ * `bucket.created` for. Made after {@link BUCKET_CREATIONS_AUDITED_SINCE}, that
+ * means it was created outside the console, and the row says so; made before,
+ * the log could not have recorded it, and the row is a plain creation.
+ *
+ * A creation event counts for a bucket when it names the same bucket in the
+ * same region and is no older than the bucket, give or take
+ * {@link CREATION_MATCH_MARGIN_MS}. The age check keeps an old console creation
+ * from covering a bucket of the same name deleted and made again over S3.
+ */
+function getUnrecordedCreations({
+  buckets,
+  events,
+  since,
+}: {
+  buckets: BucketSummary[];
+  events: AuditEvent[];
+  since: string;
+}): RecentActivity[] {
+  const creations = events.flatMap((event) =>
+    event.type === 'bucket.created' ? [{ ...event.details, at: Date.parse(event.createdAt) }] : [],
   );
-  return (keysResult.Items ?? [])
-    .map((item) => unmarshall(item) as AccessKeyRecord)
-    .filter((key) => withinScope(scope, key))
-    .map((key) => ({
-      id: `key-${key.sk.replace('ACCESSKEY#', '')}`,
-      action: 'key.created' as const,
-      resourceType: 'key' as const,
-      resourceName: key.keyName,
-      timestamp: key.createdAt,
+  return buckets
+    .filter((bucket) => Date.parse(bucket.createdAt) >= Date.parse(since))
+    .filter(
+      (bucket) =>
+        !creations.some(
+          (creation) =>
+            creation.bucketName === bucket.bucketName &&
+            creation.region === bucket.region &&
+            creation.at >= Date.parse(bucket.createdAt) - CREATION_MATCH_MARGIN_MS,
+        ),
+    )
+    .map((bucket) => ({
+      // No event id exists; this one is stable for as long as the bucket is.
+      id: `unrecorded:${bucket.region}:${bucket.bucketName}:${bucket.createdAt}`,
+      timestamp: bucket.createdAt,
+      resourceType: 'bucket',
+      action: 'bucket.created',
+      resourceName: bucket.bucketName,
+      ...(Date.parse(bucket.createdAt) >= Date.parse(BUCKET_CREATIONS_AUDITED_SINCE) && {
+        createdOutsideConsole: true,
+      }),
     }));
+}
+
+/**
+ * One audit event as a feed row. Empty for a type the feed does not render, so
+ * a filter widened on the read side cannot reach the console unlabelled.
+ */
+function mapToActivities(event: AuditEvent): RecentActivity[] {
+  const base = { id: event.eventId, timestamp: event.createdAt };
+  switch (event.type) {
+    case 'bucket.created':
+    case 'bucket.deleted':
+      return [
+        {
+          ...base,
+          resourceType: 'bucket',
+          action: event.type,
+          resourceName: event.details.bucketName,
+        },
+      ];
+    case 'key.created':
+    case 'key.rotated':
+    case 'key.deleted':
+      return [
+        {
+          ...base,
+          resourceType: 'key',
+          action: event.type,
+          // A revocation recorded before every one named its key carries only
+          // the characters the console shows.
+          resourceName:
+            event.details.keyName ??
+            (event.details.keyIdSuffix ? `…${event.details.keyIdSuffix}` : 'API key'),
+        },
+      ];
+    default:
+      return [];
+  }
 }
 
 export const handler = middy(baseHandler)
   .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware())
-  .use(authorize('buckets.read'))
+  .use(authorize('audit.view'))
   .use(errorHandlerMiddleware());

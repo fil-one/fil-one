@@ -590,17 +590,15 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'buckets.read',
   },
-  // A synthesized feed of bucket, object, and key events — not the audit log.
-  // The route requirement is only half the gate: the key-lifecycle entries it
-  // carries follow the same scope the keys pages do, so `keys.manage_all` sees
-  // the org's, `keys.manage_own` sees the caller's own, and a caller with
-  // neither is not handed the key inventory at all.
+  // The dashboard's preview of the audit log: the org's recent bucket and key
+  // events, plus buckets created outside the console. Gated like the audit page
+  // it links to.
   {
     method: 'GET',
     path: '/api/activity',
     handler: 'get-activity',
     category: 'authenticated',
-    requires: 'buckets.read',
+    requires: 'audit.view',
   },
 
   // ── Audit log ────────────────────────────────────────────────────
