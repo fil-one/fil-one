@@ -19,20 +19,26 @@ test.afterAll(async () => {
   await setOrgName(orgId, { name: orgName });
 });
 
-for (const { item, path, heading } of [
-  { item: 'Members', path: '/members', heading: 'Members' },
-  { item: 'Billing', path: '/billing', heading: 'Billing' },
-  { item: 'Audit log', path: '/audit', heading: 'Audit log' },
-  { item: 'Edit organization', path: '/edit-organization', heading: 'Edit organization' },
+for (const { testId, path, heading } of [
+  { testId: 'nav-members', path: '/members', heading: 'Members' },
+  { testId: 'nav-billing', path: '/billing', heading: 'Billing' },
+  { testId: 'nav-audit', path: '/audit', heading: 'Audit log' },
 ]) {
-  test(`${item} opens from the org menu`, async ({ page }) => {
+  test(`${heading} opens from the sidebar`, async ({ page }) => {
     await page.goto('/dashboard');
-    await page.getByTestId('org-switcher-button').click();
-    await menuItem(page, item).click();
+    await page.getByTestId(testId).click();
     await expect(page).toHaveURL(new RegExp(`${path}$`));
     await expect(page.locator('h1', { hasText: heading })).toBeVisible();
   });
 }
+
+test('Edit organization opens from the org menu', async ({ page }) => {
+  await page.goto('/dashboard');
+  await page.getByTestId('org-switcher-button').click();
+  await menuItem(page, 'Edit organization').click();
+  await expect(page).toHaveURL(/\/edit-organization$/);
+  await expect(page.locator('h1', { hasText: 'Edit organization' })).toBeVisible();
+});
 
 test('/organization redirects to /members', async ({ page }) => {
   await page.goto('/organization');
