@@ -1,0 +1,11 @@
+packages/website/src
+packages/shared/src
+packages/backend/src
+sst.config.ts
+infra
+:(exclude,glob)**/*.test.ts
+:(exclude,glob)**/*.test.tsx
+:(exclude,glob)**/*.stories.tsx
+:(exclude)packages/backend/src/test
+:(exclude)packages/shared/src/testing
+:(exclude)packages/website/src/stories

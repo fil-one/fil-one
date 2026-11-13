@@ -1,0 +1,65 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["impact", "gated", "gated_reason", "summary", "items", "new_pages"],
+  "properties": {
+    "impact": {
+      "type": "string",
+      "enum": ["none", "affected", "unsure"],
+      "description": "none: no public docs change needed. affected: at least one docs page or mirror needs a change. unsure: you could not tell."
+    },
+    "gated": {
+      "type": "boolean",
+      "description": "True when the user-visible part of this change is behind a feature flag, allowlist, beta gate, or environment gate."
+    },
+    "gated_reason": {
+      "type": "string",
+      "description": "The flag or gate and the file that defines it, or an empty string."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Two or three plain sentences on what the PR changes for users and why the docs are or are not affected. No links."
+    },
+    "items": {
+      "type": "array",
+      "description": "One entry per docs claim that the PR makes wrong or incomplete. Empty when impact is none.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["page", "claim", "change", "surface", "evidence"],
+        "properties": {
+          "page": {
+            "type": "string",
+            "description": "Path inside the docs repo, e.g. docs/app/api-keys.mdx or static/llms-full.txt."
+          },
+          "claim": {
+            "type": "string",
+            "description": "What the page says today, quoted or paraphrased."
+          },
+          "change": { "type": "string", "description": "What it should say after this PR." },
+          "surface": { "type": "string", "enum": ["console", "s3-api", "both", "other"] },
+          "evidence": {
+            "type": "string",
+            "description": "file:line in the product PR head that decides it, e.g. packages/website/src/pages/ApiKeys.tsx:42."
+          }
+        }
+      }
+    },
+    "new_pages": {
+      "type": "array",
+      "description": "Pages that should exist but do not. Usually empty.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "topic"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Suggested path, e.g. docs/app/organization-members.mdx."
+          },
+          "topic": { "type": "string" }
+        }
+      }
+    }
+  }
+}
