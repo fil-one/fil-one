@@ -15,8 +15,10 @@ export type CodeBlockProps = {
   minimal?: boolean;
   /**
    * Wraps long lines instead of scrolling them sideways, for prose such as
-   * instructions to paste. Code keeps scrolling, since a wrapped command reads
-   * as two. Copying gives the text as written either way.
+   * instructions to paste, or a value in a narrow column that cannot be checked
+   * before pasting once it is cut off at the edge. Other code keeps scrolling,
+   * since a wrapped command reads as two. Copying gives the text as written
+   * either way.
    */
   wrap?: boolean;
 };
