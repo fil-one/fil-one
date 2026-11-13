@@ -7,6 +7,8 @@ import { Badge } from './Badge';
 import { Card } from './Card';
 import { CopyButton } from './CopyButton';
 import { Heading } from './Heading/Heading';
+import { Skeleton } from './Skeleton';
+import { isRetentionActive } from '../lib/object-metadata.js';
 import { getFileTypeLabel } from '../lib/object-preview.js';
 import { formatDate, formatDateTime, timeAgo } from '../lib/time.js';
 
@@ -46,12 +48,19 @@ function parseTags(raw: string | undefined): string[] {
   }
 }
 
-/** The object's facts as label and value pairs, laid out as the access key drawer's are. */
-export function ObjectDetailsCard({
-  metadata,
-  versionId,
-  objectLockEnabled,
-}: {
+/** The object's facts in a card of their own, for the object page. */
+export function ObjectDetailsCard(props: ObjectFactsProps) {
+  return (
+    <Card>
+      <Heading tag="h2" size="sm" className="mb-4">
+        Details
+      </Heading>
+      <ObjectFacts {...props} />
+    </Card>
+  );
+}
+
+export type ObjectFactsProps = {
   metadata: ObjectMetadataResponse;
   versionId?: string;
   /**
@@ -59,7 +68,24 @@ export function ObjectDetailsCard({
    * retention period, so the row would only ever say "None".
    */
   objectLockEnabled: boolean;
-}) {
+  /** Shown as a copyable row, the one place to copy it on the page and in the panel. */
+  s3Uri: string;
+  /**
+   * True while `metadata` holds only what the bucket listing knows. Type and
+   * retention then hold their place with a placeholder, and the facts the
+   * listing cannot know appear when the object's own details arrive.
+   */
+  pending?: boolean;
+};
+
+/** The object's facts as label and value pairs, laid out as the access key drawer's are. */
+export function ObjectFacts({
+  metadata,
+  versionId,
+  objectLockEnabled,
+  s3Uri,
+  pending = false,
+}: ObjectFactsProps) {
   // Strip surrounding quotes from ETag (S3 returns it wrapped in double-quotes).
   const etag = metadata.etag?.replace(/^"|"$/g, '');
   const tags = parseTags(metadata.metadata.tags);
@@ -67,11 +93,12 @@ export function ObjectDetailsCard({
     ([key]) => !NAMED_METADATA_KEYS.has(key),
   );
 
+  // Three groups, as the access key drawer has bands: what the file is, the
+  // values used to address it (copied, not read), and the rule that protects it.
+  // The user's own metadata follows as a fourth. One wrapper, so a flex parent
+  // spaces the facts as one block rather than adding its gap between groups.
   return (
-    <Card>
-      <Heading tag="h2" size="sm" className="mb-4">
-        Details
-      </Heading>
+    <div>
       <dl className={factGridClass}>
         <Fact label="Size">
           <span title={`${metadata.sizeBytes.toLocaleString()} bytes`}>
@@ -79,42 +106,13 @@ export function ObjectDetailsCard({
           </span>
         </Fact>
         <Fact label="Type">
-          {metadata.contentType ? (
-            <span title={metadata.contentType}>{getFileTypeLabel(metadata.contentType)}</span>
-          ) : (
-            <Muted>Unknown</Muted>
-          )}
+          {pending ? <FactSkeleton /> : <FileType contentType={metadata.contentType} />}
         </Fact>
         <Fact label="Last modified">
           <span title={formatDateTime(metadata.lastModified)}>
             {formatModified(metadata.lastModified)}
           </span>
         </Fact>
-        {versionId && (
-          <Fact label="Version ID">
-            <CopyableValue value={versionId} />
-          </Fact>
-        )}
-        {etag && (
-          <Fact label="ETag">
-            <CopyableValue value={etag} />
-          </Fact>
-        )}
-        {objectLockEnabled && (
-          <Fact label="Retention">
-            {metadata.retention ? (
-              <span className="inline-flex items-center gap-1.5">
-                <LockIcon size={12} aria-hidden="true" className="text-zinc-500" />
-                {metadata.retention.mode === 'COMPLIANCE' ? 'Compliance' : 'Governance'}
-                <span className="text-zinc-500">
-                  until {formatRetainUntil(metadata.retention.retainUntilDate)}
-                </span>
-              </span>
-            ) : (
-              <Muted>None</Muted>
-            )}
-          </Fact>
-        )}
         {metadata.metadata.description && (
           <Fact label="Description">{metadata.metadata.description}</Fact>
         )}
@@ -132,11 +130,33 @@ export function ObjectDetailsCard({
           </Fact>
         )}
       </dl>
+      <dl data-testid="object-identifiers" className={`${groupClass} ${factGridClass}`}>
+        <Fact label="S3 URI">
+          <CopyableValue value={s3Uri} />
+        </Fact>
+        {versionId && (
+          <Fact label="Version ID">
+            <CopyableValue value={versionId} />
+          </Fact>
+        )}
+        {etag && (
+          <Fact label="ETag">
+            <CopyableValue value={etag} />
+          </Fact>
+        )}
+      </dl>
+      {objectLockEnabled && (
+        <dl data-testid="object-retention" className={`${groupClass} ${factGridClass}`}>
+          <Fact label="Retention">
+            {pending ? <FactSkeleton /> : <Retention retention={metadata.retention} />}
+          </Fact>
+        </dl>
+      )}
       {/* The object's own x-amz-meta-* fields, apart from the facts above: their
           keys are the user's, stored lowercase by S3, so they are shown as keys
           (verbatim, in mono) rather than dressed up as labels. */}
       {customMetadata.length > 0 && (
-        <div className="mt-4 border-t border-zinc-100 pt-4">
+        <div className={groupClass}>
           <Heading tag="h3" size="sm" className="mb-3 text-xs text-zinc-500">
             Custom metadata
           </Heading>
@@ -149,12 +169,46 @@ export function ObjectDetailsCard({
           </dl>
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
-// A fixed label column, so the facts and the custom metadata below them line up
-// as one table even though they are two lists. Fits "Last modified".
+// Each group after the first, set off by the same hairline as the drawer's bands
+const groupClass = 'mt-4 border-t border-zinc-100 pt-4';
+
+function FileType({ contentType }: { contentType?: string }) {
+  if (!contentType) return <Muted>Unknown</Muted>;
+  return <span title={contentType}>{getFileTypeLabel(contentType)}</span>;
+}
+
+function Retention({ retention }: { retention?: ObjectMetadataResponse['retention'] }) {
+  if (!retention) return <Muted>None</Muted>;
+  const mode = retention.mode === 'COMPLIANCE' ? 'Compliance' : 'Governance';
+  // S3 keeps returning a retention setting after its date passes, when it no
+  // longer holds anything back, so a lapsed one says so rather than read as a lock
+  if (!isRetentionActive(retention)) {
+    return (
+      <Muted>
+        {mode}, ended {formatRetainUntil(retention.retainUntilDate)}
+      </Muted>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <LockIcon size={12} aria-hidden="true" className="text-zinc-500" />
+      {mode}
+      <span className="text-zinc-500">until {formatRetainUntil(retention.retainUntilDate)}</span>
+    </span>
+  );
+}
+
+// The height of a line of text-ui, so the row does not change height when the value lands
+function FactSkeleton() {
+  return <Skeleton className="h-4 w-24" />;
+}
+
+// A fixed label column, so every group of facts lines up as one table even
+// though each is a list of its own. Fits "Last modified".
 const factGridClass = 'grid grid-cols-[7rem_minmax(0,1fr)] items-baseline gap-x-6 gap-y-3 text-ui';
 
 function Fact({
