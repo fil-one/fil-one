@@ -134,7 +134,7 @@ export function VersionHistoryCard({
               <th className="px-3 py-2 text-left font-medium text-zinc-500">Version ID</th>
               <th className="px-3 py-2 text-left font-medium text-zinc-500">Status</th>
               <th className="px-3 py-2 text-left font-medium text-zinc-500">Size</th>
-              <th className="px-3 py-2 text-left font-medium text-zinc-500">Last Modified</th>
+              <th className="px-3 py-2 text-left font-medium text-zinc-500">Last modified</th>
             </tr>
           </thead>
           <tbody>
