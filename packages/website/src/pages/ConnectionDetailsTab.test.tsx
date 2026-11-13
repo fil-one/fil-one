@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 
 // The Buckets link is the router's; a plain anchor stands in for it here.
 vi.mock('@tanstack/react-router', () => ({
@@ -32,6 +32,17 @@ describe('ConnectionDetailsTab', () => {
       'Node.js',
       'Go',
     ]);
+  });
+
+  it('gives AI agent instructions a section of their own, outside the client tabs', () => {
+    renderTab();
+
+    const section = screen
+      .getByRole('heading', { name: 'Use with an AI agent' })
+      .closest('section');
+    expect(section).not.toBeNull();
+    expect(within(section!).queryByRole('tab')).not.toBeInTheDocument();
+    expect(within(section!).getByText("Add to your agent's instructions")).toBeVisible();
   });
 
   it('shows the same two steps for the client in view', () => {
