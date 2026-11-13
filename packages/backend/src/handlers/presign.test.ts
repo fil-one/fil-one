@@ -595,7 +595,10 @@ describe('presign baseHandler', () => {
 
       await baseHandler(buildPresignEvent(buildGetObjectOps('b'), { role: OrgRole.Member }));
 
-      expect(mockGetS3ClientContext).toHaveBeenCalledWith('aurora-t-1');
+      // The event names eu-west-1; the registry mock answers with the iam
+      // orchestrator whatever region is asked for, so the request region is what
+      // the handler signs with.
+      expect(mockGetS3ClientContext).toHaveBeenCalledWith('aurora-t-1', 'eu-west-1');
     });
 
     it('returns the same 404 as a missing bucket when no policy grants the Member the bucket', async () => {
