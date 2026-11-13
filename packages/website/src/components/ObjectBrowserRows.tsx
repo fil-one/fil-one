@@ -415,32 +415,25 @@ export function FolderRow({
   versioningEnabled,
   onPrefixChange,
   selectable,
-  isSelected,
-  onToggleSelect,
 }: {
   name: string;
   prefix: string;
   versioningEnabled: boolean;
   onPrefixChange: (prefix: string) => void;
+  /** Whether the table has a selection column, which this row leaves empty. */
   selectable: boolean;
-  isSelected: boolean;
-  onToggleSelect: () => void;
 }) {
   return (
     <Table.Row
       data-testid="folder-row"
       data-folder-prefix={prefix}
-      selected={isSelected}
       className="cursor-pointer"
       onClick={() => onPrefixChange(prefix)}
     >
-      {selectable && (
-        <Table.SelectCell
-          checked={isSelected}
-          onChange={onToggleSelect}
-          label={`Select everything in ${name}`}
-        />
-      )}
+      {/* A folder is listed one page at a time, so the browser never holds
+          everything inside it and cannot offer to select it. The empty cell
+          keeps the name column aligned with the object rows. */}
+      {selectable && <Table.Cell className="w-0 pr-0" />}
       <Table.Cell className={NAME_CELL}>
         <div className="flex items-center gap-2 font-medium text-zinc-900" title={name}>
           <FolderIcon size={16} className="shrink-0 text-zinc-400" aria-hidden="true" />

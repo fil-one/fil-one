@@ -8,6 +8,7 @@ import {
   S3Region,
   SubscriptionStatus,
   buildStatement,
+  type ListObjectsResponse,
 } from '@filone/shared';
 
 import { seedPermissions } from '../lib/test-permissions.js';
@@ -45,11 +46,12 @@ const mockGetMe = vi.fn(() => new Promise(() => {}));
 
 // One object by default, so the table renders a row with its per-row controls
 // and the header actions the empty bucket would otherwise hide from everybody.
-const ONE_OBJECT_LISTING = {
+const ONE_OBJECT_LISTING: ListObjectsResponse = {
   objects: [{ key: OBJECT_KEY, sizeBytes: 12, lastModified: '2026-01-01T00:00:00Z' }],
+  commonPrefixes: [],
   isTruncated: false,
 };
-const mockParseListObjects = vi.fn(() => ONE_OBJECT_LISTING);
+const mockParseListObjects = vi.fn<() => ListObjectsResponse>(() => ONE_OBJECT_LISTING);
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
@@ -90,7 +92,7 @@ vi.mock('../lib/use-presign.js', () => ({
 vi.mock('../lib/aurora-s3.js', () => ({
   executePresignedUrl: () =>
     Promise.resolve({ text: () => Promise.resolve('<ListBucketResult/>') }),
-  parseListObjectVersionsResponse: () => ({ versions: [], isTruncated: false }),
+  parseListObjectVersionsResponse: () => ({ versions: [], commonPrefixes: [], isTruncated: false }),
   parseListObjectsResponse: () => mockParseListObjects(),
 }));
 
@@ -354,7 +356,9 @@ describe('BucketDetailPage — the object controls', () => {
 // A bucket the create form just made opens here, so the empty state carries the
 // API key step the form no longer asks about.
 describe('BucketDetailPage — an empty bucket', () => {
-  beforeEach(() => mockParseListObjects.mockReturnValue({ objects: [], isTruncated: false }));
+  beforeEach(() =>
+    mockParseListObjects.mockReturnValue({ objects: [], commonPrefixes: [], isTruncated: false }),
+  );
 
   it('opens the Add key modal from the empty state when no key reaches the bucket', async () => {
     mockBucketKeys.mockReturnValue([]);
@@ -477,5 +481,23 @@ describe('BucketDetailPage — sharing from a row', () => {
 
     const share = await screen.findByRole('button', { name: `Share ${OBJECT_KEY}` });
     await waitFor(() => expect(share).toBeEnabled());
+  });
+});
+
+describe('BucketDetailPage: a folder that spans pages', () => {
+  it('moves to the next page of the folder from the pager', async () => {
+    mockParseListObjects
+      .mockReturnValueOnce({ ...ONE_OBJECT_LISTING, nextToken: 'any-token', isTruncated: true })
+      .mockReturnValue({
+        objects: [{ key: 'any-later-object', sizeBytes: 1, lastModified: '2026-01-01T00:00:00Z' }],
+        commonPrefixes: [],
+        isTruncated: false,
+      });
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('any-later-object')).toBeInTheDocument();
+    expect(screen.getByTestId('listing-pager-range')).toHaveTextContent('Showing 2–2');
   });
 });

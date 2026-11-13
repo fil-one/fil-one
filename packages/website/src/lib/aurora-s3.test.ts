@@ -33,6 +33,7 @@ describe('parseListObjectsResponse', () => {
     const result = parseListObjectsResponse(xml);
 
     expect(result).toEqual({
+      commonPrefixes: [],
       objects: [
         {
           key: 'photo.jpg',
@@ -60,6 +61,7 @@ describe('parseListObjectsResponse', () => {
     const result = parseListObjectsResponse(xml);
 
     expect(result).toEqual({
+      commonPrefixes: [],
       objects: [],
       nextToken: undefined,
       isTruncated: false,
@@ -81,6 +83,7 @@ describe('parseListObjectsResponse', () => {
     const result = parseListObjectsResponse(xml);
 
     expect(result).toEqual({
+      commonPrefixes: [],
       objects: [
         {
           key: 'file1.txt',
@@ -110,6 +113,22 @@ describe('parseListObjectsResponse', () => {
     const result = parseListObjectsResponse(xml);
     expect(result.objects).toHaveLength(1);
     expect(result.objects[0].key).toBe('valid.txt');
+  });
+
+  it('returns the folders of a delimited listing, without the listed prefix itself', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+      <ListBucketResult>
+        <Prefix>photos/</Prefix>
+        <Delimiter>/</Delimiter>
+        <IsTruncated>false</IsTruncated>
+        <CommonPrefixes><Prefix>photos/2025/</Prefix></CommonPrefixes>
+        <CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>
+      </ListBucketResult>`;
+
+    expect(parseListObjectsResponse(xml)).toMatchObject({
+      objects: [],
+      commonPrefixes: ['photos/2025/', 'photos/2026/'],
+    });
   });
 
   it('throws on malformed XML', () => {
@@ -155,6 +174,7 @@ describe('parseListObjectVersionsResponse', () => {
     const result = parseListObjectVersionsResponse(xml);
 
     expect(result).toEqual({
+      commonPrefixes: [],
       versions: [
         {
           key: 'old-file.txt',
@@ -196,6 +216,7 @@ describe('parseListObjectVersionsResponse', () => {
     const result = parseListObjectVersionsResponse(xml);
 
     expect(result).toEqual({
+      commonPrefixes: [],
       versions: [],
       isTruncated: false,
     });
@@ -219,6 +240,7 @@ describe('parseListObjectVersionsResponse', () => {
     const result = parseListObjectVersionsResponse(xml);
 
     expect(result).toEqual({
+      commonPrefixes: [],
       versions: [
         {
           key: 'photo.jpg',
@@ -282,6 +304,21 @@ describe('parseListObjectVersionsResponse', () => {
         lastModified: '2026-03-01T00:00:00.000Z',
       },
     ]);
+  });
+
+  it('returns the folders of a delimited listing, without the listed prefix itself', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+      <ListVersionsResult>
+        <Prefix>photos/</Prefix>
+        <Delimiter>/</Delimiter>
+        <IsTruncated>false</IsTruncated>
+        <CommonPrefixes><Prefix>photos/2026/</Prefix></CommonPrefixes>
+      </ListVersionsResult>`;
+
+    expect(parseListObjectVersionsResponse(xml)).toMatchObject({
+      versions: [],
+      commonPrefixes: ['photos/2026/'],
+    });
   });
 
   it('throws on malformed XML', () => {

@@ -28,7 +28,6 @@ import type {
   ObjectMetadataResponse,
   ObjectRetentionInfo,
   GetBucketResponse,
-  ListObjectVersionsResponse,
   S3Region,
 } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
@@ -38,6 +37,7 @@ import { SHARE_UNAVAILABLE_TOOLTIP, useCanShareObjects } from '../lib/use-can-sh
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { queryKeys, queryClient } from '../lib/query-client.js';
 import { batchPresign } from '../lib/use-presign.js';
+import type { ObjectListingPage } from '../lib/object-listing.js';
 import {
   parseHeadObjectResponse,
   parseGetObjectRetentionResponse,
@@ -155,11 +155,18 @@ export function ObjectDetailPage({
     },
   });
 
-  // Pull version history from the bucket object listing cache (no extra fetch)
-  const cachedVersions = queryClient.getQueryData<ListObjectVersionsResponse>(
-    queryKeys.objects(bucketName, region),
-  );
-  const objectVersions = (cachedVersions?.versions ?? []).filter((v) => v.key === objectKey);
+  // Pull version history from the cached listing pages (no extra fetch). Pages
+  // keep a key's versions together where they can, but the same page can sit in
+  // the cache under more than one folder position, so versions are de-duplicated.
+  const objectVersions = [
+    ...new Map(
+      queryClient
+        .getQueriesData<ObjectListingPage>({ queryKey: queryKeys.objects(bucketName, region) })
+        .flatMap(([, page]) => page?.versions ?? [])
+        .filter((v) => v.key === objectKey)
+        .map((v) => [v.versionId, v]),
+    ).values(),
+  ];
 
   const mayDelete = useHasPermission('objects.delete');
   const canShare = useCanShareObjects();
