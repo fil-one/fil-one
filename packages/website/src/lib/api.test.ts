@@ -589,6 +589,48 @@ describe('getMe — when /me itself refuses', () => {
   });
 });
 
+describe('getMe: a tab seeded from an earlier visit', () => {
+  const ORG_A = '11111111-1111-1111-1111-111111111111';
+  const reload = vi.fn();
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    reload.mockClear();
+    vi.stubGlobal('fetch', vi.fn());
+    vi.stubGlobal('location', { hostname: 'localhost', reload });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("opens the signed-in user's own org without a notice when another user saved an org they share", async () => {
+    localStorage.setItem(
+      'filone:lastUsedOrg',
+      JSON.stringify({ orgId: ORG_A, userId: 'any-user' }),
+    );
+    const { api, stash } = await freshApi();
+    stash.seedActiveOrgFromLastUsed();
+    // A different user who is also a member of org A: the server serves it, so
+    // nothing but the user check tells the two people apart.
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ orgId: ORG_A, userId: 'other-user' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await api.getMe();
+
+    expect(stash.getActiveOrgId()).toBeNull();
+    expect(stash.takeReconcileNotice()).toBe(false);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('the redirect that answers an expired session', () => {
   beforeEach(() => {
     sessionStorage.clear();
