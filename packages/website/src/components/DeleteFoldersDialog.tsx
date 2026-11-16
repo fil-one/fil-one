@@ -56,6 +56,9 @@ export function DeleteFoldersDialog({
   // Once a job exists the work is server-side, so there is nothing left to
   // confirm and closing the dialog does not stop it.
   const started = jobs.length > 0;
+  // Once Delete is pressed the requests are on their way and the deletion will
+  // go ahead, so nothing may read as backing out of it until the jobs exist.
+  const close = starting ? () => {} : onClose;
   const summary = started ? summarizeBulkDeleteJobs(jobs) : null;
   const outcome =
     summary && !isRunning
@@ -73,7 +76,7 @@ export function DeleteFoldersDialog({
       : `Delete ${describeSelection(folderPrefixes.length, objectCount)}`);
 
   return (
-    <Modal open={open} onClose={onClose} size="sm" testId="delete-folders-dialog">
+    <Modal open={open} onClose={close} size="sm" testId="delete-folders-dialog">
       <ModalBody>
         <div className="flex flex-col items-center gap-3 pt-6 pb-0 text-center">
           <IconBox icon={icon.icon} color={icon.color} size="lg" />
@@ -108,7 +111,8 @@ export function DeleteFoldersDialog({
             id="delete-folders-cancel-button"
             variant="ghost"
             className={started ? 'flex-1' : undefined}
-            onClick={onClose}
+            disabled={starting}
+            onClick={close}
           >
             {started ? 'Close' : 'Cancel'}
           </Button>

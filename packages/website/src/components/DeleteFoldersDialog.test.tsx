@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { BulkDeleteJobStatus, BulkDeleteScope, S3Region, type BulkDeleteJob } from '@filone/shared';
 
@@ -92,5 +92,18 @@ describe('DeleteFoldersDialog: once started', () => {
 
     expect(screen.getByText('Folders deleted')).toBeInTheDocument();
     expect(screen.getByText('Deleted 5 objects.')).toBeInTheDocument();
+  });
+});
+
+describe('DeleteFoldersDialog: while the deletion starts', () => {
+  it('offers no way to back out once Delete is pressed', () => {
+    const onClose = vi.fn();
+    renderDialog({ starting: true, onClose });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
