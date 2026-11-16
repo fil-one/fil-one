@@ -656,6 +656,22 @@ describe('the org a new tab starts in', () => {
     expect(reloaded.getActiveOrgId()).toBeNull();
   });
 
+  it('keeps a tab opened before the seed existed out of the last-used org after a recovery', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // An org but no seed mark, as a tab open when this shipped has.
+    const tab = await loadPage();
+    tab.setActiveOrgId(ORG_A);
+    tab.seedActiveOrgFromLastUsed();
+    saveLastUsedOrg(ORG_B);
+    tab.reconcileActiveOrg(ORG_C, ORG_A);
+    vi.resetModules();
+    const reloaded = await loadPage();
+
+    reloaded.seedActiveOrgFromLastUsed();
+
+    expect(reloaded.getActiveOrgId()).toBeNull();
+  });
+
   it('reopens the last org in the same tab after logging out and back in', async () => {
     const tab = await loadPage();
     tab.seedActiveOrgFromLastUsed();
@@ -902,6 +918,57 @@ describe("the user a tab's org belongs to", () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps who chose the org when a switch rolls back', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await loadPage();
+    await switchAndLand(stash, ORG_A);
+    stash.noteSignedInUser('other-user');
+    navigate.mockRejectedValue(new Error('navigation blocked'));
+    await switchAndLand(stash, ORG_B);
+    reload.mockClear();
+
+    // Org A was chosen by any-user, so other-user is still a different user.
+    stash.settleActiveOrg('other-user', ORG_A, ORG_A);
+
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('says so when a seeded org the user switched to again is lost after its /me failed', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    saveLastUsedOrg(ORG_A, 'any-user');
+    const newTab = await openNewTab();
+    newTab.noteSignedInUser('any-user');
+    landSwitchesAs(undefined);
+    await switchAndLand(newTab, ORG_A);
+
+    newTab.clearActiveOrgAfterRefusal(403);
+
+    expect(newTab.takeReconcileNotice()).toBe(true);
+  });
+
+  it("stops running work without asking before it drops another user's org", async () => {
+    const stash = await loadPage();
+    const { holdLeaveGuard: hold } = await import('./use-warn-before-unload.js');
+    await switchAndLand(stash, ORG_B);
+    const confirm = vi.spyOn(window, 'confirm');
+    const cancel = vi.fn();
+    hold(cancel);
+
+    stash.settleActiveOrg('other-user', ORG_B, ORG_B);
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("holds requests until the reload that drops another user's org", async () => {
+    const stash = await loadPage();
+    await switchAndLand(stash, ORG_B);
+
+    stash.settleActiveOrg('other-user', ORG_B, ORG_B);
+
+    expect(stash.isSwitchingOrg()).toBe(true);
+  });
+
   it('keeps the seeded org for the user who saved it', async () => {
     saveLastUsedOrg(ORG_A, 'any-user');
     const newTab = await openNewTab();
@@ -927,6 +994,8 @@ describe("the user a tab's org belongs to", () => {
   it('does not remember a switch the server refused after its navigation finished', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const stash = await loadPage();
+    // A known user, so only the refusal can stop the save.
+    stash.noteSignedInUser('any-user');
     // `_app.tsx`'s `beforeLoad` swallows the refused /me and lets the
     // navigation resolve, after the recovery has already started.
     navigate.mockImplementation(() => {

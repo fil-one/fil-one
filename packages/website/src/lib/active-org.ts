@@ -58,7 +58,9 @@ const ACTIVE_ORG_USER_KEY = 'filone:activeOrgUserId';
  * The user who chose this tab's org, by switching to it or by having saved it
  * as their last-used org. Kept beside the org so that whoever signs in next in
  * this tab, after a logout or an expired session, is checked against it (see
- * {@link settleActiveOrg}). Absent until a `/me` has named the user.
+ * {@link settleActiveOrg}). Absent when nothing has named the user yet: a
+ * switch made before any `/me` in its page load answered, or a tab from before
+ * this record existed. Such a tab learns it from its next `/me`.
  */
 function getActiveOrgUserId(): string | null {
   try {
@@ -114,8 +116,11 @@ interface LastUsedOrg {
  * dropped silently.
  */
 export function seedActiveOrgFromLastUsed(): void {
-  if (hasSeedRun() || getActiveOrgId() !== null) return;
+  if (hasSeedRun()) return;
+  // Marked first, so a tab that already has an org (one opened before this
+  // seed existed) does not get seeded on the reload a recovery starts.
   markSeedRun();
+  if (getActiveOrgId() !== null) return;
   const lastUsed = getLastUsedOrg();
   if (lastUsed === null) return;
   setActiveOrgId(lastUsed.orgId);
@@ -174,10 +179,12 @@ function clearSeededOrg(): void {
 }
 
 /**
- * The user the latest `/me` in this page load named. A signed-in user cannot
- * change without a full page load, so this is who makes any switch here, even
- * when the switch's own `/me` fails. Module state, so it starts empty on every
- * load.
+ * The user the latest `/me` in this page load named, taken as who makes any
+ * switch here, even when the switch's own `/me` fails. Another tab can sign
+ * someone else in under this page, since the session cookie is shared. A
+ * switch from such a stale page then names the previous user, and its own
+ * `/me` drops the org through the user check. Module state, so it starts empty
+ * on every load.
  */
 let signedInUserId: string | undefined;
 
