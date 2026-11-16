@@ -4,6 +4,13 @@
 import type { NonEmptyArray, S3Region } from '@filone/shared';
 import type { Client } from '@filone/orchestrator-client';
 
+/** Where one region's S3 gateway is, when it is not where its name says. */
+export interface S3Endpoint {
+  endpointUrl: string;
+  /** The same gateway as browsers reach it, when that differs from `endpointUrl`. */
+  presignEndpointUrl?: string;
+}
+
 export interface FilOneOrchestratorConfig {
   /**
    * Orchestrator id (e.g. 'forge'). Must be stable: it drives the PROFILE
@@ -17,10 +24,13 @@ export interface FilOneOrchestratorConfig {
   regions: NonEmptyArray<S3Region>;
   /** Deployment stage — explicit (rather than read from process.env) so instances are testable. */
   stage: string;
-  /** S3 gateway endpoint for the data plane, e.g. `https://s3.{region}.filonecontent.com`. */
-  s3EndpointUrl: string;
-  /** The same gateway as browsers reach it, when that differs from `s3EndpointUrl`. */
-  s3PresignEndpointUrl?: string;
+  /**
+   * Gateway overrides, by the region each one serves. A region without an entry
+   * derives its endpoint from `getS3Endpoint`, which is every deployed network;
+   * an override is for a gateway at an address no region name produces, such as
+   * a local stack on a port.
+   */
+  s3Endpoints?: Partial<Record<S3Region, S3Endpoint>>;
   /**
    * Control-plane Management API access: either connection settings (the
    * factory builds and instruments a client) or a pre-built client (used by

@@ -51,7 +51,7 @@ const orchestrator = new FilOneOrchestrator({
   id: 'forge',
   regions: [S3Region.UsEast9],
   stage: 'test',
-  s3EndpointUrl: 'https://s3.example.test',
+  s3Endpoints: { [S3Region.UsEast9]: { endpointUrl: 'https://s3.example.test' } },
   api: { baseUrl: 'https://api.example.test', accessToken: 'partner-key' },
 });
 

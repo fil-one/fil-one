@@ -6,6 +6,7 @@ import {
 } from '@filone/shared';
 import { Resource } from 'sst';
 import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
+import type { S3Endpoint } from './orchestrator/config.ts';
 import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
 import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
 import { ORCHESTRATOR_ID_BY_REGION } from './service-orchestrator-ids.ts';
@@ -31,11 +32,11 @@ function getForgeOrchestrator(
   id: string,
   regions: NonEmptyArray<S3Region>,
   api: () => ForgeManagementApi,
-  s3?: { endpointUrl?: string; presignEndpointUrl?: string },
+  s3Endpoints?: Partial<Record<S3Region, S3Endpoint>>,
 ): ServiceOrchestrator {
   let orchestrator = forgeOrchestrators.get(id);
   if (!orchestrator) {
-    orchestrator = createForgeOrchestrator(id, regions, api(), s3);
+    orchestrator = createForgeOrchestrator(id, regions, api(), s3Endpoints);
     forgeOrchestrators.set(id, orchestrator);
   }
   return orchestrator;
@@ -64,10 +65,18 @@ export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
             baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
             accessToken: Resource.ForgeDevManagementApiToken.value,
           }),
-          {
-            endpointUrl: process.env.FORGE_DEV_S3_ENDPOINT_URL,
-            presignEndpointUrl: process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL,
-          },
+          // The dev stack's gateway is a local port, which no region name
+          // produces, so the override is keyed by the region it serves.
+          process.env.FORGE_DEV_S3_ENDPOINT_URL
+            ? {
+                [region]: {
+                  endpointUrl: process.env.FORGE_DEV_S3_ENDPOINT_URL,
+                  ...(process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL && {
+                    presignEndpointUrl: process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL,
+                  }),
+                },
+              }
+            : undefined,
         );
     }
   }

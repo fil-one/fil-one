@@ -16,9 +16,9 @@
 // are linked only on non-production stages, so eager construction would crash
 // production at import time.
 
-import { getS3Endpoint, S3Region } from '@filone/shared';
-import type { NonEmptyArray } from '@filone/shared';
+import type { NonEmptyArray, S3Region } from '@filone/shared';
 import { FilOneOrchestrator } from '../orchestrator/orchestrator.ts';
+import type { S3Endpoint } from '../orchestrator/config.ts';
 import type { ServiceOrchestrator } from '../service-orchestrator.ts';
 
 /** Management API endpoint and bearer credential of one Forge network's Hilt. */
@@ -30,25 +30,23 @@ export interface ForgeManagementApi {
 /**
  * @param id The unique identifier for the Forge orchestrator. It should have
  *           the format `^[a-z][a-zA-Z0-9_]*$`.
- * @param region The S3 region the orchestrator will manage.
+ * @param regions The S3 regions the network serves.
  * @param api The Hilt endpoint and bearer token of the Forge network.
- * @param s3 Overrides of the S3 endpoint (default getS3Endpoint()) and of the
- *           endpoint presigned URLs carry.
+ * @param s3Endpoints Gateway overrides by region. A region without one derives
+ *           its endpoint from its name, which is every deployed network.
  * @returns The orchestrator for the Forge network.
  */
 export function createForgeOrchestrator(
   id: string,
   regions: NonEmptyArray<S3Region>,
   api: ForgeManagementApi,
-  s3: { endpointUrl?: string; presignEndpointUrl?: string } = {},
+  s3Endpoints?: Partial<Record<S3Region, S3Endpoint>>,
 ): ServiceOrchestrator {
-  const stage = process.env.FILONE_STAGE!;
   return new FilOneOrchestrator({
     id,
     regions,
-    stage,
-    s3EndpointUrl: s3.endpointUrl ?? getS3Endpoint(regions[0], stage),
-    s3PresignEndpointUrl: s3.presignEndpointUrl,
+    stage: process.env.FILONE_STAGE!,
+    ...(s3Endpoints && { s3Endpoints }),
     api,
   });
 }

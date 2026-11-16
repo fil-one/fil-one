@@ -22,6 +22,7 @@ import type {
   S3Region,
   TenantStatus,
 } from '@filone/shared';
+import { getS3Endpoint } from '@filone/shared';
 import {
   ensureTenantReady as ensureManagementTenantReady,
   type TenantSetupDeps,
@@ -145,6 +146,10 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
     tenantId: string,
     requestOptions?: OrchestratorRequestOptions,
   ): Promise<S3ClientContext> {
+    // Every call this class makes is for the network's first region; a caller
+    // naming one of the others reaches the gateway through the handlers.
+    const region = this.regions[0];
+    const endpoint = this.config.s3Endpoints?.[region];
     const credentials = await getConsoleS3Credentials(
       {
         orchestratorId: this.id,
@@ -154,14 +159,14 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
       requestOptions,
     );
     return {
-      endpointUrl: this.config.s3EndpointUrl,
-      region: this.regions[0],
+      endpointUrl: endpoint?.endpointUrl ?? getS3Endpoint(region, this.config.stage),
+      region,
       credentials,
       forcePathStyle: true,
       orchestratorId: this.id,
       tenantId,
-      ...(this.config.s3PresignEndpointUrl && {
-        presignEndpointUrl: this.config.s3PresignEndpointUrl,
+      ...(endpoint?.presignEndpointUrl && {
+        presignEndpointUrl: endpoint.presignEndpointUrl,
       }),
     };
   }

@@ -113,7 +113,9 @@ function buildOrchestrator(overrides?: Pick<Partial<FilOneOrchestratorConfig>, '
     id: 'forge',
     regions: [S3Region.UsEast1],
     stage: 'test',
-    s3EndpointUrl: 'https://us-east-1.s3.test.example.com',
+    s3Endpoints: {
+      [S3Region.UsEast1]: { endpointUrl: 'https://us-east-1.s3.test.example.com' },
+    },
     api: overrides?.api ?? { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
   });
 }
