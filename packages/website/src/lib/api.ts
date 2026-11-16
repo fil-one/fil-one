@@ -7,7 +7,7 @@ import {
   getActiveOrgId,
   NAVIGATION_GIVE_UP_MS,
   reconcileActiveOrg,
-  settleSeededOrg,
+  settleActiveOrg,
   waitWhileSwitching,
 } from './active-org.js';
 import { redirectToStepUp } from './step-up.js';
@@ -612,10 +612,10 @@ export async function getMe(options?: {
     throw err;
   }
   if (options?.skipOrgReconcile) return me;
-  // The reconcile catches an org the server would not serve. An org seeded from
-  // another user's visit can be one this user belongs to as well, which only
+  // The reconcile catches an org the server would not serve. An org another
+  // user chose for this tab can be one this user belongs to as well, which only
   // the user check sees.
-  if (!settleSeededOrg(me.userId, me.orgId, sentOrg.orgId)) {
+  if (!settleActiveOrg(me.userId, me.orgId, sentOrg.orgId)) {
     reconcileActiveOrg(me.orgId, sentOrg.orgId);
   }
   return me;

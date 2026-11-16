@@ -47,6 +47,39 @@ export function setActiveOrgId(orgId: string): void {
 export function clearActiveOrgId(): void {
   try {
     sessionStorage.removeItem(ACTIVE_ORG_KEY);
+    sessionStorage.removeItem(ACTIVE_ORG_USER_KEY);
+  } catch {
+    // Storage disabled, so there was nothing stored to clear.
+  }
+}
+
+const ACTIVE_ORG_USER_KEY = 'filone:activeOrgUserId';
+
+/**
+ * The user who chose this tab's org, by switching to it or by having saved it
+ * as their last-used org. Kept beside the org so that whoever signs in next in
+ * this tab, after a logout or an expired session, is checked against it (see
+ * {@link settleActiveOrg}). Absent until a `/me` has named the user.
+ */
+function getActiveOrgUserId(): string | null {
+  try {
+    return sessionStorage.getItem(ACTIVE_ORG_USER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setActiveOrgUserId(userId: string): void {
+  try {
+    sessionStorage.setItem(ACTIVE_ORG_USER_KEY, userId);
+  } catch {
+    // Storage disabled, so there is no org to check it against either.
+  }
+}
+
+function clearActiveOrgUserId(): void {
+  try {
+    sessionStorage.removeItem(ACTIVE_ORG_USER_KEY);
   } catch {
     // Storage disabled, so there was nothing stored to clear.
   }
@@ -55,14 +88,13 @@ export function clearActiveOrgId(): void {
 const LAST_USED_ORG_KEY = 'filone:lastUsedOrg';
 
 /**
- * The org the user last switched to, and who that user was. The user is
- * unknown until `/me` answers, so a new tab is seeded from this first and
- * checked against the signed-in user afterwards (see {@link settleSeededOrg}).
- * `userId` is absent when the switch landed before any `/me` named the user.
+ * The org the user last switched to, and who that user was. Only saved when
+ * the user is known, so a new tab can always be checked against whoever signs
+ * in (see {@link settleActiveOrg}).
  */
 interface LastUsedOrg {
   orgId: string;
-  userId?: string;
+  userId: string;
 }
 
 /**
@@ -74,15 +106,18 @@ interface LastUsedOrg {
  * org keeps it, so a switch in one tab still never moves another one (see
  * {@link getActiveOrgId}).
  *
- * The seeded org is marked until the first `/me` settles it, because until
- * then the user has not chosen it in this tab: an org they can no longer reach
- * or one saved by someone else on this browser is dropped silently.
+ * The user who saved it comes along into this tab, so the check against the
+ * signed-in user does not depend on what other tabs write afterwards. The org
+ * is also marked as seeded until a `/me` accepts it, because until then the
+ * user has not chosen it in this tab: an org they can no longer reach is
+ * dropped silently.
  */
 export function seedActiveOrgFromLastUsed(): void {
   if (getActiveOrgId() !== null) return;
   const lastUsed = getLastUsedOrg();
   if (lastUsed === null) return;
   setActiveOrgId(lastUsed.orgId);
+  setActiveOrgUserId(lastUsed.userId);
   try {
     sessionStorage.setItem(SEEDED_ORG_KEY, lastUsed.orgId);
   } catch {
@@ -110,31 +145,40 @@ function clearSeededOrg(): void {
 }
 
 /**
- * Settle a seeded org once the first `/me` has answered under it.
+ * Check this tab's org against the user a `/me` names, on every `/me`.
  *
- * Saved by a different user on this browser, it is dropped and the tab reloads
- * into the signed-in user's own org, with no notice: they did not pick it.
- * Accepted for the same user, it becomes the tab's own org, so losing it later
- * gets the usual notice. Refused, it is left to the recovery in
- * {@link reconcileActiveOrg} or {@link clearActiveOrgAfterRefusal}, which stays
- * silent while the mark is there.
+ * Chosen by a different user (the tab outlived a logout or an expired session,
+ * or was seeded from someone else's visit), the org is dropped and the tab
+ * reloads into the signed-in user's own org, with no notice: they did not pick
+ * it. The server would serve the org if both people belong to it, so nothing
+ * else catches this.
+ *
+ * Accepted for the same user, the org becomes the tab's own: the seeded mark
+ * goes, so losing it later gets the usual notice, and a tab whose switch landed
+ * before any `/me` named the user learns who chose it. Refused, it is left to
+ * the recovery in {@link reconcileActiveOrg} or
+ * {@link clearActiveOrgAfterRefusal}, which stays silent while the mark is
+ * there.
  *
  * @param userId the user `/me` says is signed in.
  * @param resolvedOrgId the org `/me` says it served.
  * @param requestedOrgId the org that request named, `null` for no header.
  * @returns whether a reload was triggered.
  */
-export function settleSeededOrg(
+export function settleActiveOrg(
   userId: string | undefined,
   resolvedOrgId: string | undefined,
   requestedOrgId: string | null,
 ): boolean {
-  if (requestedOrgId === null || !isSeededOrg(requestedOrgId)) return false;
-  if (getActiveOrgId() !== requestedOrgId) return false;
+  // The answer is about the org it was asked for, and the tab may have
+  // switched since (see `reconcileActiveOrg`).
+  if (requestedOrgId === null || getActiveOrgId() !== requestedOrgId) return false;
+  if (userId === undefined) return false;
 
-  const savedBy = getLastUsedOrg()?.userId;
-  if (savedBy !== undefined && userId !== undefined && savedBy !== userId) {
-    clearLastUsedOrgId();
+  const chosenBy = getActiveOrgUserId();
+  if (chosenBy !== null && chosenBy !== userId) {
+    // Saved by the previous user too, most likely, and theirs to keep.
+    if (getLastUsedOrg()?.userId !== userId) clearLastUsedOrgId();
     clearSeededOrg();
     clearActiveOrgId();
     // Nothing the signed-in user started belongs in the other user's org.
@@ -143,7 +187,9 @@ export function settleSeededOrg(
     window.location.reload();
     return true;
   }
-  if (resolvedOrgId === requestedOrgId) clearSeededOrg();
+  if (resolvedOrgId !== requestedOrgId) return false;
+  if (chosenBy === null) setActiveOrgUserId(userId);
+  clearSeededOrg();
   return false;
 }
 
@@ -154,11 +200,8 @@ function getLastUsedOrg(): LastUsedOrg | null {
     const parsed: unknown = JSON.parse(stored);
     if (typeof parsed !== 'object' || parsed === null) return null;
     if (!('orgId' in parsed) || typeof parsed.orgId !== 'string') return null;
-    const { orgId } = parsed;
-    if ('userId' in parsed && typeof parsed.userId === 'string') {
-      return { orgId, userId: parsed.userId };
-    }
-    return { orgId };
+    if (!('userId' in parsed) || typeof parsed.userId !== 'string') return null;
+    return { orgId: parsed.orgId, userId: parsed.userId };
   } catch {
     // Storage disabled, or a value this code did not write.
     return null;
@@ -365,7 +408,7 @@ function latchUntilNavigation(): void {
  * a shared machine the next person to sign in would otherwise start inside the
  * previous user's org whenever they are also a member of it. The last-used org
  * stays, so the same user signing back in returns to it; another user's first
- * `/me` drops it (see {@link settleSeededOrg}). Clearing at the
+ * `/me` drops it (see {@link settleActiveOrg}). Clearing at the
  * click is too early, because the click may not become a navigation — the
  * upload page installs a `beforeunload` guard while a transfer is running, and
  * a user who answers "stay on this page" would be left rendering org B with no
@@ -471,11 +514,19 @@ export function switchToOrg(
       // `/me` starts has already cleared the stash. Neither may become the org
       // the next tab opens in.
       if (getActiveOrgId() === orgId) {
-        // The navigation's `beforeLoad` fetched `/me` under the new org.
-        const userId = queryClient.getQueryData<MeResponse>(queryKeys.me)?.userId;
-        setLastUsedOrg(userId === undefined ? { orgId } : { orgId, userId });
         // The tab's org is now the user's own pick, and losing it deserves a word.
         clearSeededOrg();
+        // The navigation's `beforeLoad` fetched `/me` under the new org. When
+        // that failed, nobody is named: the next tab is not seeded from a choice
+        // no user can be checked against, and this tab learns who chose its org
+        // at its next `/me`.
+        const userId = queryClient.getQueryData<MeResponse>(queryKeys.me)?.userId;
+        if (userId === undefined) {
+          clearActiveOrgUserId();
+        } else {
+          setActiveOrgUserId(userId);
+          setLastUsedOrg({ orgId, userId });
+        }
       }
       setSwitching(false, 'committed');
     } catch (error) {
