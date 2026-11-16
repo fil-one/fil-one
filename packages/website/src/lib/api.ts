@@ -6,6 +6,7 @@ import {
   clearActiveOrgOnNavigation,
   getActiveOrgId,
   NAVIGATION_GIVE_UP_MS,
+  noteSignedInUser,
   reconcileActiveOrg,
   settleActiveOrg,
   waitWhileSwitching,
@@ -611,6 +612,7 @@ export async function getMe(options?: {
     clearActiveOrgAfterRefusal((err as { status?: number }).status);
     throw err;
   }
+  noteSignedInUser(me.userId);
   if (options?.skipOrgReconcile) return me;
   // The reconcile catches an org the server would not serve. An org another
   // user chose for this tab can be one this user belongs to as well, which only

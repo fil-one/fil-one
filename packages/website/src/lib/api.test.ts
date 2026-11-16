@@ -591,6 +591,7 @@ describe('getMe — when /me itself refuses', () => {
 
 describe('getMe: a tab seeded from an earlier visit', () => {
   const ORG_A = '11111111-1111-1111-1111-111111111111';
+  const ORG_HOME = '33333333-3333-3333-3333-333333333333';
   const reload = vi.fn();
 
   beforeEach(() => {
@@ -628,6 +629,47 @@ describe('getMe: a tab seeded from an earlier visit', () => {
     expect(stash.getActiveOrgId()).toBeNull();
     expect(stash.takeReconcileNotice()).toBe(false);
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the home org without a notice when the server will not serve a seeded org', async () => {
+    localStorage.setItem(
+      'filone:lastUsedOrg',
+      JSON.stringify({ orgId: ORG_A, userId: 'any-user' }),
+    );
+    const { api, stash } = await freshApi();
+    stash.seedActiveOrgFromLastUsed();
+    // The same user, removed from org A since: /me answers under their home org.
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ orgId: ORG_HOME, userId: 'any-user' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await api.getMe();
+
+    expect(stash.getActiveOrgId()).toBeNull();
+    expect(stash.takeReconcileNotice()).toBe(false);
+  });
+
+  it('saves a later switch under the user /me named', async () => {
+    const { api, stash } = await freshApi();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ orgId: ORG_HOME, userId: 'any-user' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await api.getMe();
+    routerNavigate.mockResolvedValue(undefined);
+
+    stash.switchToOrg(ORG_A);
+    await vi.waitFor(() => expect(stash.isSwitchingOrg()).toBe(false));
+
+    expect(JSON.parse(localStorage.getItem('filone:lastUsedOrg') ?? 'null')).toStrictEqual({
+      orgId: ORG_A,
+      userId: 'any-user',
+    });
   });
 });
 

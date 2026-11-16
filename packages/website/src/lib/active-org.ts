@@ -1,4 +1,3 @@
-import type { MeResponse } from '@filone/shared';
 import { useQuery } from '@tanstack/react-query';
 
 import { getMe } from './api.js';
@@ -98,13 +97,15 @@ interface LastUsedOrg {
 }
 
 /**
- * Start this tab in the org the user last switched to, when it has no org of
- * its own yet. Called once, before the first request.
+ * Start a new tab in the org the user last switched to. Called on every page
+ * load, before the first request, but it acts once per tab: a reload, or the
+ * reload a recovery starts, keeps the org the tab has, its home org included,
+ * so a switch in one tab still never moves another one (see
+ * {@link getActiveOrgId}). Logging out, or a different user signing in, lets
+ * the tab start again from the last-used org.
  *
  * The last-used org lives in `localStorage`, so it outlives the tab, the
- * browser and a logout, but it is read only here. A tab that already has an
- * org keeps it, so a switch in one tab still never moves another one (see
- * {@link getActiveOrgId}).
+ * browser and a logout.
  *
  * The user who saved it comes along into this tab, so the check against the
  * signed-in user does not depend on what other tabs write afterwards. The org
@@ -113,7 +114,8 @@ interface LastUsedOrg {
  * dropped silently.
  */
 export function seedActiveOrgFromLastUsed(): void {
-  if (getActiveOrgId() !== null) return;
+  if (hasSeedRun() || getActiveOrgId() !== null) return;
+  markSeedRun();
   const lastUsed = getLastUsedOrg();
   if (lastUsed === null) return;
   setActiveOrgId(lastUsed.orgId);
@@ -122,6 +124,33 @@ export function seedActiveOrgFromLastUsed(): void {
     sessionStorage.setItem(SEEDED_ORG_KEY, lastUsed.orgId);
   } catch {
     // Storage disabled, so `setActiveOrgId` stored nothing either.
+  }
+}
+
+const SEED_RUN_KEY = 'filone:activeOrgSeedRun';
+
+function hasSeedRun(): boolean {
+  try {
+    return sessionStorage.getItem(SEED_RUN_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function markSeedRun(): void {
+  try {
+    sessionStorage.setItem(SEED_RUN_KEY, '1');
+  } catch {
+    // Storage disabled, so the seed stores nothing either.
+  }
+}
+
+/** Let this tab start from the last-used org again on its next load. */
+function clearSeedRun(): void {
+  try {
+    sessionStorage.removeItem(SEED_RUN_KEY);
+  } catch {
+    // Storage disabled, so there was nothing stored to clear.
   }
 }
 
@@ -142,6 +171,19 @@ function clearSeededOrg(): void {
   } catch {
     // Storage disabled, so there was nothing stored to clear.
   }
+}
+
+/**
+ * The user the latest `/me` in this page load named. A signed-in user cannot
+ * change without a full page load, so this is who makes any switch here, even
+ * when the switch's own `/me` fails. Module state, so it starts empty on every
+ * load.
+ */
+let signedInUserId: string | undefined;
+
+/** Called by `getMe` with every answer, before any check runs. */
+export function noteSignedInUser(userId: string | undefined): void {
+  if (userId !== undefined) signedInUserId = userId;
 }
 
 /**
@@ -177,10 +219,14 @@ export function settleActiveOrg(
 
   const chosenBy = getActiveOrgUserId();
   if (chosenBy !== null && chosenBy !== userId) {
-    // Saved by the previous user too, most likely, and theirs to keep.
+    // A last-used org saved by anyone but the signed-in user goes too. Kept,
+    // every new tab they open would start in it and reload once more. The
+    // cost: the previous user's next sign-in here opens their home org.
     if (getLastUsedOrg()?.userId !== userId) clearLastUsedOrgId();
     clearSeededOrg();
     clearActiveOrgId();
+    // The reload may start from the signed-in user's own last-used org.
+    clearSeedRun();
     // Nothing the signed-in user started belongs in the other user's org.
     cancelGuardedWork();
     latchUntilNavigation();
@@ -423,11 +469,42 @@ export function clearActiveOrgOnNavigation(): void {
   const clear = (): void => {
     clearTimeout(giveUp);
     clearActiveOrgId();
+    // Signing back in, in this same tab, starts from the last-used org.
+    clearSeedRun();
   };
   const giveUp = setTimeout(() => {
     window.removeEventListener('pagehide', clear);
   }, NAVIGATION_GIVE_UP_MS);
   window.addEventListener('pagehide', clear, { once: true });
+}
+
+/**
+ * Record a switch whose navigation finished: the tab's org becomes the user's
+ * own pick, and the next tab's starting org.
+ *
+ * Only once the tab is really there. A rolled-back switch never gets here, but
+ * a refused one does: `_app.tsx`'s `beforeLoad` lets the navigation finish
+ * after `/me` refuses the org, and the recovery that `/me` starts has already
+ * cleared the stash. Neither may become the org the next tab opens in.
+ */
+function recordLandedSwitch(orgId: string): void {
+  if (getActiveOrgId() !== orgId) return;
+  // Losing the org later deserves a word.
+  clearSeededOrg();
+  // Unknown only when no `/me` in this page load has named the user. The next
+  // tab is then not seeded from a choice nobody can be checked against, and
+  // this tab learns who chose its org at its next `/me`.
+  if (signedInUserId === undefined) return;
+  setActiveOrgUserId(signedInUserId);
+  setLastUsedOrg({ orgId, userId: signedInUserId });
+}
+
+/** Put back the org, and who chose it, that a switch replaced. */
+function restoreActiveOrg(orgId: string | null, chooser: string | null): void {
+  if (orgId === null) clearActiveOrgId();
+  else setActiveOrgId(orgId);
+  if (chooser === null) clearActiveOrgUserId();
+  else setActiveOrgUserId(chooser);
 }
 
 /**
@@ -481,7 +558,12 @@ export function switchToOrg(
   if (!leaveGuardedWork()) return false;
 
   const previousOrgId = getActiveOrgId();
+  const previousChooser = getActiveOrgUserId();
   setActiveOrgId(orgId);
+  // The signed-in user picked this org, whoever chose the one before it (a tab
+  // seeded from another user's visit, say).
+  if (signedInUserId === undefined) clearActiveOrgUserId();
+  else setActiveOrgUserId(signedInUserId);
   setSwitching(true);
   queryClient.clear();
   // The new org's `/me`, started before anything can render. A component that
@@ -508,33 +590,13 @@ export function switchToOrg(
     try {
       const { router } = await import('../router.js');
       await router.navigate({ to: landOn === 'get-started' ? '/get-started' : '/dashboard' });
-      // Only once the tab is really there. A rolled-back switch never gets
-      // here, but a refused one does: `_app.tsx`'s `beforeLoad` lets the
-      // navigation finish after `/me` refuses the org, and the recovery that
-      // `/me` starts has already cleared the stash. Neither may become the org
-      // the next tab opens in.
-      if (getActiveOrgId() === orgId) {
-        // The tab's org is now the user's own pick, and losing it deserves a word.
-        clearSeededOrg();
-        // The navigation's `beforeLoad` fetched `/me` under the new org. When
-        // that failed, nobody is named: the next tab is not seeded from a choice
-        // no user can be checked against, and this tab learns who chose its org
-        // at its next `/me`.
-        const userId = queryClient.getQueryData<MeResponse>(queryKeys.me)?.userId;
-        if (userId === undefined) {
-          clearActiveOrgUserId();
-        } else {
-          setActiveOrgUserId(userId);
-          setLastUsedOrg({ orgId, userId });
-        }
-      }
+      recordLandedSwitch(orgId);
       setSwitching(false, 'committed');
     } catch (error) {
       // The navigation was blocked or failed — a `beforeLoad` redirect threw
       // somewhere unexpected, say. Roll the stash back to where this tab was.
       console.warn('[active-org] The switch navigation did not complete — rolling back', error);
-      if (previousOrgId === null) clearActiveOrgId();
-      else setActiveOrgId(previousOrgId);
+      restoreActiveOrg(previousOrgId, previousChooser);
       setSwitching(false, 'rolledBack');
       // The `/me` started above is about the org the tab never reached. Kept,
       // it would name that org over this one's pages for `ME_STALE_TIME`, and
