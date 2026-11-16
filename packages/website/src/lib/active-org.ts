@@ -242,7 +242,9 @@ export function settleActiveOrg(
   }
   if (resolvedOrgId !== requestedOrgId) return false;
   if (chosenBy === null) setActiveOrgUserId(userId);
-  clearSeededOrg();
+  // Only the mark for this org. A switch's `/me` answers for the org being
+  // switched to, and a switch that then rolls back puts the seeded org back.
+  if (isSeededOrg(requestedOrgId)) clearSeededOrg();
   return false;
 }
 

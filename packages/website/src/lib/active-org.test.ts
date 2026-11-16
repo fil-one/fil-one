@@ -969,6 +969,25 @@ describe("the user a tab's org belongs to", () => {
     expect(stash.isSwitchingOrg()).toBe(true);
   });
 
+  it('stays silent when a seeded org is lost after a switch away from it rolled back', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    saveLastUsedOrg(ORG_A, 'any-user');
+    const newTab = await openNewTab();
+    newTab.noteSignedInUser('any-user');
+    // Org B's /me is accepted in `beforeLoad`, then a later hook blocks the
+    // navigation and the switch puts org A back.
+    navigate.mockImplementation(() => {
+      newTab.settleActiveOrg('any-user', ORG_B, ORG_B);
+      return Promise.reject(new Error('navigation blocked'));
+    });
+    await switchAndLand(newTab, ORG_B);
+
+    newTab.clearActiveOrgAfterRefusal(403);
+
+    expect(newTab.getActiveOrgId()).toBeNull();
+    expect(newTab.takeReconcileNotice()).toBe(false);
+  });
+
   it('keeps the seeded org for the user who saved it', async () => {
     saveLastUsedOrg(ORG_A, 'any-user');
     const newTab = await openNewTab();
