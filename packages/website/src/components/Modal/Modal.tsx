@@ -22,7 +22,8 @@ export type ModalProps = {
 
 export type ModalHeaderProps = {
   children: React.ReactNode;
-  description?: string;
+  /** A node rather than a string, for a description that sets its sentences on lines of their own. */
+  description?: React.ReactNode;
   onClose?: () => void;
   titleId?: string;
 };

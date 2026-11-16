@@ -6,7 +6,7 @@ import {
 } from '@phosphor-icons/react/dist/ssr';
 import clsx from 'clsx';
 
-import type { IconBoxColor } from './IconBox.js';
+import type { IconBoxColor, IconBoxProps } from './IconBox.js';
 import { IconBox } from './IconBox.js';
 
 export type AlertVariant = 'blue' | 'green' | 'red' | 'grey' | 'amber';
@@ -33,6 +33,11 @@ export type AlertProps = {
    * elsewhere is worse than one that carries it.
    */
   action?: React.ReactNode;
+  /**
+   * Replaces the variant's glyph when the alert reports a state with an icon
+   * of its own, such as a frozen bucket's snowflake.
+   */
+  icon?: IconBoxProps['icon'];
 };
 
 const containerStyles: Record<AlertVariant, string> = {
@@ -75,6 +80,7 @@ export function Alert({
   centered = false,
   assertive = true,
   action,
+  icon,
 }: AlertProps) {
   return (
     <div
@@ -84,6 +90,9 @@ export function Alert({
         // one-line and a two-line alert equally balanced. `centered` now only
         // controls horizontal centring.
         'items-center',
+        // Below `sm` the action takes its own row: beside the text it squeezed
+        // a long description into a column a few words wide.
+        action && 'flex-wrap sm:flex-nowrap',
         centered && 'justify-center',
         containerStyles[variant],
       )}
@@ -93,7 +102,7 @@ export function Alert({
           badge read as an undersized speck beside the text. Set here rather than
           exposed as a per-caller prop so every alert stays consistent. */}
       {showIcon && (
-        <IconBox icon={iconComponents[variant]} color={iconBoxColors[variant]} size="md" />
+        <IconBox icon={icon ?? iconComponents[variant]} color={iconBoxColors[variant]} size="md" />
       )}
       {/* No top offset: `pt-1` nudged the text down to sit against the icon box
           back when the row was top-aligned. The row now centres, so the offset
@@ -114,7 +123,7 @@ export function Alert({
       </div>
       {/* `shrink-0` so a long description wraps rather than squeezing the
           control the reader is being pointed at. */}
-      {action && <div className="shrink-0">{action}</div>}
+      {action && <div className="min-w-0 basis-full sm:shrink-0 sm:basis-auto">{action}</div>}
     </div>
   );
 }

@@ -83,7 +83,9 @@ export function BucketActionMenu({ actions, onDisable }: BucketActionMenuProps) 
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={handleOpen}
-        className="rounded-md p-1.5 text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+        // Inside a frozen bucket's tinted row, the grey hover sat on the blue
+        // wash as a patch of another colour, so it takes the wash's hue there.
+        className="rounded-md p-1.5 text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-900 in-data-[cold-storage=frozen]:hover:bg-(--color-row-frozen-control-hover)"
       >
         <DotsThreeIcon weight="bold" width={18} height={18} aria-hidden="true" />
       </button>

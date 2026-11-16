@@ -4,6 +4,7 @@ import { WarningCircleIcon } from '@phosphor-icons/react/dist/ssr';
 import { Modal, ModalBody, ModalFooter } from './Modal';
 import { Button } from './Button';
 import { IconBox } from './IconBox';
+import { Alert } from './Alert';
 
 export type ConfirmDialogProps = {
   open: boolean;
@@ -20,6 +21,11 @@ export type ConfirmDialogProps = {
    * finding out from a rejected request.
    */
   confirmDisabled?: boolean;
+  /**
+   * A consequence beyond the action itself, such as a charge it still brings,
+   * set apart in an amber alert under the description so it isn't read past.
+   */
+  notice?: string;
 };
 
 export function ConfirmDialog({
@@ -31,6 +37,7 @@ export function ConfirmDialog({
   confirmLabel = 'Delete',
   cancelLabel = 'Cancel',
   confirmDisabled = false,
+  notice,
 }: ConfirmDialogProps) {
   const [loading, setLoading] = useState(false);
 
@@ -55,6 +62,11 @@ export function ConfirmDialog({
             </DialogTitle>
             <p className="text-sm text-zinc-500">{description}</p>
           </div>
+          {notice && (
+            <div className="mt-2 w-full text-left">
+              <Alert variant="amber" description={notice} assertive={false} />
+            </div>
+          )}
         </div>
       </ModalBody>
       <ModalFooter>

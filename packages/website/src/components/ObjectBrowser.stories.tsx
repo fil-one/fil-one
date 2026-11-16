@@ -12,6 +12,13 @@ import {
 import { S3Region, SubscriptionStatus, type S3ObjectVersion } from '@filone/shared';
 
 import { ObjectBrowser, type ObjectBrowserProps } from './ObjectBrowser';
+import type { ObjectColdStorage } from './ObjectBrowserColdStorage';
+import {
+  EMPTY_COLD_RECORD,
+  getFileColdState,
+  getFolderColdState,
+  type BucketColdRecord,
+} from '../lib/cold-storage-files.js';
 
 const sampleVersions: S3ObjectVersion[] = [
   {
@@ -428,6 +435,53 @@ export const LongNames: Story = {
       currentPrefix=""
       onDownload={() => {}}
       downloading={null}
+    />
+  ),
+};
+
+// Cold storage prototype (FIL-1608): `images/` is under a freeze rule since
+// yesterday and `docs/intro.md` has one of its own, so the root listing shows
+// a frozen folder, a partly frozen one, and their files' states.
+const coldRecord: BucketColdRecord = {
+  ...EMPTY_COLD_RECORD,
+  policies: [
+    { prefix: 'images/', createdAt: Date.now() - 2 * 24 * 60 * 60 * 1000 },
+    { key: 'docs/intro.md', createdAt: Date.now() - 2 * 24 * 60 * 60 * 1000 },
+  ],
+};
+const coldClock = { dayMs: 24 * 60 * 60 * 1000, restoreWaitMs: 60 * 60 * 1000 };
+
+function storyColdStorage(versions: S3ObjectVersion[]): ObjectColdStorage {
+  const now = Date.now();
+  return {
+    showColumn: true,
+    getState: (version) => getFileColdState(coldRecord, version, now, coldClock),
+    getFolderState: (prefix) =>
+      getFolderColdState(coldRecord, { prefix, versions }, now, coldClock),
+    now,
+    onRestore: () => {},
+    onKeepInStandard: () => {},
+    describeDeleteCharge: () => undefined,
+  };
+}
+
+// Every file at 200 KB or more, so none stays in Standard for being too small.
+const coldVersions = sampleVersions.map((v) => ({
+  ...v,
+  sizeBytes: Math.max(v.sizeBytes, 200_000),
+}));
+
+/** Folder rows in the Storage column: frozen under a rule, partly frozen, or a dash. */
+export const ColdStorageFolders: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={coldVersions}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      coldStorage={storyColdStorage(coldVersions)}
     />
   ),
 };

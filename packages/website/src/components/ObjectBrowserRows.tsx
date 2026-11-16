@@ -6,20 +6,28 @@ import {
   FileIcon,
   FolderIcon,
   LinkIcon,
+  SnowflakeIcon,
+  ThermometerIcon,
   TrashIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
 import { formatBytes } from '@filone/shared';
 import type { S3ObjectVersion } from '@filone/shared';
 
+import { FileStorageBadge, FolderStorageBadge } from './ColdStorageStatus';
 import { IconButton } from './IconButton';
+import { getColdRowActions, type ObjectColdStorage } from './ObjectBrowserColdStorage';
+
+export type { ObjectColdStorage } from './ObjectBrowserColdStorage';
 import { Spinner } from './Spinner';
 import { Table } from './Table/Table';
-import { VersionRowBadge, truncateVersionId } from './VersionHistoryCard';
+import { truncateVersionId } from './VersionHistoryCard';
+import { Badge } from './Badge';
 import type { VersionGroup } from '../lib/object-grouping.js';
 import { selectionId } from '../lib/object-selection.js';
 import { SHARE_UNAVAILABLE_TOOLTIP } from '../lib/use-can-share-objects.js';
 import { formatDate } from '../lib/time.js';
+import { isLockedFile } from '../lib/cold-storage-prototype.js';
 
 /**
  * Columns dropped below `sm`, header and rows alike. With them a phone scrolls
@@ -43,11 +51,25 @@ const NAME_CELL = 'w-full max-w-0';
  * The line may still wrap on the narrowest phones; each separator travels with
  * the fact after it, so a wrap never leaves one hanging at a line's end.
  */
-function MobileFacts({ version }: { version: S3ObjectVersion }) {
+function MobileFacts({
+  version,
+  coldStorage,
+}: {
+  version: S3ObjectVersion;
+  coldStorage?: ObjectColdStorage;
+}) {
   const date = formatDate(version.lastModified);
+  const state = coldStorage?.getState(version);
   const facts = version.isDeleteMarker
     ? [<span className="font-medium text-red-600">Deleted {date}</span>]
-    : [<span>{formatBytes(version.sizeBytes)}</span>, <span>{date}</span>];
+    : [
+        // Cold storage prototype: a file that isn't plain Standard says so first.
+        ...(state && state.status !== 'standard' && coldStorage
+          ? [<FileStorageBadge state={state} now={coldStorage.now} />]
+          : []),
+        <span>{formatBytes(version.sizeBytes)}</span>,
+        <span>{date}</span>,
+      ];
 
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-zinc-500 tabular-nums sm:hidden">
@@ -68,6 +90,12 @@ export type RowActions = {
   /** Whether the plan allows share links; when not, Share stays visible but disabled. */
   canShare: boolean;
   onShare: (key: string, versionId: string) => void;
+  /**
+   * Cold storage prototype: each file's storage, which adds the Storage
+   * column and hides download and share on frozen files. Absent while the
+   * bucket has no freeze policy.
+   */
+  coldStorage?: ObjectColdStorage;
   /** Absent for a role without `objects.delete` — the control is not rendered. */
   onRequestDelete?: (key: string, versionId: string) => void;
   onNavigate: (key: string, versionId: string) => void;
@@ -95,10 +123,27 @@ function VersionActions({
   actions: RowActions;
   label: string;
 }) {
-  const { downloading, onDownload, canShare, onShare, onRequestDelete } = actions;
+  const { downloading, onDownload, canShare, onShare, onRequestDelete, coldStorage } = actions;
+  const state = coldStorage?.getState(version);
+  // Cold storage prototype: a frozen or restoring file has nothing to download
+  // or share yet, so those buttons go rather than sit disabled. A frozen file
+  // shows Restore in their place, the one thing it can do.
+  const locked = state !== undefined && isLockedFile(state);
+  const hasContent = !version.isDeleteMarker && !locked;
+  const coldRowActions = coldStorage && state ? getColdRowActions(version, state, coldStorage) : [];
   return (
     <div className="flex items-center justify-end gap-1">
-      {!version.isDeleteMarker &&
+      {coldStorage && state?.status === 'frozen' && (
+        <IconButton
+          icon={ThermometerIcon}
+          aria-label={`Restore ${label}`}
+          tooltip="Restore to download or share"
+          tooltipSide="top"
+          size="md"
+          onClick={() => coldStorage.onRestore([version])}
+        />
+      )}
+      {hasContent &&
         (downloading === groupKey ? (
           // Same footprint as the IconButton it replaces while the download runs.
           <span className="inline-flex items-center justify-center p-1.5 text-zinc-500">
@@ -115,7 +160,7 @@ function VersionActions({
           />
         ))}
       {/* A delete marker has no content to link to, same as Download. */}
-      {!version.isDeleteMarker && (
+      {hasContent && (
         <IconButton
           icon={LinkIcon}
           aria-label={`Share ${label}`}
@@ -126,6 +171,19 @@ function VersionActions({
           onClick={() => onShare(groupKey, version.versionId)}
         />
       )}
+      {/* Cold storage actions as icons like the rest: the row has the room,
+          and a menu would hide what the file can do. */}
+      {coldRowActions.map((action) => (
+        <IconButton
+          key={action.label}
+          icon={action.icon ?? SnowflakeIcon}
+          aria-label={`${action.label} ${label}`}
+          tooltip={action.label}
+          tooltipSide="top"
+          size="md"
+          onClick={action.onSelect}
+        />
+      ))}
       {onRequestDelete && (
         <IconButton
           icon={TrashIcon}
@@ -186,30 +244,31 @@ function VersionSubRow({
         />
       )}
       <Table.Cell className={`py-3 pr-4 pl-10 ${NAME_CELL}`}>
-        <div className="flex items-center gap-2 text-zinc-500" title={displayName}>
+        <div className="flex items-center gap-2 text-zinc-500" title={version.versionId}>
           <FileIcon size={14} className="shrink-0 text-zinc-300" aria-hidden="true" />
-          {/* Below `sm` the Version column is hidden, and every older version
-              repeats the object's name, so the id takes the name's place. */}
-          <span className="truncate font-mono text-xs sm:hidden">
-            {truncateVersionId(version.versionId)}
-          </span>
-          <span className="hidden truncate sm:inline">{displayName}</span>
+          {/* Every older version repeats the object's name, so its id takes
+              the name's place; the table has no Version column. */}
+          <span className="truncate font-mono text-xs">{truncateVersionId(version.versionId)}</span>
+          {version.isDeleteMarker && <DeletedPill />}
         </div>
-        <MobileFacts version={version} />
+        <MobileFacts version={version} coldStorage={actions.coldStorage} />
       </Table.Cell>
-      <Table.Cell
-        className={`font-mono text-xs text-zinc-500 ${SECONDARY_COLUMN}`}
-        title={version.versionId}
-      >
-        {truncateVersionId(version.versionId)}
-      </Table.Cell>
-      <Table.Cell className={SECONDARY_COLUMN}>
-        <VersionRowBadge version={version} />
-      </Table.Cell>
-      <Table.Cell className={`text-zinc-500 ${SECONDARY_COLUMN}`}>
+      {actions.coldStorage?.showColumn && (
+        <Table.Cell className={`text-xs text-zinc-500 ${SECONDARY_COLUMN}`}>
+          {version.isDeleteMarker ? (
+            '\u2014'
+          ) : (
+            <FileStorageBadge
+              state={actions.coldStorage.getState(version)}
+              now={actions.coldStorage.now}
+            />
+          )}
+        </Table.Cell>
+      )}
+      <Table.Cell className={`text-xs text-zinc-500 ${SECONDARY_COLUMN}`}>
         {version.isDeleteMarker ? '\u2014' : formatBytes(version.sizeBytes)}
       </Table.Cell>
-      <Table.Cell className={`text-zinc-500 ${SECONDARY_COLUMN}`}>
+      <Table.Cell className={`text-xs text-zinc-500 ${SECONDARY_COLUMN}`}>
         {formatDate(version.lastModified)}
       </Table.Cell>
       {/* Narrower padding below `sm`, where every pixel goes to the name. */}
@@ -228,6 +287,18 @@ function VersionSubRow({
 // ---------------------------------------------------------------------------
 // Latest version row (primary row for each object key)
 // ---------------------------------------------------------------------------
+
+/**
+ * Marks a delete marker beside its name. Below `sm` the line under the name
+ * already says "Deleted" with the date, so the pill shows from `sm` up.
+ */
+function DeletedPill() {
+  return (
+    <Badge color="red" size="xs" className="hidden shrink-0 sm:inline-flex">
+      Deleted
+    </Badge>
+  );
+}
 
 function NameCell({
   name,
@@ -264,6 +335,7 @@ function NameCell({
         <FileIcon size={16} className="shrink-0 text-zinc-400" aria-hidden="true" />
       )}
       <span className="truncate">{name}</span>
+      {group.latest.isDeleteMarker && <DeletedPill />}
       {hasMultipleVersions && (
         // Below `sm` the expand caret alone says there is history, so the
         // name keeps the room.
@@ -325,25 +397,24 @@ function LatestVersionRow({
           isExpanded={isExpanded}
           onToggleExpand={onToggleExpand}
         />
-        <MobileFacts version={group.latest} />
+        <MobileFacts version={group.latest} coldStorage={actions.coldStorage} />
       </Table.Cell>
-      {versioningEnabled && (
-        <>
-          <Table.Cell
-            className={`font-mono text-xs text-zinc-500 ${SECONDARY_COLUMN}`}
-            title={group.latest.versionId}
-          >
-            {truncateVersionId(group.latest.versionId)}
-          </Table.Cell>
-          <Table.Cell className={SECONDARY_COLUMN}>
-            <VersionRowBadge version={{ ...group.latest, isLatest: true }} />
-          </Table.Cell>
-        </>
+      {actions.coldStorage?.showColumn && (
+        <Table.Cell className={`text-xs ${SECONDARY_COLUMN}`}>
+          {group.latest.isDeleteMarker ? (
+            <span className="text-zinc-400">{'\u2014'}</span>
+          ) : (
+            <FileStorageBadge
+              state={actions.coldStorage.getState(group.latest)}
+              now={actions.coldStorage.now}
+            />
+          )}
+        </Table.Cell>
       )}
-      <Table.Cell className={`text-zinc-600 ${SECONDARY_COLUMN}`}>
+      <Table.Cell className={`text-xs text-zinc-600 ${SECONDARY_COLUMN}`}>
         {group.latest.isDeleteMarker ? '\u2014' : formatBytes(group.latest.sizeBytes)}
       </Table.Cell>
-      <Table.Cell className={`text-zinc-600 ${SECONDARY_COLUMN}`}>
+      <Table.Cell className={`text-xs text-zinc-600 ${SECONDARY_COLUMN}`}>
         {formatDate(group.latest.lastModified)}
       </Table.Cell>
       {/* Narrower padding below `sm`, where every pixel goes to the name. */}
@@ -412,7 +483,7 @@ export function ObjectEntryRows({
 export function FolderRow({
   name,
   prefix,
-  versioningEnabled,
+  coldStorage,
   onPrefixChange,
   selectable,
   isSelected,
@@ -420,12 +491,14 @@ export function FolderRow({
 }: {
   name: string;
   prefix: string;
-  versioningEnabled: boolean;
+  /** Cold storage prototype: the folder's freeze state, in the Storage column. */
+  coldStorage?: ObjectColdStorage;
   onPrefixChange: (prefix: string) => void;
   selectable: boolean;
   isSelected: boolean;
   onToggleSelect: () => void;
 }) {
+  const coldState = coldStorage?.showColumn ? coldStorage.getFolderState(prefix) : undefined;
   return (
     <Table.Row
       data-testid="folder-row"
@@ -446,16 +519,26 @@ export function FolderRow({
           <FolderIcon size={16} className="shrink-0 text-zinc-400" aria-hidden="true" />
           <span className="truncate">{name}</span>
         </div>
+        {/* Below `sm` the Storage column is hidden, so a frozen folder says so
+            under its name, as a file does. */}
+        {coldState && coldState.status !== 'standard' && (
+          <div className="mt-1 flex text-xs sm:hidden">
+            <FolderStorageBadge state={coldState} />
+          </div>
+        )}
       </Table.Cell>
-      {versioningEnabled && (
-        <>
-          <Table.Cell className={`text-zinc-400 ${SECONDARY_COLUMN}`}>&mdash;</Table.Cell>
-          <Table.Cell className={`text-zinc-400 ${SECONDARY_COLUMN}`}>&mdash;</Table.Cell>
-        </>
+      {coldState && (
+        <Table.Cell className={`text-xs ${SECONDARY_COLUMN}`}>
+          <FolderStorageBadge state={coldState} />
+        </Table.Cell>
       )}
-      <Table.Cell className={`text-zinc-400 ${SECONDARY_COLUMN}`}>&mdash;</Table.Cell>
-      <Table.Cell className={`text-zinc-400 ${SECONDARY_COLUMN}`}>&mdash;</Table.Cell>
-      <Table.Cell />
+      <Table.Cell className={`text-xs text-zinc-400 ${SECONDARY_COLUMN}`}>&mdash;</Table.Cell>
+      <Table.Cell className={`text-xs text-zinc-400 ${SECONDARY_COLUMN}`}>&mdash;</Table.Cell>
+      <Table.Cell className="px-2 sm:px-4">
+        {/* A folder has no row actions; this holds their height (an 18px icon
+            in a p-1.5 button) so a folder row is as tall as a file row. */}
+        <div aria-hidden="true" className="h-7.5" />
+      </Table.Cell>
     </Table.Row>
   );
 }

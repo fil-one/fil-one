@@ -7,7 +7,7 @@ export type IconBoxColor = 'blue' | 'green' | 'red' | 'grey' | 'amber';
 export type IconBoxSize = 'sm' | 'md' | 'lg';
 export type IconBoxRounded = 'lg' | 'xl' | 'full';
 
-type IconBoxProps = {
+export type IconBoxProps = {
   icon: PhosphorIcon | ComponentType<SVGProps<SVGSVGElement>>;
   color?: IconBoxColor;
   size?: IconBoxSize;

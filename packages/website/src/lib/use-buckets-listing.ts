@@ -6,6 +6,8 @@ import { apiRequest } from './api.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from './query-client.js';
 import { useDebouncedValue } from './use-debounced-value.js';
 import {
+  DEFAULT_BUCKET_SORT,
+  EMPTY_BUCKET_FILTERS,
   bucketRegions,
   bucketsQueryParams,
   hasRefinements,
@@ -13,6 +15,7 @@ import {
   type BucketFilters,
   type BucketSort,
 } from './bucket-table.js';
+import { useDemoBucket, withDemoBucket } from './cold-storage-prototype.js';
 
 // Round-tripping every keystroke to the backend would make search feel laggy;
 // this is short enough that typing still feels live once results land.
@@ -39,7 +42,14 @@ export function useBucketsListing(filters: BucketFilters, sort: BucketSort) {
     staleTime: LIST_STALE_TIME,
     gcTime: LIST_GC_TIME,
   });
-  const baseBuckets = baseData?.buckets ?? [];
+  // Cold storage prototype: a made-up bucket joins the list in this browser.
+  const demo = useDemoBucket();
+  const baseBuckets = withDemoBucket(
+    baseData?.buckets ?? [],
+    demo,
+    EMPTY_BUCKET_FILTERS,
+    DEFAULT_BUCKET_SORT,
+  );
   // Read off the always-fetched baseline (not the debounced/refined query) so the
   // degraded-regions banner doesn't flicker as a search or sort is applied.
   const unavailableRegions = baseData?.unavailableRegions ?? [];
@@ -62,7 +72,11 @@ export function useBucketsListing(filters: BucketFilters, sort: BucketSort) {
 
   // Falls back to the unfiltered baseline while the very first refined result
   // is still in flight, rather than flashing an empty table.
-  const buckets = refining ? (refinedData?.buckets ?? baseBuckets) : baseBuckets;
+  const buckets = refining
+    ? refinedData
+      ? withDemoBucket(refinedData.buckets, demo, debouncedFilters, sort)
+      : baseBuckets
+    : baseBuckets;
 
   return {
     buckets,

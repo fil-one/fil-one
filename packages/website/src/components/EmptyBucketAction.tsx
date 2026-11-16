@@ -1,9 +1,7 @@
 import { useState } from 'react';
-import { TrashIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { BulkDeleteJob, S3Region } from '@filone/shared';
 
-import { Button } from './Button';
 import { EmptyBucketDialog } from './EmptyBucketDialog';
 import { useBulkDeleteJob } from '../lib/use-bulk-delete-job.js';
 
@@ -16,11 +14,11 @@ export type EmptyBucketActionProps = {
 };
 
 /**
- * The "empty bucket" entry point: button plus its confirmation dialog. Both live
- * here so the job state stays in one place; the dialog renders in a portal, so
- * its position in the tree does not matter.
+ * The "empty bucket" confirmation and its job state, for a caller that places
+ * its own trigger, such as a menu item. The dialog renders in a portal, so its
+ * position in the tree does not matter.
  */
-export function EmptyBucketAction({
+export function useEmptyBucketAction({
   bucketName,
   region,
   totalObjectCount,
@@ -28,22 +26,9 @@ export function EmptyBucketAction({
 }: EmptyBucketActionProps) {
   const [open, setOpen] = useState(false);
   const bulkDelete = useBulkDeleteJob({ bucketName, region, onFinished });
-
-  return (
-    <>
-      {/* iconSize matches the Upload button beside it: `sm` defaults to 14, and
-          that button overrides to 18, which also makes it taller. */}
-      <Button
-        id="empty-bucket-button"
-        variant="ghost"
-        size="sm"
-        icon={TrashIcon}
-        iconSize={18}
-        onClick={() => setOpen(true)}
-      >
-        Empty bucket
-      </Button>
-
+  return {
+    open: () => setOpen(true),
+    dialog: (
       <EmptyBucketDialog
         open={open}
         onClose={() => {
@@ -57,6 +42,6 @@ export function EmptyBucketAction({
         starting={bulkDelete.starting}
         isRunning={bulkDelete.isRunning}
       />
-    </>
-  );
+    ),
+  };
 }

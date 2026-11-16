@@ -17,6 +17,15 @@ import { useDeleteBucket } from '../lib/use-delete-bucket.js';
 import { DEFAULT_BUCKET_SORT, EMPTY_BUCKET_FILTERS } from '../lib/bucket-table.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { useHasPermission } from '../lib/use-permissions.js';
+import { ColdStoragePrototypeControls } from '../components/ColdStoragePrototypeControls';
+import { FreezeBucketDialog, type ColdStorageTarget } from '../components/FreezeBucketDialog';
+import { useRestoreAll } from '../components/RestoreAllFiles';
+import {
+  trackColdStorage,
+  useHasColdBuckets,
+  useStorageFilteredBuckets,
+  type StorageFilter,
+} from '../lib/cold-storage-prototype.js';
 
 // Mirrors BucketsTable's columns (labels and breakpoints) so the loading
 // placeholder drops the same columns at the same widths as the real table.
@@ -49,8 +58,26 @@ export function BucketsPage() {
   } = useBucketsListing(filters, sort);
   // "No buckets yet" would be a lie while a region is down. The banner explains the gap.
   const showEmptyState = baseBuckets.length === 0 && unavailableRegions.length === 0;
+  // Cold storage prototype: the storage filter narrows the listing here, since
+  // the backend knows nothing of cold storage. Shown once any bucket is cold.
+  const [storage, setStorage] = useState<StorageFilter>('all');
+  const shownBuckets = useStorageFilteredBuckets(buckets, storage);
+  const hasColdBuckets = useHasColdBuckets(baseBuckets);
 
   const { pendingBucket, contents, requestDelete, cancelDelete, confirmDelete } = useDeleteBucket();
+
+  // Cold storage prototype (FIL-1608): the row menu opens the freeze review,
+  // and the restore over every frozen file once it has loaded the listing.
+  const [freezeTarget, setFreezeTarget] = useState<ColdStorageTarget | null>(null);
+  const restoreAll = useRestoreAll();
+  const coldStorage = {
+    onFreeze: (bucketName: string, region: S3Region) => {
+      trackColdStorage('freeze started');
+      setFreezeTarget({ bucketName, region });
+    },
+    onRestoreAll: restoreAll.open,
+    storageFilter: hasColdBuckets ? { value: storage, onChange: setStorage } : undefined,
+  };
 
   // Shared across every state so navigating to Buckets never blanks the header
   // or takes the Create action away while the list loads.
@@ -131,7 +158,7 @@ export function BucketsPage() {
         </EmptyStateCard>
       ) : (
         <BucketsTable
-          buckets={buckets}
+          buckets={shownBuckets}
           onDelete={requestDelete}
           showControls={showControls}
           filters={filters}
@@ -139,8 +166,9 @@ export function BucketsPage() {
           sort={sort}
           onSortChange={setSort}
           regions={regions}
-          matchCount={buckets.length}
+          matchCount={shownBuckets.length}
           totalCount={baseBuckets.length}
+          coldStorage={coldStorage}
         />
       )}
 
@@ -160,6 +188,9 @@ export function BucketsPage() {
           });
         }}
       />
+      <FreezeBucketDialog target={freezeTarget} onClose={() => setFreezeTarget(null)} />
+      {restoreAll.dialog}
+      <ColdStoragePrototypeControls />
     </PageLayout>
   );
 }

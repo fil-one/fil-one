@@ -1,6 +1,7 @@
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
 import { ObjectBrowser, type EmptyBucketKeyAction } from '../components/ObjectBrowser';
+import type { ObjectColdStorage } from '../components/ObjectBrowserRows';
 import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import type { useObjectActions } from '../lib/use-object-actions.js';
 
@@ -80,6 +81,7 @@ export function ObjectsPanel({
   onShowKeys: () => void;
   listingTruncated: boolean;
   totalObjectCount: number | undefined;
+  coldStorage?: ObjectColdStorage;
 }) {
   // An empty bucket's next steps depend on its keys and the caller's permissions, so its
   // empty state waits for both and appears once, in its final form; a bucket with objects

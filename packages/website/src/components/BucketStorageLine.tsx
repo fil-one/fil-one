@@ -6,6 +6,7 @@ import { formatBytes } from '@filone/shared';
 
 import { apiRequest } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
+import { useSimulatedAnalytics } from '../lib/cold-storage-prototype.js';
 
 const FIVE_MINUTES = 5 * 60 * 1000;
 
@@ -62,8 +63,11 @@ export function BucketStorageLine({
     },
     staleTime: FIVE_MINUTES,
   });
+  // Cold storage prototype: the 70 TB stand-in shows its faked size.
+  const simulated = useSimulatedAnalytics(bucketName, region);
+  const shown = simulated ?? data;
 
-  if (isPending) {
+  if (!simulated && isPending) {
     return (
       <>
         <MobileSeparator />
@@ -79,14 +83,14 @@ export function BucketStorageLine({
   // claim "0 B". The caller's line reserves its height either way, so one
   // failing region doesn't leave a shorter row among taller ones and the number
   // lands in place, without reflow, once the read succeeds.
-  if (isError || !data) return null;
+  if (!shown || (!simulated && isError)) return null;
 
   return (
     <>
       <MobileSeparator />
       <span>
-        {formatBytes(data.bytesUsed)} · {data.objectCount.toLocaleString()}{' '}
-        {data.objectCount === 1 ? 'object' : 'objects'}
+        {formatBytes(shown.bytesUsed)} · {shown.objectCount.toLocaleString()}{' '}
+        {shown.objectCount === 1 ? 'object' : 'objects'}
       </span>
     </>
   );

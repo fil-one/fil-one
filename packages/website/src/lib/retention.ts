@@ -16,3 +16,18 @@ export function formatRetention(
   const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
   return `${modeLabel} · ${duration} ${unit}`;
 }
+
+/**
+ * A default retention policy as a phrase for the line under a bucket's name,
+ * `"15-day compliance retention"`, or null when the bucket has no complete
+ * policy. The duration comes first so the phrase needs no comma or separator
+ * of its own inside a line already split by dots.
+ */
+export function describeRetention(
+  mode?: RetentionMode,
+  duration?: number,
+  durationType?: RetentionDurationType,
+): string | null {
+  if (!mode || !duration || !durationType) return null;
+  return `${duration}-${durationType === 'y' ? 'year' : 'day'} ${mode.toLowerCase()} retention`;
+}

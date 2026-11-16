@@ -384,6 +384,30 @@ export const AllTokens: Story = {
                 from: opacity 0, translateX(100%) → to: opacity 1, translateX(0)
               </div>
             </div>
+            <div className="rounded-xl border border-zinc-200 p-5">
+              <p className="mb-3 font-mono text-xs text-zinc-400">frost-sweep</p>
+              <p className="text-sm text-zinc-600">
+                Used by a bucket row the moment it freezes: a soft white band slides off to the
+                right, revealing the frozen wash left to right (0.5s ease-in-out, an exception to
+                the 200ms budget). Under reduced motion it uses{' '}
+                <code className="rounded-md bg-zinc-100 px-1 py-0.5 text-xs">frost-fade</code>.
+              </p>
+              <div className="mt-3 font-mono text-xs text-zinc-400">
+                from: background-position 100% → to: 0
+              </div>
+            </div>
+            <div className="rounded-xl border border-zinc-200 p-5">
+              <p className="mb-3 font-mono text-xs text-zinc-400">frost-badge-in</p>
+              <p className="text-sm text-zinc-600">
+                The Frozen pill entering as the sweep ends (0.2s ease-out). Under reduced motion it
+                uses{' '}
+                <code className="rounded-md bg-zinc-100 px-1 py-0.5 text-xs">frost-fade-in</code>,
+                opacity only.
+              </p>
+              <div className="mt-3 font-mono text-xs text-zinc-400">
+                from: opacity 0, scale(0.9) → to: opacity 1, scale(1)
+              </div>
+            </div>
           </div>
         </Section>
       </div>

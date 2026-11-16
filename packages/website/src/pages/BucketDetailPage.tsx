@@ -1,22 +1,20 @@
 import { useCallback } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { CloudArrowUpIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { Heading } from '../components/Heading/Heading';
-import { Button } from '../components/Button';
 import { Tabs, TabList, Tab, TabPanels, TabPanel } from '../components/Tabs';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Alert } from '../components/Alert';
 import { Skeleton } from '../components/Skeleton';
 import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
-import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { countObjects } from '../components/ObjectBrowser';
 import { ObjectsPanel } from './BucketObjectsPanel';
 import { useBucketTabs } from '../lib/use-bucket-tabs.js';
-import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import { BucketPolicyTab } from '../components/BucketPolicyTab';
+import { useBucketColdStorage } from '../components/BucketColdStorage';
+import { BucketPageHeader } from './BucketPageHeader';
+import { useSimulatedAnalytics } from '../lib/cold-storage-prototype.js';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
@@ -35,12 +33,8 @@ import { useHasPermission, usePermissions } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
-import { batchPresign } from '../lib/use-presign.js';
-import {
-  parseListObjectVersionsResponse,
-  parseListObjectsResponse,
-  executePresignedUrl,
-} from '../lib/aurora-s3.js';
+import { fetchObjectListing } from '../lib/object-listing.js';
+import { describeRetention } from '../lib/retention.js';
 
 function formatStorage(bytesUsed: number | undefined): string {
   if (bytesUsed === undefined) return '—';
@@ -67,38 +61,6 @@ function displayObjectCount(
 ): number {
   if (!listingTruncated) return countObjects(versions);
   return analytics?.objectCount ?? countObjects(versions);
-}
-
-// Fetch the object listing via presigned URL. Versioned buckets use
-// ListObjectVersions so version history is available inline; non-versioned
-// buckets use ListObjectsV2, which only ever returns live objects (never delete
-// markers). Both paths are normalized to the ListObjectVersionsResponse shape so
-// the cache and invalidation logic stay identical.
-async function fetchObjectListing(
-  region: S3Region,
-  bucketName: string,
-  bucket: BucketDetails | null,
-): Promise<ListObjectVersionsResponse> {
-  if (bucket?.versioning) {
-    const { items } = await batchPresign(region, [
-      { op: 'listObjectVersions', bucket: bucketName },
-    ]);
-    const response = await executePresignedUrl(items[0].url, items[0].method);
-    return parseListObjectVersionsResponse(await response.text());
-  }
-
-  const { items } = await batchPresign(region, [{ op: 'listObjects', bucket: bucketName }]);
-  const response = await executePresignedUrl(items[0].url, items[0].method);
-  const { objects, isTruncated } = parseListObjectsResponse(await response.text());
-  return {
-    versions: objects.map((obj) => ({
-      ...obj,
-      versionId: '',
-      isLatest: true,
-      isDeleteMarker: false,
-    })),
-    isTruncated,
-  };
 }
 
 function removeVersionFromListing(
@@ -137,42 +99,44 @@ function BucketOverview({
   region: S3Region;
   bytesUsed: number | undefined;
 }) {
+  // Cold storage prototype: the demo bucket shows its made-up size.
+  const simulated = useSimulatedAnalytics(bucket?.bucketName ?? '', region);
   if (!bucket) return null;
 
+  // The one setting that changes what can be done in the table: retention
+  // blocks deletes. Bucket details lists every setting, on or off.
+  const retention = bucket.objectLockEnabled
+    ? describeRetention(
+        bucket.defaultRetention,
+        bucket.retentionDuration,
+        bucket.retentionDurationType,
+      )
+    : null;
   return (
-    <>
-      <p className="mb-6 text-sm">
-        <span className="text-zinc-700">{region}</span>
-        <span className="mx-2 text-zinc-400">&bull;</span>
-        <span className="text-xs text-zinc-500">{formatStorage(bytesUsed)} used</span>
-      </p>
-      {/* Responsive rather than a fixed three columns: at 375px three columns
-          crushed the cards, and with four of them the fourth was orphaned at a
-          third of the width on a row of its own. */}
-      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <BucketPropertyCards bucket={bucket} />
-      </div>
-    </>
+    <p className="mb-6 text-sm">
+      <span className="text-zinc-700">{region}</span>
+      <span className="mx-2 text-zinc-400">&bull;</span>
+      <span className="text-xs text-zinc-500">
+        {formatStorage(simulated?.bytesUsed ?? bytesUsed)} used
+      </span>
+      {retention && (
+        <>
+          <span className="mx-2 text-zinc-400">&bull;</span>
+          <span className="text-xs text-zinc-500">{retention}</span>
+        </>
+      )}
+    </p>
   );
 }
 
 /**
- * The overview's own placeholder, shown while the bucket metadata is in flight.
- *
- * It mirrors the real block it stands in for: one line of meta, then the same
- * responsive grid of three property cards at the same height. Without it the
- * heading sat directly on top of the tabs and everything below jumped down a
- * card's height the moment metadata landed.
+ * The overview's own placeholder, shown while the bucket metadata is in flight:
+ * the one line of meta.
  */
 function BucketOverviewSkeleton() {
   return (
     <div role="status" aria-label="Loading bucket details">
       <Skeleton className="mb-6 h-4 w-72 max-w-full" />
-      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {['versioning', 'object-lock', 'retention'].map((property) => (
-          <Skeleton key={property} className="h-[68px] rounded-xl" />
-        ))}
-      </div>
     </div>
   );
 }
@@ -275,62 +239,6 @@ function BucketErrorState({
 // Component
 // ---------------------------------------------------------------------------
 
-/**
- * The action bar beside the bucket heading. Both actions are hidden while the
- * bucket is empty: the empty state carries the sole upload CTA then, so two
- * identical primary actions never compete, and there is nothing to empty. Each
- * also goes with its permission: emptying the bucket is a bulk
- * `objects.delete`, uploading is `objects.write`, and a role holding neither
- * gets no action bar at all. The cloud glyph leads the label, echoing that
- * empty state's icon.
- */
-export function BucketHeaderActions({
-  bucketName,
-  region,
-  hasObjects,
-  mayDelete,
-  mayUpload,
-  totalObjectCount,
-  onEmptied,
-  onUpload,
-}: {
-  bucketName: string;
-  region: S3Region;
-  hasObjects: boolean;
-  mayDelete: boolean;
-  mayUpload: boolean;
-  totalObjectCount: number | undefined;
-  onEmptied: () => void;
-  onUpload: () => void;
-}) {
-  if (!hasObjects || !(mayDelete || mayUpload)) return null;
-  return (
-    <div className="flex items-center gap-2">
-      {mayDelete && (
-        <EmptyBucketAction
-          bucketName={bucketName}
-          region={region}
-          totalObjectCount={totalObjectCount}
-          onFinished={onEmptied}
-        />
-      )}
-      {mayUpload && (
-        <Button
-          id="upload-object-button"
-          variant="primary"
-          size="sm"
-          icon={CloudArrowUpIcon}
-          iconSize={18}
-          iconPosition="left"
-          onClick={onUpload}
-        >
-          Upload object
-        </Button>
-      )}
-    </div>
-  );
-}
-
 export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
@@ -413,6 +321,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     region,
     onDeleted: invalidateObjectsCache,
   });
+  // Cold storage prototype: files freeze one by one, so the bucket itself
+  // never turns read-only; frozen files lock their own downloads.
+  const cold = useBucketColdStorage(bucketName, region, currentPrefix);
 
   const invalidateAccessKeysCache = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.accessKeys });
@@ -445,27 +356,18 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     <div className="px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
       <Breadcrumb items={[{ label: 'Buckets', href: '/buckets' }, { label: bucketName }]} />
 
-      <div className="mt-4 mb-2 flex items-center justify-between">
-        <Heading id="bucket-detail-heading" tag="h1" size="xl">
-          {bucketName}
-        </Heading>
-        <BucketHeaderActions
-          bucketName={bucketName}
-          region={region}
-          hasObjects={versions.length > 0}
-          mayDelete={mayDelete}
-          mayUpload={mayUpload}
-          totalObjectCount={analyticsData?.objectCount}
-          onEmptied={refreshAfterBulkDelete}
-          onUpload={() =>
-            void navigate({
-              to: '/buckets/$bucketName/upload',
-              params: { bucketName },
-              search: { region },
-            })
-          }
-        />
-      </div>
+      <BucketPageHeader
+        bucketName={bucketName}
+        bucket={bucket}
+        region={region}
+        analytics={analyticsData}
+        hasObjects={versions.length > 0}
+        mayDelete={mayDelete}
+        mayUpload={mayUpload}
+        onEmptied={refreshAfterBulkDelete}
+        coldMenuActions={cold.menuActions}
+        onRestoreFiles={cold.onRestoreFiles}
+      />
 
       {bucketQuery.isPending ? (
         <BucketOverviewSkeleton />
@@ -516,6 +418,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onAddKeyOpenChange={setAddKeyOpen}
               onShowKeys={tabs.showKeysTab}
               listingTruncated={isTruncated}
+              coldStorage={cold.objectColdStorage}
               totalObjectCount={analyticsData?.objectCount}
             />
           </TabPanel>
@@ -549,6 +452,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         region={region}
         onKeyAdded={invalidateAccessKeysCache}
       />
+      {cold.overlays}
     </div>
   );
 }
