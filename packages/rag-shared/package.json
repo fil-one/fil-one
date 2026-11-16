@@ -15,7 +15,7 @@
     "@smithy/types": "^4.20.0",
     "fast-xml-parser": "^5.12.0",
     "unpdf": "^1.9.1",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@smithy/util-stream": "^4.8.2",
