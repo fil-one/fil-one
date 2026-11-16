@@ -14,7 +14,7 @@
     "@aws-sdk/client-s3vectors": "^3.1163.0",
     "@smithy/types": "^4.20.0",
     "fast-xml-parser": "^5.12.0",
-    "unpdf": "^1.9.1",
+    "unpdf": "^2.1.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
