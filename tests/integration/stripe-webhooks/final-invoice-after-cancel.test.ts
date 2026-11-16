@@ -7,6 +7,7 @@ import {
   createTestCustomer,
   deleteBillingRecord,
   getBillingRecord,
+  getHubspotSyncFields,
   getStripeClient,
   pollForBillingStatusChange,
   pollForPaymentMethod,
@@ -67,7 +68,8 @@ describe.each([
     });
     await waitForEventHandled(eventType, invoiceId);
 
-    expect(await getBillingRecord(userId)).toStrictEqual({
+    const row = await getBillingRecord(userId);
+    expect(row).toStrictEqual({
       pk: { S: `ORG#${testOrgId(userId)}` },
       sk: { S: 'SUBSCRIPTION' },
       orgId: { S: testOrgId(userId) },
@@ -85,6 +87,7 @@ describe.each([
       paymentMethodLast4: { S: last4 },
       paymentMethodExpYear: { N: expect.any(String) },
       paymentMethodExpMonth: { N: expect.any(String) },
+      ...getHubspotSyncFields(row),
     });
   });
 });
