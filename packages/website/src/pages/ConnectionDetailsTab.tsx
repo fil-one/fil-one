@@ -16,6 +16,7 @@ import { FILONE_STAGE } from '../env';
 import {
   type ConnectionClient,
   type ConnectionSnippet,
+  getAgentInstructions,
   getConnectionSnippets,
 } from '../lib/connection-snippets.js';
 
@@ -28,8 +29,10 @@ const CLIENTS: { id: ConnectionClient; label: string }[] = [
 
 /**
  * How to reach Fil One over S3: the facts a client needs, then the same two
- * steps for each client. The region drives the endpoint and every snippet, so
- * it leads.
+ * steps for each client, then instructions for an AI agent. The agent gets its
+ * own section: it uses one of the clients, and what it needs is text to paste,
+ * not code to run. The region drives the endpoint and every snippet, so it
+ * leads.
  */
 export function ConnectionDetailsTab() {
   const [region, setRegion] = useState<S3Region>(S3_REGION);
@@ -79,6 +82,21 @@ export function ConnectionDetailsTab() {
               ))}
             </TabPanels>
           </Tabs>
+        </Card>
+      </section>
+
+      <section>
+        <Heading tag="h3" size="sm" className="mb-3">
+          Use with an AI agent
+        </Heading>
+        <p className="mb-3 text-sm text-(--color-paragraph-text)">
+          Give a coding agent what it needs to work with Fil One, without handing it your keys.
+        </p>
+        <Card padding="none" className="divide-y divide-zinc-100 overflow-hidden">
+          <AgentSteps
+            setup={snippets.cli.setup}
+            instructions={getAgentInstructions(region, endpoint)}
+          />
         </Card>
       </section>
     </div>
@@ -200,6 +218,33 @@ function ClientSteps({ snippet, isCli }: { snippet: ConnectionSnippet; isCli: bo
       </Step>
     </>
   );
+}
+
+/**
+ * For an AI coding agent: keep the key in the CLI profile, then hand the agent
+ * instructions that name the profile. The key never enters the agent's context
+ * or the file the instructions live in.
+ */
+function AgentSteps({ setup, instructions }: { setup: string; instructions: string }) {
+  return (
+    <>
+      <Step n={1} title="Store your key in a profile">
+        <StepNote>
+          Use a key scoped to the buckets the agent needs, read-only if it only reads.
+        </StepNote>
+        <CodeBlock minimal language="shell" code={setup} />
+      </Step>
+      <Step n={2} title="Add to your agent's instructions">
+        <StepNote>Paste into AGENTS.md, CLAUDE.md or your agent's system prompt.</StepNote>
+        <CodeBlock minimal wrap language="markdown" code={instructions} />
+      </Step>
+    </>
+  );
+}
+
+/** A sentence of context between a step's title and its code. */
+function StepNote({ children }: { children: React.ReactNode }) {
+  return <p className="mb-2 text-ui text-(--color-paragraph-text-subtle)">{children}</p>;
 }
 
 /** A numbered step: a small index chip and its title, above its code. */

@@ -8,10 +8,10 @@ import type { ListMembersResponse, MemberSummary, AccessKeySummary } from '@filo
 import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
 import { EmptyStateCard } from '../components/EmptyStateCard';
-import { MembersTable } from '../components/MembersTable';
+import { MEMBER_COLUMNS, MembersTable } from '../components/MembersTable';
 import { MembersToolbar } from '../components/MembersToolbar';
 import { MemberDialogs, useMemberDialogs } from '../components/MemberDialogs';
-import { Spinner } from '../components/Spinner';
+import { ACTIONS_COLUMN, TableSkeleton } from '../components/Table/TableSkeleton';
 import { useToast } from '../components/Toast';
 import { errorCodeOf, errorMessageOf, errorStatusOf, getMe, keysRevokedOf } from '../lib/api.js';
 import {
@@ -506,11 +506,10 @@ function MembersPanel({
   pendingUserIds: ReadonlySet<string>;
 }) {
   if (isPending) {
-    return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading members" size={32} />
-      </div>
-    );
+    // Owner and Admin get row actions on most rosters, so their placeholder
+    // keeps a place for that column.
+    const columns = scope.mayManage ? [...MEMBER_COLUMNS, ACTIONS_COLUMN] : MEMBER_COLUMNS;
+    return <TableSkeleton columns={columns} rows={3} aria-label="Loading members" />;
   }
 
   if (isError && !hasData) {

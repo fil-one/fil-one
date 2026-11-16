@@ -86,8 +86,9 @@ export type AccessKeysTableProps = {
   /**
    * Who minted each key, resolved from a user id. Passed only when the org has
    * somebody else in it: a column reading the same name on every row is noise
-   * in an org of one, and it is the column that says which keys leave with a
-   * departing member — removal does not revoke them (FIL-1021).
+   * in an org of one, and it is the column that says whose keys a removal
+   * revokes: every key a member created goes with them. Keys with no recorded
+   * creator stay, and are the ones to review by hand (FIL-1021).
    *
    * A resolver rather than the roster itself, so the table stays presentational
    * and does not learn what a membership is.

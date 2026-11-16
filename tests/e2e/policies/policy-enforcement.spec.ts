@@ -230,9 +230,7 @@ test('multipart parts listing and abort are granted on their own', { tag: '@api'
   ]).toEqual(['ok', 'ok']);
 });
 
-// Quarantined: on staging, GetBucketVersioning is refused even with
-// s3:ListBucket (FIL-1673). Restore with `test` once that's resolved.
-test.fixme('versions are read and deleted under their own actions', { tag: '@api' }, async () => {
+test('versions are read and deleted under their own actions', { tag: '@api' }, async () => {
   const bucket = await createBucketWithStatements(
     [allow([memberId], ['s3:GetObject', 's3:DeleteObject', 's3:ListBucket'])],
     { versioning: true },
@@ -247,19 +245,27 @@ test.fixme('versions are read and deleted under their own actions', { tag: '@api
     await getS3Outcome(
       s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: SEEDED_KEY, VersionId })),
     ),
-    await getS3Outcome(s3.send(new GetBucketVersioningCommand({ Bucket: bucket }))),
-  ]).toEqual(['ok', '403 AccessDenied', '403 AccessDenied', 'ok']);
+  ]).toEqual(['ok', '403 AccessDenied', '403 AccessDenied']);
 });
 
-test('GetBucketVersioning is refused without s3:ListBucket', { tag: '@api' }, async () => {
-  const bucket = await createBucketWithStatements([allow([memberId], ['s3:GetObject'])]);
-  expect(
-    await getS3Outcome(
-      (await createS3ClientWithNewKey(member, testKeys)).send(
-        new GetBucketVersioningCommand({ Bucket: bucket }),
-      ),
-    ),
-  ).toBe('403 AccessDenied');
+test('GetBucketVersioning is granted by s3:GetBucketVersioning', { tag: '@api' }, async () => {
+  const bucket = await createBucketWithStatements([allow([memberId], ['s3:GetBucketVersioning'])], {
+    versioning: true,
+  });
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
+  expect(await getS3Outcome(s3.send(new GetBucketVersioningCommand({ Bucket: bucket })))).toBe(
+    'ok',
+  );
+});
+
+test('GetBucketVersioning is refused with s3:ListBucket alone', { tag: '@api' }, async () => {
+  const bucket = await createBucketWithStatements([allow([memberId], ['s3:ListBucket'])]);
+  const s3 = await createS3ClientWithNewKey(member, testKeys);
+  // The listing shows the key works, so the refusal is the policy's.
+  expect([
+    await getS3Outcome(listObjects(s3, bucket)),
+    await getS3Outcome(s3.send(new GetBucketVersioningCommand({ Bucket: bucket }))),
+  ]).toEqual(['ok', '403 AccessDenied']);
 });
 
 test('a write or read grant does not carry retention or legal holds', { tag: '@api' }, async () => {

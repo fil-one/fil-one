@@ -11,6 +11,7 @@ import {
   pollForBillingStatusChange,
   pollForPaymentMethod,
   getBillingRecord,
+  getHubspotSyncFields,
   testOrgId,
 } from './helpers.js';
 
@@ -52,7 +53,8 @@ describe('Past Due Recovery (customer.subscription.updated to active)', () => {
     await stripe.invoices.pay(invoiceId, { payment_method: paymentMethodId });
 
     await pollForBillingStatusChange({ userId, expectedStatus: 'active', fromStatus: 'past_due' });
-    expect(await getBillingRecord(userId)).toStrictEqual({
+    const row = await getBillingRecord(userId);
+    expect(row).toStrictEqual({
       pk: { S: `ORG#${testOrgId(userId)}` },
       sk: { S: 'SUBSCRIPTION' },
       orgId: { S: testOrgId(userId) },
@@ -68,6 +70,7 @@ describe('Past Due Recovery (customer.subscription.updated to active)', () => {
       paymentMethodLast4: { S: '4242' },
       paymentMethodExpYear: { N: expect.any(String) },
       paymentMethodExpMonth: { N: expect.any(String) },
+      ...getHubspotSyncFields(row),
     });
   });
 });

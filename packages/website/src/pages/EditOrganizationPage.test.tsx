@@ -118,7 +118,52 @@ describe('EditOrganizationPage', () => {
     expect(mockUpdateOrg).not.toHaveBeenCalled();
   });
 
-  it('shows an error instead of a spinner when /me fails to load', async () => {
+  it.each([
+    // An Owner holds org.delete, so the danger zone gets a placeholder too.
+    { role: OrgRole.Owner, sections: 'General and Danger zone', skeletons: 4 },
+    // An Admin holds org.rename but not org.delete.
+    { role: OrgRole.Admin, sections: 'General only', skeletons: 2 },
+  ])(
+    'shows a placeholder heading and card for $sections under the page title while /me loads, as $role',
+    async ({ role, skeletons }) => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      seedPermissions(client, role, me(role));
+      // Never settles, so the page stays loading.
+      mockGetMe.mockReturnValue(new Promise(() => {}));
+      render(
+        <QueryClientProvider client={client}>
+          <ToastProvider>
+            <EditOrganizationPage />
+          </ToastProvider>
+        </QueryClientProvider>,
+      );
+
+      expect(screen.getByRole('heading', { name: 'Edit organization' })).toBeInTheDocument();
+      const loading = await screen.findByRole('status', { name: 'Loading organization' });
+      // A heading bar and a card per section.
+      expect(loading.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(skeletons);
+    },
+  );
+
+  it('shows a placeholder for both sections while the permissions themselves load', async () => {
+    // No permissions seeded, and /me never settles, so whether the caller gets
+    // the danger zone is not known yet.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    mockGetMe.mockReturnValue(new Promise(() => {}));
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <EditOrganizationPage />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    const loading = await screen.findByRole('status', { name: 'Loading organization' });
+    // A heading bar and a card for General, and the same for Danger zone.
+    expect(loading.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(4);
+  });
+
+  it('shows an error instead of the loading state when /me fails to load', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     seedPermissions(client, OrgRole.Owner, me(OrgRole.Owner));
     mockGetMe.mockRejectedValue(new Error('Could not load your account'));
