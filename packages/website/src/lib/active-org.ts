@@ -20,6 +20,9 @@ const RECONCILED_KEY = 'filone:activeOrgReconciled';
  * Absent means "the org my identity says is mine" — the server resolves it that
  * way when the header is missing, so a first visit needs no stash to work.
  *
+ * A new tab starts from the org the user last switched to, so coming back to
+ * the console reopens it. See {@link seedActiveOrgFromLastUsed}.
+ *
  * Every accessor tolerates storage being unavailable (private mode, storage
  * disabled). The failure mode is then the personal org on every request, which
  * is the same thing a caller with no stash gets.
@@ -43,6 +46,84 @@ export function setActiveOrgId(orgId: string): void {
 export function clearActiveOrgId(): void {
   try {
     sessionStorage.removeItem(ACTIVE_ORG_KEY);
+  } catch {
+    // Storage disabled, so there was nothing stored to clear.
+  }
+}
+
+const LAST_USED_ORG_KEY = 'filone:lastUsedOrgId';
+
+/**
+ * Start this tab in the org the user last switched to, when it has no org of
+ * its own yet. Called once, before the first request.
+ *
+ * The last-used org lives in `localStorage`, so it outlives the tab, but it is
+ * read only here. A tab that already has an org keeps it, so a switch in one
+ * tab still never moves another one (see {@link getActiveOrgId}).
+ *
+ * An org the user can no longer reach costs one recovery reload: the server
+ * refuses it, the refusal forgets it here too, and the reload starts in the
+ * home org. That recovery is silent: the user did not pick the org in this tab,
+ * so a notice that the tab's choice is gone would describe nothing they did.
+ * The seeded org is marked so the recovery can tell.
+ */
+export function seedActiveOrgFromLastUsed(): void {
+  if (getActiveOrgId() !== null) return;
+  const lastUsed = getLastUsedOrgId();
+  if (lastUsed === null) return;
+  setActiveOrgId(lastUsed);
+  try {
+    sessionStorage.setItem(SEEDED_ORG_KEY, lastUsed);
+  } catch {
+    // Storage disabled, so `setActiveOrgId` stored nothing either.
+  }
+}
+
+const SEEDED_ORG_KEY = 'filone:activeOrgSeeded';
+
+/** Whether this tab is in `orgId` only because it was seeded there. */
+function isSeededOrg(orgId: string): boolean {
+  try {
+    return sessionStorage.getItem(SEEDED_ORG_KEY) === orgId;
+  } catch {
+    return false;
+  }
+}
+
+function clearSeededOrg(): void {
+  try {
+    sessionStorage.removeItem(SEEDED_ORG_KEY);
+  } catch {
+    // Storage disabled, so there was nothing stored to clear.
+  }
+}
+
+function getLastUsedOrgId(): string | null {
+  try {
+    return localStorage.getItem(LAST_USED_ORG_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setLastUsedOrgId(orgId: string): void {
+  try {
+    localStorage.setItem(LAST_USED_ORG_KEY, orgId);
+  } catch {
+    // Storage disabled: a new tab starts in the home org, as before.
+  }
+}
+
+/**
+ * Forget the last-used org. With `orgId`, only when it names that org: another
+ * tab may have switched somewhere valid since this tab chose the org being
+ * dropped, and that later choice stays.
+ */
+export function clearLastUsedOrgId(orgId?: string): void {
+  try {
+    if (orgId === undefined || localStorage.getItem(LAST_USED_ORG_KEY) === orgId) {
+      localStorage.removeItem(LAST_USED_ORG_KEY);
+    }
   } catch {
     // Storage disabled, so there was nothing stored to clear.
   }
@@ -238,6 +319,9 @@ export function clearActiveOrgOnNavigation(): void {
   const clear = (): void => {
     clearTimeout(giveUp);
     clearActiveOrgId();
+    // The last-used org outlives the tab, so on a shared machine it would seed
+    // the next person's first tab the same way.
+    clearLastUsedOrgId();
   };
   const giveUp = setTimeout(() => {
     window.removeEventListener('pagehide', clear);
@@ -323,6 +407,11 @@ export function switchToOrg(
     try {
       const { router } = await import('../router.js');
       await router.navigate({ to: landOn === 'get-started' ? '/get-started' : '/dashboard' });
+      // Only once the tab is really there: a rolled-back switch must not
+      // become the org the next tab opens in.
+      setLastUsedOrgId(orgId);
+      // The tab's org is now the user's own pick, and losing it deserves a word.
+      clearSeededOrg();
       setSwitching(false, 'committed');
     } catch (error) {
       // The navigation was blocked or failed — a `beforeLoad` redirect threw
@@ -353,6 +442,8 @@ export function switchToOrg(
  */
 export function moveToLeftOrganization(): void {
   clearActiveOrgId();
+  // The account has no org left but the floor org, so the last-used one is gone.
+  clearLastUsedOrgId();
   queryClient.clear();
   void import('../router.js').then(({ router }) => router.navigate({ to: '/left-organization' }));
 }
@@ -404,15 +495,24 @@ export function reconcileActiveOrg(
   // left running and the reload declined, its later requests would go out with
   // no header, into whatever org the server resolves instead.
   cancelGuardedWork();
+  // Kept, it would seed the next tab into the same refusal.
+  clearLastUsedOrgId(stashed);
   clearActiveOrgId();
-  noteReconcile();
+  noteReconcile(stashed);
   latchUntilNavigation();
   window.location.reload();
   return true;
 }
 
-/** Leave word for the page that comes back that its org changed under it. */
-function noteReconcile(): void {
+/**
+ * Leave word for the page that comes back that its org changed under it, unless
+ * the org came from an earlier visit rather than a choice made in this tab (see
+ * {@link seedActiveOrgFromLastUsed}).
+ */
+function noteReconcile(droppedOrgId: string): void {
+  const seeded = isSeededOrg(droppedOrgId);
+  clearSeededOrg();
+  if (seeded) return;
   try {
     sessionStorage.setItem(RECONCILED_KEY, '1');
   } catch {
@@ -468,10 +568,12 @@ export function clearActiveOrgAfterRefusal(status: number | undefined): boolean 
   if (stashClearedAfterRefusal || !stashed) return false;
   stashClearedAfterRefusal = true;
   console.warn('[active-org] /me refused the org this tab asked for — dropping it', { status });
-  // As in `reconcileActiveOrg`: running work was headed into the refused org.
+  // As in `reconcileActiveOrg`: running work was headed into the refused org,
+  // and the next tab must not be seeded into it.
   cancelGuardedWork();
+  clearLastUsedOrgId(stashed);
   clearActiveOrgId();
-  noteReconcile();
+  noteReconcile(stashed);
   latchUntilNavigation();
   window.location.reload();
   return true;

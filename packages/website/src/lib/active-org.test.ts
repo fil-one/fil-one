@@ -541,3 +541,167 @@ describe('a recovery reload that never happens', () => {
     expect(reload).not.toHaveBeenCalled();
   });
 });
+
+describe('the org a new tab starts in', () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    vi.resetModules();
+    reload.mockClear();
+    assign.mockClear();
+    navigate.mockReset();
+    navigate.mockResolvedValue(undefined);
+    vi.stubGlobal('location', { reload, assign });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** Fresh module: the switch latch and the refusal latch are per page load. */
+  async function loadPage() {
+    return import('./active-org.js');
+  }
+
+  /** A new tab shares `localStorage` with the old one, but not `sessionStorage`. */
+  async function openNewTab() {
+    sessionStorage.clear();
+    vi.resetModules();
+    const stash = await loadPage();
+    stash.seedActiveOrgFromLastUsed();
+    return stash;
+  }
+
+  type Stash = Awaited<ReturnType<typeof loadPage>>;
+
+  async function switchAndLand(stash: Stash, orgId: string) {
+    stash.switchToOrg(orgId);
+    await vi.waitFor(() => expect(stash.isSwitchingOrg()).toBe(false));
+  }
+
+  it('starts in the org the user last switched to', async () => {
+    await switchAndLand(await loadPage(), ORG_B);
+
+    const newTab = await openNewTab();
+
+    expect(newTab.getActiveOrgId()).toBe(ORG_B);
+  });
+
+  it('starts in the home org when the user never switched', async () => {
+    const newTab = await openNewTab();
+
+    expect(newTab.getActiveOrgId()).toBeNull();
+  });
+
+  it('keeps the org a tab already has, whatever another tab switched to since', async () => {
+    const stash = await loadPage();
+    stash.setActiveOrgId(ORG_A);
+    localStorage.setItem('filone:lastUsedOrgId', ORG_B);
+
+    // A reload of the same tab, which keeps its `sessionStorage`.
+    stash.seedActiveOrgFromLastUsed();
+
+    expect(stash.getActiveOrgId()).toBe(ORG_A);
+  });
+
+  it('does not remember a switch whose navigation never completed', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    navigate.mockRejectedValue(new Error('navigation blocked'));
+    await switchAndLand(await loadPage(), ORG_B);
+
+    const newTab = await openNewTab();
+
+    expect(newTab.getActiveOrgId()).toBeNull();
+  });
+
+  it('forgets an org the server answered for with a different one', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await loadPage();
+    await switchAndLand(stash, ORG_A);
+
+    stash.reconcileActiveOrg(ORG_B, ORG_A);
+    const newTab = await openNewTab();
+
+    expect(newTab.getActiveOrgId()).toBeNull();
+  });
+
+  it('forgets an org /me refused', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await loadPage();
+    await switchAndLand(stash, ORG_A);
+
+    stash.clearActiveOrgAfterRefusal(403);
+    const newTab = await openNewTab();
+
+    expect(newTab.getActiveOrgId()).toBeNull();
+  });
+
+  it('keeps a later choice from another tab when this tab is refused its org', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stash = await loadPage();
+    stash.setActiveOrgId(ORG_A);
+    // Another tab switched to org B after this one settled in org A.
+    localStorage.setItem('filone:lastUsedOrgId', ORG_B);
+
+    stash.clearActiveOrgAfterRefusal(403);
+    const newTab = await openNewTab();
+
+    expect(newTab.getActiveOrgId()).toBe(ORG_B);
+  });
+
+  it.each([
+    [
+      'the server answered for a different org',
+      (stash: Stash) => stash.reconcileActiveOrg(ORG_B, ORG_A),
+    ],
+    ['/me refused the org', (stash: Stash) => stash.clearActiveOrgAfterRefusal(403)],
+  ])(
+    'opens the home org without a notice when a remembered org is gone and %s',
+    async (_case, recover) => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      localStorage.setItem('filone:lastUsedOrgId', ORG_A);
+      const newTab = await openNewTab();
+
+      expect(recover(newTab)).toBe(true);
+
+      // The user did not pick org A in this tab, so a notice about losing the
+      // tab's choice would describe nothing they did.
+      expect(newTab.getActiveOrgId()).toBeNull();
+      expect(newTab.takeReconcileNotice()).toBe(false);
+    },
+  );
+
+  it('still says so when an org the user picked in a seeded tab is refused', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    localStorage.setItem('filone:lastUsedOrgId', ORG_A);
+    const newTab = await openNewTab();
+    await switchAndLand(newTab, ORG_A);
+
+    newTab.clearActiveOrgAfterRefusal(403);
+
+    expect(newTab.takeReconcileNotice()).toBe(true);
+  });
+
+  it('forgets the org once a logout navigation commits', async () => {
+    const stash = await loadPage();
+    await switchAndLand(stash, ORG_B);
+
+    stash.clearActiveOrgOnNavigation();
+    window.dispatchEvent(new Event('pagehide'));
+    const newTab = await openNewTab();
+
+    // On a shared machine, the next person to sign in starts in their own org.
+    expect(newTab.getActiveOrgId()).toBeNull();
+  });
+
+  it('forgets the org when the user leaves their last one', async () => {
+    const stash = await loadPage();
+    await switchAndLand(stash, ORG_B);
+
+    stash.moveToLeftOrganization();
+    const newTab = await openNewTab();
+
+    expect(newTab.getActiveOrgId()).toBeNull();
+  });
+});
