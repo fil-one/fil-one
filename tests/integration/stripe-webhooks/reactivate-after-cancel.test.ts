@@ -5,6 +5,7 @@ import {
   createTestCustomer,
   deleteBillingRecord,
   getBillingRecord,
+  getHubspotSyncFields,
   getStripeClient,
   pollForBillingStatusChange,
   pollForPaymentMethod,
@@ -42,7 +43,8 @@ describe('Reactivation after cancellation (customer.subscription.created)', () =
       fromStatus: 'grace_period',
     });
 
-    expect(await getBillingRecord(userId)).toStrictEqual({
+    const row = await getBillingRecord(userId);
+    expect(row).toStrictEqual({
       pk: { S: `ORG#${testOrgId(userId)}` },
       sk: { S: 'SUBSCRIPTION' },
       orgId: { S: testOrgId(userId) },
@@ -58,6 +60,7 @@ describe('Reactivation after cancellation (customer.subscription.created)', () =
       paymentMethodLast4: { S: '4242' },
       paymentMethodExpYear: { N: expect.any(String) },
       paymentMethodExpMonth: { N: expect.any(String) },
+      ...getHubspotSyncFields(row),
     });
   });
 });
