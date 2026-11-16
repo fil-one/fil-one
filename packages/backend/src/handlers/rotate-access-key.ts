@@ -7,10 +7,8 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import {
   ApiErrorCode,
   NO_ROLE,
-  S3Region,
   auditKeyIdSuffix,
   canRetainAccessKey,
-  isSupportedRegion,
   roleHasPermission,
 } from '@filone/shared';
 import type { ErrorResponse, KeyRetentionResult, RotateAccessKeyResponse } from '@filone/shared';
@@ -21,7 +19,6 @@ import type { AuditCorrelation } from '../lib/audit.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import {
   AccessKeyKeys,
-  DEFAULT_ACCESS_KEY_REGION,
   keyAttribution,
   getAccessKeyOrchestratorId,
   getAccessKeyRegions,
@@ -48,7 +45,6 @@ import {
   accessKeyNetworkUnavailableResponse,
   ResponseBuilder,
   tenantNotReadyResponse,
-  unsupportedRegionResponse,
 } from '../lib/response-builder.ts';
 import { vendorNameForRotation } from '../lib/rotation-key-name.ts';
 import { findOrchestratorById } from '../lib/service-orchestrator-registry.ts';
@@ -160,10 +156,6 @@ async function prepareRotation(
         message: `This key expired on ${stored.expiresAt}. Create a new key instead of rotating it.`,
       })
       .build();
-  }
-
-  if (!isSupportedRegion(stored.region, process.env.FILONE_STAGE!)) {
-    return unsupportedRegionResponse(stored.region);
   }
 
   // Before ensureTenantReady, as the mint has it: the replacement is minted
@@ -344,18 +336,17 @@ interface Rotation {
 }
 
 /**
- * The stored row, with the two fallbacks a legacy row needs: a row written
- * before the id was stored has no `keyName` to show, and one written before
- * multi-region routing has no `region`, so it takes
- * {@link DEFAULT_ACCESS_KEY_REGION}, the same fallback the revoke applies.
- * Everything else is read as stored; `unmarshall` leaves an absent attribute
- * absent, which is what the row write needs.
+ * The stored row, with the one fallback a legacy row needs: a row written
+ * before the id was stored has no `keyName` to show. Everything else is read as
+ * stored; `unmarshall` leaves an absent attribute absent, which is what the row
+ * write needs, and which network holds the key is answered by
+ * {@link getAccessKeyOrchestratorId} rather than by a region invented here.
  */
-type StoredKey = Partial<AccessKeyRecord> & { keyName: string; region: S3Region };
+type StoredKey = Partial<AccessKeyRecord> & { keyName: string };
 
 function readStoredKey(item: Record<string, AttributeValue>, keyId: string): StoredKey {
   const row = unmarshall(item) as Partial<AccessKeyRecord>;
-  return { ...row, keyName: row.keyName ?? keyId, region: row.region ?? DEFAULT_ACCESS_KEY_REGION };
+  return { ...row, keyName: row.keyName ?? keyId };
 }
 
 /**

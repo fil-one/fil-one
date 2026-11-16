@@ -18,6 +18,7 @@ import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
+const mockFindOrchestratorById = vi.fn();
 const mockEnsureTenantReady = vi.fn();
 const mockIssueAccessKey = vi.fn();
 const mockDeleteAccessKey = vi.fn();
@@ -31,7 +32,10 @@ const mockOrchestrator = {
 };
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  findOrchestratorById: () => mockOrchestrator,
+  findOrchestratorById: (...args: unknown[]) => {
+    mockFindOrchestratorById(...args);
+    return mockOrchestrator;
+  },
 }));
 
 process.env.FILONE_STAGE = 'test';
@@ -175,6 +179,17 @@ describe('rotate-access-key baseHandler', () => {
     mockEnsureTenantReady.mockResolvedValue(TENANT_ID);
     mockIssueAccessKey.mockResolvedValue(issuedAccessKey());
     mockDeleteAccessKey.mockResolvedValue(undefined);
+  });
+
+  it('rotates against the network the row names, whichever it is', async () => {
+    // The only row here that is not Aurora's. Every other fixture is, so a
+    // reader that fell back to the default region would still look right.
+    stubStoredKey({ orchestratorId: 'forge', region: undefined });
+    stubWrites();
+
+    await baseHandler(eventFor());
+
+    expect(mockFindOrchestratorById).toHaveBeenCalledWith('forge');
   });
 
   it('mints a replacement carrying everything the key already had', async () => {
