@@ -44,9 +44,9 @@ export const BUCKET_CREATIONS_AUDITED_SINCE = '2026-11-10T00:00:00.000Z';
  *
  * The audit log records what the console did, so a bucket created with the
  * S3 API directly is missing from it. The feed lists the org's buckets beside
- * the read and adds a creation row for each bucket the log has no creation
- * for. A bucket deleted with the S3 API leaves nothing to list, so that
- * deletion never appears.
+ * the audit log and adds a creation row for each bucket the log has no
+ * creation for. A bucket deleted with the S3 API leaves nothing to list, so
+ * that deletion never appears.
  */
 export async function baseHandler(
   event: AuthenticatedEvent,
@@ -62,27 +62,27 @@ export async function baseHandler(
   const { from, to } = resolveWindow({ to: new Date().toISOString() });
   const start = performance.now();
   // Named steps, so a read cut off by the deadline is logged by name.
-  const [read, buckets] = await Promise.all([
+  const [auditLog, buckets] = await Promise.all([
     trackRequestStep(event, 'queryActivityEvents', () =>
       queryActivityEvents({ orgId, from, to, limit, signal }),
     ),
     trackRequestStep(event, 'listBuckets', () => listBuckets(orgId, signal)),
   ]);
 
-  const recorded = read.events.flatMap(mapToActivities);
+  const recorded = auditLog.events.flatMap(mapToActivities);
   reportAuditQuery({
     route: 'activity',
-    cost: read.cost,
+    cost: auditLog.cost,
     durationMs: performance.now() - start,
     rowsReturned: recorded.length,
   });
 
-  const unrecorded = getUnrecordedCreations({
+  const unrecorded = getUnrecordedBucketCreations({
     buckets,
-    events: read.events,
+    events: auditLog.events,
     // Below the point the audit read stopped, the log's creations are not all
     // in hand, so a bucket there cannot be told apart and is left out.
-    since: read.completeSince ?? from,
+    since: auditLog.completeSince ?? from,
   });
   const activities = [...recorded, ...unrecorded]
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
@@ -132,7 +132,7 @@ async function listBuckets(orgId: string, signal: AbortSignal): Promise<BucketSu
  * {@link CREATION_MATCH_MARGIN_MS}. The age check keeps an old console creation
  * from covering a bucket of the same name deleted and made again over S3.
  */
-function getUnrecordedCreations({
+function getUnrecordedBucketCreations({
   buckets,
   events,
   since,
@@ -141,20 +141,24 @@ function getUnrecordedCreations({
   events: AuditEvent[];
   since: string;
 }): RecentActivity[] {
-  const creations = events.flatMap((event) =>
-    event.type === 'bucket.created' ? [{ ...event.details, at: Date.parse(event.createdAt) }] : [],
-  );
+  // Only the latest creation per bucket matters: if it is too old to cover the
+  // bucket, every earlier one is too.
+  const latestCreationAt = new Map<string, number>();
+  for (const event of events) {
+    if (event.type !== 'bucket.created') continue;
+    const key = getBucketKey(event.details);
+    const at = Date.parse(event.createdAt);
+    latestCreationAt.set(key, Math.max(at, latestCreationAt.get(key) ?? at));
+  }
   return buckets
     .filter((bucket) => Date.parse(bucket.createdAt) >= Date.parse(since))
-    .filter(
-      (bucket) =>
-        !creations.some(
-          (creation) =>
-            creation.bucketName === bucket.bucketName &&
-            creation.region === bucket.region &&
-            creation.at >= Date.parse(bucket.createdAt) - CREATION_MATCH_MARGIN_MS,
-        ),
-    )
+    .filter((bucket) => {
+      const creationAt = latestCreationAt.get(getBucketKey(bucket));
+      return (
+        creationAt === undefined ||
+        creationAt < Date.parse(bucket.createdAt) - CREATION_MATCH_MARGIN_MS
+      );
+    })
     .map((bucket) => ({
       // No event id exists; this one is stable for as long as the bucket is.
       id: `unrecorded:${bucket.region}:${bucket.bucketName}:${bucket.createdAt}`,
@@ -166,6 +170,11 @@ function getUnrecordedCreations({
         createdOutsideConsole: true,
       }),
     }));
+}
+
+/** Identifies a bucket across regions, since names are unique only within one. */
+function getBucketKey({ region, bucketName }: { region: string; bucketName: string }): string {
+  return `${region}:${bucketName}`;
 }
 
 /**
