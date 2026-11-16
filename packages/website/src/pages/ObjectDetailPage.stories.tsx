@@ -122,7 +122,11 @@ function Seeded({ scenario, children }: { scenario: Scenario; children: React.Re
         objectLockEnabled: scenario.objectLockEnabled ?? false,
       },
     });
-    if (scenario.previewUrl) client.setQueryData(previewKey, scenario.previewUrl);
+    if (scenario.previewUrl) {
+      // Far off, so the card's expiry-based staleTime keeps it fresh.
+      const expiresAt = '2099-01-01T00:00:00.000Z';
+      client.setQueryData(previewKey, { url: scenario.previewUrl, method: 'GET', expiresAt });
+    }
     if (scenario.previewText) client.setQueryData([...previewKey, 'text'], scenario.previewText);
     return null;
   });

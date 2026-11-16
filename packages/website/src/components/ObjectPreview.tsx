@@ -18,13 +18,12 @@ import {
   TEXT_PREVIEW_MAX_CHARS,
   type PreviewKind,
 } from '../lib/object-preview.js';
+import { getPreviewUrl } from '../lib/preview-url.js';
 import { queryKeys } from '../lib/query-client.js';
-import { batchPresign } from '../lib/use-presign.js';
 
-// An hour, so a video paused for a while can still seek. The query refreshes the
-// URL well before it lapses.
-const PREVIEW_URL_EXPIRY_SECONDS = 60 * 60;
-const PREVIEW_URL_STALE_TIME = 50 * 60 * 1000;
+// How long before a URL lapses the query treats it as stale, so a remount or a
+// refocus fetches a fresh one rather than showing one about to expire.
+const PREVIEW_URL_REFRESH_MARGIN_MS = 60 * 1000;
 
 /** Why there is no preview, which decides what the placeholder says. */
 export type NoPreviewReason = 'unsupported' | 'too-large' | 'failed';
@@ -249,29 +248,26 @@ export function ObjectPreviewCard({
   const urlQuery = useQuery({
     queryKey: queryKeys.objectPreviewUrl(bucketName, objectKey, versionId),
     enabled: loadable,
-    staleTime: PREVIEW_URL_STALE_TIME,
-    queryFn: async () => {
-      const { items } = await batchPresign(region, [
-        {
-          op: 'getObject',
-          bucket: bucketName,
-          key: objectKey,
-          expiresIn: PREVIEW_URL_EXPIRY_SECONDS,
-          ...(versionId && { versionId }),
-        },
-      ]);
-      return items[0].url;
+    // The URL lasts an hour, or five minutes on a trial account, so its own
+    // expiry decides when it goes stale.
+    staleTime: (query) => {
+      const expiresAt = query.state.data?.expiresAt;
+      return expiresAt ? Date.parse(expiresAt) - Date.now() - PREVIEW_URL_REFRESH_MARGIN_MS : 0;
     },
+    queryFn: () => getPreviewUrl({ region, bucketName, objectKey, versionId }),
   });
+  const url = urlQuery.data?.url;
 
   const textQuery = useQuery({
     // Without a version ID the key alone names whatever is latest, so the ETag
     // tells a cached body from the contents of a file overwritten since
     queryKey: [...queryKeys.objectPreviewUrl(bucketName, objectKey, versionId), 'text', etag],
-    enabled: kind === 'text' && urlQuery.data !== undefined,
-    staleTime: PREVIEW_URL_STALE_TIME,
+    enabled: kind === 'text' && url !== undefined,
+    // The key carries the ETag, so a cached body stays true to the contents. A
+    // refetch could also run on a URL that has since lapsed.
+    staleTime: Infinity,
     // `enabled` holds this back until the URL has arrived
-    queryFn: () => fetchPreviewText(urlQuery.data ?? ''),
+    queryFn: () => fetchPreviewText(url ?? ''),
   });
 
   if (!loadable) {
@@ -303,13 +299,8 @@ export function ObjectPreviewCard({
       <ObjectPreview state="loading" kind="text" />
     );
   }
-  return urlQuery.data ? (
-    <ObjectPreview
-      state="ready"
-      kind={kind}
-      url={urlQuery.data}
-      fileName={getObjectFileName(objectKey)}
-    />
+  return url ? (
+    <ObjectPreview state="ready" kind={kind} url={url} fileName={getObjectFileName(objectKey)} />
   ) : (
     <ObjectPreview state="loading" kind={kind} />
   );
