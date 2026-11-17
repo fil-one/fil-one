@@ -146,9 +146,12 @@ function getUnrecordedBucketCreations({
   const latestCreationAt = new Map<string, number>();
   for (const event of events) {
     if (event.type !== 'bucket.created') continue;
-    const key = getBucketKey(event.details);
-    const at = Date.parse(event.createdAt);
-    latestCreationAt.set(key, Math.max(at, latestCreationAt.get(key) ?? at));
+    const bucketKey = getBucketKey(event.details);
+    const createdAt = Date.parse(event.createdAt);
+    latestCreationAt.set(
+      bucketKey,
+      Math.max(createdAt, latestCreationAt.get(bucketKey) ?? createdAt),
+    );
   }
   return buckets
     .filter((bucket) => Date.parse(bucket.createdAt) >= Date.parse(since))
