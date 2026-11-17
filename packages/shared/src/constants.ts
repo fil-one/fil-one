@@ -111,7 +111,7 @@ export const NETWORK_ID_BY_REGION: Record<S3Region, string> = {
 };
 
 /** The network behind a region, or undefined for a region the product does not know. */
-export function networkIdForRegion(region: string): string | undefined {
+export function getNetworkIdForRegion(region: string): string | undefined {
   return Object.values(S3Region).includes(region as S3Region)
     ? NETWORK_ID_BY_REGION[region as S3Region]
     : undefined;
@@ -122,7 +122,7 @@ export function networkIdForRegion(region: string): string | undefined {
  * on a network is region-free, so its access keys work at every one of these
  * regions and its buckets may live in any of them.
  */
-export function regionsForNetwork(id: string, stage: StageLike): S3Region[] {
+export function getRegionsForNetwork(id: string, stage: StageLike): S3Region[] {
   return getAvailableRegions(stage).filter((region) => NETWORK_ID_BY_REGION[region] === id);
 }
 

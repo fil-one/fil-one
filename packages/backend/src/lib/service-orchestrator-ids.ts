@@ -5,8 +5,8 @@
 
 import {
   NETWORK_ID_BY_REGION,
-  networkIdForRegion,
-  regionsForNetwork,
+  getNetworkIdForRegion,
+  getRegionsForNetwork,
   S3Region,
   supportsIamMethods,
   type StageLike,
@@ -23,7 +23,7 @@ import {
 export const ORCHESTRATOR_ID_BY_REGION = NETWORK_ID_BY_REGION;
 
 /** The orchestrator id behind a region, or undefined for a region the product does not know. */
-export const orchestratorIdForRegion = networkIdForRegion;
+export const orchestratorIdForRegion = getNetworkIdForRegion;
 
 /**
  * The regions an orchestrator serves on a stage, in {@link S3Region} order. An
@@ -33,7 +33,7 @@ export const orchestratorIdForRegion = networkIdForRegion;
  * secret and builds nothing, so the console-facing key mapping can use it.
  */
 export function getRegionsForOrchestrator(id: string, stage: StageLike): S3Region[] {
-  return regionsForNetwork(id, stage);
+  return getRegionsForNetwork(id, stage);
 }
 
 /**
