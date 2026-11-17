@@ -52,6 +52,16 @@ describe('ConnectionDetailsTab', () => {
     expect(screen.getByText('Upload a file')).toBeInTheDocument();
   });
 
+  // The CLI set-up ends at a prompt for the keys, so both places that show it
+  // say what to type there.
+  it('explains the key prompt in the AWS CLI tab and in the agent steps', () => {
+    renderTab();
+
+    expect(screen.getAllByText(/asks for your Access Key ID and Secret Access Key/)).toHaveLength(
+      2,
+    );
+  });
+
   it('says once, before the code, that a bucket comes from Buckets', () => {
     renderTab();
 
