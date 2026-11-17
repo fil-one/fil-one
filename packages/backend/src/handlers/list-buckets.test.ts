@@ -31,6 +31,14 @@ const fth: MockOrchestrator = {
   listBuckets: vi.fn(),
 };
 
+/** One network serving two regions, which is what a shared Forge network is. */
+const sharedForge: MockOrchestrator = {
+  id: 'forge',
+  regions: [S3Region.EuCentral3, S3Region.UsEast9],
+  isTenantReady: vi.fn(),
+  listBuckets: vi.fn(),
+};
+
 const availableOrchestrators = vi.fn<() => MockOrchestrator[]>();
 
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
@@ -238,6 +246,19 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(JSON.parse(result.body as string)).toStrictEqual({
       message: unavailableMessage('eu-west-1'),
     });
+  });
+
+  it('returns 503 when the only network fails, however many regions it serves', async () => {
+    // The failure is counted per network, not per region it covers: counting
+    // regions would leave a two-region network's outage looking like a
+    // partial failure, and answer 200 with no buckets over a real one.
+    availableOrchestrators.mockReturnValue([sharedForge]);
+    sharedForge.isTenantReady.mockReturnValue('forge-t-1');
+    sharedForge.listBuckets.mockRejectedValue(new Error('Forge is down'));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(503);
   });
 
   it('returns 200 with empty array when tenant is not ready', async () => {

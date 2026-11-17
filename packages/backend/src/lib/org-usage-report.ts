@@ -87,7 +87,10 @@ export async function reportOrgUsage(params: {
     const e = error as Error & { cause?: unknown };
     console.error(`${LOG} Usage metrics fetch failed`, {
       orgId,
-      regions: orgRegions.map((r) => ({ orchestratorId: r.orchestrator.id, tenantId: r.tenantId })),
+      networks: orgRegions.map((r) => ({
+        orchestratorId: r.orchestrator.id,
+        tenantId: r.tenantId,
+      })),
       subscriptionId,
       message: e.message,
       cause: e.cause,
