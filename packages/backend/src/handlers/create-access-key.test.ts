@@ -28,7 +28,7 @@ const mockGetOrchestratorForRegion = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
-  region: 'eu-west-1',
+  regions: ['eu-west-1'],
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
   findAccessKeyByName: (...args: unknown[]) => mockFindAccessKeyByName(...args),
@@ -41,7 +41,7 @@ const mockOrchestrator = {
 const iamFake = new FakeIamOrchestrator();
 const iamOrchestrator = {
   id: 'forgeDev',
-  region: S3Region.UsEast9,
+  regions: [S3Region.UsEast9],
   ...delegateIamMethods(iamFake),
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),

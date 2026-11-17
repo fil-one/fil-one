@@ -12,21 +12,29 @@ vi.mock('sst', () => ({
 
 interface MockOrchestrator {
   id: string;
-  region: string;
+  regions: S3Region[];
   isTenantReady: ReturnType<typeof vi.fn>;
   listBuckets: ReturnType<typeof vi.fn>;
 }
 
 const aurora: MockOrchestrator = {
   id: 'aurora',
-  region: 'eu-west-1',
+  regions: [S3Region.EuWest1],
   isTenantReady: vi.fn(),
   listBuckets: vi.fn(),
 };
 
 const fth: MockOrchestrator = {
   id: 'fth',
-  region: 'us-east-1',
+  regions: [S3Region.UsEast1],
+  isTenantReady: vi.fn(),
+  listBuckets: vi.fn(),
+};
+
+/** One network serving two regions, which is what a shared Forge network is. */
+const sharedForge: MockOrchestrator = {
+  id: 'forge',
+  regions: [S3Region.EuCentral3, S3Region.UsEast9],
   isTenantReady: vi.fn(),
   listBuckets: vi.fn(),
 };
@@ -238,6 +246,19 @@ describe('list-buckets baseHandler (single-region)', () => {
     expect(JSON.parse(result.body as string)).toStrictEqual({
       message: unavailableMessage('eu-west-1'),
     });
+  });
+
+  it('returns 503 when the only network fails, however many regions it serves', async () => {
+    // The failure is counted per network, not per region it covers: counting
+    // regions would leave a two-region network's outage looking like a
+    // partial failure, and answer 200 with no buckets over a real one.
+    availableOrchestrators.mockReturnValue([sharedForge]);
+    sharedForge.isTenantReady.mockReturnValue('forge-t-1');
+    sharedForge.listBuckets.mockRejectedValue(new Error('Forge is down'));
+
+    const result = await baseHandler(buildEvent({ userInfo: USER_INFO }));
+
+    expect(result.statusCode).toBe(503);
   });
 
   it('returns 200 with empty array when tenant is not ready', async () => {
@@ -533,7 +554,7 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     consoleError.mockRestore();
   });
 
-  it('logs the orchestrator id and region of every failing leg', async () => {
+  it('logs the orchestrator id and regions of every failing leg', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const auroraError = new Error('Aurora listBuckets blew up');
     aurora.listBuckets.mockRejectedValue(auroraError);
@@ -545,13 +566,13 @@ describe('list-buckets baseHandler (multi-region fan-out)', () => {
     expect(consoleError).toHaveBeenCalledWith('[list-buckets] Orchestrator listBuckets failed', {
       orgId: 'org-1',
       orchestratorId: 'aurora',
-      region: 'eu-west-1',
+      regions: ['eu-west-1'],
       tenantId: 'aurora-t-1',
       error: auroraError,
     });
     expect(consoleError).toHaveBeenCalledWith(
       '[list-buckets] Orchestrator listBuckets failed',
-      expect.objectContaining({ orchestratorId: 'fth', region: 'us-east-1' }),
+      expect.objectContaining({ orchestratorId: 'fth', regions: ['us-east-1'] }),
     );
     consoleError.mockRestore();
   });

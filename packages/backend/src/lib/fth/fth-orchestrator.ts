@@ -18,7 +18,7 @@ import pRetry from 'p-retry';
 import QuickLRU from 'quick-lru';
 import { Resource } from 'sst';
 import { getS3Endpoint, S3Region, type TenantStatus } from '@filone/shared';
-import type { AccessKeyPermission, GranularPermission } from '@filone/shared';
+import type { NonEmptyArray, AccessKeyPermission, GranularPermission } from '@filone/shared';
 import {
   ensureTenantReady as ensureFthTenantReady,
   FTH_CONSOLE_USER_CODE,
@@ -100,7 +100,7 @@ export function createInstrumentedFthClient(): FthManagementClient {
 // Callers only ever see createFthOrchestrator(client).
 class FthOrchestrator implements LegacyServiceOrchestrator {
   readonly id = 'fth';
-  readonly region = S3Region.UsEast1;
+  readonly regions: NonEmptyArray<S3Region> = [S3Region.UsEast1];
 
   private readonly client: FthManagementClient;
 
@@ -192,7 +192,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
       requestOptions,
     );
     return {
-      endpointUrl: getS3Endpoint(this.region, stage),
+      endpointUrl: getS3Endpoint(this.regions[0], stage),
       region: 'us-east-1',
       credentials,
       forcePathStyle: true,
@@ -271,7 +271,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
 
     return buckets.map((b) => ({
       bucketName: b.name,
-      region: this.region,
+      region: this.regions[0],
       createdAt: b.createdAt,
       isPublic: false,
       encrypted: true,
@@ -297,7 +297,7 @@ class FthOrchestrator implements LegacyServiceOrchestrator {
 
     return {
       bucketName,
-      region: this.region,
+      region: this.regions[0],
       createdAt: match.createdAt,
       isPublic: false,
       versioning,

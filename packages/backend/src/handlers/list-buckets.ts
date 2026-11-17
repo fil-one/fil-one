@@ -48,10 +48,10 @@ export async function baseHandler(
   // handler until the Lambda timeout kills it with nothing logged.
   const signal = getRequestDeadline(event);
 
-  // Each orchestrator only ever serves its own fixed region, so a region filter
-  // lets every other leg be skipped outright instead of fetched and discarded.
+  // An orchestrator is one storage network and lists every region it serves in
+  // one call, so a region filter skips the networks that do not serve the region.
   const orchestrators = getAvailableOrchestrators().filter(
-    (orchestrator) => !region || orchestrator.region === region,
+    (orchestrator) => !region || orchestrator.regions.includes(region as S3Region),
   );
   const orgProfile = await getOrgProfile(orgId);
 
@@ -75,6 +75,9 @@ export async function baseHandler(
 
   const buckets: BucketSummary[] = [];
   const unavailableRegions: S3Region[] = [];
+  // Failed calls are counted apart from regions: one failed network may account
+  // for several unavailable regions, and the all-failed check below is per call.
+  let failedOrchestratorCalls = 0;
   settled.forEach((result, index) => {
     if (result.status === 'fulfilled') {
       // Bucket Intelligence keeps its Lance datasets in companion buckets on
@@ -88,18 +91,19 @@ export async function baseHandler(
     console.error('[list-buckets] Orchestrator listBuckets failed', {
       orgId,
       orchestratorId: orchestrator.id,
-      region: orchestrator.region,
+      regions: orchestrator.regions,
       tenantId,
       error: result.reason,
     });
-    unavailableRegions.push(orchestrator.region);
+    failedOrchestratorCalls++;
+    unavailableRegions.push(...orchestrator.regions);
   });
 
-  // Every provisioned region is down: an empty 200 renders as "No buckets yet" over a real
+  // Every provisioned network is down: an empty 200 renders as "No buckets yet" over a real
   // outage. Returned rather than thrown so the message survives, since the error-handler
   // middleware replaces any throw with the generic 500. The `> 0` guard keeps an org with no
-  // provisioned regions on the 200 path.
-  if (unavailableRegions.length > 0 && unavailableRegions.length === ready.length) {
+  // provisioned networks on the 200 path.
+  if (failedOrchestratorCalls > 0 && failedOrchestratorCalls === ready.length) {
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({ message: listBucketsUnavailableMessage(unavailableRegions) })

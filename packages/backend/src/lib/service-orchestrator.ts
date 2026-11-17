@@ -1,4 +1,4 @@
-import type { S3Region } from '@filone/shared';
+import type { NonEmptyArray, S3Region } from '@filone/shared';
 import type { AccessKeyOrchestrator } from './access-key-orchestrator.ts';
 import type { BucketOrchestrator } from './bucket-orchestrator.ts';
 import type { BucketPolicyOrchestrator } from './bucket-policy-orchestrator.ts';
@@ -50,14 +50,20 @@ export interface OrchestratorRequestOptions {
   signal?: AbortSignal;
 }
 
-/** Which orchestrator this is, and the region it serves. */
+/** Which orchestrator this is, and the regions it serves. */
 export interface OrchestratorCore {
   /**
    * The orchestrator's unique identifier (e.g. `aurora`, `fth`, etc.). It
    * should have the format `^[a-z][a-zA-Z0-9_]*$`.
    */
   readonly id: string;
-  readonly region: S3Region;
+  /**
+   * The regions this network serves, in {@link S3Region} order. Aurora and FTH
+   * serve one each; a Forge network serves every region its Hilt has a
+   * provider for. Every one of them reports the same access model, since that
+   * belongs to the network.
+   */
+  readonly regions: NonEmptyArray<S3Region>;
 }
 
 /**
