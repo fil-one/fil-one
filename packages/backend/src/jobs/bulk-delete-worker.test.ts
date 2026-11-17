@@ -35,7 +35,8 @@ vi.mock('../lib/org-membership.ts', () => ({
 }));
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: vi.fn((region: string) => ({
-    region,
+    id: region === 'us-east-9' ? 'forgeDev' : 'aurora',
+    regions: [region],
     isTenantReady: () => 'tenant-1',
     resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args),
     getS3ClientContext: async () => ({

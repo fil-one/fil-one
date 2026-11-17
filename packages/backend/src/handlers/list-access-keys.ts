@@ -2,7 +2,8 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { AccessKey, ListAccessKeysResponse } from '@filone/shared';
-import { getEffectiveActions, isSupportedRegion, supportsIamMethods } from '@filone/shared';
+import { getEffectiveActions, isSupportedRegion } from '@filone/shared';
+import { isIamOrchestrator } from '../lib/service-orchestrator-ids.ts';
 import { getAccessKeysInScope } from '../lib/access-key-inventory.ts';
 import { keyScope } from '../lib/key-scope.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
@@ -58,18 +59,17 @@ async function filterKeysWithBucketAccess(
   { orgId, bucketName, region }: { orgId: string; bucketName: string; region?: string },
 ): Promise<AccessKey[]> {
   if (!keys.some((key) => key.type === 'principal')) return keys;
-  const orchestrator =
-    region && isSupportedRegion(region, process.env.FILONE_STAGE!)
-      ? getOrchestratorForRegion(region)
-      : undefined;
   // No `iam` region to ask, so no bucket policy can give a principal-bound key access.
-  if (!orchestrator || !supportsIamMethods(orchestrator.region))
-    return keys.filter((key) => key.type !== 'principal');
+  const withoutPrincipalKeys = () => keys.filter((key) => key.type !== 'principal');
+  if (!region || !isSupportedRegion(region, process.env.FILONE_STAGE!))
+    return withoutPrincipalKeys();
+  const orchestrator = getOrchestratorForRegion(region);
+  if (!isIamOrchestrator(orchestrator)) return withoutPrincipalKeys();
   const iam = orchestrator as ServiceOrchestrator;
   // Uses `isTenantReady`: a list must not create a tenant.
   const tenantId = iam.isTenantReady(await getOrgProfile(orgId));
   // No tenant or no policy on the bucket: no principal-bound key has access.
-  const stored = tenantId ? await iam.getBucketPolicy(tenantId, bucketName) : null;
+  const stored = tenantId ? await iam.getBucketPolicy(tenantId, { region, bucketName }) : null;
   return keys.filter(
     (key) =>
       key.type !== 'principal' ||

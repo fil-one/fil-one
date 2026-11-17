@@ -1,4 +1,5 @@
-import { useRef, useState, type SyntheticEvent } from 'react';
+import { useRef, useState } from 'react';
+import type { SyntheticEvent } from 'react';
 import { DownloadSimpleIcon, FileIcon, WarningCircleIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 
@@ -18,16 +19,12 @@ import {
   TEXT_PREVIEW_MAX_CHARS,
   type PreviewKind,
 } from '../lib/object-preview.js';
+import { getPreviewUrl } from '../lib/preview-url.js';
 import { queryKeys } from '../lib/query-client.js';
-import { batchPresign } from '../lib/use-presign.js';
 
-// The preview asks for a URL with the default lifetime of five minutes. A custom
-// lifetime would make it a shareable link, which trial accounts cannot mint. A
-// panel opened again after four minutes signs a new URL, and a player that
-// outlives its URL signs one when it next fails to load (see `MediaPreview`).
-const PREVIEW_URL_STALE_TIME = 4 * 60 * 1000;
-// The text is read once and keyed by the ETag, so it stays good far longer than the URL
-const PREVIEW_TEXT_STALE_TIME = 50 * 60 * 1000;
+// How long before a URL lapses the card treats it as lapsed, so a remount
+// fetches a fresh one rather than showing one about to expire.
+const PREVIEW_URL_REFRESH_MARGIN_MS = 60 * 1000;
 
 /** Why there is no preview, which decides what the placeholder says. */
 export type NoPreviewReason = 'unsupported' | 'too-large' | 'failed';
@@ -39,8 +36,11 @@ export type ObjectPreviewProps =
       kind: 'image' | 'video' | 'audio';
       url: string;
       fileName: string;
-      /** Signs a new URL after this one fails, as it does once it lapses. */
-      onRefreshUrl?: () => void;
+      /**
+       * Called when the media fails to load. Asks for a new URL and returns
+       * true when the current one has lapsed; false means the failure is real.
+       */
+      renewUrlIfLapsed: () => boolean;
     }
   | { state: 'ready'; kind: 'text'; text: string; truncated: boolean }
   | {
@@ -78,64 +78,52 @@ function ObjectPreviewBody(props: ObjectPreviewProps) {
   if (props.kind === 'text') {
     return <TextPreview text={props.text} truncated={props.truncated} />;
   }
-  return (
-    <MediaPreview
-      kind={props.kind}
-      url={props.url}
-      fileName={props.fileName}
-      onRefreshUrl={props.onRefreshUrl}
-    />
-  );
+  return <MediaPreview {...props} />;
 }
 
-/**
- * An image or player for a signed URL that lapses after a few minutes. Players
- * fetch as they play and seek, so a paused video can outlive its URL. When a
- * load fails, the preview asks for a new URL once and picks up where playback
- * stood. Failing again before anything loads means the file itself cannot be
- * shown.
- */
+/** Where a player stood when its URL lapsed, so it can carry on from there. */
+interface PlaybackPosition {
+  time: number;
+  playing: boolean;
+}
+
 function MediaPreview({
   kind,
   url,
   fileName,
-  onRefreshUrl,
+  renewUrlIfLapsed,
 }: {
   kind: 'image' | 'video' | 'audio';
   url: string;
   fileName: string;
-  onRefreshUrl?: () => void;
+  renewUrlIfLapsed: () => boolean;
 }) {
-  // A failure belongs to one URL, so stepping to another object, or a new URL
-  // for this one, gets a fresh attempt
-  const [failedUrl, setFailedUrl] = useState<string>();
-  // Set while waiting for the URL asked for after a failure; cleared once anything loads
-  const refreshing = useRef(false);
-  // Where playback stood when the URL lapsed, to return to once the new one loads
-  const resumeAt = useRef<number>(undefined);
+  const [failed, setFailed] = useState(false);
+  const resumeFrom = useRef<PlaybackPosition | null>(null);
 
-  const handleError = (event: SyntheticEvent<HTMLElement>) => {
-    if (refreshing.current || !onRefreshUrl) {
-      refreshing.current = false;
-      setFailedUrl(url);
+  // A player streams on demand, so its URL can lapse mid-play. The new URL
+  // reloads the element from the start, so the position is kept to resume at.
+  const handleError = (event: SyntheticEvent<HTMLImageElement | HTMLMediaElement>) => {
+    if (!renewUrlIfLapsed()) {
+      setFailed(true);
       return;
     }
-    refreshing.current = true;
-    if (event.currentTarget instanceof HTMLMediaElement) {
-      resumeAt.current = event.currentTarget.currentTime;
+    const element = event.currentTarget;
+    if (element instanceof HTMLMediaElement) {
+      resumeFrom.current = { time: element.currentTime, playing: !element.paused };
     }
-    onRefreshUrl();
   };
-  const handleLoad = () => {
-    refreshing.current = false;
-  };
-  const handleLoadedMetadata = (event: SyntheticEvent<HTMLMediaElement>) => {
-    refreshing.current = false;
-    if (resumeAt.current) event.currentTarget.currentTime = resumeAt.current;
-    resumeAt.current = undefined;
+  const resumePlayback = (event: SyntheticEvent<HTMLMediaElement>) => {
+    const position = resumeFrom.current;
+    if (!position) return;
+    resumeFrom.current = null;
+    const element = event.currentTarget;
+    element.currentTime = position.time;
+    // The browser may refuse to play without a fresh gesture; the controls stay
+    if (position.playing) element.play().catch(() => undefined);
   };
 
-  if (failedUrl === url) {
+  if (failed) {
     return <NoPreviewMessage />;
   }
   if (kind === 'audio') {
@@ -147,7 +135,7 @@ function MediaPreview({
           src={url}
           className="w-full"
           onError={handleError}
-          onLoadedMetadata={handleLoadedMetadata}
+          onLoadedMetadata={resumePlayback}
         >
           <track kind="captions" />
         </audio>
@@ -163,7 +151,6 @@ function MediaPreview({
           alt={fileName}
           className="max-h-96 max-w-full rounded-md object-contain"
           onError={handleError}
-          onLoad={handleLoad}
         />
       ) : (
         <video
@@ -173,7 +160,7 @@ function MediaPreview({
           src={url}
           className="max-h-96 max-w-full rounded-md"
           onError={handleError}
-          onLoadedMetadata={handleLoadedMetadata}
+          onLoadedMetadata={resumePlayback}
         >
           <track kind="captions" />
         </video>
@@ -280,31 +267,8 @@ export type ObjectPreviewCardProps = {
   onDownload: () => void;
 };
 
-type PreviewTarget = {
-  bucketName: string;
-  region: S3Region;
-  objectKey: string;
-  versionId?: string;
-};
-
-async function signPreviewUrl({
-  bucketName,
-  region,
-  objectKey,
-  versionId,
-}: PreviewTarget): Promise<string> {
-  const { items } = await batchPresign(region, [
-    { op: 'getObject', bucket: bucketName, key: objectKey, ...(versionId && { versionId }) },
-  ]);
-  return items[0].url;
-}
-
-// Signs its own URL rather than reusing the media one, which may have lapsed by the
-// time a cached text goes stale
-async function fetchPreviewText(
-  target: PreviewTarget,
-): Promise<{ text: string; truncated: boolean }> {
-  const response = await executePresignedUrl(await signPreviewUrl(target), 'GET');
+async function fetchPreviewText(url: string): Promise<{ text: string; truncated: boolean }> {
+  const response = await executePresignedUrl(url, 'GET');
   const text = await response.text();
   return {
     text: text.slice(0, TEXT_PREVIEW_MAX_CHARS),
@@ -325,26 +289,41 @@ export function ObjectPreviewCard({
 }: ObjectPreviewCardProps) {
   const kind = getPreviewKind(objectKey, contentType);
   const loadable = kind !== null && isWithinPreviewLimit(kind, sizeBytes);
-  const target = { bucketName, region, objectKey, versionId };
 
   const urlQuery = useQuery({
     queryKey: queryKeys.objectPreviewUrl(bucketName, objectKey, versionId),
-    enabled: loadable && kind !== 'text',
-    staleTime: PREVIEW_URL_STALE_TIME,
-    // A new URL reloads the player, so it changes only when the panel opens or a
-    // load fails, never because the window regained focus
+    enabled: loadable,
+    // The URL is short-lived, so its own expiry decides when it goes stale.
+    // A refocus or reconnect does not refetch: a new URL would reload a player
+    // the user paused, and `renewUrlIfLapsed` replaces one that lapses in use.
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
-    queryFn: () => signPreviewUrl(target),
+    staleTime: (query) => {
+      const expiresAt = query.state.data?.expiresAt;
+      return expiresAt ? Date.parse(expiresAt) - Date.now() - PREVIEW_URL_REFRESH_MARGIN_MS : 0;
+    },
+    queryFn: () => getPreviewUrl({ region, bucketName, objectKey, versionId }),
   });
+  const url = urlQuery.data?.url;
+  const renewUrlIfLapsed = () => {
+    const expiresAt = urlQuery.data?.expiresAt;
+    if (!expiresAt || Date.parse(expiresAt) - Date.now() > PREVIEW_URL_REFRESH_MARGIN_MS) {
+      return false;
+    }
+    void urlQuery.refetch();
+    return true;
+  };
 
   const textQuery = useQuery({
     // Without a version ID the key alone names whatever is latest, so the ETag
     // tells a cached body from the contents of a file overwritten since
     queryKey: [...queryKeys.objectPreviewUrl(bucketName, objectKey, versionId), 'text', etag],
-    enabled: loadable && kind === 'text',
-    staleTime: PREVIEW_TEXT_STALE_TIME,
-    queryFn: () => fetchPreviewText(target),
+    enabled: kind === 'text' && url !== undefined,
+    // The key carries the ETag, so a cached body stays true to the contents. A
+    // refetch could also run on a URL that has since lapsed.
+    staleTime: Infinity,
+    // `enabled` holds this back until the URL has arrived
+    queryFn: () => fetchPreviewText(url ?? ''),
   });
 
   if (!loadable) {
@@ -376,15 +355,15 @@ export function ObjectPreviewCard({
       <ObjectPreview state="loading" kind="text" />
     );
   }
-  return urlQuery.data ? (
+  return url ? (
     <ObjectPreview
       // A new object starts with no failure or playback position from the last one
       key={`${objectKey}\n${versionId ?? ''}`}
       state="ready"
       kind={kind}
-      url={urlQuery.data}
+      url={url}
       fileName={getObjectFileName(objectKey)}
-      onRefreshUrl={() => void urlQuery.refetch()}
+      renewUrlIfLapsed={renewUrlIfLapsed}
     />
   ) : (
     <ObjectPreview state="loading" kind={kind} />

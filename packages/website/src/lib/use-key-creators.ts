@@ -14,9 +14,9 @@ export interface KeyCreator {
  * Resolve the member who minted a key, for orgs with somebody else in them.
  *
  * `undefined` for a solo org, which is what leaves the column off: a column
- * reading the same name on every row is noise. It matters at all because
- * removing a member does not revoke their keys (FIL-1021), so this is the
- * column that says which keys leave with them.
+ * reading the same name on every row is noise. It matters because removing a
+ * member revokes every key they created (FIL-1021), so this is the column that
+ * says which keys go with them.
  *
  * `members.read` is held by every role, so the read asks nothing the caller
  * cannot have, and a failed one simply resolves to `undefined`.

@@ -109,15 +109,19 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
         objectKey={objectKey}
         versionState={versionState}
         onBack={returnToFolder}
+        // The actions hide on a failed load: the object may be gone, and S3
+        // reports success for deleting or presigning a key that does not exist
         actions={
-          <ObjectHeaderActions
-            isVersion={Boolean(versionId)}
-            canShare={canShare}
-            mayDelete={mayDelete}
-            onDownload={download}
-            onShare={() => setShareOpen(true)}
-            onDelete={() => setConfirmDeleteOpen(true)}
-          />
+          !isError && (
+            <ObjectHeaderActions
+              isVersion={Boolean(versionId)}
+              canShare={canShare}
+              mayDelete={mayDelete}
+              onDownload={download}
+              onShare={() => setShareOpen(true)}
+              onDelete={() => setConfirmDeleteOpen(true)}
+            />
+          )
         }
       />
 
@@ -126,34 +130,39 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
         <div className="flex w-full max-w-[520px] shrink-0 flex-col gap-6">
           {isError ? (
             <Alert variant="red" description={error?.message ?? 'Failed to load object details'} />
-          ) : isPending ? (
-            <ObjectBodySkeleton />
           ) : (
             <>
-              {metadata.retention?.mode === 'COMPLIANCE' &&
-                isRetentionActive(metadata.retention) && (
-                  <Alert
-                    variant="red"
-                    title="Compliance retention lock"
-                    description={`This object is locked until ${formatRetainUntil(metadata.retention.retainUntilDate)}. It cannot be deleted before this date.`}
+              {isPending ? (
+                <ObjectBodySkeleton />
+              ) : (
+                <>
+                  {metadata.retention?.mode === 'COMPLIANCE' &&
+                    isRetentionActive(metadata.retention) && (
+                      <Alert
+                        variant="red"
+                        title="Compliance retention lock"
+                        description={`This object is locked until ${formatRetainUntil(metadata.retention.retainUntilDate)}. It cannot be deleted before this date.`}
+                      />
+                    )}
+                  <ObjectPreviewCard
+                    bucketName={bucketName}
+                    region={region}
+                    objectKey={objectKey}
+                    versionId={versionId}
+                    etag={metadata.etag}
+                    sizeBytes={metadata.sizeBytes}
+                    contentType={metadata.contentType}
+                    onDownload={download}
                   />
-                )}
-              <ObjectPreviewCard
-                bucketName={bucketName}
-                region={region}
-                objectKey={objectKey}
-                versionId={versionId}
-                etag={metadata.etag}
-                sizeBytes={metadata.sizeBytes}
-                contentType={metadata.contentType}
-                onDownload={download}
-              />
-              <ObjectDetailsCard
-                s3Uri={`s3://${bucketName}/${objectKey}`}
-                metadata={metadata}
-                versionId={versionState.shownVersionId}
-                objectLockEnabled={bucketQuery.data?.bucket.objectLockEnabled ?? false}
-              />
+                  <ObjectDetailsCard
+                    s3Uri={`s3://${bucketName}/${objectKey}`}
+                    metadata={metadata}
+                    versionId={versionState.shownVersionId}
+                    objectLockEnabled={bucketQuery.data?.bucket.objectLockEnabled ?? false}
+                  />
+                </>
+              )}
+              {/* The history has its own query, so it does not wait for the metadata */}
               {versionsQuery.isError && !versionsQuery.data ? (
                 <Alert
                   variant="red"

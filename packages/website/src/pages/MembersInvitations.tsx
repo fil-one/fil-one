@@ -14,10 +14,10 @@ import { Alert } from '../components/Alert';
 import { Button } from '../components/Button';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 import { Heading } from '../components/Heading/Heading';
-import { InvitationsTable } from '../components/InvitationsTable';
+import { INVITATION_COLUMNS, InvitationsTable } from '../components/InvitationsTable';
 import { InviteMemberForm } from '../components/InviteMemberForm';
 import { Modal, ModalHeader } from '../components/Modal';
-import { Spinner } from '../components/Spinner';
+import { ACTIONS_COLUMN, TableSkeleton } from '../components/Table/TableSkeleton';
 import { useToast } from '../components/Toast';
 import { errorCodeOf, errorMessageOf } from '../lib/api.js';
 import { createInvitation, listInvitations, revokeInvitation } from '../lib/members-api.js';
@@ -374,6 +374,7 @@ export function MembersInvitations({
         isError={pending.isError}
         hasData={pending.data !== undefined}
         errorMessage={pending.error?.message}
+        mayManage={scope.mayManage}
         mayManageTarget={scope.mayManageTarget}
         onInvite={scope.mayInvite ? openInvite : undefined}
         onRevoke={(invitation) => revoke.mutate(invitation)}
@@ -398,6 +399,7 @@ function InvitationsPanel({
   isError,
   hasData,
   errorMessage,
+  mayManage,
   mayManageTarget,
   onInvite,
   onRevoke,
@@ -409,6 +411,8 @@ function InvitationsPanel({
   isError: boolean;
   hasData: boolean;
   errorMessage?: string;
+  /** Whether the caller manages members, and so gets row actions on most lists. */
+  mayManage: boolean;
   mayManageTarget: (targetRole: string) => boolean;
   /** Opens the invite dialog, when this caller may send one. Absent otherwise. */
   onInvite?: () => void;
@@ -417,11 +421,8 @@ function InvitationsPanel({
   pendingInviteIds: ReadonlySet<string>;
 }) {
   if (isPending) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <Spinner ariaLabel="Loading invitations" size={24} />
-      </div>
-    );
+    const columns = mayManage ? [...INVITATION_COLUMNS, ACTIONS_COLUMN] : INVITATION_COLUMNS;
+    return <TableSkeleton columns={columns} rows={3} aria-label="Loading invitations" />;
   }
 
   if (isError && !hasData) {

@@ -57,6 +57,18 @@ describe('get-bucket-policy baseHandler', () => {
     });
   });
 
+  it('asks the region the request names, not the first the network serves', async () => {
+    // A bucket is served by one region, and no other region's gateway knows it,
+    // so the policy read has to be signed for the region the caller named.
+    iam.seedPolicy(TENANT_ID, BUCKET_NAME, grantGetObjectToUser);
+
+    await baseHandler(buildGetEvent(IAM_REGION));
+
+    expect(iam.calls).toStrictEqual([
+      { method: 'getBucketPolicy', tenantId: TENANT_ID, target: BUCKET_NAME, region: IAM_REGION },
+    ]);
+  });
+
   it('answers 404 POLICY_NOT_FOUND for a bucket with no policy', async () => {
     const result = await baseHandler(buildGetEvent());
 

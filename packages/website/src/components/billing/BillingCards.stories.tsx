@@ -132,6 +132,46 @@ export const TabLayout: StoryObj = {
   ),
 };
 
+/** The self-serve price with a promo code applied when the card was added. */
+const WITH_PROMO_CODE = subscription({
+  ...SELF_SERVE,
+  discounts: [
+    {
+      promotionCode: 'LAUNCH20',
+      duration: 'repeating',
+      durationInMonths: 3,
+      endsAt: '2026-11-12T00:00:00Z',
+      percentOff: 20,
+    },
+  ],
+});
+
+/**
+ * A promo code on the plan: named under the rate it changes, and taken off the
+ * estimate, whose caption says so. Usage is under the minimum here so the
+ * caption shows both reasons the total differs from usage times the rate.
+ */
+export const WithPromoCode: StoryObj = {
+  render: () => (
+    <div className="flex max-w-4xl flex-col gap-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <PlanCard subscription={WITH_PROMO_CODE} mayManage onManage={noop} onChoosePlan={noop} />
+        <PaymentMethodCard
+          billing={{ subscription: WITH_PROMO_CODE, paymentMethod: CARD }}
+          mayManage
+          onManage={noop}
+          onAddCard={noop}
+        />
+      </div>
+      <UsageCard
+        subscription={WITH_PROMO_CODE}
+        storageBytesUsed={0.4 * TB_BYTES}
+        egressBytesUsed={0.02 * TB_BYTES}
+      />
+    </div>
+  ),
+};
+
 /**
  * The tab with its help rail, heading included, which is how the page actually
  * lays out: the heading spans the row so the rail starts level with the cards

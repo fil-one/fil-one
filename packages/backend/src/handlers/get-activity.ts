@@ -9,7 +9,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import { keyScope, withinScope } from '../lib/key-scope.ts';
 import type { KeyScope } from '../lib/key-scope.ts';
-import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import type { NetworkOrchestrator } from '../lib/service-orchestrator.ts';
 import {
   getRequestDeadline,
   requestDeadlineMiddleware,
@@ -22,7 +22,7 @@ import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
-import { type ProvisionedRegion, getProvisionedRegions } from '../lib/region-helpers.ts';
+import { type ProvisionedNetwork, getProvisionedNetworks } from '../lib/region-helpers.ts';
 import { reportMetric } from '../lib/metrics.ts';
 
 const dynamo = getDynamoClient();
@@ -96,12 +96,12 @@ export async function baseHandler(
   // fails its own leg (caught in listBucketActivities) instead of holding the
   // whole handler until the Lambda timeout kills it with nothing logged.
   const signal = getRequestDeadline(event);
-  // The dashboard aggregates activity across every region the org is provisioned
-  // in, so resolve the ready tenant on each available orchestrator.
-  const { result: regions, durationMs: resolveRegionsMs } = await timed(
+  // The dashboard aggregates activity across every network the org is provisioned
+  // on, so resolve the ready tenant on each available orchestrator.
+  const { result: networks, durationMs: resolveNetworksMs } = await timed(
     event,
-    'resolveRegions',
-    () => getProvisionedRegions(orgId),
+    'resolveNetworks',
+    () => getProvisionedNetworks(orgId),
   );
 
   const [
@@ -109,7 +109,7 @@ export async function baseHandler(
     { result: keyActivities, durationMs: keyActivitiesMs },
   ] = await Promise.all([
     timed(event, 'fetchBucketActivities', () =>
-      fetchBucketActivities(event, orgId, regions, signal),
+      fetchBucketActivities(event, orgId, networks, signal),
     ),
     // Timed only when it runs: a phase duration emitted for a fetch that was
     // skipped reports a 0ms DynamoDB query that never happened.
@@ -140,13 +140,13 @@ export async function baseHandler(
   // emits neither the metric nor this line; the request-deadline log names it.
   console.log('[get-activity] completed', {
     orgId,
-    regionCount: regions.length,
-    regions: regions.map((r) => r.orchestrator.region),
+    networkCount: networks.length,
+    orchestrators: networks.map((n) => n.orchestrator.id),
     bucketActivityCount: bucketActivities.length,
     keyActivityCount: keyActivities.length,
     durationsMs: {
       total: Math.round(totalMs),
-      resolveRegions: Math.round(resolveRegionsMs),
+      resolveNetworks: Math.round(resolveNetworksMs),
       fetchBucketActivities: Math.round(bucketActivitiesMs),
       fetchAccessKeyActivities: Math.round(keyActivitiesMs),
     },
@@ -158,12 +158,12 @@ export async function baseHandler(
 async function fetchBucketActivities(
   event: AuthenticatedEvent,
   orgId: string,
-  regions: ProvisionedRegion[],
+  networks: ProvisionedNetwork[],
   signal: AbortSignal,
 ): Promise<RecentActivity[]> {
   const perRegion = await Promise.all(
-    regions.map(({ orchestrator, tenantId }) =>
-      trackRequestStep(event, `listBuckets:${orchestrator.region}`, () =>
+    networks.map(({ orchestrator, tenantId }) =>
+      trackRequestStep(event, `listBuckets:${orchestrator.id}`, () =>
         listBucketActivities(orgId, orchestrator, tenantId, signal),
       ),
     ),
@@ -173,7 +173,7 @@ async function fetchBucketActivities(
 
 async function listBucketActivities(
   orgId: string,
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
   tenantId: string,
   signal: AbortSignal,
 ): Promise<RecentActivity[]> {
@@ -182,7 +182,7 @@ async function listBucketActivities(
   try {
     const buckets = await orchestrator.listBuckets(tenantId, undefined, { signal });
     const durationMs = performance.now() - start;
-    reportDuration('ListBucketsDuration', { region: orchestrator.region }, durationMs);
+    reportDuration('ListBucketsDuration', { orchestrator: orchestrator.id }, durationMs);
     // bucketCount vs durationMs exposes the per-bucket cost: a duration that
     // grows with bucketCount points at an N+1 in the orchestrator's listBuckets.
     // This line ships only on non-production stages: production logs at WARN
@@ -192,7 +192,7 @@ async function listBucketActivities(
     console.log('[get-activity] listed buckets', {
       orgId,
       tenantId,
-      region: orchestrator.region,
+      orchestratorId: orchestrator.id,
       bucketCount: buckets.length,
       durationMs: Math.round(durationMs),
     });
@@ -214,13 +214,13 @@ async function listBucketActivities(
       console.warn('[get-activity] AccessDenied listing buckets — tenant may have no buckets yet', {
         orgId,
         tenantId,
-        region: orchestrator.region,
+        orchestratorId: orchestrator.id,
       });
     } else {
       console.error('[get-activity] Failed to list buckets', {
         orgId,
         tenantId,
-        region: orchestrator.region,
+        orchestratorId: orchestrator.id,
         err,
       });
     }

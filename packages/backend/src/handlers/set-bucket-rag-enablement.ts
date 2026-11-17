@@ -9,7 +9,7 @@ import {
   usesRagEngine,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import type { NetworkOrchestrator } from '../lib/service-orchestrator.ts';
 import { checkIndexingAccess } from '../lib/rag-indexing-access.ts';
 import { getOrgProfile, isOrgDeleting } from '../lib/org-profile.ts';
 import {
@@ -122,7 +122,7 @@ export async function baseHandler(
   const memberId = getScopedMemberId(membership?.role, userId);
   // Enforce tenant/org scope: a bucket the caller's tenant does not own, or a
   // scoped member cannot reach, is 404.
-  if (!(await orchestrator.getBucket(tenantId, bucketName, memberId))) {
+  if (!(await orchestrator.getBucket(tenantId, { region, bucketName }, memberId))) {
     return new ResponseBuilder()
       .status(404)
       .body<ErrorResponse>({ message: 'Bucket not found' })
@@ -166,7 +166,7 @@ export async function baseHandler(
 
 /** Why this bucket cannot be indexed for this caller, or undefined when it can. */
 async function checkCanIndex(args: {
-  orchestrator: RegionOrchestrator;
+  orchestrator: NetworkOrchestrator;
   tenantId: string;
   bucketName: string;
   memberId: string | undefined;
@@ -196,7 +196,7 @@ function refuseWithoutEngine(region: S3Region): APIGatewayProxyStructuredResultV
  */
 async function startEngineSync(
   response: BucketRagEnablementResponse,
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
   tenantId: string,
   bucket: { orgId: string; region: S3Region; bucketName: string; enabled: boolean },
 ): Promise<BucketRagEnablementResponse> {
