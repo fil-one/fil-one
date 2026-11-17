@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { CaretDownIcon, CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import type { S3Region } from '@filone/shared';
@@ -5,7 +6,7 @@ import { formatRegion, getAvailableNetworks } from '@filone/shared';
 
 import { FILONE_STAGE } from '../env.js';
 import type { InputSize } from './Input';
-import { RegionFlag } from './RegionFlag';
+import { RegionLine } from './RegionLine';
 
 type NetworkRegionSelectProps = {
   id?: string;
@@ -19,46 +20,38 @@ type NetworkRegionSelectProps = {
 // The same heights and insets as `RegionSelect`, which this sits beside.
 const SIZES: Record<InputSize, { control: string; caret: { inset: string; size: number } }> = {
   sm: {
-    control: 'h-(--control-height-sm) pr-7 pl-2.5 text-ui',
+    control: 'min-h-(--control-height-sm) py-1 pr-7 pl-2.5 text-ui',
     caret: { inset: 'right-2', size: 12 },
   },
   md: {
-    control: 'h-(--control-height-md) pr-9 pl-3 text-sm',
+    control: 'min-h-(--control-height-md) py-1.5 pr-9 pl-3 text-sm',
     caret: { inset: 'right-3', size: 14 },
   },
   lg: {
-    control: 'h-(--control-height-lg) pr-10 pl-4 text-sm',
+    control: 'min-h-(--control-height-lg) py-2 pr-10 pl-4 text-sm',
     caret: { inset: 'right-4', size: 14 },
   },
 };
 
-/** The regions one network serves, read as a list: "eu-central-3, pilot-mad". */
+/** The regions one network serves, read as a list: "eu-central-3, us-east-9". */
 function networkRegions(regions: readonly S3Region[]): string {
   return regions.join(', ');
 }
 
-/** A network's flags and the regions it serves. */
-function NetworkLine({
-  regions,
-  isCodeInColumn,
-}: {
-  regions: readonly S3Region[];
-  isCodeInColumn: boolean;
-}) {
+/**
+ * The closed field: the rows of the network that was chosen, as the list drew
+ * them. A network serving several regions is several lines, and the control
+ * grows to hold them, because the regions are the answer to what the field
+ * asks and abbreviating them to codes loses the names.
+ */
+function SelectedNetwork({ regions }: { regions: readonly S3Region[] }) {
   return (
     <>
-      {/* The codes beside the flags already say where the network reaches, so
-          the flags stay out of the accessible name. */}
-      <span aria-hidden="true" className="flex gap-1 group-data-disabled:opacity-50">
-        {regions.map((region) => (
-          <RegionFlag key={region} region={region} />
-        ))}
-      </span>
-      <span
-        className={`truncate text-zinc-500 group-data-disabled:text-zinc-400 ${isCodeInColumn ? 'ml-auto pl-3' : ''}`}
-      >
-        {networkRegions(regions)}
-      </span>
+      {regions.map((region) => (
+        <span key={region} className="flex w-full items-center gap-2">
+          <RegionLine region={region} isCodeInColumn />
+        </span>
+      ))}
     </>
   );
 }
@@ -67,10 +60,10 @@ function NetworkLine({
  * The regions an access key will work in, chosen one network at a time.
  *
  * A key belongs to a network, not to a region: its tenant is region-free, so
- * the key works at every region that network serves. The field is labelled for
- * the regions because that is what the user is choosing between, and it carries
- * a region as its value so callers keep naming one; every region of a network
- * selects that network.
+ * the key works at every region that network serves. The list is a row per
+ * region, which is what the user recognises, divided into the networks they
+ * sit on; picking any row takes the whole network, and every region on it is
+ * ticked. The field carries a region as its value so callers keep naming one.
  */
 export function NetworkRegionSelect({
   id,
@@ -87,19 +80,15 @@ export function NetworkRegionSelect({
   const onlyOne = networks.length === 1;
 
   return (
-    <Listbox
-      value={selected?.regions[0] ?? value}
-      onChange={onChange}
-      disabled={disabled || onlyOne}
-    >
+    <Listbox value={value} onChange={onChange} disabled={disabled || onlyOne}>
       {/* A button takes its name from its label alone, which would leave the
           chosen regions unannounced, so the name carries both. */}
       <ListboxButton
         id={id}
         aria-label={`Regions, ${selected ? networkRegions(selected.regions) : formatRegion(value)}`}
-        className={`group relative flex w-full items-center gap-2 rounded-md border border-(--input-border-color) bg-white text-left ${SIZES[size].control} text-(--color-text-base) transition-colors duration-150 focus-visible:brand-outline data-disabled:cursor-not-allowed data-disabled:bg-zinc-100 data-disabled:text-zinc-400 ${className ?? ''}`}
+        className={`group relative flex w-full flex-col justify-center gap-3 rounded-md border border-(--input-border-color) bg-white text-left ${SIZES[size].control} text-(--color-text-base) transition-colors duration-150 focus-visible:brand-outline data-disabled:cursor-not-allowed data-disabled:bg-zinc-100 data-disabled:text-zinc-400 ${className ?? ''}`}
       >
-        <NetworkLine regions={selected?.regions ?? [value]} isCodeInColumn={false} />
+        <SelectedNetwork regions={selected?.regions ?? [value]} />
         <span
           className={`pointer-events-none absolute inset-y-0 flex items-center text-zinc-400 ${SIZES[size].caret.inset}`}
         >
@@ -111,23 +100,54 @@ export function NetworkRegionSelect({
         transition
         className="z-50 w-(--button-width) rounded-lg border border-zinc-200 bg-white p-1 shadow-md outline-none transition-opacity duration-200 ease-out data-closed:opacity-0 data-leave:ease-in"
       >
-        {networks.map((network) => (
-          <ListboxOption
-            key={network.id}
-            value={network.regions[0]}
-            aria-label={networkRegions(network.regions)}
-            data-testid="network-option"
-            data-network={network.id}
-            className="group flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-ui text-zinc-900 select-none data-focus:bg-zinc-100"
-          >
-            <NetworkLine regions={network.regions} isCodeInColumn />
-            <CheckIcon
-              size={13}
-              weight="bold"
-              aria-hidden="true"
-              className="shrink-0 text-brand-600 invisible group-data-selected:visible"
-            />
-          </ListboxOption>
+        {networks.map((network, index) => (
+          <Fragment key={network.id}>
+            {/* The rule is decoration: the field's description says the key
+                works in the regions it names, and choosing one announces the
+                whole set, so nothing rests on seeing the divider. */}
+            {index > 0 && <hr aria-hidden="true" className="my-1 border-zinc-200" />}
+            {/* The highlight is on the group, not the row under the pointer:
+                picking any row takes the whole network, so the rows it would
+                take are what lights up.
+                The pointer lights it with a plain hover, which holds while the
+                pointer is anywhere in the group; driving it from the active
+                option instead would blink at every row boundary, where the
+                option being left drops `data-focus` before the one being
+                entered takes it. Keyboard focus moves one option at a time and
+                has no such gap, so it reads the group off that option. */}
+            <div className="relative rounded-md hover:bg-zinc-100 has-[[data-focus]]:bg-zinc-100">
+              {network.regions.map((region) => (
+                // Named outright: built from its parts, the name would run
+                // "Europe (France)eu-west-1".
+                <ListboxOption
+                  key={region}
+                  value={region}
+                  aria-label={formatRegion(region)}
+                  data-testid="network-region-option"
+                  data-network={network.id}
+                  data-region={region}
+                  // The right padding is the tick's column, left clear on
+                  // every network so the codes line up down the list whether
+                  // or not a network is the chosen one.
+                  className="group flex cursor-pointer items-center gap-2 rounded-md py-1.5 pr-8 pl-3 text-ui text-zinc-900 select-none"
+                >
+                  <RegionLine region={region} isCodeInColumn />
+                </ListboxOption>
+              ))}
+              {/* One tick for the network, centred on its rows: what the key
+                  reaches is the network, and a tick per region would read as
+                  several separate choices. */}
+              {network.id === selected?.id && (
+                <CheckIcon
+                  size={13}
+                  weight="bold"
+                  aria-hidden="true"
+                  data-testid="network-tick"
+                  className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-brand-600"
+                />
+              )}
+            </div>
+          </Fragment>
         ))}
       </ListboxOptions>
     </Listbox>
