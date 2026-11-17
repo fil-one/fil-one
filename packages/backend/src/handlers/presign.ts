@@ -365,7 +365,7 @@ export async function baseHandler(
   );
   if (accessRefused) return accessRefused;
 
-  const s3Ctx = await orchestrator.getS3ClientContext(tenantId);
+  const s3Ctx = await orchestrator.getS3ClientContext(tenantId, region);
   const ctx = s3Ctx.presignEndpointUrl
     ? { ...s3Ctx, endpointUrl: s3Ctx.presignEndpointUrl }
     : s3Ctx;

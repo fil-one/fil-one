@@ -15,6 +15,7 @@ import {
 } from '@filone/shared';
 
 import { canBulkDelete, type BulkDeleteRefusalReason } from '../lib/bulk-delete-access.ts';
+import type { BucketRef } from '../lib/bucket-orchestrator.ts';
 import {
   BulkDeleteJobExistsError,
   createBulkDeleteJob,
@@ -79,10 +80,10 @@ function buildBulkDeleteRefusalResponse(
 async function readVersioningStatus(
   orchestrator: RegionOrchestrator,
   tenantId: string,
-  bucketName: string,
+  { region, bucketName }: BucketRef,
 ): Promise<BucketVersioningStatus | undefined> {
   try {
-    const s3 = createS3Client(await orchestrator.getS3ClientContext(tenantId));
+    const s3 = createS3Client(await orchestrator.getS3ClientContext(tenantId, region));
     return await getBucketVersioningStatus(s3, bucketName);
   } catch (err) {
     if (isNoSuchBucketError(err)) return undefined;
@@ -132,7 +133,10 @@ export async function baseHandler(
 
   const { prefix, scope, idempotencyKey } = parsed.data;
 
-  const versioningStatus = await readVersioningStatus(orchestrator, tenantId, bucketName);
+  const versioningStatus = await readVersioningStatus(orchestrator, tenantId, {
+    region,
+    bucketName,
+  });
   if (!versioningStatus) return buildBucketNotFoundResponse();
 
   const memberId = getScopedMemberId(membership?.role, userId);
