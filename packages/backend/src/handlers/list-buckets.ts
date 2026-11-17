@@ -82,7 +82,14 @@ export async function baseHandler(
     if (result.status === 'fulfilled') {
       // Bucket Intelligence keeps its Lance datasets in companion buckets on
       // Forge storage; they hold no user data and are not the user's to manage.
-      buckets.push(...result.value.filter((bucket) => !isRagCompanionBucket(bucket.bucketName)));
+      // A network answers for every region it serves, so a region filter is
+      // applied to its buckets here rather than by skipping the call.
+      buckets.push(
+        ...result.value.filter(
+          (bucket) =>
+            !isRagCompanionBucket(bucket.bucketName) && (!region || bucket.region === region),
+        ),
+      );
       return;
     }
     const { orchestrator, tenantId } = ready[index];
@@ -96,7 +103,11 @@ export async function baseHandler(
       error: result.reason,
     });
     failedOrchestratorCalls++;
-    unavailableRegions.push(...orchestrator.regions);
+    // Every region the network serves is unavailable with it, or just the one
+    // asked for when the request was narrowed to it.
+    unavailableRegions.push(
+      ...orchestrator.regions.filter((served) => !region || served === region),
+    );
   });
 
   // Every provisioned network is down: an empty 200 renders as "No buckets yet" over a real
