@@ -41,7 +41,7 @@ import { requireOrgMembershipMiddleware, requirePermission } from '../middleware
 import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
-import { orchestratorSupportsIamMethods } from '../lib/service-orchestrator-ids.ts';
+import { isIamOrchestrator } from '../lib/service-orchestrator-ids.ts';
 
 const PRESIGN_EXPIRY_SECONDS = 300;
 const MAX_GET_OBJECT_EXPIRY_SECONDS = 604800;
@@ -132,7 +132,7 @@ async function checkMemberBucketAccess(
   userId: string | undefined,
   ops: PresignOp[],
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  if (!userId || !orchestratorSupportsIamMethods(orchestrator)) return undefined;
+  if (!userId || !isIamOrchestrator(orchestrator)) return undefined;
   const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(tenantId, userId);
   const grantedBucketActions = new Map<string, Set<PolicyAction>>(
     access.map((entry) => [entry.bucketName, new Set(entry.actions)]),

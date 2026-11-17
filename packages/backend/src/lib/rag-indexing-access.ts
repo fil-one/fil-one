@@ -1,7 +1,7 @@
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from './response-builder.ts';
-import { orchestratorSupportsIamMethods } from './service-orchestrator-ids.ts';
+import { isIamOrchestrator } from './service-orchestrator-ids.ts';
 import type { RegionOrchestrator, ServiceOrchestrator } from './service-orchestrator.ts';
 
 /**
@@ -18,7 +18,7 @@ export async function checkIndexingAccess(
   bucketName: string,
   memberId: string | undefined,
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  if (!memberId || !orchestratorSupportsIamMethods(orchestrator)) return undefined;
+  if (!memberId || !isIamOrchestrator(orchestrator)) return undefined;
   const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(
     tenantId,
     memberId,

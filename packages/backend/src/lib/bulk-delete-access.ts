@@ -7,7 +7,7 @@
 import { BulkDeleteScope, type PolicyAction } from '@filone/shared';
 
 import type { BucketVersioningStatus } from './s3-bucket-operations.ts';
-import { orchestratorSupportsIamMethods } from './service-orchestrator-ids.ts';
+import { isIamOrchestrator } from './service-orchestrator-ids.ts';
 import type { RegionOrchestrator, ServiceOrchestrator } from './service-orchestrator.ts';
 
 /**
@@ -57,7 +57,7 @@ export async function canBulkDelete(
   memberId: string | undefined,
   target: BulkDeleteTarget,
 ): Promise<BulkDeleteAccess> {
-  if (!memberId || !orchestratorSupportsIamMethods(orchestrator)) return { ok: true };
+  if (!memberId || !isIamOrchestrator(orchestrator)) return { ok: true };
   // Every network serving the iam access model has a ServiceOrchestrator, which
   // the compiler cannot tell from the access-model check.
   const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(

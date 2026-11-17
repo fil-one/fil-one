@@ -39,7 +39,7 @@ export function orchestratorIdForRegion(region: string): string | undefined {
  * these regions and its buckets may live in any of them. Pure: it reads no
  * secret and builds nothing, so the console-facing key mapping can use it.
  */
-export function regionsForOrchestrator(id: string, stage: StageLike): S3Region[] {
+export function getRegionsForOrchestrator(id: string, stage: StageLike): S3Region[] {
   return getAvailableRegions(stage).filter((region) => ORCHESTRATOR_ID_BY_REGION[region] === id);
 }
 
@@ -49,8 +49,6 @@ export function regionsForOrchestrator(id: string, stage: StageLike): S3Region[]
  * network, so every region it serves answers the same; the registry test holds
  * every built orchestrator to that.
  */
-export function orchestratorSupportsIamMethods(orchestrator: {
-  regions: NonEmptyArray<S3Region>;
-}): boolean {
+export function isIamOrchestrator(orchestrator: { regions: NonEmptyArray<S3Region> }): boolean {
   return supportsIamMethods(orchestrator.regions[0]);
 }

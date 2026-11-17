@@ -5,7 +5,7 @@
 // user sends the same request again.
 
 import type { S3Region } from '@filone/shared';
-import { orchestratorSupportsIamMethods } from './service-orchestrator-ids.ts';
+import { isIamOrchestrator } from './service-orchestrator-ids.ts';
 import { IamRegionRefusedError } from './errors.ts';
 import { getOrgProfile } from './org-profile.ts';
 import type { OrgProfileItem } from './org-profile.ts';
@@ -17,7 +17,7 @@ function getReadyIamOrchestrators(
   orgProfile: OrgProfileItem | undefined,
 ): Array<{ orchestrator: ServiceOrchestrator; tenantId: string }> {
   return getAvailableOrchestrators().flatMap((candidate) => {
-    if (!orchestratorSupportsIamMethods(candidate)) return [];
+    if (!isIamOrchestrator(candidate)) return [];
     const orchestrator = candidate as ServiceOrchestrator;
     const tenantId = orchestrator.isTenantReady(orgProfile);
     return tenantId ? [{ orchestrator, tenantId }] : [];
@@ -69,7 +69,7 @@ export async function registerMemberPrincipal({
   orgId: string;
   userId: string;
 }): Promise<void> {
-  if (!getAvailableOrchestrators().some(orchestratorSupportsIamMethods)) return;
+  if (!getAvailableOrchestrators().some(isIamOrchestrator)) return;
   const orgProfile = await getOrgProfile(orgId, { consistentRead: true });
   await onEveryReadyIamRegion('register', orgProfile, userId, (orchestrator, tenantId) =>
     orchestrator.syncMember(tenantId, userId),

@@ -25,8 +25,8 @@ import {
 } from './service-orchestrator-registry.ts';
 import {
   ORCHESTRATOR_ID_BY_REGION,
-  orchestratorSupportsIamMethods,
-  regionsForOrchestrator,
+  isIamOrchestrator,
+  getRegionsForOrchestrator,
 } from './service-orchestrator-ids.ts';
 import { supportsIamMethods } from '@filone/shared';
 
@@ -101,14 +101,14 @@ describe('findOrchestratorById', () => {
   });
 });
 
-describe('regionsForOrchestrator', () => {
+describe('getRegionsForOrchestrator', () => {
   it.each([
     [Stage.Production, 'aurora', [S3Region.EuWest1]],
     [Stage.Production, 'fth', [S3Region.UsEast1]],
     [Stage.Staging, 'forge', [S3Region.EuCentral3]],
     [Stage.Staging, 'forgeDev', [S3Region.UsEast9]],
   ])('lists what %s serves for %s', (stage, id, expected) => {
-    expect(regionsForOrchestrator(id, stage)).toStrictEqual(expected);
+    expect(getRegionsForOrchestrator(id, stage)).toStrictEqual(expected);
   });
 
   it.each([
@@ -117,7 +117,7 @@ describe('regionsForOrchestrator', () => {
     [Stage.Production, 'forgeDev'],
     [Stage.Staging, 'nope'],
   ])('lists nothing for %s / %s', (stage, id) => {
-    expect(regionsForOrchestrator(id, stage)).toStrictEqual([]);
+    expect(getRegionsForOrchestrator(id, stage)).toStrictEqual([]);
   });
 });
 
@@ -133,7 +133,7 @@ describe.each([Stage.Staging, Stage.Production])('built orchestrators in %s', (s
     for (const orchestrator of getAvailableOrchestrators()) {
       expect({ id: orchestrator.id, regions: orchestrator.regions }).toStrictEqual({
         id: orchestrator.id,
-        regions: regionsForOrchestrator(orchestrator.id, stage),
+        regions: getRegionsForOrchestrator(orchestrator.id, stage),
       });
     }
   });
@@ -150,7 +150,7 @@ describe.each([Stage.Staging, Stage.Production])('built orchestrators in %s', (s
   });
 });
 
-describe('orchestratorSupportsIamMethods', () => {
+describe('isIamOrchestrator', () => {
   // The access model belongs to the network, so reading it off any one of its
   // regions has to give the same answer. Asking the first region is only
   // sound while that holds.
@@ -159,7 +159,7 @@ describe('orchestratorSupportsIamMethods', () => {
     for (const orchestrator of getAvailableOrchestrators()) {
       const perRegion = orchestrator.regions.map(supportsIamMethods);
       expect(new Set(perRegion).size).toBe(1);
-      expect(orchestratorSupportsIamMethods(orchestrator)).toBe(perRegion[0]);
+      expect(isIamOrchestrator(orchestrator)).toBe(perRegion[0]);
     }
   });
 });
