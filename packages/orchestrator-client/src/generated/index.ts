@@ -33,7 +33,6 @@ export type {
   CreatedAccessKey,
   CreatePrincipalAccessKeyRequest,
   CreateServiceAccessKeyRequest,
-  CreateTenantRequest,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdData,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdError,
   DeleteTenantsByTenantIdAccessKeysByAccessKeyIdErrors,
