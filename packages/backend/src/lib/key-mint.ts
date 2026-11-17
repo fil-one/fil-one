@@ -21,7 +21,7 @@ import {
 } from './membership-changes.ts';
 import { resolveMembership } from './org-membership.ts';
 import { ResponseBuilder } from './response-builder.ts';
-import type { RegionOrchestrator } from './service-orchestrator.ts';
+import type { NetworkOrchestrator } from './service-orchestrator.ts';
 
 /**
  * The half of a mint that happens after the vendor has answered.
@@ -51,7 +51,7 @@ export interface MintedKey {
   accessKeyId: string;
   keyName: string;
   /** The network that minted it, which is where it lives and what revokes it. */
-  orchestrator: RegionOrchestrator;
+  orchestrator: NetworkOrchestrator;
   tenantId: string;
 }
 

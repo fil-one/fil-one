@@ -9,7 +9,7 @@ import { Resource } from 'sst';
 import { getDynamoClient } from '../lib/ddb-client.ts';
 import { keyScope, withinScope } from '../lib/key-scope.ts';
 import type { KeyScope } from '../lib/key-scope.ts';
-import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import type { NetworkOrchestrator } from '../lib/service-orchestrator.ts';
 import {
   getRequestDeadline,
   requestDeadlineMiddleware,
@@ -173,7 +173,7 @@ async function fetchBucketActivities(
 
 async function listBucketActivities(
   orgId: string,
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
   tenantId: string,
   signal: AbortSignal,
 ): Promise<RecentActivity[]> {

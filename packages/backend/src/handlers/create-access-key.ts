@@ -34,7 +34,7 @@ import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/er
 import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  RegionOrchestrator,
+  NetworkOrchestrator,
   ServiceOrchestrator,
 } from '../lib/service-orchestrator.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
@@ -300,7 +300,7 @@ function buildKeyRowFields(data: CreateKeyRequest, issued: IssuedAccessKey, user
 function checkServiceKeyAuthority(
   event: AuthenticatedEvent,
   request: CreateKeyRequest,
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
 ): APIGatewayProxyStructuredResultV2 | undefined {
   // A principal-bound key carries no authority to check.
   if (!('permissions' in request)) return undefined;
@@ -441,7 +441,7 @@ interface MintAttempt {
   tenantId: string;
   keyName: string;
   region: S3Region;
-  orchestrator: RegionOrchestrator;
+  orchestrator: NetworkOrchestrator;
   attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
   /** The intent this attempt already wrote — every exit here closes it. */
   mint: AuditCorrelation<'key.created'>;

@@ -31,7 +31,7 @@ import {
 } from '../lib/s3-bucket-operations.ts';
 import { createS3Client } from '../lib/s3-client.ts';
 import { isNoSuchBucketError } from '../lib/s3-errors.ts';
-import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import type { NetworkOrchestrator } from '../lib/service-orchestrator.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
@@ -78,7 +78,7 @@ function buildBulkDeleteRefusalResponse(
 
 /** The bucket's versioning, or undefined when the bucket does not exist. */
 async function readVersioningStatus(
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
   tenantId: string,
   { region, bucketName }: BucketRef,
 ): Promise<BucketVersioningStatus | undefined> {
