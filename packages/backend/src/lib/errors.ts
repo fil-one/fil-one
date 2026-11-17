@@ -74,6 +74,29 @@ export class UnknownAccessKeyRegionError extends Error {
   }
 }
 
+/**
+ * The request names a storage network this deployment does not run. A
+ * deployment wires the Management API endpoint of every network it runs, so
+ * one left unset is a network that is not there. On a developer's machine
+ * that is typically a smelt stack running fewer networks than the console
+ * offers.
+ *
+ * Carries the network's id for the log. It is an internal name, so it does
+ * not reach the caller.
+ */
+export class NetworkNotRunningError extends Error {
+  readonly orchestratorId: string;
+
+  constructor(orchestratorId: string, options?: ErrorOptions) {
+    super(
+      `No Management API endpoint is configured for the storage network "${orchestratorId}"`,
+      options,
+    );
+    this.name = 'NetworkNotRunningError';
+    this.orchestratorId = orchestratorId;
+  }
+}
+
 export class NotImplementedError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);

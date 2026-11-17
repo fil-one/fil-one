@@ -75,13 +75,15 @@ if [ "${SMELT:-}" = true ]; then
   sst secret set ForgeDevManagementApiToken "$smelt_key" >/dev/null
 
   # The second network is optional: a single-network smelt stack has no
-  # hilt-1, and the stage simply offers no us-west-9 that answers.
+  # hilt-1. The stage is told which it got, so a request for a region the
+  # stack does not serve fails saying the network is not running.
   smelt_key2=$(partner_key hilt-1)
   if [ -n "$smelt_key2" ]; then
     sst secret set ForgeDev2ManagementApiToken "$smelt_key2" >/dev/null
+    export SMELT_SECOND_NETWORK=true
     echo "Using smelt networks hilt and hilt-1 (project $smelt_project)"
   else
-    echo "Using smelt network hilt only (project $smelt_project); no hilt-1 for us-west-9"
+    echo "Using smelt network hilt only (project $smelt_project); us-west-9 will refuse"
   fi
 fi
 

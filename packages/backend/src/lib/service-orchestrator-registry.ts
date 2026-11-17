@@ -4,6 +4,7 @@ import { auroraOrchestrator } from './aurora/aurora-orchestrator.ts';
 import type { S3Endpoint } from './orchestrator/config.ts';
 import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
 import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
+import { NetworkNotRunningError } from './errors.ts';
 import {
   ORCHESTRATOR_ID_BY_REGION,
   getRegionsForOrchestrator,
@@ -35,16 +36,15 @@ const FORGE_NETWORKS: Record<
   { api: () => ForgeManagementApi; s3Endpoints?: Partial<Record<S3Region, S3Endpoint>> }
 > = {
   forge: {
-    api: () => ({
-      baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
-      accessToken: Resource.ForgeManagementApiToken.value,
-    }),
+    api: () => managementApi('forge', 'FORGE_MANAGEMENT_API_URL', Resource.ForgeManagementApiToken),
   },
   forgeDev: {
-    api: () => ({
-      baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
-      accessToken: Resource.ForgeDevManagementApiToken.value,
-    }),
+    api: () =>
+      managementApi(
+        'forgeDev',
+        'FORGE_DEV_MANAGEMENT_API_URL',
+        Resource.ForgeDevManagementApiToken,
+      ),
     // The dev stack's gateways are local ports, which no region name
     // produces, so the overrides are keyed by the region each serves.
     get s3Endpoints() {
@@ -58,10 +58,12 @@ const FORGE_NETWORKS: Record<
   // account reaching two networks. No hosted counterpart: only a local stage
   // offers its region.
   forgeDev2: {
-    api: () => ({
-      baseUrl: process.env.FORGE_DEV2_MANAGEMENT_API_URL!,
-      accessToken: Resource.ForgeDev2ManagementApiToken.value,
-    }),
+    api: () =>
+      managementApi(
+        'forgeDev2',
+        'FORGE_DEV2_MANAGEMENT_API_URL',
+        Resource.ForgeDev2ManagementApiToken,
+      ),
     get s3Endpoints() {
       return localEndpoints({ [S3Region.UsWest9]: 'FORGE_DEV2_S3_ENDPOINT_URL' });
     },
@@ -88,6 +90,19 @@ function localEndpoints(
     endpoints[region] = { endpointUrl, ...(presignEndpointUrl && { presignEndpointUrl }) };
   }
   return Object.keys(endpoints).length > 0 ? endpoints : undefined;
+}
+
+/**
+ * A network's Management API, or a refusal naming it. A deployment sets the
+ * endpoint of every network it runs, so one left unset is a network this
+ * deployment does not run: a local stage against a smelt stack of one network
+ * offers the regions of the second but has nowhere to send them. Failing here
+ * says so, rather than reaching for an address that is not there.
+ */
+function managementApi(id: string, variable: string, token: { value: string }): ForgeManagementApi {
+  const baseUrl = process.env[variable];
+  if (!baseUrl) throw new NetworkNotRunningError(id);
+  return { baseUrl, accessToken: token.value };
 }
 
 function getForgeOrchestrator(id: string, stage: string): ServiceOrchestrator {
@@ -140,7 +155,16 @@ export function getOrchestratorForRegion(region: S3Region): NetworkOrchestrator 
 export function getAvailableOrchestrators(): NetworkOrchestrator[] {
   const stage = process.env.FILONE_STAGE!;
   const seen = new Set<NetworkOrchestrator>();
-  for (const region of getAvailableRegions(stage)) seen.add(getOrchestratorForRegion(region));
+  for (const region of getAvailableRegions(stage)) {
+    try {
+      seen.add(getOrchestratorForRegion(region));
+    } catch (error) {
+      // A deployment may run fewer networks than its stage offers, and the
+      // ones it does run still answer. Leaving the missing one out keeps a
+      // listing to what is there; a request naming its region still fails.
+      if (!(error instanceof NetworkNotRunningError)) throw error;
+    }
+  }
   return [...seen];
 }
 

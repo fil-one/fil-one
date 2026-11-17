@@ -31,6 +31,7 @@ import {
   getRegionsForOrchestrator,
 } from './service-orchestrator-ids.ts';
 import { getAvailableRegions, supportsIamMethods } from '@filone/shared';
+import { NetworkNotRunningError } from './errors.ts';
 
 afterEach(() => {
   delete process.env.FILONE_STAGE;
@@ -196,5 +197,74 @@ describe('getOrchestratorForRegion refusals', () => {
     expect(() => getOrchestratorForRegion('mars-1' as S3Region)).toThrow(
       /Unsupported region "mars-1"/,
     );
+  });
+});
+
+describe('a network this deployment does not run', () => {
+  // A smelt stack may run fewer networks than the console offers. The
+  // deployment wires an endpoint for each network it runs, so one left unset
+  // is a network that is not there, and the request says so rather than
+  // reaching for an address that does not answer.
+  //
+  // The registry builds each network once and keeps it, so these reload the
+  // module: a network another test already built would answer from the cache
+  // and never reach the check. The error class is taken from the same reload,
+  // since a fresh module graph defines its own.
+  async function registryWithout(variable: string) {
+    const saved = process.env[variable];
+    delete process.env[variable];
+    vi.resetModules();
+    const registry = await import('./service-orchestrator-registry.ts');
+    const errors = await import('./errors.ts');
+    return {
+      registry,
+      NotRunning: errors.NetworkNotRunningError,
+      restore: () => {
+        if (saved !== undefined) process.env[variable] = saved;
+      },
+    };
+  }
+
+  it('refuses the region rather than building an orchestrator', async () => {
+    process.env.FILONE_STAGE = LOCAL_STAGE;
+    const { registry, NotRunning, restore } = await registryWithout(
+      'FORGE_DEV2_MANAGEMENT_API_URL',
+    );
+    try {
+      expect(() => registry.getOrchestratorForRegion(S3Region.UsWest9)).toThrow(NotRunning);
+    } finally {
+      restore();
+    }
+  });
+
+  it('names the network in the error, for the log', async () => {
+    process.env.FILONE_STAGE = LOCAL_STAGE;
+    const { registry, restore } = await registryWithout('FORGE_DEV2_MANAGEMENT_API_URL');
+    try {
+      registry.getOrchestratorForRegion(S3Region.UsWest9);
+      expect.unreachable('expected the network to be refused');
+    } catch (err) {
+      expect((err as NetworkNotRunningError).orchestratorId).toBe('forgeDev2');
+    } finally {
+      restore();
+    }
+  });
+
+  it('leaves it out of the listing, which keeps the networks that are running', async () => {
+    process.env.FILONE_STAGE = LOCAL_STAGE;
+    const { registry, restore } = await registryWithout('FORGE_DEV2_MANAGEMENT_API_URL');
+    try {
+      const ids = registry.getAvailableOrchestrators().map((o) => o.id);
+      expect(ids).not.toContain('forgeDev2');
+      expect(ids).toContain('forgeDev');
+    } finally {
+      restore();
+    }
+  });
+
+  it('builds it when the deployment wires one', () => {
+    // The hoisted setup wires it, which is the ordinary case.
+    process.env.FILONE_STAGE = LOCAL_STAGE;
+    expect(getOrchestratorForRegion(S3Region.UsWest9).id).toBe('forgeDev2');
   });
 });

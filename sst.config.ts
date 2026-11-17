@@ -853,14 +853,21 @@ export default $config({
           ? `http://${smeltHost}:15110`
           : 'https://auth.latest.dev.fil-forge.com',
       ...(useSmelt && {
-        FORGE_DEV2_MANAGEMENT_API_URL: `http://${smeltHost}:15113`,
         FORGE_DEV_S3_ENDPOINT_URL: smeltUrls(15130).endpoint,
         FORGE_DEV_S3_PRESIGN_ENDPOINT_URL: smeltUrls(15130).presign,
         FORGE_DEV_EU_S3_ENDPOINT_URL: smeltUrls(15133).endpoint,
         FORGE_DEV_EU_S3_PRESIGN_ENDPOINT_URL: smeltUrls(15133).presign,
-        FORGE_DEV2_S3_ENDPOINT_URL: smeltUrls(15135).endpoint,
-        FORGE_DEV2_S3_PRESIGN_ENDPOINT_URL: smeltUrls(15135).presign,
       }),
+      // The second network only when the stack is running one, which
+      // bin/deploy-local.sh reports. Left unset, a request for its region
+      // fails saying the network is not running, rather than hanging on a
+      // port nothing answers.
+      ...(useSmelt &&
+        process.env.SMELT_SECOND_NETWORK === 'true' && {
+          FORGE_DEV2_MANAGEMENT_API_URL: `http://${smeltHost}:15113`,
+          FORGE_DEV2_S3_ENDPOINT_URL: smeltUrls(15135).endpoint,
+          FORGE_DEV2_S3_PRESIGN_ENDPOINT_URL: smeltUrls(15135).presign,
+        }),
     };
 
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
