@@ -113,6 +113,7 @@ describe('create-bucket baseHandler', () => {
 
     expect(result.statusCode).toBe(201);
     expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
+      region: SERVICE_KEYS_REGION,
       bucketName: 'my-bucket',
       versioning: false,
       lock: false,
@@ -189,6 +190,7 @@ describe('create-bucket baseHandler', () => {
 
     expect(result.statusCode).toBe(201);
     expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
+      region: SERVICE_KEYS_REGION,
       bucketName: 'my-bucket',
       versioning: true,
       lock: true,
@@ -204,6 +206,7 @@ describe('create-bucket baseHandler', () => {
 
     expect(result.statusCode).toBe(201);
     expect(mockCreateBucket).toHaveBeenCalledWith('aurora-t-1', {
+      region: SERVICE_KEYS_REGION,
       bucketName: 'my-bucket',
       versioning: false,
       lock: false,

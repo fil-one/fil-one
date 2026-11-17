@@ -9,6 +9,7 @@ export {
   PollTimeoutError,
   seedBillingRecord,
   getBillingRecord,
+  getHubspotSyncFields,
   deleteBillingRecord,
   createTestCustomer,
   testOrgId,

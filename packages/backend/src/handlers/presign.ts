@@ -6,7 +6,6 @@ import {
   PresignRequestSchema,
   SubscriptionStatus,
   isSupportedRegion,
-  supportsIamMethods,
 } from '@filone/shared';
 import type {
   ErrorResponse,
@@ -17,7 +16,7 @@ import type {
   PresignResponseItem,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { RegionOrchestrator, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import type { NetworkOrchestrator, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import type { S3ClientContext } from '../lib/s3-client.ts';
 import {
@@ -42,6 +41,7 @@ import { requireOrgMembershipMiddleware, requirePermission } from '../middleware
 import { csrfMiddleware } from '../middleware/csrf.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
+import { isIamOrchestrator } from '../lib/service-orchestrator-ids.ts';
 
 const PRESIGN_EXPIRY_SECONDS = 300;
 const MAX_GET_OBJECT_EXPIRY_SECONDS = 604800;
@@ -127,12 +127,12 @@ function getRequiredAction(op: PresignOp): PolicyAction {
  * serving service keys, skips the read.
  */
 async function checkMemberBucketAccess(
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
   tenantId: string,
   userId: string | undefined,
   ops: PresignOp[],
 ): Promise<APIGatewayProxyStructuredResultV2 | undefined> {
-  if (!userId || !supportsIamMethods(orchestrator.region)) return undefined;
+  if (!userId || !isIamOrchestrator(orchestrator)) return undefined;
   const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(tenantId, userId);
   const grantedBucketActions = new Map<string, Set<PolicyAction>>(
     access.map((entry) => [entry.bucketName, new Set(entry.actions)]),
@@ -365,7 +365,7 @@ export async function baseHandler(
   );
   if (accessRefused) return accessRefused;
 
-  const s3Ctx = await orchestrator.getS3ClientContext(tenantId);
+  const s3Ctx = await orchestrator.getS3ClientContext(tenantId, region);
   const ctx = s3Ctx.presignEndpointUrl
     ? { ...s3Ctx, endpointUrl: s3Ctx.presignEndpointUrl }
     : s3Ctx;

@@ -409,16 +409,21 @@ export function AccessKeysTable({
                 {/* Name + Access Key ID */}
                 <KeyNameCell accessKey={key} onOpen={() => setDetailKeyId(key.id)} />
 
-                {/* Region, laid out as the buckets table lays it out */}
+                {/* Regions, laid out as the buckets table lays them out. A key
+                    works at every region of the network holding it. */}
                 {showRegion && (
                   <Table.Cell className="hidden text-xs md:table-cell">
-                    {key.region ? (
-                      <div className="flex items-center gap-2.5">
-                        <RegionFlag region={key.region} />
-                        <div>
-                          <p className="font-medium text-zinc-900">{getRegionLabel(key.region)}</p>
-                          <p className="text-zinc-500">{key.region}</p>
-                        </div>
+                    {key.regions.length > 0 ? (
+                      <div className="flex flex-col gap-1.5">
+                        {key.regions.map((region) => (
+                          <div key={region} className="flex items-center gap-2.5">
+                            <RegionFlag region={region} />
+                            <div>
+                              <p className="font-medium text-zinc-900">{getRegionLabel(region)}</p>
+                              <p className="text-zinc-500">{region}</p>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     ) : (
                       <span className="text-zinc-400">-</span>

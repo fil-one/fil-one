@@ -21,7 +21,7 @@ import {
   ragEngineErrorResponse,
   ragEngineTarget,
 } from '../lib/rag-engine-client.ts';
-import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import type { NetworkOrchestrator } from '../lib/service-orchestrator.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
@@ -110,7 +110,7 @@ export async function baseHandler(
   // own bucket scope, which the auth middleware already applied.
   const bucket = await orchestrator.getBucket(
     tenantId,
-    bucketName,
+    { region, bucketName },
     apiKeySession ? undefined : getScopedMemberId(membership?.role, userId),
   );
   if (!bucket) {
@@ -185,7 +185,7 @@ export async function baseHandler(
  * `model` names a Bedrock model and does not apply here.
  */
 async function queryEngine(args: {
-  orchestrator: RegionOrchestrator;
+  orchestrator: NetworkOrchestrator;
   tenantId: string;
   orgId: string;
   region: S3Region;

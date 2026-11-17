@@ -13,10 +13,11 @@ import { Link } from '../components/Link';
 import { PageLayout } from '../components/PageLayout.js';
 import { RequirePermission } from '../components/RequirePermission';
 import { SectionCard } from '../components/SectionCard.js';
-import { Spinner } from '../components/Spinner';
+import { Skeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { errorMessageOf, getMe, updateOrg } from '../lib/api.js';
 import { queryKeys, ME_STALE_TIME } from '../lib/query-client.js';
+import { useHasPermission } from '../lib/use-permissions.js';
 
 // ---------------------------------------------------------------------------
 // Identity: logo and name
@@ -216,6 +217,7 @@ function DangerSection({ me }: { me: MeResponse }) {
 // ---------------------------------------------------------------------------
 
 function OrganizationDetails() {
+  const mayDelete = useHasPermission('org.delete');
   const {
     data: me,
     isPending,
@@ -231,13 +233,7 @@ function OrganizationDetails() {
     return <Alert variant="red" description={error?.message ?? 'Failed to load organization'} />;
   }
 
-  if (isPending || !me) {
-    return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading organization" />
-      </div>
-    );
-  }
+  if (isPending || !me) return <EditOrganizationSkeleton showDangerZone={mayDelete} />;
 
   return (
     <div className="flex max-w-2xl flex-col gap-6">
@@ -245,6 +241,32 @@ function OrganizationDetails() {
       <RequirePermission permission="org.delete">
         <DangerSection me={me} />
       </RequirePermission>
+    </div>
+  );
+}
+
+const SKELETON_SECTIONS = [
+  { section: 'general', height: 'h-44' },
+  { section: 'danger-zone', height: 'h-19.5' },
+];
+
+/**
+ * One heading bar and one card per section, at the height of the real ones, in
+ * the page shell so the header does not blank while `/me` loads. The danger
+ * zone placeholder shows only where the real section will.
+ */
+function EditOrganizationSkeleton({ showDangerZone }: { showDangerZone: boolean }) {
+  const sections = showDangerZone
+    ? SKELETON_SECTIONS
+    : SKELETON_SECTIONS.filter(({ section }) => section !== 'danger-zone');
+  return (
+    <div role="status" aria-label="Loading organization" className="flex max-w-2xl flex-col gap-6">
+      {sections.map(({ section, height }) => (
+        <div key={section} className="flex flex-col gap-2">
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className={`rounded-xl ${height}`} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -267,9 +289,9 @@ export function EditOrganizationPage() {
       permission="org.rename"
       pending={
         <PageLayout title="Edit organization">
-          <div className="flex items-center justify-center p-16">
-            <Spinner ariaLabel="Loading organization" />
-          </div>
+          {/* Permissions are still loading, so whether the caller gets the
+              danger zone is not known yet. */}
+          <EditOrganizationSkeleton showDangerZone />
         </PageLayout>
       }
       fallback={

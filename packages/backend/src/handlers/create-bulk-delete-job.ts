@@ -15,6 +15,7 @@ import {
 } from '@filone/shared';
 
 import { canBulkDelete, type BulkDeleteRefusalReason } from '../lib/bulk-delete-access.ts';
+import type { BucketRef } from '../lib/bucket-orchestrator.ts';
 import {
   BulkDeleteJobExistsError,
   createBulkDeleteJob,
@@ -30,7 +31,7 @@ import {
 } from '../lib/s3-bucket-operations.ts';
 import { createS3Client } from '../lib/s3-client.ts';
 import { isNoSuchBucketError } from '../lib/s3-errors.ts';
-import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import type { NetworkOrchestrator } from '../lib/service-orchestrator.ts';
 import {
   ResponseBuilder,
   tenantNotReadyResponse,
@@ -77,12 +78,12 @@ function buildBulkDeleteRefusalResponse(
 
 /** The bucket's versioning, or undefined when the bucket does not exist. */
 async function readVersioningStatus(
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
   tenantId: string,
-  bucketName: string,
+  { region, bucketName }: BucketRef,
 ): Promise<BucketVersioningStatus | undefined> {
   try {
-    const s3 = createS3Client(await orchestrator.getS3ClientContext(tenantId));
+    const s3 = createS3Client(await orchestrator.getS3ClientContext(tenantId, region));
     return await getBucketVersioningStatus(s3, bucketName);
   } catch (err) {
     if (isNoSuchBucketError(err)) return undefined;
@@ -132,7 +133,10 @@ export async function baseHandler(
 
   const { prefix, scope, idempotencyKey } = parsed.data;
 
-  const versioningStatus = await readVersioningStatus(orchestrator, tenantId, bucketName);
+  const versioningStatus = await readVersioningStatus(orchestrator, tenantId, {
+    region,
+    bucketName,
+  });
   if (!versioningStatus) return buildBucketNotFoundResponse();
 
   const memberId = getScopedMemberId(membership?.role, userId);

@@ -7,6 +7,7 @@ import {
   deleteBillingRecord,
   getStripeClient,
   getBillingRecord,
+  getHubspotSyncFields,
   pollForPaymentMethod,
   waitForEventHandled,
 } from './helpers.js';
@@ -42,9 +43,11 @@ describe('Grace Period (invoice.payment_succeeded)', () => {
 
     // Stripe also sends customer.updated around the invoice, which rewrites the
     // same payment method and stamps updatedAt.
-    expect(await getBillingRecord(userId)).toStrictEqual({
+    const row = await getBillingRecord(userId);
+    expect(row).toStrictEqual({
       ...before,
       updatedAt: { S: expect.any(String) },
+      ...getHubspotSyncFields(row),
     });
   });
 });
