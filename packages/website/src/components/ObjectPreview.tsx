@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import type { SyntheticEvent } from 'react';
 import { DownloadSimpleIcon, FileIcon, WarningCircleIcon } from '@phosphor-icons/react/dist/ssr';
 import { useQuery } from '@tanstack/react-query';
 
@@ -21,8 +22,8 @@ import {
 import { getPreviewUrl } from '../lib/preview-url.js';
 import { queryKeys } from '../lib/query-client.js';
 
-// How long before a URL lapses the query treats it as stale, so a remount or a
-// refocus fetches a fresh one rather than showing one about to expire.
+// How long before a URL lapses the card treats it as lapsed, so a remount
+// fetches a fresh one rather than showing one about to expire.
 const PREVIEW_URL_REFRESH_MARGIN_MS = 60 * 1000;
 
 /** Why there is no preview, which decides what the placeholder says. */
@@ -30,7 +31,17 @@ export type NoPreviewReason = 'unsupported' | 'too-large' | 'failed';
 
 export type ObjectPreviewProps =
   | { state: 'loading'; kind: PreviewKind }
-  | { state: 'ready'; kind: 'image' | 'video' | 'audio'; url: string; fileName: string }
+  | {
+      state: 'ready';
+      kind: 'image' | 'video' | 'audio';
+      url: string;
+      fileName: string;
+      /**
+       * Called when the media fails to load. Asks for a new URL and returns
+       * true when the current one has lapsed; false means the failure is real.
+       */
+      renewUrlIfLapsed: () => boolean;
+    }
   | { state: 'ready'; kind: 'text'; text: string; truncated: boolean }
   | {
       state: 'none';
@@ -67,19 +78,51 @@ function ObjectPreviewBody(props: ObjectPreviewProps) {
   if (props.kind === 'text') {
     return <TextPreview text={props.text} truncated={props.truncated} />;
   }
-  return <MediaPreview kind={props.kind} url={props.url} fileName={props.fileName} />;
+  return <MediaPreview {...props} />;
+}
+
+/** Where a player stood when its URL lapsed, so it can carry on from there. */
+interface PlaybackPosition {
+  time: number;
+  playing: boolean;
 }
 
 function MediaPreview({
   kind,
   url,
   fileName,
+  renewUrlIfLapsed,
 }: {
   kind: 'image' | 'video' | 'audio';
   url: string;
   fileName: string;
+  renewUrlIfLapsed: () => boolean;
 }) {
   const [failed, setFailed] = useState(false);
+  const resumeFrom = useRef<PlaybackPosition | null>(null);
+
+  // A player streams on demand, so its URL can lapse mid-play. The new URL
+  // reloads the element from the start, so the position is kept to resume at.
+  const handleError = (event: SyntheticEvent<HTMLImageElement | HTMLMediaElement>) => {
+    if (!renewUrlIfLapsed()) {
+      setFailed(true);
+      return;
+    }
+    const element = event.currentTarget;
+    if (element instanceof HTMLMediaElement) {
+      resumeFrom.current = { time: element.currentTime, playing: !element.paused };
+    }
+  };
+  const resumePlayback = (event: SyntheticEvent<HTMLMediaElement>) => {
+    const position = resumeFrom.current;
+    if (!position) return;
+    resumeFrom.current = null;
+    const element = event.currentTarget;
+    element.currentTime = position.time;
+    // The browser may refuse to play without a fresh gesture; the controls stay
+    if (position.playing) element.play().catch(() => undefined);
+  };
+
   if (failed) {
     return <NoPreviewMessage />;
   }
@@ -91,7 +134,8 @@ function MediaPreview({
           preload="metadata"
           src={url}
           className="w-full"
-          onError={() => setFailed(true)}
+          onError={handleError}
+          onLoadedMetadata={resumePlayback}
         >
           <track kind="captions" />
         </audio>
@@ -106,7 +150,7 @@ function MediaPreview({
           src={url}
           alt={fileName}
           className="max-h-96 max-w-full rounded-md object-contain"
-          onError={() => setFailed(true)}
+          onError={handleError}
         />
       ) : (
         <video
@@ -115,7 +159,8 @@ function MediaPreview({
           preload="metadata"
           src={url}
           className="max-h-96 max-w-full rounded-md"
-          onError={() => setFailed(true)}
+          onError={handleError}
+          onLoadedMetadata={resumePlayback}
         >
           <track kind="captions" />
         </video>
@@ -248,8 +293,11 @@ export function ObjectPreviewCard({
   const urlQuery = useQuery({
     queryKey: queryKeys.objectPreviewUrl(bucketName, objectKey, versionId),
     enabled: loadable,
-    // The URL lasts an hour, or five minutes on a trial account, so its own
-    // expiry decides when it goes stale.
+    // The URL is short-lived, so its own expiry decides when it goes stale.
+    // A refocus or reconnect does not refetch: a new URL would reload a player
+    // the user paused, and `renewUrlIfLapsed` replaces one that lapses in use.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     staleTime: (query) => {
       const expiresAt = query.state.data?.expiresAt;
       return expiresAt ? Date.parse(expiresAt) - Date.now() - PREVIEW_URL_REFRESH_MARGIN_MS : 0;
@@ -257,6 +305,14 @@ export function ObjectPreviewCard({
     queryFn: () => getPreviewUrl({ region, bucketName, objectKey, versionId }),
   });
   const url = urlQuery.data?.url;
+  const renewUrlIfLapsed = () => {
+    const expiresAt = urlQuery.data?.expiresAt;
+    if (!expiresAt || Date.parse(expiresAt) - Date.now() > PREVIEW_URL_REFRESH_MARGIN_MS) {
+      return false;
+    }
+    void urlQuery.refetch();
+    return true;
+  };
 
   const textQuery = useQuery({
     // Without a version ID the key alone names whatever is latest, so the ETag
@@ -300,7 +356,13 @@ export function ObjectPreviewCard({
     );
   }
   return url ? (
-    <ObjectPreview state="ready" kind={kind} url={url} fileName={getObjectFileName(objectKey)} />
+    <ObjectPreview
+      state="ready"
+      kind={kind}
+      url={url}
+      fileName={getObjectFileName(objectKey)}
+      renewUrlIfLapsed={renewUrlIfLapsed}
+    />
   ) : (
     <ObjectPreview state="loading" kind={kind} />
   );
