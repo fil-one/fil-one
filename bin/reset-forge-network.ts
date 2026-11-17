@@ -57,7 +57,6 @@ import { extractApiMessage } from '@filone/backend/src/lib/orchestrator/api-mess
 import { FilOneOrchestrator } from '@filone/backend/src/lib/orchestrator/orchestrator.ts';
 import { ORCHESTRATOR_ID_BY_REGION } from '@filone/backend/src/lib/service-orchestrator-ids.ts';
 import { createClient } from '@filone/orchestrator-client';
-import { getS3Endpoint } from '@filone/shared';
 import { FORGE_NETWORKS, isForgeNetworkName, resolveForgeApi } from './lib/forge-network.ts';
 import type { AccountPlan } from './lib/region-reset.ts';
 import { assertRegionAllowed } from './lib/region-reset.ts';
@@ -120,10 +119,15 @@ const forgeApi = await resolveForgeApi(
 
 const orchestrator = new FilOneOrchestrator({
   id: orchestratorId,
-  region,
+  // The script works one region at a time, so the orchestrator it builds serves
+  // only that one, whatever else the network does.
+  regions: [region],
   stage,
-  // Unused by deleteTenant; required by the config.
-  s3EndpointUrl: forgeApi.s3EndpointUrl ?? getS3Endpoint(region, stage),
+  // Unused by deleteTenant; carried so the region resolves to the gateway the
+  // caller named rather than the one its name gives.
+  ...(forgeApi.s3EndpointUrl && {
+    s3Endpoints: { [region]: { endpointUrl: forgeApi.s3EndpointUrl } },
+  }),
   // A pre-built client skips the metrics instrumentation the Lambdas get.
   api: { client: createClient({ baseUrl: forgeApi.baseUrl, auth: () => forgeApi.token }) },
 });

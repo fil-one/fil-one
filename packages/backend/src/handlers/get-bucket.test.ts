@@ -151,7 +151,7 @@ describe('get-bucket baseHandler', () => {
     // The default caller is an Owner, whom the console reads for unscoped.
     expect(orch.getBucket).toHaveBeenCalledWith(
       tenantFor('aurora', 'org-1'),
-      'my-bucket',
+      { region: S3_REGION, bucketName: 'my-bucket' },
       undefined,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
@@ -174,7 +174,7 @@ describe('get-bucket baseHandler', () => {
 
       expect(orch.getBucket).toHaveBeenCalledWith(
         tenantFor('aurora', 'org-1'),
-        'my-bucket',
+        { region: S3_REGION, bucketName: 'my-bucket' },
         USER_1,
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
@@ -186,7 +186,7 @@ describe('get-bucket baseHandler', () => {
 
     expect(orch.getBucket).toHaveBeenCalledWith(
       tenantFor('aurora', 'org-1'),
-      'my-bucket',
+      { region: S3_REGION, bucketName: 'my-bucket' },
       undefined,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );

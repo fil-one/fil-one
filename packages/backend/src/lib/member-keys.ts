@@ -1,7 +1,7 @@
 import { QueryCommand } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
-import { NO_ROLE, S3Region, auditKeyIdSuffix, canRetainAccessKey } from '@filone/shared';
+import { NO_ROLE, auditKeyIdSuffix, canRetainAccessKey, roleHasPermission } from '@filone/shared';
 import type {
   AccessKeyRevocationReason,
   AccessKeySummary,
@@ -12,16 +12,17 @@ import { Resource } from 'sst';
 import { readAccessKeyMintSeq } from './access-key-mint-seq.ts';
 import type { KeyMintFence } from './access-key-mint-seq.ts';
 import { getDynamoClient } from './ddb-client.ts';
-import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION } from './dynamo-records.ts';
+import { AccessKeyKeys, getAccessKeyOrchestratorId } from './dynamo-records.ts';
+import { getRegionsForOrchestrator } from './service-orchestrator-ids.ts';
 import type { AccessKeyRecord } from './dynamo-records.ts';
 
 /**
  * An org's access-key rows, and which of them a member could still mint.
  *
- * Every key row lives in the same `ORG#{orgId}` partition whatever region holds
+ * Every key row lives in the same `ORG#{orgId}` partition whatever network holds
  * the credential, and `UserInfoTable` carries no secondary index, so asking
  * "which keys does this member hold" is one paged Query and a filter in memory.
- * The region on the row decides which orchestrator revokes it, nothing else.
+ * The network on the row decides which orchestrator revokes it, nothing else.
  */
 
 /** One access-key row, as the revocation pass and the preview both read it. */
@@ -31,7 +32,8 @@ export interface MemberAccessKey {
   keyName: string;
   /** What the console lists. Absent only on rows written before it was stored. */
   accessKeyId?: string;
-  region: S3Region;
+  /** The storage network holding the credential, which is what revokes it. */
+  orchestratorId: string;
   createdAt: string;
   createdBy?: string;
   permissions?: AccessKeyRecord['permissions'];
@@ -125,18 +127,29 @@ export function reviewAccessKeysForRole(
       continue;
     }
     if (accessKey.createdBy !== userId) continue;
-    // A principal-bound key follows the bucket policies, so a role change
-    // keeps it; removal, which leaves no role, revokes it.
+    // A principal-bound key carries no permissions of its own: the bucket
+    // policy statements naming its principal are its whole authority, and
+    // nothing on the role-change path rewrites them. So the only question the
+    // new role can answer about it is the one `canRetainAccessKey` asks first —
+    // could this role mint such a key at all. A role that could not leaves a
+    // holder who can neither list nor revoke it (`keys.manage_own` is what
+    // scopes both) while it keeps signing whatever those policies grant: a
+    // demotion to ReadOnly would otherwise keep working PutObject and
+    // DeleteObject. NO_ROLE holds no permission either, so removal still
+    // revokes, as it did before.
     if (accessKey.principalId) {
-      if (role === NO_ROLE) {
-        review.keysToRevoke.push({ ...accessKey, reason: 'role_cannot_mint', excess: [] });
-      } else {
+      if (roleHasPermission(role, 'keys.create')) {
         review.retainedKeyCount += 1;
+      } else {
+        review.keysToRevoke.push({ ...accessKey, reason: 'role_cannot_mint', excess: [] });
       }
       continue;
     }
 
-    const retention = canRetainAccessKey(role, accessKey);
+    const retention = canRetainAccessKey(role, {
+      ...accessKey,
+      regions: getRegionsForOrchestrator(accessKey.orchestratorId, process.env.FILONE_STAGE!),
+    });
     if (retention.retained) {
       review.retainedKeyCount += 1;
       continue;
@@ -169,10 +182,11 @@ export async function reviewMemberAccessKeysForRole(
  * landing between them is counted by the fence and missing from the list.
  *
  * Removal asks about `NO_ROLE`, the narrowing to nothing: no role is left to
- * mint under, so every attributed key is revoked: a service key because
- * `canRetainAccessKey` condemns it, a principal-bound key because its member is
- * gone. Any other role change keeps principal-bound keys. Rows with no recorded
- * creator are outside this rule, as they are outside every other.
+ * mint under, so every attributed key is revoked. A role that keeps
+ * `keys.create` keeps the member's principal-bound keys; one that does not —
+ * `NO_ROLE` and ReadOnly — takes them, since nothing here rewrites the bucket
+ * policies that are their authority. Rows with no recorded creator are outside
+ * this rule, as they are outside every other.
  */
 export async function reviewKeysForRoleChange(
   orgId: string,
@@ -197,7 +211,7 @@ export function summarizeAccessKey(key: AccessKeyToRevoke): AccessKeySummary {
     id: key.id,
     keyName: key.keyName,
     ...(key.accessKeyId ? { accessKeyIdSuffix: auditKeyIdSuffix('s3', key.accessKeyId) } : {}),
-    region: key.region,
+    regions: getRegionsForOrchestrator(key.orchestratorId, process.env.FILONE_STAGE!),
     createdAt: key.createdAt,
     reason: key.reason,
     excess: key.excess.map(({ keyPermission }) => keyPermission),
@@ -209,7 +223,7 @@ function toMemberAccessKey(record: Partial<AccessKeyRecord>): MemberAccessKey {
   return {
     id: sk.slice(AccessKeyKeys.keySkPrefix().length),
     keyName: record.keyName ?? '',
-    region: record.region ?? DEFAULT_ACCESS_KEY_REGION,
+    orchestratorId: getAccessKeyOrchestratorId(record),
     createdAt: record.createdAt ?? '',
     ...(record.accessKeyId ? { accessKeyId: record.accessKeyId } : {}),
     ...(record.createdBy ? { createdBy: record.createdBy } : {}),

@@ -4,11 +4,11 @@ import type { AccessKey, GranularPermission, ServiceAccessKey } from '@filone/sh
 import { S3Region } from '@filone/shared';
 import { Resource } from 'sst';
 import { getDynamoClient } from './ddb-client.ts';
-import { AccessKeyKeys, DEFAULT_ACCESS_KEY_REGION } from './dynamo-records.ts';
+import { AccessKeyKeys, getAccessKeyRegions, type AccessKeyRecord } from './dynamo-records.ts';
 import { withinScope, type KeyScope } from './key-scope.ts';
 import { BARE_DATE } from './access-key-expiry.ts';
 
-/** Narrows a scoped listing to keys touching one bucket, or minted in one region. */
+/** Narrows a scoped listing to keys touching one bucket, or usable at one region. */
 export interface AccessKeyScopeFilters {
   bucketFilter?: string;
   regionFilter?: string;
@@ -51,7 +51,14 @@ export async function getAccessKeysInScope(
         createdBy: record.createdBy as string | undefined,
         recovered: record.recovered as boolean | undefined,
       });
-      if (inScope) keys.push(toAccessKey(record));
+      if (!inScope) continue;
+      const key = toAccessKey(record);
+      // A key works at every region of its network, so the region filter is
+      // answered from the network's regions here rather than from a stored
+      // region: the row records the network, and which regions that network
+      // serves is a property of the stage, not of the row.
+      if (filters.regionFilter && !key.regions.includes(filters.regionFilter as S3Region)) continue;
+      keys.push(key);
     }
 
     startKey = result.LastEvaluatedKey;
@@ -62,10 +69,7 @@ export async function getAccessKeysInScope(
 
 type QueryInput = ConstructorParameters<typeof QueryCommand>[0];
 
-function buildQueryInput(
-  orgId: string,
-  { bucketFilter, regionFilter }: AccessKeyScopeFilters,
-): QueryInput {
+function buildQueryInput(orgId: string, { bucketFilter }: AccessKeyScopeFilters): QueryInput {
   const values: Record<string, { S: string }> = {
     ':pk': { S: AccessKeyKeys.orgPk(orgId) },
     ':skPrefix': { S: AccessKeyKeys.keySkPrefix() },
@@ -83,21 +87,6 @@ function buildQueryInput(
     );
     values[':all'] = { S: 'all' };
     values[':bucket'] = { S: bucketFilter };
-  }
-
-  // Access keys are region-scoped: a key created in one region cannot operate on
-  // buckets in another — not even a key scoped to all buckets, since "all buckets"
-  // only spans the key's own region. `region` is a DynamoDB reserved word, hence #region.
-  if (regionFilter) {
-    // Rows written before regions existed carry no `region` attribute and belong to
-    // eu-west-1, matching the fallback applied when mapping rows below.
-    filterExpressions.push(
-      regionFilter === S3Region.EuWest1
-        ? '(#region = :region OR attribute_not_exists(#region))'
-        : '#region = :region',
-    );
-    names['#region'] = 'region';
-    values[':region'] = { S: regionFilter };
   }
 
   return {
@@ -169,7 +158,10 @@ function toAccessKey(record: Record<string, unknown>): AccessKey {
     accessKeyId: record.accessKeyId as string,
     createdAt: record.createdAt as string,
     status,
-    region: (record.region as AccessKey['region']) ?? DEFAULT_ACCESS_KEY_REGION,
+    regions: getAccessKeyRegions(
+      record as Pick<AccessKeyRecord, 'orchestratorId' | 'region'>,
+      process.env.FILONE_STAGE!,
+    ),
     expiresAt,
     // Shipped so the console can gate the per-row revoke button on the same
     // rule the delete route enforces.
