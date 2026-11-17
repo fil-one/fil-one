@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { unmarshall } from '@aws-sdk/util-dynamodb';
 import { mockClient } from 'aws-sdk-client-mock';
+import { S3_REGION } from '@filone/shared';
 import { sstResourceMock } from '../test/sst-resource-mock.ts';
 
 // ---------------------------------------------------------------------------
@@ -135,7 +136,7 @@ describe('delete-bucket baseHandler', () => {
     expect(result).toMatchObject({ statusCode: 204, body: '' });
     expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith(
       'aurora-t-1',
-      'my-bucket',
+      { region: S3_REGION, bucketName: 'my-bucket' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
@@ -150,7 +151,7 @@ describe('delete-bucket baseHandler', () => {
 
     expect(mockOrchestratorDeleteBucket).toHaveBeenCalledWith(
       'tenant-xyz',
-      'some-bucket',
+      { region: S3_REGION, bucketName: 'some-bucket' },
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });

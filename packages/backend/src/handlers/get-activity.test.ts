@@ -14,9 +14,13 @@ vi.mock('../lib/audit-query.ts', async (importOriginal) => ({
 
 const mockListBuckets = vi.fn();
 vi.mock('../lib/region-helpers.ts', () => ({
-  getProvisionedRegions: async () => [
+  getProvisionedNetworks: async () => [
     {
-      orchestrator: { id: 'any-orchestrator', region: 'any-region', listBuckets: mockListBuckets },
+      orchestrator: {
+        id: 'any-orchestrator',
+        regions: ['any-region'],
+        listBuckets: mockListBuckets,
+      },
       tenantId: 'any-tenant',
     },
   ],
@@ -336,7 +340,7 @@ describe('get-activity buckets created outside the console', () => {
     ]);
   });
 
-  it('still returns the audit events when a region fails to list its buckets', async () => {
+  it('still returns the audit events when a network fails to list its buckets', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     resolveEvents(created('any-bucket', RECENT));
     mockListBuckets.mockRejectedValue(new Error('any-error'));

@@ -20,7 +20,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyableField } from '../components/CopyableField';
 import { IconButton } from '../components/IconButton';
 import { ShareObjectModal } from '../components/ShareObjectModal';
-import { Spinner } from '../components/Spinner';
+import { Skeleton } from '../components/Skeleton';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
 import { formatBytes, getS3Endpoint } from '@filone/shared';
 
@@ -180,55 +180,12 @@ export function ObjectDetailPage({
     },
   });
 
-  if (isPending) {
-    return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading object details" size={32} />
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div className="p-10">
-        <Breadcrumb
-          items={[
-            { label: 'Buckets', href: '/buckets' },
-            { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
-            { label: objectKey },
-          ]}
-        />
-        <Alert variant="red" description={error?.message ?? 'Failed to load object metadata'} />
-      </div>
-    );
-  }
-
-  // Parse tags from metadata
-  let tags: string[] = [];
-  if (metadata?.metadata.tags) {
-    try {
-      const parsed: unknown = JSON.parse(metadata.metadata.tags);
-      if (Array.isArray(parsed)) {
-        tags = parsed.filter((t): t is string => typeof t === 'string');
-      }
-    } catch {
-      // ignore invalid JSON
-    }
-  }
-
-  // Strip surrounding quotes from ETag (S3 returns it wrapped in double-quotes).
-  const etag = metadata?.etag?.replace(/^"|"$/g, '');
-
-  const s3Path = `s3://${bucketName}/${objectKey}`;
-
-  const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
-
-  const apiExample = `# Retrieve via S3 API
-aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
-  --endpoint-url ${s3Endpoint}`;
-
-  return (
-    <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
+  // Everything in the header is known from the URL, so it stays on screen while
+  // the metadata loads or after it fails, and only the cards below wait for it.
+  // The actions hide on failure: the object may be gone, and S3 reports success
+  // for deleting or presigning a key that does not exist.
+  const header = (
+    <>
       {/* Breadcrumb */}
       <Breadcrumb
         items={[
@@ -258,36 +215,137 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
           <p className="text-sm text-(--color-paragraph-text-subtle)">{bucketName}</p>
         </div>
 
-        <div className="flex items-center gap-1">
-          <IconButton
-            id="object-download-button"
-            icon={DownloadSimpleIcon}
-            aria-label="Download object"
-            tooltip="Download"
-            tooltipSide="bottom"
-            onClick={() => void objectActions.downloadObject(objectKey, versionId)}
-          />
-          <IconButton
-            id="object-share-button"
-            icon={LinkIcon}
-            aria-label="Share object"
-            tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
-            tooltipSide="bottom"
-            disabled={!canShare}
-            onClick={() => setShareOpen(true)}
-          />
-          {mayDelete && (
+        {!isError && (
+          <div className="flex items-center gap-1">
             <IconButton
-              id="object-delete-button"
-              icon={TrashIcon}
-              aria-label="Delete object"
-              tooltip="Delete"
+              id="object-download-button"
+              icon={DownloadSimpleIcon}
+              aria-label="Download object"
+              tooltip="Download"
               tooltipSide="bottom"
-              onClick={() => setConfirmDeleteOpen(true)}
+              onClick={() => void objectActions.downloadObject(objectKey, versionId)}
             />
-          )}
-        </div>
+            <IconButton
+              id="object-share-button"
+              icon={LinkIcon}
+              aria-label="Share object"
+              tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
+              tooltipSide="bottom"
+              disabled={!canShare}
+              onClick={() => setShareOpen(true)}
+            />
+            {mayDelete && (
+              <IconButton
+                id="object-delete-button"
+                icon={TrashIcon}
+                aria-label="Delete object"
+                tooltip="Delete"
+                tooltipSide="bottom"
+                onClick={() => setConfirmDeleteOpen(true)}
+              />
+            )}
+          </div>
+        )}
       </div>
+    </>
+  );
+
+  // The header's Share and Delete work while the metadata loads, so their
+  // dialogs render in every state: one opened during loading stays open
+  // whether the query succeeds or fails.
+  const dialogs = (
+    <>
+      {/* Share dialog */}
+      <ShareObjectModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        bucketName={bucketName}
+        region={region}
+        objectKey={objectKey}
+        versionId={versionId}
+      />
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onClose={() => setConfirmDeleteOpen(false)}
+        onConfirm={() => objectActions.deleteObject(objectKey, versionId)}
+        title="Delete object"
+        description="This object will be permanently deleted. This action cannot be undone."
+        confirmLabel="Delete object"
+      />
+    </>
+  );
+
+  // Version history comes from the bucket listing cache and the API example from
+  // the URL, so neither waits for the metadata.
+  const versionHistory = (
+    <VersionHistoryCard
+      versions={objectVersions}
+      currentVersionId={versionId}
+      bucketName={bucketName}
+      region={region}
+    />
+  );
+
+  const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
+
+  const apiExample = `# Retrieve via S3 API
+aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
+  --endpoint-url ${s3Endpoint}`;
+
+  const apiExampleCard = (
+    <Card className="mt-6">
+      <Heading tag="h2" size="sm" className="mb-3">
+        API access example
+      </Heading>
+      <CodeBlock code={apiExample} language="bash" />
+    </Card>
+  );
+
+  if (isPending) {
+    return (
+      <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
+        {header}
+        <ObjectDetailSkeleton hasVersionId={versionId !== undefined} />
+        {versionHistory}
+        {apiExampleCard}
+        {dialogs}
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
+        {header}
+        <Alert variant="red" description={error?.message ?? 'Failed to load object metadata'} />
+        {dialogs}
+      </div>
+    );
+  }
+
+  // Parse tags from metadata
+  let tags: string[] = [];
+  if (metadata?.metadata.tags) {
+    try {
+      const parsed: unknown = JSON.parse(metadata.metadata.tags);
+      if (Array.isArray(parsed)) {
+        tags = parsed.filter((t): t is string => typeof t === 'string');
+      }
+    } catch {
+      // ignore invalid JSON
+    }
+  }
+
+  // Strip surrounding quotes from ETag (S3 returns it wrapped in double-quotes).
+  const etag = metadata?.etag?.replace(/^"|"$/g, '');
+
+  const s3Path = `s3://${bucketName}/${objectKey}`;
+
+  return (
+    <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
+      {header}
 
       {/* Object details card */}
       <Card>
@@ -353,40 +411,26 @@ aws s3 cp s3://${bucketName}/${objectKey} ./local-copy \\
       )}
 
       {/* Version history */}
-      <VersionHistoryCard
-        versions={objectVersions}
-        currentVersionId={versionId}
-        bucketName={bucketName}
-        region={region}
-      />
+      {versionHistory}
 
       {/* API access example card */}
-      <Card className="mt-6">
-        <Heading tag="h2" size="sm" className="mb-3">
-          API access example
-        </Heading>
-        <CodeBlock code={apiExample} language="bash" />
-      </Card>
+      {apiExampleCard}
 
-      {/* Share dialog */}
-      <ShareObjectModal
-        open={shareOpen}
-        onClose={() => setShareOpen(false)}
-        bucketName={bucketName}
-        region={region}
-        objectKey={objectKey}
-        versionId={versionId}
-      />
+      {dialogs}
+    </div>
+  );
+}
 
-      {/* Delete confirmation */}
-      <ConfirmDialog
-        open={confirmDeleteOpen}
-        onClose={() => setConfirmDeleteOpen(false)}
-        onConfirm={() => objectActions.deleteObject(objectKey, versionId)}
-        title="Delete object"
-        description="This object will be permanently deleted. This action cannot be undone."
-        confirmLabel="Delete object"
-      />
+/**
+ * The object details card is the only one that waits for the metadata, so it
+ * is the only placeholder, at the height of the real card. The Version ID row
+ * (a 36px row plus a 4px gap) shows when the URL names a version, so the
+ * block grows to match.
+ */
+function ObjectDetailSkeleton({ hasVersionId }: { hasVersionId: boolean }) {
+  return (
+    <div role="status" aria-label="Loading object details">
+      <Skeleton className={`rounded-xl ${hasVersionId ? 'h-97.5' : 'h-87.5'}`} />
     </div>
   );
 }

@@ -316,7 +316,10 @@ export interface AuditEventDetails {
   'key.created': {
     keyKind: AuditKeyKind;
     keyName: string;
+    /** The region the request named; the key works at every region of its network. */
     region?: string;
+    /** The storage network holding the credential. */
+    orchestratorId?: string;
     /** The characters of the key the console shows — see {@link auditKeyIdSuffix}. */
     keyIdSuffix?: string;
     /**
@@ -339,7 +342,10 @@ export interface AuditEventDetails {
   'key.deleted': {
     keyKind: AuditKeyKind;
     keyName?: string;
+    /** Only on events written while keys were recorded by region rather than network. */
     region?: string;
+    /** The storage network the credential was revoked at. */
+    orchestratorId?: string;
     /** The characters of the key the console shows — see {@link auditKeyIdSuffix}. */
     keyIdSuffix?: string;
     /**
@@ -362,7 +368,10 @@ export interface AuditEventDetails {
   'key.rotated': {
     keyKind: AuditKeyKind;
     keyName: string;
+    /** Only on events written while keys were recorded by region rather than network. */
     region?: string;
+    /** The storage network the replacement was minted at. */
+    orchestratorId?: string;
     /** The replacement, by the characters the console shows. Set on the completion. */
     keyIdSuffix?: string;
     /** The key being replaced, by the same characters. Set on the intent. */

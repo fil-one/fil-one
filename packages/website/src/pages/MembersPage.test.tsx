@@ -41,7 +41,7 @@ vi.mock('../lib/members-api.js', () => ({
 const REVOKED_KEY = {
   id: 'key-1',
   keyName: 'nightly backup',
-  region: 'us-east-1',
+  regions: ['us-east-1'],
   createdAt: '2026-02-01T00:00:00.000Z',
   reason: 'exceeds_role' as const,
   excess: ['DeleteBucket'],
@@ -168,6 +168,41 @@ function rowMenuFor(member: string): HTMLElement | null {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe('MembersPage — while the roster loads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListInvitations.mockResolvedValue({ invitations: [] });
+  });
+
+  it.each([
+    // Owner and Admin get row actions, so the placeholder keeps their column.
+    [OrgRole.Owner, ['Member', 'Role', 'Joined', 'Actions']],
+    [OrgRole.Admin, ['Member', 'Role', 'Joined', 'Actions']],
+    [OrgRole.Member, ['Member', 'Role', 'Joined']],
+  ])('shows %s the roster column headers above placeholder rows', async (role, headers) => {
+    // Never settles, so the roster stays loading.
+    mockListMembers.mockReturnValue(new Promise(() => {}));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    seedPermissions(client, role);
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <MembersRoster />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    const loading = await screen.findByRole('status', { name: 'Loading members' });
+    expect(
+      within(loading)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent),
+    ).toStrictEqual(headers);
+    // The header row, then three placeholder rows.
+    expect(within(loading).getAllByRole('row')).toHaveLength(4);
+  });
+});
 
 describe('MembersPage', () => {
   beforeEach(() => {
@@ -457,7 +492,7 @@ describe('the role-narrowing confirmation', () => {
           id: 'key-1',
           keyName: 'nightly backup',
           accessKeyIdSuffix: '9999',
-          region: 'us-east-1',
+          regions: ['us-east-1'],
           createdAt: '2026-02-01T00:00:00.000Z',
           reason: 'exceeds_role',
           excess: ['DeleteBucket'],
@@ -625,7 +660,7 @@ describe('the role-narrowing confirmation', () => {
         {
           id: 'key-1',
           keyName: 'nightly backup',
-          region: 'us-east-1',
+          regions: ['us-east-1'],
           createdAt: '2026-02-01T00:00:00.000Z',
           reason: 'exceeds_role',
           excess: ['DeleteBucket'],
@@ -657,7 +692,7 @@ describe('the role-narrowing confirmation', () => {
           {
             id: 'key-1',
             keyName: 'nightly backup',
-            region: 'us-east-1',
+            regions: ['us-east-1'],
             createdAt: '2026-02-01T00:00:00.000Z',
             reason: 'exceeds_role',
             excess: ['DeleteBucket'],
@@ -837,7 +872,7 @@ describe('MembersPage — transferring the owner seat', () => {
         {
           id: 'key-9',
           keyName: 'compliance writer',
-          region: 'eu-west-1',
+          regions: ['eu-west-1'],
           createdAt: '2026-05-14T00:00:00.000Z',
           reason: 'exceeds_role',
           excess: ['PutObjectRetention'],

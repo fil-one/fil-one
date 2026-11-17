@@ -95,6 +95,7 @@ export async function baseHandler(
   try {
     await orchestrator.createBucket(tenantId, {
       bucketName,
+      region,
       versioning,
       lock,
       retention,

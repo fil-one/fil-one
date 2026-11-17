@@ -224,7 +224,7 @@ describe('authMiddleware', () => {
       // First call: access token verify; second call: ID token verify
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
 
       ddbMock
         .on(GetItemCommand, {
@@ -287,7 +287,7 @@ describe('authMiddleware', () => {
     it('410s a tombstoned identity instead of resolving it', async () => {
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
 
       ddbMock
         .on(GetItemCommand, {
@@ -321,7 +321,7 @@ describe('authMiddleware', () => {
 
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
 
       // The identity row is untouched at confirm — only the profile is fenced.
       ddbMock
@@ -392,7 +392,7 @@ describe('authMiddleware', () => {
 
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
 
       ddbMock
         .on(GetItemCommand, {
@@ -440,7 +440,7 @@ describe('authMiddleware', () => {
 
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
 
       ddbMock
         .on(GetItemCommand, {
@@ -482,7 +482,7 @@ describe('authMiddleware', () => {
         const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
         mockJwtVerify
           .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-          .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+          .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
         stubIdentityAndFailingMembership();
 
         const { before } = authMiddleware({ requireVerifiedEmail: false });
@@ -513,7 +513,7 @@ describe('authMiddleware', () => {
         const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
         mockJwtVerify
           .mockRejectedValueOnce(new Error('token expired'))
-          .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+          .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
         mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
         mockFetch.mockResolvedValue({
           ok: true,
@@ -554,7 +554,7 @@ describe('authMiddleware', () => {
        */
       function stubStrandedAccount(otherMemberships: string[] = []) {
         mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
-          payload: { email: MOCK_EMAIL, email_verified: true },
+          payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
         });
         ddbMock.on(GetItemCommand).callsFake((input) => {
           const pk: string = input.Key.pk?.S ?? '';
@@ -620,7 +620,7 @@ describe('authMiddleware', () => {
     // after: a replica that has not seen the write still holds the old stamp.
     it('lets in an account that just rejoined when a stale read still shows its tombstone', async () => {
       mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
-        payload: { email: MOCK_EMAIL, email_verified: true },
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
       });
       ddbMock.on(GetItemCommand).callsFake((input) => {
         if (input.Key.pk?.S !== `SUB#${MOCK_SUB}`) return {};
@@ -653,7 +653,7 @@ describe('authMiddleware', () => {
       it('hands back the rotated cookies when it answers that the org is being deleted', async () => {
         mockJwtVerify
           .mockRejectedValueOnce(new Error('token expired'))
-          .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+          .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
         mockDecodeJwt.mockReturnValue({ sub: MOCK_SUB });
         mockFetch.mockResolvedValue({
           ok: true,
@@ -697,6 +697,7 @@ describe('authMiddleware', () => {
 
       mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
         payload: {
+          sub: MOCK_SUB,
           email: MOCK_EMAIL,
           email_verified: true,
           name: MOCK_NAME,
@@ -762,6 +763,7 @@ describe('authMiddleware', () => {
 
       mockJwtVerify.mockRejectedValueOnce(new Error('token expired')).mockResolvedValueOnce({
         payload: {
+          sub: MOCK_SUB,
           email: MOCK_EMAIL,
           email_verified: true,
           name: MOCK_NAME,
@@ -912,9 +914,9 @@ describe('authMiddleware', () => {
 
     it('creates new user and org with a derived name, deferring tenant setup and claiming nothing', async () => {
       // First call: access token verify; second call: ID token verify
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, name: 'Alice Johnson' } });
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, name: 'Alice Johnson' },
+      });
 
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
@@ -1064,7 +1066,7 @@ describe('authMiddleware', () => {
 
     it('names the actor by their email once the claim says it is verified', async () => {
       mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
-        payload: { email: MOCK_EMAIL, email_verified: true, name: 'Alice Johnson' },
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true, name: 'Alice Johnson' },
       });
 
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
@@ -1087,9 +1089,9 @@ describe('authMiddleware', () => {
     });
 
     it('creates the account anyway when the audit item is the half the table refused', async () => {
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, name: 'Alice Johnson' } });
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, name: 'Alice Johnson' },
+      });
 
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock
@@ -1132,7 +1134,7 @@ describe('authMiddleware', () => {
 
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
 
       ddbMock
         .on(GetItemCommand, {
@@ -1166,7 +1168,7 @@ describe('authMiddleware', () => {
     it('falls back to email-derived org name when no JWT name claim is present', async () => {
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
 
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
@@ -1193,7 +1195,7 @@ describe('authMiddleware', () => {
       // First call: access token verify fails; second call: refreshed ID token verify succeeds
       mockJwtVerify
         .mockRejectedValueOnce(new Error('token expired'))
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL } });
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, email: MOCK_EMAIL } });
 
       mockFetch.mockResolvedValue({
         ok: true,
@@ -1448,9 +1450,9 @@ describe('authMiddleware', () => {
     }
 
     it('returns 403 EMAIL_NOT_VERIFIED by default when email is unverified', async () => {
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+      });
       mockExistingUser();
 
       const { before } = authMiddleware();
@@ -1469,9 +1471,9 @@ describe('authMiddleware', () => {
     });
 
     it('allows the request by default when email is verified', async () => {
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
+      });
       mockExistingUser();
 
       const { before } = authMiddleware();
@@ -1486,10 +1488,33 @@ describe('authMiddleware', () => {
       expect(result).toBeUndefined();
     });
 
+    it('returns 403 when the verified claim comes from another account’s ID token', async () => {
+      // The access token authenticates this session; the ID token cookie is a
+      // separate submission, here a verified token minted for someone else.
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: 'auth0|someone-else', email: 'other@example.com', email_verified: true },
+      });
+      mockExistingUser();
+
+      const { before } = authMiddleware();
+      const request = buildMiddyRequest(
+        buildEvent({
+          cookies: [`hs_access_token=valid-token`, `hs_id_token=another-accounts-id-token`],
+        }),
+      );
+
+      const result = await before(request);
+
+      expectErrorResponse(result, 403, {
+        message: 'Email verification required',
+        code: ApiErrorCode.EMAIL_NOT_VERIFIED,
+      });
+    });
+
     it('returns 403 on the refresh path when refreshed claims are unverified', async () => {
-      mockJwtVerify
-        .mockRejectedValueOnce(new Error('token expired'))
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockJwtVerify.mockRejectedValueOnce(new Error('token expired')).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+      });
       mockFetch.mockResolvedValue({
         ok: true,
         json: async () => ({
@@ -1542,9 +1567,9 @@ describe('authMiddleware', () => {
     });
 
     it('allows unverified email when requireVerifiedEmail is false', async () => {
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+      });
       mockExistingUser();
 
       const { before } = authMiddleware({ requireVerifiedEmail: false });
@@ -1563,9 +1588,9 @@ describe('authMiddleware', () => {
       // Identity creation is authentication-time work; the gate is an
       // authorization check that runs after it. A brand-new (unverified)
       // user must still get their user/org records so /me works.
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+      });
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
@@ -1607,9 +1632,9 @@ describe('authMiddleware', () => {
     }
 
     function verifiedLogin() {
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
+      });
       return buildMiddyRequest(
         buildEvent({
           cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
@@ -1618,9 +1643,9 @@ describe('authMiddleware', () => {
     }
 
     it('stamps the verified email at signup', async () => {
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: true } });
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true },
+      });
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
@@ -1641,9 +1666,9 @@ describe('authMiddleware', () => {
     });
 
     it('leaves the address off an unverified signup', async () => {
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+      });
       ddbMock.on(GetItemCommand).resolves({ Item: undefined });
       ddbMock.on(TransactWriteItemsCommand).resolves({});
 
@@ -1704,9 +1729,9 @@ describe('authMiddleware', () => {
 
     it('does not stamp an unverified address on an existing account', async () => {
       mockExistingUser();
-      mockJwtVerify
-        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: { email: MOCK_EMAIL, email_verified: false } });
+      mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: false },
+      });
 
       const { before } = authMiddleware({ requireVerifiedEmail: false });
       await before(
@@ -1757,7 +1782,7 @@ describe('authMiddleware', () => {
     function login(idClaims: Record<string, unknown>) {
       mockJwtVerify
         .mockResolvedValueOnce({ payload: { sub: MOCK_SUB } })
-        .mockResolvedValueOnce({ payload: idClaims });
+        .mockResolvedValueOnce({ payload: { sub: MOCK_SUB, ...idClaims } });
       return buildMiddyRequest(
         buildEvent({
           cookies: [`hs_access_token=valid-token`, `hs_id_token=id-token`],
@@ -1908,7 +1933,7 @@ describe('authMiddleware', () => {
      */
     function signInAs(orgId: string, idTokenClaims: Record<string, unknown> = {}) {
       mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB } }).mockResolvedValueOnce({
-        payload: { email: MOCK_EMAIL, email_verified: true, ...idTokenClaims },
+        payload: { sub: MOCK_SUB, email: MOCK_EMAIL, email_verified: true, ...idTokenClaims },
       });
       ddbMock
         .on(GetItemCommand, { Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } } })

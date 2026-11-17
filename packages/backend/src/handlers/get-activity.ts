@@ -6,7 +6,7 @@ import { isRagCompanionBucket } from '@filone/shared';
 import { queryActivityEvents, resolveWindow } from '../lib/audit-query.ts';
 import { reportAuditQuery } from '../lib/audit-metrics.ts';
 import type { BucketSummary } from '../lib/bucket-orchestrator.ts';
-import { getProvisionedRegions } from '../lib/region-helpers.ts';
+import { getProvisionedNetworks } from '../lib/region-helpers.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -92,15 +92,15 @@ export async function baseHandler(
 }
 
 /**
- * Every bucket in the org's provisioned regions. A region that fails to list
+ * Every bucket on the org's provisioned networks. A network that fails to list
  * is logged and skipped: its buckets then lack a creation row, and the audit
  * events still show.
  */
 async function listBuckets(orgId: string, signal: AbortSignal): Promise<BucketSummary[]> {
-  const regions = await getProvisionedRegions(orgId);
+  const networks = await getProvisionedNetworks(orgId);
   const settled = await Promise.allSettled(
     // No member id: the feed is for Owner and Admin, who see every bucket.
-    regions.map(({ orchestrator, tenantId }) =>
+    networks.map(({ orchestrator, tenantId }) =>
       orchestrator.listBuckets(tenantId, undefined, { signal }),
     ),
   );
@@ -109,11 +109,10 @@ async function listBuckets(orgId: string, signal: AbortSignal): Promise<BucketSu
       // Companion buckets hold Bucket Intelligence's datasets, not user data.
       return result.value.filter((bucket) => !isRagCompanionBucket(bucket.bucketName));
     }
-    const { orchestrator, tenantId } = regions[index];
+    const { orchestrator, tenantId } = networks[index];
     console.error('[get-activity] Orchestrator listBuckets failed', {
       orgId,
       orchestratorId: orchestrator.id,
-      region: orchestrator.region,
       tenantId,
       error: result.reason,
     });

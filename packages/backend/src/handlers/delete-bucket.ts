@@ -61,7 +61,7 @@ export async function baseHandler(
   });
 
   try {
-    await orchestrator.deleteBucket(tenantId, bucketName, { signal });
+    await orchestrator.deleteBucket(tenantId, { region, bucketName }, { signal });
   } catch (err) {
     // A timeout may still have deleted the bucket, so the intent stays open.
     if (!isOutcomeUnknown(err, signal)) await bucketAudit.complete({ outcome: 'failed' });

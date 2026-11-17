@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getAccessKeyOrchestratorId,
   type BucketRAGEnablementRecord,
   type ObjectChunkManifestRecord,
   type RAGConfigRecord,
@@ -8,6 +9,7 @@ import {
   RAGKeys,
 } from './dynamo-records.ts';
 import { S3Region } from '@filone/shared';
+import { UnknownAccessKeyRegionError } from './errors.ts';
 
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 
@@ -221,5 +223,32 @@ describe('RagIndexerCheckpointRecord', () => {
       ttl: Math.floor(Date.now() / 1000) + 48 * 60 * 60,
     };
     expect(record.continuationToken).toBeUndefined();
+  });
+});
+
+describe('getAccessKeyOrchestratorId', () => {
+  it('takes the network a row names outright', () => {
+    expect(getAccessKeyOrchestratorId({ orchestratorId: 'forge', region: S3Region.EuWest1 })).toBe(
+      'forge',
+    );
+  });
+
+  it('resolves an older row from the region it was minted in', () => {
+    expect(getAccessKeyOrchestratorId({ region: S3Region.UsEast1 })).toBe('fth');
+  });
+
+  it("reads a row naming neither as Aurora's", () => {
+    // Until keys could be minted outside Aurora the create handler refused
+    // every other region, so a row with neither attribute is an Aurora key.
+    expect(getAccessKeyOrchestratorId({})).toBe('aurora');
+  });
+
+  it('refuses a row stored against a region we no longer know', () => {
+    // us-midwest-1 was renamed before keys recorded their network. Guessing
+    // here would answer with a network the credential is not on, and the
+    // callers are deleting and rotating credentials.
+    expect(() => getAccessKeyOrchestratorId({ region: 'us-midwest-1' as S3Region })).toThrow(
+      UnknownAccessKeyRegionError,
+    );
   });
 });
