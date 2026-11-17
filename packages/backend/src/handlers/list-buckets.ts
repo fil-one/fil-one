@@ -75,9 +75,9 @@ export async function baseHandler(
 
   const buckets: BucketSummary[] = [];
   const unavailableRegions: S3Region[] = [];
-  // Failed legs are counted apart from regions: one failed network may account
-  // for several unavailable regions, and the all-failed check below is per leg.
-  let failedLegs = 0;
+  // Failed calls are counted apart from regions: one failed network may account
+  // for several unavailable regions, and the all-failed check below is per call.
+  let failedOrchestratorCalls = 0;
   settled.forEach((result, index) => {
     if (result.status === 'fulfilled') {
       // Bucket Intelligence keeps its Lance datasets in companion buckets on
@@ -95,7 +95,7 @@ export async function baseHandler(
       tenantId,
       error: result.reason,
     });
-    failedLegs++;
+    failedOrchestratorCalls++;
     unavailableRegions.push(...orchestrator.regions);
   });
 
@@ -103,7 +103,7 @@ export async function baseHandler(
   // outage. Returned rather than thrown so the message survives, since the error-handler
   // middleware replaces any throw with the generic 500. The `> 0` guard keeps an org with no
   // provisioned networks on the 200 path.
-  if (failedLegs > 0 && failedLegs === ready.length) {
+  if (failedOrchestratorCalls > 0 && failedOrchestratorCalls === ready.length) {
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({ message: listBucketsUnavailableMessage(unavailableRegions) })
