@@ -130,6 +130,7 @@ function MediaPreview({
     return (
       <div className="p-4">
         <audio
+          data-testid="object-preview-media"
           controls
           preload="metadata"
           src={url}
@@ -147,6 +148,7 @@ function MediaPreview({
     <div className="flex items-center justify-center bg-zinc-50 p-4">
       {kind === 'image' ? (
         <img
+          data-testid="object-preview-media"
           src={url}
           alt={fileName}
           className="max-h-96 max-w-full rounded-md object-contain"
@@ -154,6 +156,7 @@ function MediaPreview({
         />
       ) : (
         <video
+          data-testid="object-preview-media"
           controls
           // Metadata only until the user presses play: the file streams on demand
           preload="metadata"
