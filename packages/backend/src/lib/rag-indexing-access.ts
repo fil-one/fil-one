@@ -2,7 +2,7 @@ import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from './response-builder.ts';
 import { isIamOrchestrator } from './service-orchestrator-ids.ts';
-import type { RegionOrchestrator, ServiceOrchestrator } from './service-orchestrator.ts';
+import type { NetworkOrchestrator, ServiceOrchestrator } from './service-orchestrator.ts';
 
 /**
  * Refuse to index a bucket for a scoped member whose policies grant neither
@@ -13,7 +13,7 @@ import type { RegionOrchestrator, ServiceOrchestrator } from './service-orchestr
  * is asked of the orchestrator rather than of one region.
  */
 export async function checkIndexingAccess(
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
   tenantId: string,
   bucketName: string,
   memberId: string | undefined,

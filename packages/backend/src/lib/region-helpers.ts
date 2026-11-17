@@ -1,7 +1,7 @@
 import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { getAvailableOrchestrators } from './service-orchestrator-registry.ts';
 import { getOrgProfile } from './org-profile.ts';
-import type { RegionOrchestrator } from './service-orchestrator.ts';
+import type { NetworkOrchestrator } from './service-orchestrator.ts';
 import type { TenantStatus } from '@filone/shared/src/api/tenants.ts';
 
 /**
@@ -11,7 +11,7 @@ import type { TenantStatus } from '@filone/shared/src/api/tenants.ts';
  * over it touches each tenant once.
  */
 export interface ProvisionedNetwork {
-  orchestrator: RegionOrchestrator;
+  orchestrator: NetworkOrchestrator;
   tenantId: string;
 }
 
@@ -85,7 +85,7 @@ async function syncRegionTenantStatus({
   desired,
 }: {
   orgId: string;
-  orchestrator: RegionOrchestrator;
+  orchestrator: NetworkOrchestrator;
   tenantId: string;
   desired: TenantStatus;
 }): Promise<TenantSyncOutcome> {

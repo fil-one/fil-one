@@ -10,7 +10,7 @@ import {
 } from './service-orchestrator-ids.ts';
 import type {
   LegacyServiceOrchestrator,
-  RegionOrchestrator,
+  NetworkOrchestrator,
   ServiceOrchestrator,
 } from './service-orchestrator.ts';
 
@@ -80,7 +80,7 @@ function getForgeOrchestrator(id: string, stage: string): ServiceOrchestrator {
 }
 
 /** The orchestrator (storage network) serving a region. */
-export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
+export function getOrchestratorForRegion(region: S3Region): NetworkOrchestrator {
   const stage = process.env.FILONE_STAGE!;
   if (!isSupportedRegion(region, stage)) {
     throw new Error(`Unsupported region "${String(region)}".`);
@@ -105,9 +105,9 @@ export function getOrchestratorForRegion(region: S3Region): RegionOrchestrator {
  * key and bucket listing are shared across them, so a per-network loop must
  * not visit it twice.
  */
-export function getAvailableOrchestrators(): RegionOrchestrator[] {
+export function getAvailableOrchestrators(): NetworkOrchestrator[] {
   const stage = process.env.FILONE_STAGE!;
-  const seen = new Set<RegionOrchestrator>();
+  const seen = new Set<NetworkOrchestrator>();
   for (const region of getAvailableRegions(stage)) seen.add(getOrchestratorForRegion(region));
   return [...seen];
 }
@@ -117,6 +117,6 @@ export function getAvailableOrchestrators(): RegionOrchestrator[] {
  * available on this stage. This is how a stored key row, which records the
  * network that holds its credential, finds its way back to it.
  */
-export function findOrchestratorById(id: string): RegionOrchestrator | undefined {
+export function findOrchestratorById(id: string): NetworkOrchestrator | undefined {
   return getAvailableOrchestrators().find((orchestrator) => orchestrator.id === id);
 }

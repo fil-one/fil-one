@@ -8,7 +8,7 @@ import { BulkDeleteScope, type PolicyAction } from '@filone/shared';
 
 import type { BucketVersioningStatus } from './s3-bucket-operations.ts';
 import { isIamOrchestrator } from './service-orchestrator-ids.ts';
-import type { RegionOrchestrator, ServiceOrchestrator } from './service-orchestrator.ts';
+import type { NetworkOrchestrator, ServiceOrchestrator } from './service-orchestrator.ts';
 
 /**
  * The policy actions the worker's S3 calls need. An all-versions delete lists
@@ -52,7 +52,7 @@ export interface BulkDeleteTarget {
  * the read.
  */
 export async function canBulkDelete(
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
   tenantId: string,
   memberId: string | undefined,
   target: BulkDeleteTarget,

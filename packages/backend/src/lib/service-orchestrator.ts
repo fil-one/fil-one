@@ -114,8 +114,10 @@ export interface ServiceOrchestrator
     MemberOrchestrator {}
 
 /**
- * Any region's orchestrator. `supportsIamMethods(orchestrator.region)` says which
- * of the two it is: the region table decides, and the registry builds the
- * orchestrator to match.
+ * Any storage network's orchestrator. A network serves one or more regions and
+ * its tenant is region-free, so there is one of these per network rather than
+ * one per region. `isIamOrchestrator` says which of the two it is: the access
+ * model belongs to the network, and the registry builds the orchestrator to
+ * match.
  */
-export type RegionOrchestrator = LegacyServiceOrchestrator | ServiceOrchestrator;
+export type NetworkOrchestrator = LegacyServiceOrchestrator | ServiceOrchestrator;

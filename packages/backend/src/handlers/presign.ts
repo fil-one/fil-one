@@ -16,7 +16,7 @@ import type {
   PresignResponseItem,
 } from '@filone/shared';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { RegionOrchestrator, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
+import type { NetworkOrchestrator, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import type { S3ClientContext } from '../lib/s3-client.ts';
 import {
@@ -127,7 +127,7 @@ function getRequiredAction(op: PresignOp): PolicyAction {
  * serving service keys, skips the read.
  */
 async function checkMemberBucketAccess(
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
   tenantId: string,
   userId: string | undefined,
   ops: PresignOp[],
