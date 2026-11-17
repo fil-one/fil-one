@@ -45,18 +45,50 @@ const FORGE_NETWORKS: Record<
       baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
       accessToken: Resource.ForgeDevManagementApiToken.value,
     }),
-    // The dev stack's gateway is a local port, which no region name produces,
-    // so the override is keyed by the region it serves.
+    // The dev stack's gateways are local ports, which no region name
+    // produces, so the overrides are keyed by the region each serves.
     get s3Endpoints() {
-      const endpointUrl = process.env.FORGE_DEV_S3_ENDPOINT_URL;
-      if (!endpointUrl) return undefined;
-      const presignEndpointUrl = process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL;
-      return {
-        [S3Region.UsEast9]: { endpointUrl, ...(presignEndpointUrl && { presignEndpointUrl }) },
-      };
+      return localEndpoints({
+        [S3Region.UsEast9]: 'FORGE_DEV_S3_ENDPOINT_URL',
+        [S3Region.EuCentral9]: 'FORGE_DEV_EU_S3_ENDPOINT_URL',
+      });
+    },
+  },
+  // A second smelt network on the same machine, so a local stage can show an
+  // account reaching two networks. No hosted counterpart: only a local stage
+  // offers its region.
+  forgeDev2: {
+    api: () => ({
+      baseUrl: process.env.FORGE_DEV2_MANAGEMENT_API_URL!,
+      accessToken: Resource.ForgeDev2ManagementApiToken.value,
+    }),
+    get s3Endpoints() {
+      return localEndpoints({ [S3Region.UsWest9]: 'FORGE_DEV2_S3_ENDPOINT_URL' });
     },
   },
 };
+
+/**
+ * The S3 endpoint overrides a local stage sets, one region at a time. A
+ * region whose variable is unset is left out, so it falls back to the name
+ * the region produces; with none set the network has no overrides at all.
+ *
+ * The browser fetches a presigned URL itself, and an https page may fetch
+ * http://localhost but no other plain-http host, so each endpoint has a
+ * matching `<NAME>_PRESIGN_` variable carrying the localhost form.
+ */
+function localEndpoints(
+  byRegion: Partial<Record<S3Region, string>>,
+): Partial<Record<S3Region, S3Endpoint>> | undefined {
+  const endpoints: Partial<Record<S3Region, S3Endpoint>> = {};
+  for (const [region, variable] of Object.entries(byRegion) as [S3Region, string][]) {
+    const endpointUrl = process.env[variable];
+    if (!endpointUrl) continue;
+    const presignEndpointUrl = process.env[variable.replace('_S3_', '_S3_PRESIGN_')];
+    endpoints[region] = { endpointUrl, ...(presignEndpointUrl && { presignEndpointUrl }) };
+  }
+  return Object.keys(endpoints).length > 0 ? endpoints : undefined;
+}
 
 function getForgeOrchestrator(id: string, stage: string): ServiceOrchestrator {
   let orchestrator = forgeOrchestrators.get(id);

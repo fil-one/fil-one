@@ -9,6 +9,7 @@ vi.hoisted(() => {
   process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
   process.env.FORGE_MANAGEMENT_API_URL = 'https://forge.test';
   process.env.FORGE_DEV_MANAGEMENT_API_URL = 'https://forge-dev.test';
+  process.env.FORGE_DEV2_MANAGEMENT_API_URL = 'http://localhost:15113';
 });
 
 vi.mock('sst', () => ({
@@ -16,6 +17,7 @@ vi.mock('sst', () => ({
     FthManagementApiToken: { value: 'kid.secret' },
     ForgeManagementApiToken: { value: 'fkid.fsecret' },
     ForgeDevManagementApiToken: { value: 'dkid.dsecret' },
+    ForgeDev2ManagementApiToken: { value: 'd2kid.d2secret' },
   },
 }));
 import {
@@ -28,7 +30,7 @@ import {
   isIamOrchestrator,
   getRegionsForOrchestrator,
 } from './service-orchestrator-ids.ts';
-import { supportsIamMethods } from '@filone/shared';
+import { getAvailableRegions, supportsIamMethods } from '@filone/shared';
 
 afterEach(() => {
   delete process.env.FILONE_STAGE;
@@ -62,10 +64,12 @@ describe('service-orchestrator registry', () => {
   });
 
   // The ids map is the answer for code that cannot build an orchestrator, so
-  // it must agree with the orchestrators the registry does build.
+  // it must agree with the orchestrators the registry does build. Each region
+  // is asked on a stage that serves it: the local smelt regions appear on a
+  // local stage only.
   for (const [region, id] of Object.entries(ORCHESTRATOR_ID_BY_REGION)) {
     it(`builds the orchestrator named by ORCHESTRATOR_ID_BY_REGION for ${region}`, () => {
-      process.env.FILONE_STAGE = Stage.Staging;
+      process.env.FILONE_STAGE = stageServing(region as S3Region);
       expect(getOrchestratorForRegion(region as S3Region).id).toBe(id);
     });
   }
@@ -153,16 +157,31 @@ describe.each([Stage.Staging, Stage.Production])('built orchestrators in %s', (s
 describe('isIamOrchestrator', () => {
   // The access model belongs to the network, so reading it off any one of its
   // regions has to give the same answer. Asking the first region is only
-  // sound while that holds.
-  it('agrees with every region of every built orchestrator', () => {
-    process.env.FILONE_STAGE = Stage.Staging;
-    for (const orchestrator of getAvailableOrchestrators()) {
-      const perRegion = orchestrator.regions.map(supportsIamMethods);
-      expect(new Set(perRegion).size).toBe(1);
-      expect(isIamOrchestrator(orchestrator)).toBe(perRegion[0]);
-    }
-  });
+  // sound while that holds. A local stage is where it is most easily broken:
+  // one network serves two regions there.
+  it.each([Stage.Staging, LOCAL_STAGE])(
+    'agrees with every region of every orchestrator in %s',
+    (stage) => {
+      process.env.FILONE_STAGE = stage;
+      for (const orchestrator of getAvailableOrchestrators()) {
+        const perRegion = orchestrator.regions.map(supportsIamMethods);
+        expect(new Set(perRegion).size).toBe(1);
+        expect(isIamOrchestrator(orchestrator)).toBe(perRegion[0]);
+      }
+    },
+  );
 });
+
+/** The stage name `pnpm deploy:local` deploys, which offers the smelt regions. */
+const LOCAL_STAGE = 'local';
+
+/**
+ * A stage that serves this region. Staging serves every region with hosted
+ * infrastructure behind it; the rest exist only on a developer's machine.
+ */
+function stageServing(region: S3Region): string {
+  return getAvailableRegions(Stage.Staging).includes(region) ? Stage.Staging : LOCAL_STAGE;
+}
 
 describe('getOrchestratorForRegion refusals', () => {
   it('refuses a region the stage does not serve', () => {

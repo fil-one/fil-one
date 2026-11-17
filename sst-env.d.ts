@@ -110,6 +110,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "CheckPromotionCode": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "ConfirmAccountDeletion": {
       "name": string
       "type": "sst.aws.Function"
@@ -189,6 +193,10 @@ declare module "sst" {
     "ExportAuditEvents": {
       "name": string
       "type": "sst.aws.Function"
+    }
+    "ForgeDev2ManagementApiToken": {
+      "type": "sst.sst.Secret"
+      "value": string
     }
     "ForgeDevManagementApiToken": {
       "type": "sst.sst.Secret"
@@ -423,11 +431,11 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
-    "SyncBucketRag": {
+    "SubscriptionDriftChecker": {
       "name": string
       "type": "sst.aws.Function"
     }
-    "SubscriptionDriftChecker": {
+    "SyncBucketRag": {
       "name": string
       "type": "sst.aws.Function"
     }
@@ -477,7 +485,6 @@ declare module "sst" {
     }
   }
 }
-/// <reference path="sst-env.d.ts" />
 
 import "sst"
 export {}
