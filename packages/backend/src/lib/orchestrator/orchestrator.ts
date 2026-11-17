@@ -374,7 +374,7 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
 
     return {
       bucketName,
-      region: this.regions[0],
+      region,
       isPublic: false,
       versioning,
       encrypted: true,

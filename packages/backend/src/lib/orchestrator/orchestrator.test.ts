@@ -108,10 +108,10 @@ function fail(status: number, message = 'error') {
   return { data: undefined, error: { message }, response: { status } };
 }
 
-function buildOrchestrator(overrides?: Pick<Partial<FilOneOrchestratorConfig>, 'api'>) {
+function buildOrchestrator(overrides?: Pick<Partial<FilOneOrchestratorConfig>, 'api' | 'regions'>) {
   return new FilOneOrchestrator({
     id: 'forge',
-    regions: [S3Region.UsEast1],
+    regions: overrides?.regions ?? [S3Region.UsEast1],
     stage: 'test',
     s3Endpoints: {
       [S3Region.UsEast1]: { endpointUrl: 'https://us-east-1.s3.test.example.com' },
@@ -763,6 +763,22 @@ describe('getBucket for a member', () => {
     stubS3Credentials();
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({});
+  });
+
+  it('reports the region it was asked for, not the first the network serves', async () => {
+    // The fixture network serves two regions and the bucket is in the second,
+    // so a reader that fell back to the first would look right on every other
+    // test here.
+    const multiRegion = buildOrchestrator({ regions: [S3Region.UsEast1, S3Region.EuCentral3] });
+    mockGetPrincipalAccess.mockReturnValue(respondWithAccessibleBuckets('bucket-a'));
+
+    const bucket = await multiRegion.getBucket(
+      tenantId,
+      { region: S3Region.EuCentral3, bucketName: 'bucket-a' },
+      MEMBER_ID,
+    );
+
+    expect(bucket?.region).toBe(S3Region.EuCentral3);
   });
 
   it("returns details when the Member's access includes the bucket", async () => {
