@@ -1,11 +1,11 @@
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { CaretDownIcon, CheckIcon } from '@phosphor-icons/react/dist/ssr';
 import type { S3Region } from '@filone/shared';
-import { formatRegion, getRegionLabel } from '@filone/shared';
+import { formatRegion } from '@filone/shared';
 
 import { useAvailableRegions } from '../lib/use-available-regions.js';
 import type { InputSize } from './Input';
-import { RegionFlag } from './RegionFlag';
+import { RegionLine } from './RegionLine';
 
 type RegionSelectProps = {
   id?: string;
@@ -37,27 +37,6 @@ const SIZES: Record<InputSize, { control: string; caret: { inset: string; size: 
     caret: { inset: 'right-4', size: 14 },
   },
 };
-
-/**
- * A region's flag, name and code. In the list the codes are right-aligned into a
- * column; in the closed field the code stays beside the name it belongs to.
- */
-function RegionLine({ region, isCodeInColumn }: { region: S3Region; isCodeInColumn: boolean }) {
-  return (
-    <>
-      {/* The name beside the flag already says where it is, so the flag stays out of the accessible name */}
-      <span aria-hidden="true" className="flex group-data-disabled:opacity-50">
-        <RegionFlag region={region} />
-      </span>
-      <span className="truncate">{getRegionLabel(region)}</span>
-      <span
-        className={`shrink-0 text-zinc-500 group-data-disabled:text-zinc-400 ${isCodeInColumn ? 'ml-auto pl-3' : ''}`}
-      >
-        {region}
-      </span>
-    </>
-  );
-}
 
 /**
  * A listbox rather than a native select, because an `<option>` can hold only

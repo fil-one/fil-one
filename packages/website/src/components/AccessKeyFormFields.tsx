@@ -9,7 +9,7 @@ import { Alert } from './Alert.js';
 import { FormField } from './FormField.js';
 import { Input } from './Input.js';
 import { RadioOption } from './RadioOption.js';
-import { RegionSelect } from './RegionSelect.js';
+import { NetworkRegionSelect } from './NetworkRegionSelect.js';
 
 // Inverse of KEY_NAME_PATTERN's character class — finds disallowed chars
 const INVALID_KEY_CHAR = /[^a-zA-Z0-9 _\-.]/g;
@@ -78,14 +78,16 @@ export function AccessKeyFormFields({
         />
       </FormField>
 
-      {/* Region — only rendered when the caller supplies an onRegionChange handler */}
+      {/* Regions — only rendered when the caller supplies an onRegionChange handler.
+          A key belongs to a storage network, so the choice is one network at a
+          time and the key works at every region that network serves. */}
       {onRegionChange && (
         <FormField
           htmlFor="key-region"
-          label="Region"
-          description="This key only works with buckets in this region."
+          label="Region(s)"
+          description="This key works with buckets in these regions."
         >
-          <RegionSelect id="key-region" value={region} onChange={onRegionChange} />
+          <NetworkRegionSelect id="key-region" value={region} onChange={onRegionChange} />
         </FormField>
       )}
 

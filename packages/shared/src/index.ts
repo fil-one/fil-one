@@ -12,6 +12,10 @@ export {
   formatRegion,
   getRegionLabel,
   getAvailableRegions,
+  getAvailableNetworks,
+  NETWORK_ID_BY_REGION,
+  getNetworkIdForRegion,
+  getRegionsForNetwork,
   isSupportedRegion,
   supportsBucketManagement,
   getRegionAccessModel,
@@ -37,7 +41,14 @@ export {
   getUsageLimits,
   senderAddress,
 } from './constants.ts';
-export type { AccessModel, UsageLimits, StageLike, S3RegionLike } from './constants.ts';
+export type { StorageNetwork } from './constants.ts';
+export type {
+  AccessModel,
+  UsageLimits,
+  StageLike,
+  S3RegionLike,
+  NonEmptyArray,
+} from './constants.ts';
 export { formatBytes, formatBytesShort, bytesAxisFormatter } from './formatBytes.ts';
 export { UUID_PATTERN, isUuid } from './uuid.ts';
 export type {

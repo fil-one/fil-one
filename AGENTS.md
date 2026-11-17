@@ -16,6 +16,16 @@ Work is tracked as stories in Shortcut. Shortcut links a branch or pull request 
 
 `FIL-` IDs in older commits, comments and docs refer to Linear issues from before the move to Shortcut. Leave them as they are, and don't use `FIL-` IDs for new work: Shortcut does not recognize them.
 
+## Documentation
+
+A user-facing change is not done until [docs.filone.com](https://docs.filone.com) matches it. User-facing means anything a customer can see or rely on: console labels, screens and flows, S3 API behaviour, limits, pricing, plans, regions, error messages, and security properties.
+
+- Update the docs in [FilecoinFoundationWeb/filone-docs](https://github.com/FilecoinFoundationWeb/filone-docs) as part of the task, following that repo's `AGENTS.md` and `CONTRIBUTING.md` (which maps product paths to docs pages), and link the docs PR in this PR's description.
+- If the change needs no docs update, tick **No docs change needed** in the PR description and say why.
+- If the change is behind a feature flag or beta gate, don't open a docs PR yet: a public docs PR announces the feature. Add the `docs:gated` label and note the docs work for launch.
+
+The **Docs impact** check fails until one of those is done for a PR that touches user-facing paths (`.github/docs-impact-paths.txt`).
+
 ## Code conventions
 
 ### Naming
