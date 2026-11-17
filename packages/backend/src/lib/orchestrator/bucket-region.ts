@@ -14,7 +14,7 @@ import type { NonEmptyArray, S3Region } from '@filone/shared';
  * multi-region network it already is, so it is refused rather than guessed, as
  * is a label naming a region the network does not serve.
  */
-export function bucketRegion(
+export function resolveBucketRegion(
   network: { id: string; regions: NonEmptyArray<S3Region> },
   bucket: { name: string; region?: string },
 ): S3Region {
