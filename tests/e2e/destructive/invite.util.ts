@@ -1,5 +1,4 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { setTimeout as sleep } from 'node:timers/promises';
 import {
   DeleteItemCommand,
   DynamoDBClient,
@@ -9,6 +8,7 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
+import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { Resource } from 'sst';
 
 // Seeds and tears down the organization state the members specs drive.
@@ -559,10 +559,10 @@ export interface CleanupStep {
  * abandons is the org the next run inherits: two Admins and no Owner fails a
  * `beforeAll`, not the test that caused it.
  *
- * A step that throws runs again from the top after each delay in
- * {@link CLEANUP_RETRY_DELAYS_MS}, so every step must be safe to repeat. A
- * teardown that gives up on one transient 500 leaves a policy-suite bucket on
- * staging, still holding data, until the next run's sweep deletes it.
+ * A step that throws runs again from the top, up to {@link CLEANUP_RETRY}'s
+ * retries, so every step must be safe to repeat. A teardown that gives up on
+ * one transient 500 leaves a policy-suite bucket on staging, still holding
+ * data, until the next run's sweep deletes it.
  *
  * Steps run in the order given, which is the order the invariants need, and
  * every failure that outlasts its retries is collected and thrown together at
@@ -571,9 +571,20 @@ export interface CleanupStep {
 export async function runCleanup(steps: readonly CleanupStep[]): Promise<void> {
   const failures: string[] = [];
 
-  for (const step of steps) {
-    const failure = await runStepWithRetries(step);
-    if (failure !== undefined) failures.push(`${step.label}: ${failure}`);
+  for (const { label, run } of steps) {
+    try {
+      await pRetry(run, {
+        ...CLEANUP_RETRY,
+        onFailedAttempt: ({ error, attemptNumber, retriesLeft, retryDelay }) => {
+          if (retriesLeft === 0) return;
+          console.warn(
+            `Teardown step "${label}" failed (attempt ${attemptNumber}), retrying in ${retryDelay} ms: ${error.message}`,
+          );
+        },
+      });
+    } catch (error) {
+      failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   if (failures.length > 0) {
@@ -584,31 +595,14 @@ export async function runCleanup(steps: readonly CleanupStep[]): Promise<void> {
 }
 
 /**
- * The wait before each retry of a failed teardown step: three attempts in all.
- * A step that fails every time costs 4 s more than it did without retries, and
- * the largest teardown (about 20 buckets in a 180 s `afterAll`) stays within
- * its timeout even when every step fails.
+ * Three attempts per teardown step, 1 s and then 2 s apart (p-retry's default
+ * backoff). A step that fails every time costs 3 s more than one attempt, so
+ * the largest teardown (16 buckets in a 180 s `afterAll`) stays within its
+ * timeout even when every step fails. p-retry does not retry a `TypeError`
+ * other than a network error: that is a bug in the step, and a retry would
+ * only repeat it.
  */
-const CLEANUP_RETRY_DELAYS_MS = [1_000, 3_000];
-
-/** Run one step until it succeeds or runs out of retries; answer the last error's message. */
-async function runStepWithRetries({ label, run }: CleanupStep): Promise<string | undefined> {
-  const attempts = CLEANUP_RETRY_DELAYS_MS.length + 1;
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await run();
-      return undefined;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (attempt === attempts) return message;
-      const delayMs = CLEANUP_RETRY_DELAYS_MS[attempt - 1];
-      console.warn(
-        `Teardown step "${label}" failed (attempt ${attempt} of ${attempts}), retrying in ${delayMs} ms: ${message}`,
-      );
-      await sleep(delayMs);
-    }
-  }
-}
+const CLEANUP_RETRY = { retries: 2 } satisfies RetryOptions;
 
 /** Every row under one partition key with one sort-key prefix, paged to the end. */
 async function queryPartition(
