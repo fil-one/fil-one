@@ -7,6 +7,7 @@ import type {
 } from 'aws-lambda';
 import { GetItemCommand, type AttributeValue } from '@aws-sdk/client-dynamodb';
 import { createRemoteJWKSet, decodeJwt, jwtVerify } from 'jose';
+import type { JWTPayload } from 'jose';
 import { Resource } from 'sst';
 import type {
   AuthenticatedEvent,
@@ -28,6 +29,8 @@ import {
 import { getAuthSecrets } from '../lib/auth-secrets.ts';
 import { resolveAuth0Domain } from '../lib/auth0-domain.ts';
 import { getDynamoClient } from '../lib/ddb-client.ts';
+import { getRequestHeader } from '../lib/request-headers.ts';
+import { getMcpResourceMetadataUrl, getMcpResourceUrl } from '../lib/mcp/mcp-resource.ts';
 import { createNewUserAndOrg, stampVerifiedEmail } from '../lib/account-creation.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
 import type { OrgMembership } from '../lib/org-membership.ts';
@@ -117,6 +120,23 @@ import { moveHomeOffDeletedOrg } from '../lib/home-org-move.ts';
 function unauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder().status(401).body<ErrorResponse>({ message: 'Unauthorized' }).build();
 }
+
+function bearerUnauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(401)
+    .header('WWW-Authenticate', `Bearer resource_metadata="${getMcpResourceMetadataUrl()}"`)
+    .body<ErrorResponse>({ message: 'Unauthorized' })
+    .build();
+}
+
+/**
+ * Where the post-login Action (jobs/stack-setup/mfa-action.ts) puts the ID
+ * token's email claims on the access token, for callers that present only that.
+ */
+export const ACCESS_TOKEN_CLAIM_NAMESPACE = 'https://fil.one/';
+
+/** Scheme is case-insensitive (RFC 9110); the token itself is case-sensitive. */
+const BEARER_HEADER_PATTERN = /^bearer\s+(\S+)$/i;
 
 function emailNotVerifiedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()
@@ -760,6 +780,16 @@ export interface AuthMiddlewareOptions {
    * is the accept, and the account it creates belongs to the inviting org only.
    */
   deferAccountCreation?: boolean;
+  /**
+   * Authenticate from an `Authorization: Bearer` Auth0 access token issued for
+   * the MCP resource, instead of the session cookies, which are then ignored
+   * entirely. Without cookies there is no ambient credential, so the route needs
+   * no CSRF check, and no refresh. A 401 points the client at the resource
+   * metadata, which sends it to Auth0 to sign in.
+   *
+   * The MCP route alone sets this.
+   */
+  bearerToken?: boolean;
 }
 
 /**
@@ -882,6 +912,48 @@ async function completeAuthentication(
   return refusal ? withRefreshedCookies(request, refusal) : undefined;
 }
 
+/** The `bearerToken` path: an Auth0 access token, no cookies and no refresh. */
+async function authenticateBearer(
+  request: AuthMiddlewareRequest,
+  options: AuthMiddlewareOptions,
+): Promise<APIGatewayProxyStructuredResultV2 | void> {
+  const { event } = request;
+  const accessToken = getRequestHeader(event, 'authorization')?.match(BEARER_HEADER_PATTERN)?.[1];
+  if (!accessToken) return bearerUnauthorizedResponse();
+
+  const domain = resolveAuth0Domain(event);
+  let payload: JWTPayload;
+  try {
+    ({ payload } = await jwtVerify(accessToken, getJWKS(domain), {
+      // Not the console's audience: a console token must not reach the MCP route.
+      audience: getMcpResourceUrl(),
+      issuer: `https://${domain}/`,
+    }));
+  } catch (err) {
+    console.warn('[auth] Bearer access token verification failed', { error: err });
+    return bearerUnauthorizedResponse();
+  }
+
+  const email = payload[`${ACCESS_TOKEN_CLAIM_NAMESPACE}email`];
+  const claims: IdTokenClaims = {
+    ...EMPTY_ID_CLAIMS,
+    email: typeof email === 'string' ? email : null,
+    emailVerified: payload[`${ACCESS_TOKEN_CLAIM_NAMESPACE}email_verified`] === true,
+    auth0OrgId: typeof payload.org_id === 'string' ? payload.org_id : null,
+  };
+  request.internal.idTokenClaims = claims;
+  await attachIdentity({
+    event,
+    sub: payload.sub!,
+    email: claims.email,
+    emailVerified: claims.emailVerified,
+    name: null,
+    picture: null,
+    deferAccountCreation: options.deferAccountCreation ?? false,
+  });
+  return completeAuthentication(request, options);
+}
+
 export function authMiddleware(options: AuthMiddlewareOptions = {}) {
   // Mapped once here rather than at each attachIdentity call site, so no token
   // path can turn a deleted account into a 401 and invite a retry.
@@ -904,6 +976,7 @@ export function authMiddleware(options: AuthMiddlewareOptions = {}) {
   const authenticate = async (
     request: AuthMiddlewareRequest,
   ): Promise<APIGatewayProxyStructuredResultV2 | void> => {
+    if (options.bearerToken) return authenticateBearer(request, options);
     const { event } = request;
     const cookies = parseCookies(event);
 

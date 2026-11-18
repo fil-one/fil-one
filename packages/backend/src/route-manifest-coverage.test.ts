@@ -943,9 +943,9 @@ describe('the cookie caller on a bearer route', () => {
  * out.
  *
  * The scope is the cookie session. The Stripe webhook authenticates by the
- * provider's request signature and the RAG query route by its bearer token;
- * neither is a credential a browser attaches on its own, and neither route
- * carries the middleware.
+ * provider's request signature, the RAG query route by its bearer token and
+ * the `bearerToken` routes by an Auth0 access token; none is a credential a
+ * browser attaches on its own, and none of those routes carries the middleware.
  */
 describe('every mutating session route refuses a request with no CSRF token', () => {
   quietDenialOutput();
@@ -964,7 +964,7 @@ describe('every mutating session route refuses a request with no CSRF token', ()
   });
 
   const mutating = ROUTE_MANIFEST.filter(
-    (route) => route.category === 'authenticated' && route.method !== 'GET',
+    (route) => route.category === 'authenticated' && route.method !== 'GET' && !route.bearerToken,
   );
 
   it.each(named(mutating))('%s', async (_handler, route) => {

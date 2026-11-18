@@ -87,6 +87,7 @@ const ddbMock = mockClient(DynamoDBClient);
 
 process.env.AUTH0_DOMAIN = 'test.auth0.com';
 process.env.AUTH0_AUDIENCE = 'https://api.test.com';
+process.env.MCP_RESOURCE_URL = 'https://console.test.com/api/mcp';
 
 // Import after all mocks are set up
 import { authMiddleware } from './auth.ts';
@@ -2270,6 +2271,95 @@ describe('authMiddleware', () => {
       await after(request);
 
       expect(response.cookies).toBeUndefined();
+    });
+  });
+});
+
+describe('authMiddleware with bearerToken', () => {
+  const existingUserId = 'any-user-uuid';
+  const existingOrgId = 'any-org-uuid';
+
+  function buildBearerRequest(authorization?: string) {
+    const event = buildEvent({ cookies: ['hs_access_token=cookie-token'] });
+    if (authorization) event.headers.authorization = authorization;
+    return buildMiddyRequest(event);
+  }
+
+  function mockAccessTokenPayload(claims: Record<string, unknown>) {
+    mockJwtVerify.mockResolvedValueOnce({ payload: { sub: MOCK_SUB, ...claims } });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ddbMock.reset();
+    ddbMock.on(GetItemCommand).resolves({});
+    ddbMock.on(GetItemCommand, { TableName: 'OrgTable' }).resolves({});
+    ddbMock
+      .on(GetItemCommand, { Key: { pk: { S: `SUB#${MOCK_SUB}` }, sk: { S: 'IDENTITY' } } })
+      .resolves({ Item: { userId: { S: existingUserId }, orgId: { S: existingOrgId } } });
+  });
+
+  it('returns 401 with a Bearer challenge and ignores the cookies when no Authorization header is sent', async () => {
+    const result = await authMiddleware({ bearerToken: true }).before(buildBearerRequest());
+
+    expect(result).toMatchObject({
+      statusCode: 401,
+      headers: {
+        'WWW-Authenticate':
+          'Bearer resource_metadata="https://console.test.com/.well-known/oauth-protected-resource/api/mcp"',
+      },
+      body: JSON.stringify({ message: 'Unauthorized' }),
+    });
+    expect(mockJwtVerify).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 with a Bearer challenge when the access token fails verification', async () => {
+    mockJwtVerify.mockRejectedValueOnce(new Error('signature verification failed'));
+
+    const result = await authMiddleware({ bearerToken: true }).before(
+      buildBearerRequest('Bearer forged-token'),
+    );
+
+    expect(result).toMatchObject({
+      statusCode: 401,
+      headers: { 'WWW-Authenticate': expect.stringMatching(/^Bearer resource_metadata=/) },
+    });
+  });
+
+  it('attaches the token subject’s identity when the access token carries a verified email', async () => {
+    mockAccessTokenPayload({
+      'https://fil.one/email': MOCK_EMAIL,
+      'https://fil.one/email_verified': true,
+    });
+    const request = buildBearerRequest('bearer access-token');
+
+    const result = await authMiddleware({ bearerToken: true }).before(request);
+
+    expect(result).toBeUndefined();
+    // The MCP resource, not the console's audience: console tokens do not reach MCP.
+    expect(mockJwtVerify).toHaveBeenCalledWith('access-token', 'mock-jwks', {
+      audience: 'https://console.test.com/api/mcp',
+      issuer: 'https://test.auth0.com/',
+    });
+    expect(getUserInfoFromEvent(request.event)).toMatchObject({
+      sub: MOCK_SUB,
+      userId: existingUserId,
+      orgId: existingOrgId,
+      emailVerified: true,
+    });
+  });
+
+  it('returns 403 EMAIL_NOT_VERIFIED when the access token carries no verified-email claim', async () => {
+    // The ID token's claim, un-namespaced, does not count on an access token.
+    mockAccessTokenPayload({ email: MOCK_EMAIL, email_verified: true });
+
+    const result = await authMiddleware({ bearerToken: true }).before(
+      buildBearerRequest('Bearer access-token'),
+    );
+
+    expectErrorResponse(result, 403, {
+      message: 'Email verification required',
+      code: ApiErrorCode.EMAIL_NOT_VERIFIED,
     });
   });
 });
