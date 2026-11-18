@@ -12,6 +12,7 @@ import type {
   CloudFormationCustomResourceResponse,
 } from 'aws-lambda';
 import { onExecutePostLogin } from './mfa-action.ts';
+import { setupAuth0McpAuthorization } from './setup-mcp-authorization.ts';
 import { setupAuth0Callbacks, teardownAuth0Callbacks } from './setup-auth0-client.ts';
 import { setupAuth0PasskeyAuth } from './setup-passkey.ts';
 import { getAuth0ManagementToken } from './auth0-mgmt-token.ts';
@@ -413,6 +414,7 @@ async function handleSetup(
     tasks.push(setupAuth0EmailProvider(ctx.mgmtDomain, ctx.stage === 'production'));
     tasks.push(setupAuth0MfaAction(ctx.mgmtDomain));
     tasks.push(setupAuth0PasskeyAuth(ctx.mgmtDomain));
+    tasks.push(setupAuth0McpAuthorization(ctx.mgmtDomain, ctx.siteUrl));
   }
 
   const [stripeResult] = await Promise.all(tasks);
