@@ -12,6 +12,7 @@ import {
   seedBillingRecord,
   testOrgId,
   waitForEventHandled,
+  CLOCK_TIMEOUT_MS,
 } from './helpers.js';
 
 const DAY_SECONDS = 24 * 60 * 60;
@@ -100,6 +101,6 @@ describe('A trial that ends without a card', () => {
         S: SubscriptionStatus.Canceled,
       });
     },
-    420_000,
+    CLOCK_TIMEOUT_MS,
   );
 });
