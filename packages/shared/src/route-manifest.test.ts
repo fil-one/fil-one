@@ -63,9 +63,17 @@ describe('ROUTE_MANIFEST', () => {
     const byCategory = (category: RouteManifestEntry['category']) =>
       entries.filter((route) => route.category === category).map((route) => route.handler);
 
-    expect(byCategory('public')).toStrictEqual(['auth-login', 'auth-callback', 'auth-logout']);
+    expect(byCategory('public')).toStrictEqual([
+      'mcp-resource-metadata',
+      'auth-login',
+      'auth-callback',
+      'auth-logout',
+    ]);
     expect(byCategory('webhook')).toStrictEqual(['stripe-webhook']);
     expect(byCategory('bearer')).toStrictEqual(['query-bucket']);
+    expect(
+      entries.filter((route) => route.bearerToken).map((route) => route.handler),
+    ).toStrictEqual(['mcp']);
   });
 
   it('checks the routes whose requirement depends on the request in their handlers', () => {

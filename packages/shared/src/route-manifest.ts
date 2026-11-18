@@ -104,6 +104,21 @@ const MANIFEST = [
     category: 'authenticated',
     requires: 'buckets.read',
   },
+  // ── MCP ──────────────────────────────────────────────────────────
+  {
+    method: 'POST',
+    path: '/api/mcp',
+    handler: 'mcp',
+    category: 'authenticated',
+    requires: 'buckets.read',
+    bearerToken: true,
+  },
+  {
+    method: 'GET',
+    path: '/.well-known/oauth-protected-resource/api/mcp',
+    handler: 'mcp-resource-metadata',
+    category: 'public',
+  },
   {
     method: 'POST',
     path: '/api/buckets',

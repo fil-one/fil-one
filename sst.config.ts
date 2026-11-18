@@ -628,6 +628,11 @@ export default $config({
           url: api.url,
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
+        // Where MCP clients look up how to sign in to /api/mcp (RFC 9728).
+        '/.well-known/oauth-protected-resource/*': {
+          url: api.url,
+          cachePolicy: AWS_CACHING_DISABLED_POLICY,
+        },
       },
       // Local deploys have no cert or DNS, so they keep the generated CloudFront domain.
       domain: isLocal
@@ -687,6 +692,9 @@ export default $config({
     );
 
     const siteUrl = router.url;
+    // The MCP endpoint, and the audience of the tokens it accepts. Alias hosts
+    // are not separate resources: MCP is served on the canonical host only.
+    const mcpResourceUrl = siteUrl.apply((url) => `${url.replace(/\/$/, '')}/api/mcp`);
 
     const auth0Domain = getAuth0Domain($app.stage);
     // Auth0 Management API requires the canonical tenant domain — custom domains don't support /api/v2/
@@ -1215,6 +1223,17 @@ export default $config({
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
         memory: '1024 MB',
       },
+      // Its only tool lists buckets, so it takes list-buckets' grants.
+      mcp: {
+        extraEnv: {
+          AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+          ...fthEnv,
+          ...forgeEnv,
+          MCP_RESOURCE_URL: mcpResourceUrl,
+        },
+        permissions: bucketReadPermissions,
+      },
+      'mcp-resource-metadata': { extraEnv: { MCP_RESOURCE_URL: mcpResourceUrl } },
       'create-bucket': {
         extraEnv: orchestratorEnv,
         permissions: [
