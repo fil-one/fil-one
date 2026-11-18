@@ -5,20 +5,11 @@ import type {
   BucketSortKey,
   ErrorResponse,
   ListBucketsResponse,
-  S3Region,
   SortDirection,
 } from '@filone/shared';
-import {
-  BUCKET_SORT_KEYS,
-  isRagCompanionBucket,
-  listBucketsUnavailableMessage,
-  SORT_DIRECTIONS,
-} from '@filone/shared';
-import { getAvailableOrchestrators } from '../lib/service-orchestrator-registry.ts';
-import { getScopedMemberId } from '../lib/member-scope.ts';
-import { getOrgProfile } from '../lib/org-profile.ts';
+import { BUCKET_SORT_KEYS, listBucketsUnavailableMessage, SORT_DIRECTIONS } from '@filone/shared';
+import { listOrgBuckets } from '../lib/list-org-buckets.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
-import type { BucketSummary } from '../lib/service-orchestrator.ts';
 import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -43,78 +34,19 @@ export async function baseHandler(
   const { search, region } = event.queryStringParameters ?? {};
   const sortKey = parseSortKey(event.queryStringParameters?.sortKey);
   const sortDirection = parseSortDirection(event.queryStringParameters?.sortDirection);
-  // One deadline for every leg of the fan-out below. A hung region then fails
+  // One deadline for every leg of the fan-out. A hung region then fails
   // its own leg and is named in the response, instead of holding the whole
   // handler until the Lambda timeout kills it with nothing logged.
   const signal = getRequestDeadline(event);
-
-  // An orchestrator is one storage network and lists every region it serves in
-  // one call, so a region filter skips the networks that do not serve the region.
-  const orchestrators = getAvailableOrchestrators().filter(
-    (orchestrator) => !region || orchestrator.regions.includes(region as S3Region),
-  );
-  const orgProfile = await getOrgProfile(orgId);
-
-  // A not-ready orchestrator is simply absent from this org's provisioned regions, not a failed
-  // leg: it must not be called, and it must not count toward the all-failed 503 below.
-  const ready = orchestrators.flatMap((orchestrator) => {
-    const tenantId = orchestrator.isTenantReady(orgProfile);
-    return tenantId ? [{ orchestrator, tenantId }] : [];
-  });
-
-  // Fail open (FIL-1049): one region's ListBuckets 403 used to collapse the whole request into a
-  // generic 500, hiding the healthy regions' buckets. Return what answered, name what did not.
-  const settled = await Promise.allSettled(
-    // The member id scopes the listing on a region serving the `iam` access
-    // model, where a bucket is accessible only through a policy naming them;
-    // every other region ignores it and answers tenant-wide as before.
-    ready.map(({ orchestrator, tenantId }) =>
-      orchestrator.listBuckets(tenantId, getScopedMemberId(membership?.role, userId), { signal }),
-    ),
+  const { buckets, unavailableRegions, allFailed } = await listOrgBuckets(
+    { orgId, userId, membership },
+    { region, signal },
   );
 
-  const buckets: BucketSummary[] = [];
-  const unavailableRegions: S3Region[] = [];
-  // Failed calls are counted apart from regions: one failed network may account
-  // for several unavailable regions, and the all-failed check below is per call.
-  let failedOrchestratorCalls = 0;
-  settled.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      // Bucket Intelligence keeps its Lance datasets in companion buckets on
-      // Forge storage; they hold no user data and are not the user's to manage.
-      // A network answers for every region it serves, so a region filter is
-      // applied to its buckets here rather than by skipping the call.
-      buckets.push(
-        ...result.value.filter(
-          (bucket) =>
-            !isRagCompanionBucket(bucket.bucketName) && (!region || bucket.region === region),
-        ),
-      );
-      return;
-    }
-    const { orchestrator, tenantId } = ready[index];
-    // The reason stays here: it carries orchestrator internals that must not reach the browser,
-    // and an S3 AccessDenied string means nothing to a user. The client learns only the region.
-    console.error('[list-buckets] Orchestrator listBuckets failed', {
-      orgId,
-      orchestratorId: orchestrator.id,
-      regions: orchestrator.regions,
-      tenantId,
-      error: result.reason,
-    });
-    failedOrchestratorCalls++;
-    // Every region the network serves is unavailable with it, or just the one
-    // asked for when the request was narrowed to it.
-    unavailableRegions.push(
-      ...orchestrator.regions.filter((served) => !region || served === region),
-    );
-  });
-
-  // Every provisioned network is down: an empty 200 renders as "No buckets yet" over a real
-  // outage. Returned rather than thrown so the message survives, since the error-handler
-  // middleware replaces any throw with the generic 500. The `> 0` guard keeps an org with no
-  // provisioned networks on the 200 path.
-  if (failedOrchestratorCalls > 0 && failedOrchestratorCalls === ready.length) {
+  // An empty 200 would render as "No buckets yet" over a real outage. Returned
+  // rather than thrown so the message survives, since the error-handler
+  // middleware replaces any throw with the generic 500.
+  if (allFailed) {
     return new ResponseBuilder()
       .status(503)
       .body<ErrorResponse>({ message: listBucketsUnavailableMessage(unavailableRegions) })
