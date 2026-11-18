@@ -320,6 +320,14 @@ export type ObjectBrowserProps = {
   listingTruncated?: boolean;
   /** Full bucket object count from analytics, shown alongside the loaded count. */
   totalObjectCount?: number;
+  /**
+   * Opens a row's object in place, in the bucket page's details panel. Without it
+   * a row opens the object page.
+   */
+  onOpenObject?: (key: string, versionId: string) => void;
+  /** The pointer rests on a row, or a row takes focus. */
+  onHoverObject?: (key: string, versionId: string) => void;
+  onHoverObjectEnd?: () => void;
 };
 
 /** The share dialog a row's Share button opens, and whether the plan allows it. */
@@ -357,6 +365,9 @@ export function ObjectBrowser({
   keyAction,
   listingTruncated = false,
   totalObjectCount,
+  onOpenObject,
+  onHoverObject,
+  onHoverObjectEnd,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState<{
@@ -390,7 +401,13 @@ export function ObjectBrowser({
     // Without a delete handler no row renders the control, so nothing reaches
     // the confirmation dialog below either.
     ...(onDelete && { onRequestDelete: requestDelete }),
+    onHover: onHoverObject,
+    onHoverEnd: onHoverObjectEnd,
     onNavigate: (key, versionId) => {
+      if (onOpenObject) {
+        onOpenObject(key, versionId);
+        return;
+      }
       void navigate({
         to: '/buckets/$bucketName/objects',
         params: { bucketName },

@@ -1,7 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-import { ObjectPreview } from './ObjectPreview.js';
+import { S3Region } from '@filone/shared';
+
+const getPreviewUrl = vi.hoisted(() =>
+  vi.fn(({ objectKey }: { objectKey: string }) =>
+    Promise.resolve({
+      url: `https://any-host/${objectKey}`,
+      // An hour away, so a failure reads as the file's own rather than a lapsed URL
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    }),
+  ),
+);
+vi.mock('../lib/preview-url.js', () => ({ getPreviewUrl }));
+
+import { queryKeys } from '../lib/query-client.js';
+import { ObjectPreview, ObjectPreviewCard } from './ObjectPreview.js';
 
 function renderVideo(renewUrlIfLapsed: () => boolean, url = 'any-url') {
   return render(
@@ -66,6 +81,43 @@ describe('ObjectPreview media', () => {
     expect({ currentTime: video.currentTime, plays: play.mock.calls.length }).toStrictEqual({
       currentTime: 42,
       plays: 1,
+    });
+  });
+});
+
+describe('ObjectPreviewCard', () => {
+  function renderCard(objectKey: string) {
+    return (
+      <ObjectPreviewCard
+        bucketName="any-bucket"
+        region={S3Region.EuWest1}
+        objectKey={objectKey}
+        sizeBytes={1024}
+        contentType="image/png"
+        onDownload={() => undefined}
+      />
+    );
+  }
+
+  it('shows the next object after the previous one failed to load', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Stepping back to an object seen before finds its URL cached, so the card
+    // goes straight from one image to the next with no loading state between
+    queryClient.setQueryData(queryKeys.objectPreviewUrl('any-bucket', 'second.png'), {
+      url: 'https://any-host/second.png',
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>{renderCard('first.png')}</QueryClientProvider>,
+    );
+    fireEvent.error(await screen.findByRole('img', { name: 'first.png' }));
+
+    rerender(
+      <QueryClientProvider client={queryClient}>{renderCard('second.png')}</QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('img', { name: 'second.png' })).toMatchObject({
+      src: 'https://any-host/second.png',
     });
   });
 });

@@ -5,7 +5,7 @@ import {
   DownloadSimpleIcon,
   FileIcon,
   FolderIcon,
-  LinkIcon,
+  ExportIcon,
   TrashIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
@@ -71,7 +71,20 @@ export type RowActions = {
   /** Absent for a role without `objects.delete` — the control is not rendered. */
   onRequestDelete?: (key: string, versionId: string) => void;
   onNavigate: (key: string, versionId: string) => void;
+  /**
+   * The pointer rests on a row, or a row takes focus: the user may open it next,
+   * so its details can start loading.
+   */
+  onHover?: (key: string, versionId: string) => void;
+  onHoverEnd?: () => void;
 };
+
+/** A row's hover and focus handlers, which tell the browser the row may be opened next. */
+function hoverHandlers(actions: RowActions, key: string, versionId: string) {
+  const start = () => actions.onHover?.(key, versionId);
+  const end = () => actions.onHoverEnd?.();
+  return { onMouseEnter: start, onFocus: start, onMouseLeave: end, onBlur: end };
+}
 
 /** Selection wiring for a single row. `selectable` is false when bulk delete is off. */
 export type RowSelection = {
@@ -117,7 +130,7 @@ function VersionActions({
       {/* A delete marker has no content to link to, same as Download. */}
       {!version.isDeleteMarker && (
         <IconButton
-          icon={LinkIcon}
+          icon={ExportIcon}
           aria-label={`Share ${label}`}
           tooltip={canShare ? 'Share object' : SHARE_UNAVAILABLE_TOOLTIP}
           tooltipSide="top"
@@ -173,6 +186,7 @@ function VersionSubRow({
       className={`cursor-pointer ${isSelected ? '' : 'bg-zinc-50/50 hover:bg-zinc-100/50'}`}
       role="button"
       tabIndex={0}
+      {...hoverHandlers(actions, groupKey, version.versionId)}
       onClick={() => actions.onNavigate(groupKey, version.versionId)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') actions.onNavigate(groupKey, version.versionId);
@@ -304,6 +318,7 @@ function LatestVersionRow({
       className="cursor-pointer"
       role="button"
       tabIndex={0}
+      {...hoverHandlers(actions, group.key, group.latest.versionId)}
       onClick={() => actions.onNavigate(group.key, group.latest.versionId)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ')

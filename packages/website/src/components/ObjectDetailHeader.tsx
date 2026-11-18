@@ -2,10 +2,9 @@ import { Fragment } from 'react';
 import { Link } from '@tanstack/react-router';
 import {
   ArrowLeftIcon,
-  CopySimpleIcon,
   DownloadSimpleIcon,
+  ExportIcon,
   LinkIcon,
-  LinkSimpleIcon,
   TrashIcon,
 } from '@phosphor-icons/react/dist/ssr';
 
@@ -169,11 +168,15 @@ function VersionLine({
 }
 
 export type ObjectHeaderActionsProps = {
-  s3Uri: string;
   canShare: boolean;
   mayDelete: boolean;
   /** True when the URL names a version, so Delete removes that version alone. */
   isVersion: boolean;
+  /**
+   * The console address Copy console link copies. The page it is on by default;
+   * the bucket page's panel passes the object page, the address an object is shared by.
+   */
+  consoleLink?: string;
   onDownload: () => void;
   onShare: () => void;
   onDelete: () => void;
@@ -181,15 +184,16 @@ export type ObjectHeaderActionsProps = {
 
 /**
  * Download leads, since it is what most visits are for, with Share beside it.
- * The rest sit one step away: the two copies people reach for after a download,
- * then Delete, kept off the bar as in the access key drawer, where a red button
- * was the loudest thing on a panel that is mostly read.
+ * The rest sit one step away: the console link people reach for after a
+ * download (the S3 URI is copied from its row in Details), then Delete, kept
+ * off the bar as in the access key drawer, where a red button was the loudest
+ * thing on a panel that is mostly read.
  */
 export function ObjectHeaderActions({
-  s3Uri,
   canShare,
   mayDelete,
   isVersion,
+  consoleLink,
   onDownload,
   onShare,
   onDelete,
@@ -209,17 +213,11 @@ export function ObjectHeaderActions({
 
   const menuActions: RowAction[] = [
     {
-      label: 'Copy S3 URI',
-      icon: CopySimpleIcon,
-      onSelect: () => void copy(s3Uri, 'S3 URI copied'),
-      testId: 'object-copy-s3-uri',
-    },
-    {
       // "Console link", not "link": Share already makes a link, a public one,
       // and this one only opens for people signed in to this org
       label: 'Copy console link',
-      icon: LinkSimpleIcon,
-      onSelect: () => void copy(window.location.href, 'Console link copied'),
+      icon: LinkIcon,
+      onSelect: () => void copy(consoleLink ?? window.location.href, 'Console link copied'),
       testId: 'object-copy-console-link',
     },
   ];
@@ -238,7 +236,7 @@ export function ObjectHeaderActions({
       id="object-share-button"
       variant="ghost"
       size="sm"
-      icon={LinkIcon}
+      icon={ExportIcon}
       disabled={!canShare}
       onClick={onShare}
     >
