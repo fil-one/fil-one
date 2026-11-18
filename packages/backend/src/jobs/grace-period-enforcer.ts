@@ -145,8 +145,8 @@ async function cancelSubscriptionAndDisableTenant(
     // and may have re-enabled it before this run's disable reached it.
     const current = await retrieveIfExists(subscription.id);
     if (current && LIVE_STATUSES.has(current.status)) {
-      assertRegionSyncSucceeded(
-        await syncTenantStatusInProvisionedRegions(candidate.orgId, 'active'),
+      assertTenantSyncSucceeded(
+        await syncTenantStatusInProvisionedNetworks(candidate.orgId, 'active'),
       );
       return skipLiveSubscription(candidate, current);
     }
