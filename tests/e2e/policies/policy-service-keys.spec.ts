@@ -150,7 +150,7 @@ test.describe('the key form', () => {
     test('starts on a personal key, with no separate policy notice', async ({ page }) => {
       await page.goto('/api-keys/create');
       await page.locator('#key-region').click();
-      await page.locator(`[data-testid="region-option"][data-region="${REGION}"]`).click();
+      await page.locator(`[data-testid="network-region-option"][data-region="${REGION}"]`).click();
       await expect(
         page.getByTestId('access-key-type-principal').locator('input[type="radio"]'),
       ).toBeChecked();
@@ -161,7 +161,7 @@ test.describe('the key form', () => {
       await page.goto('/api-keys/create');
       await page.locator('#key-name').fill(`policy-e2e-svc-ui-${randomUUID().slice(0, 8)}`);
       await page.locator('#key-region').click();
-      await page.locator(`[data-testid="region-option"][data-region="${REGION}"]`).click();
+      await page.locator(`[data-testid="network-region-option"][data-region="${REGION}"]`).click();
 
       await page.getByTestId('access-key-type-service').click();
       await expect(page.getByTestId('access-key-permissions')).toBeVisible();
@@ -199,7 +199,7 @@ test.describe('the key form', () => {
       await page.goto('/api-keys/create');
       await page.locator('#key-name').fill('policy-e2e-svc-member');
       await page.locator('#key-region').click();
-      await page.locator(`[data-testid="region-option"][data-region="${REGION}"]`).click();
+      await page.locator(`[data-testid="network-region-option"][data-region="${REGION}"]`).click();
       await expect(page.getByTestId('access-key-follows-bucket-policy')).toBeVisible();
       await expect(page.getByTestId('access-key-type-service')).toHaveCount(0);
     });
