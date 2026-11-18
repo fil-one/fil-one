@@ -204,20 +204,21 @@ describe('BillingPage — inactive subscription', () => {
     expect(screen.queryByText('No card on file')).not.toBeInTheDocument();
   });
 
-  it('reads the plan card status as Active, not Trial, while trialing', async () => {
+  it('shows no status pill on the plan card while trialing, a trial being in good standing', async () => {
     mockGetBilling.mockResolvedValue(trialingBilling());
     renderPage();
 
-    await screen.findByText('Free trial');
-    expect(screen.getByText('Active')).toBeInTheDocument();
-    expect(screen.queryByText('Trial')).not.toBeInTheDocument();
+    const status = await screen.findByTestId('subscription-status');
+    expect(status).toHaveAttribute('data-status', SubscriptionStatus.Trialing);
+    expect(status).toBeEmptyDOMElement();
   });
 
   it('states the trial deadline with no rate and no "Trial" subject', async () => {
     mockGetBilling.mockResolvedValue(trialingBilling());
     renderPage();
 
-    expect(await screen.findByTestId('plan-meta')).toHaveTextContent(/^Ends in \d+ days?$/);
+    expect(await screen.findByTestId('plan-timeline')).toHaveTextContent(/^Ends in \d+ days?$/);
+    expect(screen.queryByTestId('plan-price')).not.toBeInTheDocument();
   });
 });
 
@@ -266,8 +267,9 @@ describe('BillingPage — an organization on a negotiated price', () => {
 
     await screen.findByText('Business');
     // No per-TB figure, because this price has no single one, and no minimum
-    // standing in for one either. The renewal shares the line.
-    expect(screen.getByTestId('plan-meta')).toHaveTextContent(/^Custom pricing · Renews /);
+    // standing in for one either. The renewal follows on its own line.
+    expect(screen.getByTestId('plan-price')).toHaveTextContent(/^Custom pricing$/);
+    expect(screen.getByTestId('plan-timeline')).toHaveTextContent(/^Renews /);
     expect(screen.queryByText(/\/TB per month/)).not.toBeInTheDocument();
     expect(screen.queryByText(/minimum/)).not.toBeInTheDocument();
   });
@@ -386,7 +388,7 @@ describe('BillingPage — an organization billed manually', () => {
     renderPage();
 
     expect(await screen.findByTestId('plan-name')).toHaveTextContent('Custom plan');
-    expect(screen.getByTestId('plan-meta')).toHaveTextContent(/^Billed manually$/);
+    expect(screen.getByTestId('plan-price')).toHaveTextContent(/^Billed manually$/);
   });
 
   it('offers no plan controls, since the plan is changed through the account team', async () => {
