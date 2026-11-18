@@ -221,6 +221,9 @@ importers:
       oxlint-tsgolint:
         specifier: ^7.0.2007
         version: 7.0.2007
+      p-retry:
+        specifier: ^8.0.0
+        version: 8.0.0
       sst:
         specifier: ^4.17.2
         version: 4.17.2
