@@ -1,10 +1,12 @@
-// Probe: can a Fil One trial (metered price) pause at or after trial end?
+#!/usr/bin/env node
+
+// Usage: AWS_PROFILE=<profile> AWS_REGION=<region> pnpm exec sst shell --stage <stage> -- ./bin/probe-trial-pause.ts
 //
-// Runs against the Stripe sandbox the stage is configured with. Every customer
-// it creates is deleted at the end, which deletes its subscriptions too.
-//
-//   AWS_PROFILE=hyperspace AWS_REGION=us-east-1 pnpm exec sst shell --stage srdjan -- \
-//     node tests/integration/scripts/probe-trial-pause.ts
+// Checks against the stage's Stripe sandbox whether a Fil One trial (metered
+// price) can pause at or after trial end. It showed in FIL-1545 that Stripe
+// refuses both, which is why the Stripe trial runs through the grace period
+// instead. Rerun it to see whether that still holds. Refuses a live key, and
+// deletes every customer it creates.
 
 import Stripe from 'stripe';
 import { Resource } from 'sst';
