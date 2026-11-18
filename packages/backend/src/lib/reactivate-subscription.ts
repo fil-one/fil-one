@@ -1,6 +1,7 @@
 import type Stripe from 'stripe';
 import { ApiErrorCode } from '@filone/shared';
 import type { SubscriptionRecord } from './dynamo-records.ts';
+import { reportMetric } from './metrics.ts';
 import { ResponseBuilder } from './response-builder.ts';
 import { proceed, refuse } from './result.ts';
 import type { Result } from './result.ts';
@@ -43,7 +44,7 @@ export async function createOrUpdateSubscription(
     : undefined;
 
   if (subscription && LIVE_STATUSES.has(subscription.status)) {
-    return updateLiveSubscription(params, subscription);
+    return reactivateLiveSubscription(params, subscription);
   }
   return createSubscription(params);
 }
@@ -60,7 +61,12 @@ async function retrieveIfExists(
   }
 }
 
-async function updateLiveSubscription(
+/**
+ * Puts the new card on the subscription, then brings it back to billing the way
+ * its status needs: ends a trial, pays what a past-due or unpaid one owes, or
+ * resumes a paused one. An active subscription only gets the new card.
+ */
+async function reactivateLiveSubscription(
   { stripe, paymentMethodId, promotionCodeId }: CreateOrUpdateSubscriptionParams,
   subscription: Stripe.Subscription,
 ): Promise<Result<Stripe.Subscription>> {
@@ -142,13 +148,14 @@ async function settleOpenInvoices(
   paymentMethodId: string,
 ): Promise<boolean> {
   // Invoice ids are typed optional for preview invoices; a listed invoice always has one.
-  if (subscription.status === 'unpaid') {
-    for (const draft of await listInvoices(stripe, subscription.id, 'draft')) {
-      await stripe.invoices.finalizeInvoice(draft.id!, { auto_advance: true });
-    }
+  const drafts =
+    subscription.status === 'unpaid' ? await listInvoices(stripe, subscription.id, 'draft') : [];
+  for (const draft of drafts) {
+    await stripe.invoices.finalizeInvoice(draft.id!, { auto_advance: true });
   }
   // Stripe lists newest first.
   const open = (await listInvoices(stripe, subscription.id, 'open')).reverse();
+  emitReactivationInvoiceCalls(subscription.status, drafts.length + open.length);
   for (const invoice of open) {
     try {
       await stripe.invoices.pay(invoice.id!, { payment_method: paymentMethodId });
@@ -158,6 +165,28 @@ async function settleOpenInvoices(
     }
   }
   return true;
+}
+
+/**
+ * How many invoices one activation finalizes and pays, one Stripe call each, in
+ * series. Reported before paying, so a request that runs out of time still
+ * reports how many it had to get through.
+ */
+function emitReactivationInvoiceCalls(status: string, count: number): void {
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [['status']],
+          Metrics: [{ Name: 'ReactivationInvoiceCalls', Unit: 'Count' }],
+        },
+      ],
+    },
+    status,
+    ReactivationInvoiceCalls: count,
+  });
 }
 
 /** Every invoice of the subscription in `status`, across pages, newest first. */

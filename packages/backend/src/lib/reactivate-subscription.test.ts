@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type Stripe from 'stripe';
 import { ApiErrorCode, SubscriptionStatus } from '@filone/shared';
 import type { SubscriptionRecord } from './dynamo-records.ts';
+import { reportMetric } from './metrics.ts';
 import { createOrUpdateSubscription } from './reactivate-subscription.ts';
+
+vi.mock('./metrics.ts', () => ({ reportMetric: vi.fn() }));
 
 const mockSubscriptionsRetrieve = vi.fn();
 const mockSubscriptionsUpdate = vi.fn();
@@ -175,6 +178,24 @@ describe('createOrUpdateSubscription', () => {
 
     expect(writes()).toStrictEqual(['update:sub_named', 'finalize:in_draft', 'pay:in_open']);
     expect(mockInvoicesFinalize).toHaveBeenCalledWith('in_draft', { auto_advance: true });
+  });
+
+  it('reports how many invoices it finalizes and pays before paying them', async () => {
+    mockSubscriptionsRetrieve
+      .mockResolvedValueOnce(stripeSubscription('sub_named', 'unpaid'))
+      .mockResolvedValueOnce(stripeSubscription('sub_named', 'active'));
+    mockInvoicesList.mockImplementation(async ({ status }: { status: string }) => ({
+      data: status === 'draft' ? [{ id: 'in_draft' }] : [{ id: 'in_draft' }, { id: 'in_open' }],
+    }));
+
+    await reactivate(buildRecord());
+
+    expect(vi.mocked(reportMetric).mock.calls).toStrictEqual([
+      [expect.objectContaining({ status: 'unpaid', ReactivationInvoiceCalls: 3 })],
+    ]);
+    expect(vi.mocked(reportMetric).mock.invocationCallOrder[0]).toBeLessThan(
+      mockInvoicesPay.mock.invocationCallOrder[0],
+    );
   });
 
   it('refuses with 402 and pays nothing newer when the new card is declined on an open invoice', async () => {
