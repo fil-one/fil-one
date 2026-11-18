@@ -20,6 +20,7 @@ import {
   seedBillingRecord,
   testOrgId,
   waitForEventHandled,
+  CLOCK_TIMEOUT_MS,
 } from './helpers.js';
 
 // Activation runs here against Stripe test mode, the way the activate handler
@@ -119,35 +120,43 @@ describe('Reactivation from grace_period', () => {
     await pollForActiveRow(userId, subscriptionId);
   });
 
-  it('pays the open invoice of the past-due subscription the row names with the new card', async () => {
-    const clockId = await createTestClock('reactivate-past-due');
-    const { userId, customerId } = await newOrg('rfg-pd', clockId);
-    const decliningId = await attachDecliningCard(customerId);
-    await pollForPaymentMethod({ userId, paymentMethodId: decliningId });
-    const subscriptionId = await createPastDueSubscription({
-      userId,
-      customerId,
-      clockId,
-      paymentMethodId: decliningId,
-    });
-    await pollForBillingStatusChange({ userId, expectedStatus: 'past_due', fromStatus: 'active' });
-    await seedGraceRow(userId, customerId, subscriptionId);
-    const paymentMethodId = await attachValidCard(customerId);
-    await pollForPaymentMethod({ userId, paymentMethodId });
+  it(
+    'pays the open invoice of the past-due subscription the row names with the new card',
+    async () => {
+      const clockId = await createTestClock('reactivate-past-due');
+      const { userId, customerId } = await newOrg('rfg-pd', clockId);
+      const decliningId = await attachDecliningCard(customerId);
+      await pollForPaymentMethod({ userId, paymentMethodId: decliningId });
+      const subscriptionId = await createPastDueSubscription({
+        userId,
+        customerId,
+        clockId,
+        paymentMethodId: decliningId,
+      });
+      await pollForBillingStatusChange({
+        userId,
+        expectedStatus: 'past_due',
+        fromStatus: 'active',
+      });
+      await seedGraceRow(userId, customerId, subscriptionId);
+      const paymentMethodId = await attachValidCard(customerId);
+      await pollForPaymentMethod({ userId, paymentMethodId });
 
-    const result = await reactivate(userId, paymentMethodId);
+      const result = await reactivate(userId, paymentMethodId);
 
-    expect(result).toMatchObject({ ok: true, value: { id: subscriptionId, status: 'active' } });
-    expect(await liveSubscriptions(customerId)).toStrictEqual([
-      { id: subscriptionId, status: 'active' },
-    ]);
-    const { data: openInvoices } = await getStripeClient().invoices.list({
-      subscription: subscriptionId,
-      status: 'open',
-    });
-    expect(openInvoices).toStrictEqual([]);
-    await pollForActiveRow(userId, subscriptionId);
-  }, 420_000);
+      expect(result).toMatchObject({ ok: true, value: { id: subscriptionId, status: 'active' } });
+      expect(await liveSubscriptions(customerId)).toStrictEqual([
+        { id: subscriptionId, status: 'active' },
+      ]);
+      const { data: openInvoices } = await getStripeClient().invoices.list({
+        subscription: subscriptionId,
+        status: 'open',
+      });
+      expect(openInvoices).toStrictEqual([]);
+      await pollForActiveRow(userId, subscriptionId);
+    },
+    CLOCK_TIMEOUT_MS,
+  );
 
   it('resumes the paused subscription the row names with the new card', async () => {
     const { userId, customerId } = await newOrg('rfg-paused');
