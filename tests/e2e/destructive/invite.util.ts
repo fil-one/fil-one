@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { setTimeout as sleep } from 'node:timers/promises';
 import {
   DeleteItemCommand,
   DynamoDBClient,
@@ -558,25 +559,54 @@ export interface CleanupStep {
  * abandons is the org the next run inherits: two Admins and no Owner fails a
  * `beforeAll`, not the test that caused it.
  *
+ * A step that throws runs again from the top after each delay in
+ * {@link CLEANUP_RETRY_DELAYS_MS}, so every step must be safe to repeat. A
+ * teardown that gives up on one transient 500 leaves a policy-suite bucket on
+ * staging, still holding data, until the next run's sweep deletes it.
+ *
  * Steps run in the order given, which is the order the invariants need, and
- * every failure is collected and thrown together at the end so a teardown that
- * could not finish still fails the run.
+ * every failure that outlasts its retries is collected and thrown together at
+ * the end so a teardown that could not finish still fails the run.
  */
 export async function runCleanup(steps: readonly CleanupStep[]): Promise<void> {
   const failures: string[] = [];
 
-  for (const { label, run } of steps) {
-    try {
-      await run();
-    } catch (error) {
-      failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  for (const step of steps) {
+    const failure = await runStepWithRetries(step);
+    if (failure !== undefined) failures.push(`${step.label}: ${failure}`);
   }
 
   if (failures.length > 0) {
     throw new Error(
       `Teardown could not finish ${failures.length} step(s):\n  ${failures.join('\n  ')}`,
     );
+  }
+}
+
+/**
+ * The wait before each retry of a failed teardown step: three attempts in all.
+ * A step that fails every time costs 4 s more than it did without retries, and
+ * the largest teardown (about 20 buckets in a 180 s `afterAll`) stays within
+ * its timeout even when every step fails.
+ */
+const CLEANUP_RETRY_DELAYS_MS = [1_000, 3_000];
+
+/** Run one step until it succeeds or runs out of retries; answer the last error's message. */
+async function runStepWithRetries({ label, run }: CleanupStep): Promise<string | undefined> {
+  const attempts = CLEANUP_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await run();
+      return undefined;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt === attempts) return message;
+      const delayMs = CLEANUP_RETRY_DELAYS_MS[attempt - 1];
+      console.warn(
+        `Teardown step "${label}" failed (attempt ${attempt} of ${attempts}), retrying in ${delayMs} ms: ${message}`,
+      );
+      await sleep(delayMs);
+    }
   }
 }
 
