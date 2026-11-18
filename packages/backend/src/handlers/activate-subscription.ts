@@ -14,6 +14,8 @@ import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.ts';
 import { getSubscription } from '../lib/subscription-store.ts';
 import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
 import { createOrUpdateSubscription } from '../lib/reactivate-subscription.ts';
+import { proceed, refuse } from '../lib/result.ts';
+import type { Result } from '../lib/result.ts';
 import { saveBillingRecord, unlockAllProvisionedNetworks } from '../lib/billing-activation.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import {
@@ -91,19 +93,9 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   }
 
   // 4. Resolve promo code against Stripe before we mutate any subscription state.
-  let promotionCodeId: string | undefined;
-  if (promotionCode) {
-    promotionCodeId = (await findActivePromotionCode(stripe, promotionCode, stripeCustomerId))?.id;
-    if (!promotionCodeId) {
-      return new ResponseBuilder()
-        .status(400)
-        .body({
-          message: 'Invalid or expired promo code.',
-          code: ApiErrorCode.INVALID_PROMOTION_CODE,
-        })
-        .build();
-    }
-  }
+  const promotion = await resolvePromotionCode(stripe, promotionCode, stripeCustomerId);
+  if (!promotion.ok) return promotion.refusal;
+  const promotionCodeId = promotion.value;
 
   // 5. Create or update subscription
   const activation = await createOrUpdateSubscription({
@@ -151,6 +143,26 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   };
 
   return new ResponseBuilder().status(200).body(response).build();
+}
+
+async function resolvePromotionCode(
+  stripe: ReturnType<typeof getStripeClient>,
+  promotionCode: string | undefined,
+  stripeCustomerId: string,
+): Promise<Result<string | undefined>> {
+  if (!promotionCode) return proceed(undefined);
+  const promotionCodeId = (await findActivePromotionCode(stripe, promotionCode, stripeCustomerId))
+    ?.id;
+  if (promotionCodeId) return proceed(promotionCodeId);
+  return refuse(
+    new ResponseBuilder()
+      .status(400)
+      .body({
+        message: 'Invalid or expired promo code.',
+        code: ApiErrorCode.INVALID_PROMOTION_CODE,
+      })
+      .build(),
+  );
 }
 
 function resolveSavedPaymentMethod(record: SubscriptionRecord): PaymentMethodResolution {
