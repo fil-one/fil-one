@@ -5,6 +5,7 @@ import type { S3Endpoint } from './orchestrator/config.ts';
 import { createForgeOrchestrator, type ForgeManagementApi } from './forge/forge-orchestrator.ts';
 import { createFthOrchestrator, createInstrumentedFthClient } from './fth/fth-orchestrator.ts';
 import { NetworkNotRunningError } from './errors.ts';
+import type { OrgProfileItem } from './org-profile.ts';
 import {
   ORCHESTRATOR_ID_BY_REGION,
   getRegionsForOrchestrator,
@@ -147,23 +148,37 @@ export function getOrchestratorForRegion(region: S3Region): NetworkOrchestrator 
 }
 
 /**
- * Every orchestrator available on this stage, once each and in first-region
+ * Every orchestrator this deployment runs, once each and in first-region
  * order. A network serving several regions appears once: its tenant, console
  * key and bucket listing are shared across them, so a per-network loop must
  * not visit it twice.
+ *
+ * A deployment may run fewer networks than its stage offers, and the ones it
+ * does run still answer, so a network with no endpoint is left out rather
+ * than failing the whole pass. Pass the org's profile to refuse instead when
+ * the org holds a tenant on one of them.
  */
-export function getAvailableOrchestrators(): NetworkOrchestrator[] {
+export function getAvailableOrchestrators(orgProfile?: OrgProfileItem): NetworkOrchestrator[] {
   const stage = process.env.FILONE_STAGE!;
   const seen = new Set<NetworkOrchestrator>();
+  const missingIds = new Set<string>();
   for (const region of getAvailableRegions(stage)) {
     try {
       seen.add(getOrchestratorForRegion(region));
     } catch (error) {
-      // A deployment may run fewer networks than its stage offers, and the
-      // ones it does run still answer. Leaving the missing one out keeps a
-      // listing to what is there; a request naming its region still fails.
       if (!(error instanceof NetworkNotRunningError)) throw error;
+      missingIds.add(error.orchestratorId);
     }
+  }
+
+  // Given the org's profile, a tenant on one of the missing networks stops
+  // the caller. The tenant is real, so an answer that passed over it would
+  // report work that did not happen, or a total that is short. Callers that
+  // pass no profile are listing, where leaving a missing network out is
+  // still true of the ones that are there.
+  for (const id of missingIds) {
+    // Written last in tenant setup, so its presence means a provisioned tenant.
+    if (orgProfile?.[`${id}TenantId`]?.S) throw new NetworkNotRunningError(id);
   }
   return [...seen];
 }

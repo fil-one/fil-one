@@ -262,6 +262,37 @@ describe('a network this deployment does not run', () => {
     }
   });
 
+  it('still refuses when the org holds a tenant there', async () => {
+    // Leaving a network out suits a listing, where what is shown is still
+    // true. It does not suit removing a member or counting usage: that
+    // tenant is real, and an answer that passed over it would claim work
+    // that did not happen.
+    process.env.FILONE_STAGE = LOCAL_STAGE;
+    const { registry, NotRunning, restore } = await registryWithout(
+      'FORGE_DEV2_MANAGEMENT_API_URL',
+    );
+    try {
+      const profile = { forgeDev2TenantId: { S: 'tenant-on-the-missing-network' } };
+      expect(() => registry.getAvailableOrchestrators(profile)).toThrow(NotRunning);
+    } finally {
+      restore();
+    }
+  });
+
+  it('leaves it out for an org with no tenant there', async () => {
+    // The ordinary case for a developer who has only ever run one network.
+    process.env.FILONE_STAGE = LOCAL_STAGE;
+    const { registry, restore } = await registryWithout('FORGE_DEV2_MANAGEMENT_API_URL');
+    try {
+      const profile = { forgeDevTenantId: { S: 'tenant-on-a-network-that-is-running' } };
+      const ids = registry.getAvailableOrchestrators(profile).map((o) => o.id);
+      expect(ids).not.toContain('forgeDev2');
+      expect(ids).toContain('forgeDev');
+    } finally {
+      restore();
+    }
+  });
+
   it('builds it when the deployment wires one', () => {
     // The hoisted setup wires it, which is the ordinary case.
     process.env.FILONE_STAGE = LOCAL_STAGE;

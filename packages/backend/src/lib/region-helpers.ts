@@ -21,12 +21,16 @@ export async function getProvisionedNetworks(
   // orphan a live tenant permanently.
   options?: { consistent?: boolean },
 ): Promise<ProvisionedNetwork[]> {
-  const orchestrators = getAvailableOrchestrators();
-  if (orchestrators.length === 0) return [];
+  // Nothing to be provisioned on, so the profile read is not worth making.
+  if (getAvailableOrchestrators().length === 0) return [];
   const orgProfile = await getOrgProfile(
     orgId,
     options ? { consistentRead: options.consistent } : undefined,
   );
+  // Teardown snapshots tenant ids from here and the usage figures are summed
+  // from them, so the profile goes in: a tenant on a network this deployment
+  // is not running stops the caller instead of going missing from the answer.
+  const orchestrators = getAvailableOrchestrators(orgProfile);
   return orchestrators
     .map((orchestrator) => {
       const tenantId = orchestrator.isTenantReady(orgProfile);
