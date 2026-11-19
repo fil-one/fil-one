@@ -50,8 +50,10 @@ export function useFolderDelete({
   // The jobs stay watched after the dialog closes, so the listing refreshes
   // again when they finish; they reset when the next deletion opens the dialog.
   function close() {
-    // Whatever the job has deleted so far is gone, so the listing should say so.
-    if (jobs.isRunning) onFoldersDeleted?.();
+    // Whatever the jobs have deleted is gone, so the listing should say so.
+    // Also once they finish: the listing read when they did can still hold a
+    // folder the deletion emptied.
+    if (jobs.jobs.length > 0) onFoldersDeleted?.();
     setOpen(false);
   }
 

@@ -563,6 +563,29 @@ describe('BucketDetailPage: deleting a folder', () => {
     vi.unstubAllGlobals();
   });
 
+  /** Answers the job's start with a job already finished, as a small folder's is. */
+  function answerBulkDeleteWithCompletedJob() {
+    mockApiRequest.mockImplementation((path: string) =>
+      path.includes('/bulk-delete')
+        ? Promise.resolve({
+            job: {
+              jobId: 'any-job',
+              bucketName: BUCKET,
+              region: REGION,
+              prefix: 'any-folder/',
+              scope: 'allVersions',
+              status: 'completed',
+              deletedCount: 2,
+              failedCount: 0,
+              failures: [],
+              startedAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+            },
+          })
+        : respond(path),
+    );
+  }
+
   /** Ticks the folder, then confirms the delete from the selection bar. */
   async function deleteSelectedFolder() {
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Select folder any-folder' }));
@@ -615,25 +638,7 @@ describe('BucketDetailPage: deleting a folder', () => {
   });
 
   it('lists the bucket and its analytics again once the deletion finishes', async () => {
-    mockApiRequest.mockImplementation((path: string) =>
-      path.includes('/bulk-delete')
-        ? Promise.resolve({
-            job: {
-              jobId: 'any-job',
-              bucketName: BUCKET,
-              region: REGION,
-              prefix: 'any-folder/',
-              scope: 'allVersions',
-              status: 'completed',
-              deletedCount: 2,
-              failedCount: 0,
-              failures: [],
-              startedAt: '2026-01-01T00:00:00Z',
-              updatedAt: '2026-01-01T00:00:00Z',
-            },
-          })
-        : respond(path),
-    );
+    answerBulkDeleteWithCompletedJob();
     const { client } = renderPage(OrgRole.Owner);
     const invalidate = vi.spyOn(client, 'invalidateQueries');
 
@@ -646,5 +651,20 @@ describe('BucketDetailPage: deleting a folder', () => {
         [{ queryKey: queryKeys.bucketAnalytics(BUCKET, REGION) }],
       ]),
     );
+  });
+
+  // The listing read as the job finishes can still hold the folder, so the
+  // dialog's Close lists the bucket again rather than leaving it until a reload.
+  it('drops a deleted folder from the list when the finished dialog is closed', async () => {
+    answerBulkDeleteWithCompletedJob();
+    renderPage(OrgRole.Owner);
+    const dialog = await deleteSelectedFolder();
+    await within(dialog).findByText('Folder deleted');
+    // Every listing from here on is the bucket without the folder.
+    mockParseListObjects.mockReturnValue(ONE_OBJECT_LISTING);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => expect(screen.queryByTestId('folder-row')).not.toBeInTheDocument());
   });
 });
