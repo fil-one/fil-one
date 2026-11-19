@@ -9,6 +9,7 @@ import type { OrgMembership } from './org-membership.ts';
 import type { PendingAccount } from './user-context.ts';
 import { OrgSetupStatus } from './org-setup-status.ts';
 import { deriveOrgName } from './suggest-org-name.ts';
+import { buildSignupLifecycleOutbox } from './lifecycle-outbox.ts';
 
 /**
  * Create the account on first login: identity, profiles, membership, the org's
@@ -64,7 +65,10 @@ export async function createNewUserAndOrg({
       subject: AuditSubjects.org(orgId),
       details: { orgName, source: 'signup' },
     }),
-    items: accountRows({ sub, userId, orgId, orgName, email, name, now }),
+    items: [
+      ...accountRows({ sub, userId, orgId, orgName, email, name, now }),
+      ...buildSignupLifecycleOutbox({ orgId, occurredAt: now, verifiedEmail: email }),
+    ],
   });
 
   return { orgId, userId, role: OrgRole.Owner, joinedAt: now, source: 'signup' };
