@@ -214,6 +214,17 @@ describe('billed-usage-drift-checker handler', () => {
     expect(runSummary()).toMatchObject({ BilledUsageOrgsChecked: 0 });
   });
 
+  it('skips an org on a trial, since Stripe does not charge usage during a trial', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [subscriptionRow({ subscriptionStatus: SubscriptionStatus.Trialing })],
+    });
+
+    await handler();
+
+    expect(mockListEventSummaries).not.toHaveBeenCalled();
+    expect(runSummary()).toMatchObject({ BilledUsageOrgsChecked: 0 });
+  });
+
   it('skips an org that is being deleted', async () => {
     ddbMock.on(ScanCommand).resolves({ Items: [subscriptionRow()] });
     mockIsOrgDeletedOrDeleting.mockResolvedValue(true);
@@ -265,5 +276,29 @@ describe('billed-usage-drift-checker handler', () => {
     await expect(handler()).rejects.toThrow(
       'No active Stripe meter with event name any-meter-event',
     );
+  });
+
+  it.each([
+    {
+      name: 'the Stripe meter lookup',
+      // The meter lookup rejects, so no org can be checked.
+      arrange: () => mockListMeters.mockRejectedValue(new Error('stripe unavailable')),
+    },
+    {
+      name: 'the subscription scan',
+      // The scan rejects, so no org can be found.
+      arrange: () => ddbMock.on(ScanCommand).rejects(new Error('dynamo unavailable')),
+    },
+  ])('reports a probe failure before failing the run when $name fails', async ({ arrange }) => {
+    ddbMock.on(ScanCommand).resolves({ Items: [subscriptionRow()] });
+    arrange();
+
+    await expect(handler()).rejects.toThrow('unavailable');
+
+    expect(runSummary()).toMatchObject({
+      BilledUsageOrgsChecked: 0,
+      BilledUsageDrift: 0,
+      BilledUsageProbeFailed: 1,
+    });
   });
 });

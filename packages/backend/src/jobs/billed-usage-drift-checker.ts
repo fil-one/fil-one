@@ -1,4 +1,4 @@
-import { GB_BYTES } from '@filone/shared';
+import { GB_BYTES, SubscriptionStatus } from '@filone/shared';
 import { reportMetric } from '../lib/metrics.ts';
 import { isOrgDeletedOrDeleting } from '../lib/org-profile.ts';
 import { getOrgAggregateUsage } from '../lib/org-usage-report.ts';
@@ -58,8 +58,18 @@ export async function handler(): Promise<void> {
   if (!meterEventName) throw new Error('STRIPE_METER_EVENT_NAME env var is not set');
 
   const now = Date.now();
-  const meterId = await getMeterId(meterEventName);
-  const orgs = await scanOrgsInvoicingSoon(now);
+  let meterId: string;
+  let orgs: MeteredOrg[];
+  try {
+    meterId = await getMeterId(meterEventName);
+    orgs = await scanOrgsInvoicingSoon(now);
+  } catch (error) {
+    // The checker-failure alert watches BilledUsageProbeFailed, so a run that
+    // cannot start must still report one.
+    console.error(`${LOG} setup failed`, { error });
+    emitRunSummary({ checked: 0, drift: 0, probeFailed: 1 });
+    throw error;
+  }
   const stats = { checked: 0, drift: 0, probeFailed: 0 };
 
   for (const org of orgs) {
@@ -108,6 +118,8 @@ async function scanOrgsInvoicingSoon(now: number): Promise<MeteredOrg[]> {
     job: 'billed-usage-drift-checker',
     ...METERED_SUBSCRIPTIONS,
     select: (record, owner) => {
+      // Stripe does not charge usage during a trial, so a trial's gap never reaches an invoice.
+      if (record.subscriptionStatus === SubscriptionStatus.Trialing) return undefined;
       const { stripeCustomerId, currentPeriodStart, currentPeriodEnd } = record;
       if (
         typeof stripeCustomerId !== 'string' ||

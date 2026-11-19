@@ -13,11 +13,12 @@ What matters is whether the value Stripe will invoice matches the storage the or
 
 A read-only job, `jobs/billed-usage-drift-checker.ts`, runs at 09:00 and 21:00 UTC, two hours after usage reporting, and follows the [drift telemetry pattern](2026-04-subscription-drift-telemetry.md).
 
-- **Who:** the subscriptions the usage run meters (`METERED_SUBSCRIPTIONS`) whose `currentPeriodEnd` is within 48 hours. Earlier gaps still have runs left to heal them.
+- **Who:** the subscriptions the usage run meters (`METERED_SUBSCRIPTIONS`) whose `currentPeriodEnd` is within 48 hours. Earlier gaps still have runs left to heal them. Trials are left out: Stripe does not charge usage during a trial, so their gaps never reach an invoice.
+- **Blind spot:** a period ending in the two hours between a usage run and the next check is last seen by the check before that usage run. Missing only the final run shifts a period average by well under the 2% tolerance, so this misses only a large storage change in the period's last twelve hours.
 - **Billed:** the meter's value for the current period, from `stripe.billing.meters.listEventSummaries`. No value counts as 0 GB.
 - **Actual:** the period-average GB, computed by `getOrgAggregateUsage`, the same code the worker reports from.
 - **Drift:** the gap exceeds both 2% of the larger value and 1 GB. One missed run moves a monthly average by a fraction of a percent, so a single failure stays under the line.
-- **Signals:** per run, dimensionless EMF metrics `BilledUsageOrgsChecked`, `BilledUsageDrift` and `BilledUsageProbeFailed`. Per drifted org, one warning whose message is a JSON string with `event: "[billed-usage-drift-checker] out_of_sync"`, `orgId`, `subscriptionId`, `periodEnd`, `billedGb`, `actualGb`, `gapGb` and `gapPct`. It is a warning because production Lambdas drop `console.log`, and a JSON string because Node's printed objects cannot be parsed in LogQL.
+- **Signals:** per run, dimensionless EMF metrics `BilledUsageOrgsChecked`, `BilledUsageDrift` and `BilledUsageProbeFailed`. A run that cannot look up the meter or scan subscriptions reports one probe failure before it fails, so the checker-failure alert sees it. Per drifted org, one warning whose message is a JSON string with `event: "[billed-usage-drift-checker] out_of_sync"`, `orgId`, `subscriptionId`, `periodEnd`, `billedGb`, `actualGb`, `gapGb` and `gapPct`. It is a warning because production Lambdas drop `console.log`, and a JSON string because Node's printed objects cannot be parsed in LogQL.
 
 ### Alert rules
 
