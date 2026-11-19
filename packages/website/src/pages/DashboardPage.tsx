@@ -12,6 +12,7 @@ import { Badge, type BadgeColor } from '../components/Badge';
 import { Card } from '../components/Card';
 import { EmptyStateCard } from '../components/EmptyStateCard';
 import { ProgressBar } from '../components/ProgressBar';
+import { Skeleton } from '../components/Skeleton';
 import { formatBytes } from '@filone/shared';
 
 import { getActivityActionLabel, PlanId, SubscriptionStatus, getUsageLimits } from '@filone/shared';
@@ -56,18 +57,53 @@ function statusBadgeProps(status: SubscriptionStatus): { label: string; color: B
 // Skeleton
 // ---------------------------------------------------------------------------
 
+/**
+ * Stands in for the cards below the heading while usage loads. The heading and
+ * its action sit outside it, in `DashboardLayout`, so they render immediately.
+ */
 function DashboardSkeleton() {
   return (
-    <div className="p-8 animate-pulse">
-      <div className="mb-6 h-8 w-40 rounded-md bg-zinc-200" />
+    <div role="status" aria-label="Loading dashboard">
       <div className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
-        <div className="h-[157px] rounded-xl bg-zinc-100" />
-        <div className="h-[157px] rounded-xl bg-zinc-100" />
-        <div className="h-[157px] rounded-xl bg-zinc-100" />
+        {['plan', 'storage', 'egress'].map((card) => (
+          <Skeleton key={card} className="h-[157px] rounded-xl" />
+        ))}
       </div>
-      <div className="mb-5 h-[88px] rounded-xl bg-zinc-100" />
-      <div className="h-48 rounded-lg bg-zinc-100" />
+      <Skeleton className="mb-5 h-[88px] rounded-xl" />
+      <Skeleton className="h-48 rounded-xl" />
     </div>
+  );
+}
+
+/** The page heading and its action, shared by the loading and loaded states. */
+function DashboardLayout({
+  headingRef,
+  children,
+}: {
+  headingRef?: React.Ref<HTMLHeadingElement>;
+  children: React.ReactNode;
+}) {
+  return (
+    <PageLayout
+      title="Dashboard"
+      headingId="dashboard-heading"
+      headingRef={headingRef}
+      action={
+        <RequirePermission permission="buckets.create">
+          <Button
+            id="dashboard-new-bucket-button"
+            variant="ghost"
+            size="sm"
+            icon={PlusIcon}
+            href="/buckets/create"
+          >
+            New bucket
+          </Button>
+        </RequirePermission>
+      }
+    >
+      {children}
+    </PageLayout>
   );
 }
 
@@ -120,7 +156,11 @@ export function DashboardPage() {
   // Usage alone decides whether there is a page: every counter reads it, and it
   // is `buckets.read`, which every role holds.
   if (usagePending || !usage) {
-    return <DashboardSkeleton />;
+    return (
+      <DashboardLayout headingRef={headingRef}>
+        <DashboardSkeleton />
+      </DashboardLayout>
+    );
   }
 
   const isTrialing = billing?.subscription.status === SubscriptionStatus.Trialing;
@@ -156,24 +196,7 @@ export function DashboardPage() {
       : 0;
 
   return (
-    <PageLayout
-      title="Dashboard"
-      headingId="dashboard-heading"
-      headingRef={headingRef}
-      action={
-        <RequirePermission permission="buckets.create">
-          <Button
-            id="dashboard-new-bucket-button"
-            variant="ghost"
-            size="sm"
-            icon={PlusIcon}
-            href="/buckets/create"
-          >
-            New bucket
-          </Button>
-        </RequirePermission>
-      }
-    >
+    <DashboardLayout headingRef={headingRef}>
       {/* Trial banner */}
       {isTrialing && trialBannerVisible && (
         <div className="mb-5 flex flex-col gap-3 rounded-xl bg-brand-50/60 px-5 py-3.5 ring-1 ring-brand-100 sm:flex-row sm:items-center sm:justify-between">
@@ -427,6 +450,6 @@ export function DashboardPage() {
           </div>
         )}
       </Card>
-    </PageLayout>
+    </DashboardLayout>
   );
 }
