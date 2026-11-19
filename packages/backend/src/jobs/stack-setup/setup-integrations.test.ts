@@ -244,11 +244,60 @@ describe('setup-integrations', () => {
     stubAuth0Fetch();
     mockResource.StripeSecretKey.value = 'sk_test_fake';
     process.env.AUTH0_DOMAIN = 'test.us.auth0.com';
+    vi.stubEnv('FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED', 'false');
   });
+  afterEach(() => vi.unstubAllEnvs());
 
   // ── Create ──────────────────────────────────────────────────────────
 
   describe('Create', () => {
+    it('adds exact attachment events only after explicit staging activation', async () => {
+      vi.stubEnv('FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED', 'true');
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({ id: 'we_any', secret: 'whsec_any' });
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            Stage: 'staging',
+            SiteUrl: 'https://app.example.com',
+            ServiceToken: 'arn:aws:lambda:us-east-2:123:function:any-setup',
+          },
+        }),
+      );
+      expect(mockStripeWebhookEndpoints.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          enabled_events: expect.arrayContaining(['payment_method.attached']),
+          metadata: { app: 'filone', stage: 'staging' },
+        }),
+      );
+      expect(mockStripeWebhookEndpoints.create.mock.calls[0][0].enabled_events).not.toContain(
+        'setup_intent.succeeded',
+      );
+    });
+
+    it('refuses attachment activation outside staging before changing provider endpoints', async () => {
+      vi.stubEnv('FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED', 'true');
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            Stage: 'production',
+            SiteUrl: 'https://app.example.com',
+            ServiceToken: 'arn:aws:lambda:us-east-2:123:function:any-setup',
+          },
+        }),
+      );
+      expect(mockStripeWebhookEndpoints.create).not.toHaveBeenCalled();
+      expect(mockStripeWebhookEndpoints.update).not.toHaveBeenCalled();
+      expect(mockStripeWebhookEndpoints.del).not.toHaveBeenCalled();
+      expect(capturedCfnBody).toMatchObject({
+        Status: 'FAILED',
+        Reason: 'Lifecycle attachment events are staging-only',
+      });
+    });
     it('creates a new Stripe webhook and stores the secret in SSM', async () => {
       ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
       ssmMock.on(PutParameterCommand).resolves({});

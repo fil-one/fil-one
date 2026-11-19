@@ -2,11 +2,13 @@ import { createHash } from 'node:crypto';
 import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { getDynamoClient } from './ddb-client.ts';
+import { readLifecycleCustomerBinding } from './lifecycle-customer-binding.ts';
+import { reportMetric } from './metrics.ts';
 
 interface BillingLifecycleDetail {
   schema_version: 1;
   event_id: string;
-  event_type: 'trial.started' | 'payment.succeeded' | 'payment.failed';
+  event_type: 'trial.started' | 'payment.succeeded' | 'payment.failed' | 'payment.method_added';
   occurred_at: string;
   organization_id: string;
 }
@@ -26,7 +28,7 @@ function readRecord(value: unknown): Record<string, unknown> {
 
 function assertBillingObject(
   object: Record<string, unknown>,
-  expected: 'subscription' | 'invoice',
+  expected: 'subscription' | 'invoice' | 'payment_method',
 ): void {
   if (object.object !== expected) throw new Error('Invalid billing lifecycle object');
 }
@@ -89,6 +91,15 @@ export function buildBillingLifecycleDetail(raw: unknown): BillingLifecycleDetai
     default:
       return;
   }
+  return createBillingDetail(event, kind, organizationId, occurredAt);
+}
+
+function createBillingDetail(
+  event: Record<string, unknown>,
+  kind: BillingLifecycleDetail['event_type'],
+  organizationId: string,
+  occurredAt: unknown,
+): BillingLifecycleDetail {
   if (
     typeof event.id !== 'string' ||
     !TOKEN.test(event.id) ||
@@ -107,6 +118,54 @@ export function buildBillingLifecycleDetail(raw: unknown): BillingLifecycleDetai
   };
 }
 
+function emitAttachmentCoverageGap(
+  reason: 'disabled' | 'unbound' | 'expired' | 'predates-binding' | 'unsupported-customer',
+): void {
+  reportMetric({
+    _aws: {
+      Timestamp: Date.now(),
+      CloudWatchMetrics: [
+        {
+          Namespace: 'FilOne',
+          Dimensions: [['Reason']],
+          Metrics: [{ Name: 'LifecycleAttachmentCoverageGap', Unit: 'Count' }],
+        },
+      ],
+    },
+    Reason: reason,
+    LifecycleAttachmentCoverageGap: 1,
+  });
+}
+
+async function buildAttachmentLifecycleDetail(
+  raw: unknown,
+): Promise<BillingLifecycleDetail | undefined> {
+  const event = readRecord(raw);
+  const object = readRecord(readRecord(event.data).object);
+  assertBillingObject(object, 'payment_method');
+  const customer =
+    typeof object.customer === 'string' ? object.customer : readRecord(object.customer).id;
+  if (typeof customer !== 'string' || !TOKEN.test(customer) || !customer.startsWith('cus_')) {
+    emitAttachmentCoverageGap('unsupported-customer');
+    return;
+  }
+  if (
+    typeof event.created !== 'number' ||
+    !Number.isSafeInteger(event.created) ||
+    event.created <= 0
+  ) {
+    throw new Error('Invalid lifecycle attachment occurrence');
+  }
+  const binding = await readLifecycleCustomerBinding(customer, event.created);
+  if (binding.status !== 'bound') {
+    // Missing binding is outside-or-unknown cohort, not proof of complete
+    // coverage. Do not stall unrelated billing in the FIFO customer group.
+    emitAttachmentCoverageGap(binding.status);
+    return;
+  }
+  return createBillingDetail(event, 'payment.method_added', binding.organizationId, event.created);
+}
+
 /**
  * Persist before the verified FIFO event is acknowledged. If this write fails,
  * the existing queue retries the original event even after business writes land.
@@ -114,7 +173,10 @@ export function buildBillingLifecycleDetail(raw: unknown): BillingLifecycleDetai
 export async function captureBillingLifecycle(raw: unknown): Promise<void> {
   const table = process.env.FILONE_LIFECYCLE_BILLING_OUTBOX_TABLE;
   if (!table) return;
-  const detail = buildBillingLifecycleDetail(raw);
+  const detail =
+    readRecord(raw).type === 'payment_method.attached'
+      ? await buildAttachmentLifecycleDetail(raw)
+      : buildBillingLifecycleDetail(raw);
   if (!detail) return;
   const fingerprint = createHash('sha256').update(JSON.stringify(detail)).digest('hex');
   try {
