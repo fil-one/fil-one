@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   ConditionalCheckFailedException,
@@ -6,6 +6,7 @@ import {
   GetItemCommand,
   PutItemCommand,
   UpdateItemCommand,
+  TransactWriteItemsCommand,
 } from '@aws-sdk/client-dynamodb';
 import { ApiErrorCode, SubscriptionStatus } from '@filone/shared';
 
@@ -15,6 +16,13 @@ import { ApiErrorCode, SubscriptionStatus } from '@filone/shared';
 
 const mockCustomersCreate = vi.fn();
 const mockSetupIntentsCreate = vi.fn();
+// These tests call baseHandler directly; profile middleware has independent
+// coverage and must not pull unrelated logo/storage clients into this unit.
+vi.mock('../lib/org-profile.ts', () => ({
+  OrgDeletingError: class extends Error {},
+  isOrgDeleting: vi.fn(async () => false),
+  getOrgProfile: vi.fn(),
+}));
 vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     customers: { create: mockCustomersCreate },
@@ -25,6 +33,7 @@ vi.mock('../lib/stripe-client.ts', () => ({
 vi.mock('sst', () => ({
   Resource: {
     BillingTable: { name: 'BillingTable' },
+    UserInfoTable: { name: 'UserInfoTable' },
     StripePublishableKey: { value: 'pk_test_123' },
   },
 }));
@@ -68,8 +77,39 @@ describe('create-setup-intent baseHandler', () => {
   beforeEach(() => {
     ddbMock.reset();
     vi.clearAllMocks();
+    vi.stubEnv('FILONE_LIFECYCLE_CUSTOMER_BINDINGS_TABLE', '');
     mockCustomersCreate.mockResolvedValue({ id: 'cus_test_123' });
     mockSetupIntentsCreate.mockResolvedValue({ client_secret: 'seti_test_secret_abc' });
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('commits the trusted customer binding before creating or returning a confirmable SetupIntent', async () => {
+    vi.stubEnv('FILONE_LIFECYCLE_CUSTOMER_BINDINGS_TABLE', 'any-bindings');
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(subscriptionItem(ORG_KEY, { stripeCustomerId: { S: 'cus_any' } }));
+    ddbMock.on(TransactWriteItemsCommand).resolves({});
+    mockSetupIntentsCreate.mockImplementationOnce(async () => {
+      expect(ddbMock.commandCalls(TransactWriteItemsCommand)).toHaveLength(1);
+      return { client_secret: 'seti_any_secret' };
+    });
+    expect(await baseHandler(setupIntentEvent())).toMatchObject({ statusCode: 200 });
+    expect(mockSetupIntentsCreate).toHaveBeenCalledWith({
+      customer: 'cus_any',
+      usage: 'off_session',
+    });
+  });
+
+  it('does not create a confirmable SetupIntent when the immutable binding or current customer check fails', async () => {
+    vi.stubEnv('FILONE_LIFECYCLE_CUSTOMER_BINDINGS_TABLE', 'any-bindings');
+    ddbMock
+      .on(GetItemCommand)
+      .resolves(subscriptionItem(ORG_KEY, { stripeCustomerId: { S: 'cus_any' } }));
+    ddbMock.on(TransactWriteItemsCommand).rejects(new Error('private conditional context'));
+    await expect(baseHandler(setupIntentEvent())).rejects.toThrow(
+      'Lifecycle customer binding unavailable',
+    );
+    expect(mockSetupIntentsCreate).not.toHaveBeenCalled();
   });
 
   it('refuses with 409 BILLED_MANUALLY without touching Stripe when the org is billed manually', async () => {

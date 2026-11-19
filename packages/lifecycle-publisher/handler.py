@@ -19,7 +19,7 @@ DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9
 REQUIRED = {"schema_version", "event_id", "event_type", "occurred_at", "organization_id"}
 PRODUCER_TYPES = {
     "filone.identity": {"organization.signup", "presign.first_issued"},
-    "filone.billing": {"trial.started", "payment.succeeded", "payment.failed"},
+    "filone.billing": {"trial.started", "payment.succeeded", "payment.failed", "payment.method_added"},
 }
 
 
