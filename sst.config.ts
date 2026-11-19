@@ -58,9 +58,18 @@ export default $config({
     // A production rollout needs separate broker source bindings and acceptance.
     const lifecyclePublisherEnabled = process.env.FILONE_LIFECYCLE_PUBLISHER_ENABLED === 'true';
     const lifecycleCaptureEnabled = process.env.FILONE_LIFECYCLE_CAPTURE_ENABLED === 'true';
+    const firstMilestoneEpoch = process.env.FILONE_LIFECYCLE_FIRST_MILESTONE_EPOCH;
     const lifecycleAlarmTopicArn = process.env.FILONE_LIFECYCLE_ALARM_TOPIC_ARN;
     if (lifecycleCaptureEnabled && !lifecyclePublisherEnabled) {
       throw new Error('Lifecycle capture requires the provisioned staging publisher');
+    }
+    if (
+      firstMilestoneEpoch &&
+      (!lifecycleCaptureEnabled || !/^[A-Za-z0-9_-]{1,64}$/.test(firstMilestoneEpoch))
+    ) {
+      throw new Error(
+        'First-milestone capture requires active lifecycle capture and an opaque epoch',
+      );
     }
     if (lifecyclePublisherEnabled && (!isStaging || isLocal)) {
       throw new Error('Lifecycle publishing is currently supported only in staging');
@@ -842,6 +851,9 @@ export default $config({
       AUTH0_AUDIENCE: isProduction ? 'https://app.fil.one' : 'https://staging.fil.one',
       ...(lifecycleOutbox && lifecycleCaptureEnabled
         ? { FILONE_LIFECYCLE_OUTBOX_TABLE: lifecycleOutbox.name }
+        : {}),
+      ...(firstMilestoneEpoch
+        ? { FILONE_LIFECYCLE_FIRST_MILESTONE_EPOCH: firstMilestoneEpoch }
         : {}),
     };
 

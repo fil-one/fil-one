@@ -36,6 +36,7 @@ const signup = {
 beforeEach(() => {
   ddb.reset();
   vi.stubEnv('FILONE_LIFECYCLE_OUTBOX_TABLE', 'any-outbox');
+  vi.stubEnv('FILONE_LIFECYCLE_FIRST_MILESTONE_EPOCH', 'any-epoch');
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -50,6 +51,14 @@ describe('committed signup lifecycle outcomes', () => {
       organization_id: signup.orgId,
       email_domain: 'example.org',
     });
+    const organizationProfile = transaction.TransactItems!.find(
+      (item) =>
+        item.Put?.TableName === 'UserInfoTable' && item.Put.Item?.pk.S === `ORG#${signup.orgId}`,
+    );
+    expect(organizationProfile!.Put!.Item!.lifecycleCaptureStartedAt.S).toBe(
+      unmarshall(outbox!.Put!.Item!).detail.occurred_at,
+    );
+    expect(organizationProfile!.Put!.Item!.lifecycleCaptureEpoch).toStrictEqual({ S: 'any-epoch' });
     expect(transaction.TransactItems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ Put: expect.objectContaining({ TableName: 'UserInfoTable' }) }),
@@ -57,6 +66,22 @@ describe('committed signup lifecycle outcomes', () => {
         expect.objectContaining({ Put: expect.objectContaining({ TableName: 'AuditTable' }) }),
       ]),
     );
+  });
+
+  it('does not enroll an Organization in first-event capture when signup capture is off', async () => {
+    vi.stubEnv('FILONE_LIFECYCLE_OUTBOX_TABLE', '');
+    ddb.on(TransactWriteItemsCommand).resolves({});
+    await createNewUserAndOrg(signup);
+    const transaction = ddb.commandCalls(TransactWriteItemsCommand)[0].args[0].input;
+    const organizationProfile = transaction.TransactItems!.find(
+      (item) =>
+        item.Put?.TableName === 'UserInfoTable' && item.Put.Item?.pk.S === `ORG#${signup.orgId}`,
+    );
+    expect(organizationProfile!.Put!.Item).not.toHaveProperty('lifecycleCaptureStartedAt');
+    expect(organizationProfile!.Put!.Item).not.toHaveProperty('lifecycleCaptureEpoch');
+    expect(
+      transaction.TransactItems!.filter((item) => item.Put?.TableName === 'any-outbox'),
+    ).toStrictEqual([]);
   });
 
   it('retains the exact outbox write when an audit-only failure retries the signup', async () => {
