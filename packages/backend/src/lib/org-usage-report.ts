@@ -49,6 +49,32 @@ export async function reportOrgUsage(params: {
   const { orgId, subscriptionId, stripeCustomerId, currentPeriodStart, to, meterEventName } =
     params;
 
+  const aggregate = await getOrgAggregateUsage({ orgId, from: currentPeriodStart, to });
+  if (!aggregate) return undefined;
+  const averageStorageGbUsed = aggregate.averageStorageBytesUsed / GB_BYTES;
+
+  const meterResult = await reportStorageToStripe({
+    orgId,
+    subscriptionId,
+    stripeCustomerId,
+    averageStorageGbUsed,
+    meterEventName,
+  });
+
+  return { ...meterResult, aggregate, averageStorageGbUsed };
+}
+
+/**
+ * Measures an org's storage across every network it is provisioned on, without
+ * reporting it. Returns undefined when the org is provisioned nowhere.
+ */
+export async function getOrgAggregateUsage(params: {
+  orgId: string;
+  from: string;
+  to: string;
+}): Promise<AggregateUsage | undefined> {
+  const { orgId, from, to } = params;
+
   // Each network resolves its own tenant id (side-effect-free), is fetched
   // independently, then aggregated and reported at the org level. A tenant's
   // metrics cover its buckets in every region its network serves, so one fetch
@@ -66,7 +92,7 @@ export async function reportOrgUsage(params: {
       orgNetworks.map(async (t) => {
         try {
           return await t.orchestrator.getTenantUsageMetrics(t.tenantId, {
-            from: currentPeriodStart,
+            from,
             to,
             interval: '1d',
           });
@@ -93,7 +119,6 @@ export async function reportOrgUsage(params: {
         orchestratorId: r.orchestrator.id,
         tenantId: r.tenantId,
       })),
-      subscriptionId,
       message: e.message,
       cause: e.cause,
       stack: e.stack,
@@ -101,18 +126,7 @@ export async function reportOrgUsage(params: {
     throw error;
   }
 
-  const aggregate = aggregateUsageMetrics(usageMetrics);
-  const averageStorageGbUsed = aggregate.averageStorageBytesUsed / GB_BYTES;
-
-  const meterResult = await reportStorageToStripe({
-    orgId,
-    subscriptionId,
-    stripeCustomerId,
-    averageStorageGbUsed,
-    meterEventName,
-  });
-
-  return { ...meterResult, aggregate, averageStorageGbUsed };
+  return aggregateUsageMetrics(usageMetrics);
 }
 
 /**
