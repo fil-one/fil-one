@@ -44,12 +44,24 @@ describe('getConnectionSnippets', () => {
     },
   );
 
-  it.each(['cli', 'python', 'nodejs', 'go'] as const)(
+  it.each(['python', 'nodejs', 'go'] as const)(
     'carries only placeholder credentials for %s',
     (client) => {
       expect(fullSnippet(client)).toMatch(/YOUR_ACCESS_KEY[\s\S]*YOUR_SECRET_KEY/);
     },
   );
+
+  // A key passed as an argument stays in the reader's shell history.
+  it('puts no key on the AWS CLI command line', () => {
+    expect(fullSnippet('cli')).not.toMatch(
+      /YOUR_ACCESS_KEY|YOUR_SECRET_KEY|aws_access_key_id|aws_secret_access_key/,
+    );
+  });
+
+  // Pasted as one block, any line after the prompt would be read as an answer.
+  it('ends the AWS CLI set-up with the prompt that asks for the keys', () => {
+    expect(snippets.cli.setup.split('\n').at(-1)).toBe(`aws configure --profile ${CLI_PROFILE}`);
+  });
 
   // Only some regions create a bucket over S3; everywhere else the console does.
   it.each([

@@ -7,6 +7,7 @@
 // written.
 
 import type { BucketPolicy } from '@filone/shared';
+import type { BucketRef } from './bucket-orchestrator.ts';
 
 /** A stored policy and the validator its next write must carry. Opaque to callers. */
 export interface StoredBucketPolicy {
@@ -26,10 +27,15 @@ export type PolicyPrecondition =
 /** The precondition a delete carries; a delete never creates. */
 export type IfMatchPrecondition = { ifMatch: string };
 
-/** Bucket policies, read and written over S3 with the tenant's console key. */
+/**
+ * Bucket policies, read and written over S3 with the tenant's console key.
+ *
+ * Each call names the bucket's region: a bucket is served by one region of the
+ * network, and the other regions' gateways do not know it.
+ */
 export interface BucketPolicyOrchestrator {
   /** The bucket's policy, or null when the bucket exists and has none. Throws {@link BucketNotFoundError} otherwise. */
-  getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null>;
+  getBucketPolicy(tenantId: string, bucket: BucketRef): Promise<StoredBucketPolicy | null>;
 
   /**
    * Creates or replaces the policy with `PutBucketPolicy` under the
@@ -43,7 +49,7 @@ export interface BucketPolicyOrchestrator {
    */
   putBucketPolicy(
     tenantId: string,
-    bucketName: string,
+    bucket: BucketRef,
     policy: BucketPolicy,
     precondition?: PolicyPrecondition,
   ): Promise<{ etag: string }>;
@@ -51,7 +57,7 @@ export interface BucketPolicyOrchestrator {
   /** Deletes the policy with `DeleteBucketPolicy`. Same precondition and retry rules as the write, less `ifNoneMatch`. */
   deleteBucketPolicy(
     tenantId: string,
-    bucketName: string,
+    bucket: BucketRef,
     precondition?: IfMatchPrecondition,
   ): Promise<void>;
 }

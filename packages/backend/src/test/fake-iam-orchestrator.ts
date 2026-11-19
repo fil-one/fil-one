@@ -1,5 +1,6 @@
 import { getEffectiveActions, getPrincipalIds, toPolicyPrincipal } from '@filone/shared';
-import type { BucketPolicy, MemberBucketAccess, PolicyStatement } from '@filone/shared';
+import type { BucketPolicy, MemberBucketAccess, PolicyStatement, S3Region } from '@filone/shared';
+import type { BucketRef } from '../lib/bucket-orchestrator.ts';
 import {
   BucketNotFoundError,
   PolicyNotFoundError,
@@ -38,7 +39,12 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
   readonly policies = new Map<string, Map<string, StoredBucketPolicy>>();
   readonly buckets = new Map<string, Set<string>>();
   /** Every call in order, for tests that assert what ran before what. */
-  readonly calls: Array<{ method: keyof FakedMethods; tenantId: string; target: string }> = [];
+  readonly calls: Array<{
+    method: keyof FakedMethods;
+    tenantId: string;
+    target: string;
+    region?: S3Region;
+  }> = [];
 
   private etagCounter = 0;
   private readonly failures = new Map<keyof FakedMethods, Error>();
@@ -87,8 +93,11 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
     }
   }
 
-  async getBucketPolicy(tenantId: string, bucketName: string): Promise<StoredBucketPolicy | null> {
-    this.recordCall('getBucketPolicy', tenantId, bucketName);
+  async getBucketPolicy(
+    tenantId: string,
+    { region, bucketName }: BucketRef,
+  ): Promise<StoredBucketPolicy | null> {
+    this.recordCall('getBucketPolicy', tenantId, bucketName, region);
     this.throwInjectedFailure('getBucketPolicy');
     this.assertBucketExists(tenantId, bucketName);
     return this.getOrCreatePolicies(tenantId).get(bucketName) ?? null;
@@ -96,11 +105,11 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
 
   async putBucketPolicy(
     tenantId: string,
-    bucketName: string,
+    { region, bucketName }: BucketRef,
     policy: BucketPolicy,
     precondition?: PolicyPrecondition,
   ): Promise<{ etag: string }> {
-    this.recordCall('putBucketPolicy', tenantId, bucketName);
+    this.recordCall('putBucketPolicy', tenantId, bucketName, region);
     this.throwInjectedFailure('putBucketPolicy');
     this.assertBucketExists(tenantId, bucketName);
     const current = this.getOrCreatePolicies(tenantId).get(bucketName);
@@ -121,10 +130,10 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
 
   async deleteBucketPolicy(
     tenantId: string,
-    bucketName: string,
+    { region, bucketName }: BucketRef,
     precondition?: IfMatchPrecondition,
   ): Promise<void> {
-    this.recordCall('deleteBucketPolicy', tenantId, bucketName);
+    this.recordCall('deleteBucketPolicy', tenantId, bucketName, region);
     this.throwInjectedFailure('deleteBucketPolicy');
     this.assertBucketExists(tenantId, bucketName);
     const current = this.getOrCreatePolicies(tenantId).get(bucketName);
@@ -167,8 +176,15 @@ export class FakeIamOrchestrator implements BucketPolicyOrchestrator, MemberOrch
       .filter((access) => access.actions.length > 0);
   }
 
-  private recordCall(method: keyof FakedMethods, tenantId: string, target: string): void {
-    this.calls.push({ method, tenantId, target });
+  private recordCall(
+    method: keyof FakedMethods,
+    tenantId: string,
+    target: string,
+    region?: S3Region,
+  ): void {
+    // Omitted rather than undefined, so a caller with no region to name
+    // leaves the recorded call the shape it has always had.
+    this.calls.push({ method, tenantId, target, ...(region && { region }) });
   }
 
   private throwInjectedFailure(method: keyof FakedMethods): void {

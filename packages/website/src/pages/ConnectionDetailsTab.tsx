@@ -14,6 +14,7 @@ import { RegionSelect } from '../components/RegionSelect';
 import { Tab, TabList, TabPanel, TabPanels, Tabs } from '../components/Tabs';
 import { FILONE_STAGE } from '../env';
 import {
+  CLI_PROMPT_NOTE,
   type ConnectionClient,
   type ConnectionSnippet,
   getAgentInstructions,
@@ -201,6 +202,7 @@ function ClientSteps({ snippet, isCli }: { snippet: ConnectionSnippet; isCli: bo
   return (
     <>
       <Step n={1} title={isCli ? 'Configure the CLI' : 'Set up the client'}>
+        {isCli && <StepNote>{CLI_PROMPT_NOTE}</StepNote>}
         <div className="flex flex-col gap-2">
           <CodeBlock minimal language={isCli ? snippet.language : 'shell'} code={snippet.setup} />
           {snippet.client && (
@@ -230,7 +232,8 @@ function AgentSteps({ setup, instructions }: { setup: string; instructions: stri
     <>
       <Step n={1} title="Store your key in a profile">
         <StepNote>
-          Use a key scoped to the buckets the agent needs, read-only if it only reads.
+          Use a key scoped to the buckets the agent needs, read-only if it only reads.{' '}
+          {CLI_PROMPT_NOTE}
         </StepNote>
         <CodeBlock minimal language="shell" code={setup} />
       </Step>
