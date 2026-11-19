@@ -9,7 +9,6 @@ import type { OrgMembership } from './org-membership.ts';
 import type { PendingAccount } from './user-context.ts';
 import { OrgSetupStatus } from './org-setup-status.ts';
 import { deriveOrgName } from './suggest-org-name.ts';
-import { buildSignupLifecycleOutbox } from './lifecycle-outbox.ts';
 
 /**
  * Create the account on first login: identity, profiles, membership, the org's
@@ -45,11 +44,6 @@ export async function createNewUserAndOrg({
   name?: string;
 }): Promise<OrgMembership> {
   const now = new Date().toISOString();
-  const lifecycleItems = buildSignupLifecycleOutbox({
-    orgId,
-    occurredAt: now,
-    verifiedEmail: email,
-  });
 
   // Spans three tables: identity and profiles in UserInfoTable, membership and
   // the owner count in OrgTable, the event in AuditTable. The event rides the
@@ -70,22 +64,7 @@ export async function createNewUserAndOrg({
       subject: AuditSubjects.org(orgId),
       details: { orgName, source: 'signup' },
     }),
-    items: [
-      ...accountRows({
-        sub,
-        userId,
-        orgId,
-        orgName,
-        email,
-        name,
-        now,
-        lifecycleCaptureStartedAt: lifecycleItems.length ? now : undefined,
-        lifecycleCaptureEpoch: lifecycleItems.length
-          ? process.env.FILONE_LIFECYCLE_FIRST_MILESTONE_EPOCH
-          : undefined,
-      }),
-      ...lifecycleItems,
-    ],
+    items: accountRows({ sub, userId, orgId, orgName, email, name, now }),
   });
 
   return { orgId, userId, role: OrgRole.Owner, joinedAt: now, source: 'signup' };
@@ -355,8 +334,6 @@ function accountRows({
   email,
   name,
   now,
-  lifecycleCaptureStartedAt,
-  lifecycleCaptureEpoch,
 }: {
   sub: string;
   userId: string;
@@ -365,8 +342,6 @@ function accountRows({
   email?: string;
   name?: string;
   now: string;
-  lifecycleCaptureStartedAt?: string;
-  lifecycleCaptureEpoch?: string;
 }): TransactWriteItem[] {
   const { identity, profile } = identityRows({ sub, userId, orgId, email, name, now });
   return [
@@ -374,16 +349,7 @@ function accountRows({
     { Put: profile },
     // The name here is derived, not chosen. False sends the account through
     // the naming step; `PATCH /api/org` flips it.
-    ...orgRows({
-      orgId,
-      orgName,
-      userId,
-      now,
-      source: 'signup',
-      nameConfirmed: false,
-      lifecycleCaptureStartedAt,
-      lifecycleCaptureEpoch,
-    }),
+    ...orgRows({ orgId, orgName, userId, now, source: 'signup', nameConfirmed: false }),
   ];
 }
 
@@ -505,8 +471,6 @@ function orgRows({
   nameConfirmed,
   logoUrl,
   floorOrg,
-  lifecycleCaptureStartedAt,
-  lifecycleCaptureEpoch,
 }: {
   orgId: string;
   orgName: string;
@@ -516,8 +480,6 @@ function orgRows({
   nameConfirmed: boolean;
   logoUrl?: string;
   floorOrg?: boolean;
-  lifecycleCaptureStartedAt?: string;
-  lifecycleCaptureEpoch?: string;
 }): TransactWriteItem[] {
   const orgTableName = Resource.OrgTable.name;
 
@@ -535,10 +497,6 @@ function orgRows({
           createdAt: { S: now },
           ...(logoUrl ? { logoUrl: { S: logoUrl } } : {}),
           ...(floorOrg ? { floorOrg: { BOOL: true } } : {}),
-          ...(lifecycleCaptureStartedAt
-            ? { lifecycleCaptureStartedAt: { S: lifecycleCaptureStartedAt } }
-            : {}),
-          ...(lifecycleCaptureEpoch ? { lifecycleCaptureEpoch: { S: lifecycleCaptureEpoch } } : {}),
         },
         ...(source === 'manual' ? { ConditionExpression: 'attribute_not_exists(pk)' } : {}),
       },

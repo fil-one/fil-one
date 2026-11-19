@@ -18,7 +18,6 @@ import type {
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
 import type { NetworkOrchestrator, ServiceOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
-import { recordFirstPresignLifecycle } from '../lib/first-presign-lifecycle.ts';
 import type { S3ClientContext } from '../lib/s3-client.ts';
 import {
   getPresignedDeleteObjectUrl,
@@ -355,8 +354,7 @@ export async function baseHandler(
   if (blocked) return blocked;
 
   const orchestrator = getOrchestratorForRegion(region);
-  const orgProfile = await getOrgProfile(orgId);
-  const tenantId = orchestrator.isTenantReady(orgProfile);
+  const tenantId = orchestrator.isTenantReady(await getOrgProfile(orgId));
   if (!tenantId) return tenantNotReadyResponse();
 
   const accessRefused = await checkMemberBucketAccess(
@@ -373,12 +371,6 @@ export async function baseHandler(
     : s3Ctx;
 
   const items = await Promise.all(ops.map((op) => presignOp(op, ctx)));
-  await recordFirstPresignLifecycle({
-    orgId,
-    provider: orchestrator.id,
-    tenantId,
-    profile: orgProfile,
-  });
 
   return new ResponseBuilder()
     .status(200)

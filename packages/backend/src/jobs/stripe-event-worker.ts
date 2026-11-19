@@ -21,7 +21,6 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import { resolveOrgId } from '../lib/billing-org-lookup.ts';
-import { captureBillingLifecycle } from '../lib/billing-lifecycle.ts';
 import { startDeletionFromStripe } from '../lib/deletion-from-stripe.ts';
 import {
   assertTenantSyncSucceeded,
@@ -50,9 +49,7 @@ export async function handler(event: SQSEvent): Promise<void> {
   // handler returns exactly the failed event to the queue.
   for (const record of event.Records) {
     const stripeEvent = JSON.parse(record.body) as Stripe.Event;
-    const emitCompletion = await processStripeEvent(stripeEvent);
-    await captureBillingLifecycle(stripeEvent);
-    if (emitCompletion) emitCompletion();
+    await processStripeEvent(stripeEvent);
     await recordEventHandled(stripeEvent);
   }
 }
@@ -80,7 +77,7 @@ async function recordEventHandled(stripeEvent: Stripe.Event): Promise<void> {
   }
 }
 
-async function processStripeEvent(stripeEvent: Stripe.Event): Promise<(() => void) | undefined> {
+async function processStripeEvent(stripeEvent: Stripe.Event): Promise<void> {
   switch (stripeEvent.type) {
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
@@ -88,15 +85,13 @@ async function processStripeEvent(stripeEvent: Stripe.Event): Promise<(() => voi
       await handleSubscriptionUpdate(subscription);
       // The row is written from the subscription Stripe holds now, but the
       // event records the transition Stripe made, even when it arrives after
-      // later ones. Defer the terminal metric until the new outbox write has
-      // succeeded, avoiding extra counts from that failure path. Queue
-      // delivery still has its existing at-least-once semantics.
+      // later ones. Emitted once the delivery can no longer fail, so a retried
+      // event counts once.
       if (
         stripeEvent.data.previous_attributes?.status === 'past_due' &&
         subscription.status === 'active'
       ) {
-        return () =>
-          emitDunningEscalation({ stage: 'recovered', reason: 'past_due', attemptCount: 0 });
+        emitDunningEscalation({ stage: 'recovered', reason: 'past_due', attemptCount: 0 });
       }
       return;
     }
@@ -122,22 +117,22 @@ async function processStripeEvent(stripeEvent: Stripe.Event): Promise<(() => voi
     }
     case 'invoice.payment_succeeded': {
       const invoice = stripeEvent.data.object as Stripe.Invoice;
-      return () => handlePaymentSucceeded(invoice);
-    }
-    case 'payment_method.attached':
-      // The explicitly configured lifecycle adapter owns this outcome.
+      handlePaymentSucceeded(invoice);
       return;
+    }
     case 'invoice.payment_failed': {
       const invoice = stripeEvent.data.object as Stripe.Invoice;
-      return () => handlePaymentFailed(invoice);
+      handlePaymentFailed(invoice);
+      return;
     }
     case 'invoice.finalized': {
-      return emitInvoiceFinalized;
+      emitInvoiceFinalized();
+      return;
     }
     case 'invoice.finalization_failed': {
       const invoice = stripeEvent.data.object as Stripe.Invoice;
-      return () =>
-        emitInvoiceFinalizationFailed(invoice.last_finalization_error?.code ?? 'unknown');
+      emitInvoiceFinalizationFailed(invoice.last_finalization_error?.code ?? 'unknown');
+      return;
     }
     default:
       console.log('[stripe-webhook] Unhandled event type:', stripeEvent.type);

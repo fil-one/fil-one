@@ -62,22 +62,6 @@ jobs:
       - name: Test
         run: pnpm --filter @filone/backend test
 
-      - name: Test restriction fixture guards without a browser or deployed stack
-        run: pnpm exec playwright test tests/e2e/destructive/restriction-fixture.spec.ts --project=destructive-chromium --no-deps --workers=1 --reporter=line
-        env:
-          BASE_URL: http://127.0.0.1:1
-
-  test-unit-lifecycle-publisher:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.12'
-      - run: python -m pip install -r packages/lifecycle-publisher/requirements-test.txt
-      - name: Test committed lifecycle delivery
-        run: python -m pytest packages/lifecycle-publisher/test_handler.py -q
-
   # Tests every package that has no job of its own. The filters also leave out
   # the root, whose test script lints and then runs every unit test, and the
   # integration tests, which need a deployed stack. The build comes first
@@ -129,14 +113,7 @@ jobs:
 
   deploy-hint:
     if: github.event_name == 'pull_request'
-    needs:
-      [
-        lint,
-        test-unit-website,
-        test-unit-backend,
-        test-unit-lifecycle-publisher,
-        build-and-test-unit-others,
-      ]
+    needs: [lint, test-unit-website, test-unit-backend, build-and-test-unit-others]
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -187,17 +164,6 @@ jobs:
     env:
       DEPLOY_STAGE: staging
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-      # Explicit staging environment configuration survives normal deployments.
-      # Defaults keep every lifecycle resource/capture path off; production
-      # intentionally has none of these activation inputs.
-      FILONE_LIFECYCLE_PUBLISHER_ENABLED: ${{ vars.FILONE_LIFECYCLE_PUBLISHER_ENABLED || 'false' }}
-      FILONE_LIFECYCLE_CAPTURE_ENABLED: ${{ vars.FILONE_LIFECYCLE_CAPTURE_ENABLED || 'false' }}
-      FILONE_LIFECYCLE_ALARM_TOPIC_ARN: ${{ vars.FILONE_LIFECYCLE_ALARM_TOPIC_ARN }}
-      FILONE_LIFECYCLE_FIRST_MILESTONE_EPOCH: ${{ vars.FILONE_LIFECYCLE_FIRST_MILESTONE_EPOCH }}
-      FILONE_LIFECYCLE_BILLING_PUBLISHER_ENABLED: ${{ vars.FILONE_LIFECYCLE_BILLING_PUBLISHER_ENABLED || 'false' }}
-      FILONE_LIFECYCLE_BILLING_CAPTURE_ENABLED: ${{ vars.FILONE_LIFECYCLE_BILLING_CAPTURE_ENABLED || 'false' }}
-      FILONE_LIFECYCLE_CUSTOMER_BINDINGS_ENABLED: ${{ vars.FILONE_LIFECYCLE_CUSTOMER_BINDINGS_ENABLED || 'false' }}
-      FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED: ${{ vars.FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED || 'false' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
