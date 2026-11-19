@@ -24,6 +24,13 @@ function readRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
 
+function assertBillingObject(
+  object: Record<string, unknown>,
+  expected: 'subscription' | 'invoice',
+): void {
+  if (object.object !== expected) throw new Error('Invalid billing lifecycle object');
+}
+
 function readOrganization(...metadata: unknown[]): string {
   const candidates = metadata
     .map((value) => readRecord(value).orgId)
@@ -60,21 +67,21 @@ export function buildBillingLifecycleDetail(raw: unknown): BillingLifecycleDetai
   let occurredAt = event.created;
   switch (event.type) {
     case 'customer.subscription.created':
-      if (object.object !== 'subscription') throw new Error('Invalid billing lifecycle object');
+      assertBillingObject(object, 'subscription');
       if (object.status !== 'trialing') return;
       kind = 'trial.started';
       organizationId = readOrganization(object.metadata);
       occurredAt = object.trial_start;
       break;
     case 'invoice.payment_succeeded':
-      if (object.object !== 'invoice') throw new Error('Invalid billing lifecycle object');
+      assertBillingObject(object, 'invoice');
       // A free/trial invoice is not evidence that a customer actually paid.
       if (object.status !== 'paid' || !isPositiveMinorAmount(object.amount_paid)) return;
       kind = 'payment.succeeded';
       organizationId = readInvoiceOrganization(object);
       break;
     case 'invoice.payment_failed':
-      if (object.object !== 'invoice') throw new Error('Invalid billing lifecycle object');
+      assertBillingObject(object, 'invoice');
       if (!isPositiveMinorAmount(object.amount_due)) return;
       kind = 'payment.failed';
       organizationId = readInvoiceOrganization(object);
