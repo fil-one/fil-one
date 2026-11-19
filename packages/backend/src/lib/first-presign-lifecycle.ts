@@ -79,24 +79,31 @@ export async function recordFirstPresignLifecycle({
     // A concurrent first issuance is the only acceptable conditional no-op.
     // Refused deletion/mapping/capture fences and unavailable storage fail the
     // canary request. Never log a cancellation's potentially private old item.
-    const reasons =
-      error instanceof TransactionCanceledException ? error.CancellationReasons : undefined;
-    const prior = reasons?.[0]?.Item;
     if (
-      reasons?.[0]?.Code === 'ConditionalCheckFailed' &&
-      reasons
-        .slice(1)
-        .every(
-          (reason) =>
-            !reason.Code || reason.Code === 'None' || reason.Code === 'ConditionalCheckFailed',
-        ) &&
-      prior?.[MARKER]?.S === eventId &&
-      prior.lifecycleCaptureStartedAt?.S === capturedAt &&
-      prior.lifecycleCaptureEpoch?.S === epoch &&
-      prior[`${provider}TenantId`]?.S === tenantId &&
-      prior.deleting === undefined
+      isConcurrentFirstCommit(error, {
+        [MARKER]: eventId,
+        lifecycleCaptureStartedAt: capturedAt,
+        lifecycleCaptureEpoch: epoch,
+        [`${provider}TenantId`]: tenantId,
+      })
     )
       return;
     throw new Error('Lifecycle first-issuance commit unavailable');
   }
+}
+
+function isConcurrentFirstCommit(error: unknown, expected: Record<string, string>): boolean {
+  if (!(error instanceof TransactionCanceledException)) return false;
+  const [first, ...others] = error.CancellationReasons ?? [];
+  if (first?.Code !== 'ConditionalCheckFailed' || !first.Item) return false;
+  if (
+    others.some((reason) => ![undefined, 'None', 'ConditionalCheckFailed'].includes(reason.Code))
+  ) {
+    return false;
+  }
+  const prior = first.Item;
+  return (
+    Object.entries(expected).every(([name, value]) => prior[name]?.S === value) &&
+    prior.deleting === undefined
+  );
 }
