@@ -40,10 +40,6 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
 vi.mock('../lib/org-profile.ts', () => ({
   getOrgProfile: vi.fn(async (orgId: string) => ({ pk: { S: `ORG#${orgId}` } })),
 }));
-const mockRecordFirstPresignLifecycle = vi.fn<(input: unknown) => Promise<void>>();
-vi.mock('../lib/first-presign-lifecycle.ts', () => ({
-  recordFirstPresignLifecycle: (input: unknown) => mockRecordFirstPresignLifecycle(input),
-}));
 
 const mockGetPresignedListObjectsUrl = vi.fn();
 const mockGetPresignedListObjectVersionsUrl = vi.fn();
@@ -117,7 +113,6 @@ function buildPresignEvent(
 describe('presign baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRecordFirstPresignLifecycle.mockReset().mockResolvedValue(undefined);
     vi.stubEnv('FILONE_STAGE', 'staging');
     mockGetOrchestratorForRegion.mockReturnValue(mockOrchestrator);
     mockIsTenantReady.mockReturnValue('aurora-t-1');
@@ -125,53 +120,6 @@ describe('presign baseHandler', () => {
   });
 
   // ── Validation ──────────────────────────────────────────────────────
-
-  it('records only the trusted Organization and provider mapping after signing succeeds', async () => {
-    mockGetPresignedGetObjectUrl.mockResolvedValue('https://s3.example.com/any?signed');
-    mockRecordFirstPresignLifecycle.mockImplementationOnce(async (input) => {
-      expect(mockGetPresignedGetObjectUrl).toHaveBeenCalledOnce();
-      expect(input).toStrictEqual({
-        orgId: 'org-1',
-        provider: 'aurora',
-        tenantId: 'aurora-t-1',
-        profile: { pk: { S: 'ORG#org-1' } },
-      });
-    });
-    const result = await baseHandler(
-      buildPresignEvent([{ op: 'getObject', bucket: 'any-bucket', key: 'any-key' }]),
-    );
-    expect(result).toMatchObject({ statusCode: 200 });
-    expect(mockRecordFirstPresignLifecycle).toHaveBeenCalledOnce();
-  });
-
-  it('does not record a first issuance when signing fails', async () => {
-    mockGetPresignedGetObjectUrl.mockRejectedValueOnce(new Error('any-signing-failure'));
-    await expect(
-      baseHandler(buildPresignEvent([{ op: 'getObject', bucket: 'any-bucket', key: 'any-key' }])),
-    ).rejects.toThrow('any-signing-failure');
-    expect(mockRecordFirstPresignLifecycle).not.toHaveBeenCalled();
-  });
-
-  it('waits for the canary milestone commit instead of returning a URL after a failed write', async () => {
-    mockGetPresignedGetObjectUrl.mockResolvedValue('https://s3.example.com/any?signed');
-    mockRecordFirstPresignLifecycle.mockRejectedValueOnce(
-      new Error('Lifecycle first-issuance commit unavailable'),
-    );
-    await expect(
-      baseHandler(buildPresignEvent([{ op: 'getObject', bucket: 'any-bucket', key: 'any-key' }])),
-    ).rejects.toThrow('Lifecycle first-issuance commit unavailable');
-  });
-
-  it('does not record an issuance when the request is refused before signing', async () => {
-    const result = await baseHandler(
-      buildPresignEvent(
-        [{ op: 'getObject', bucket: 'any-bucket', key: 'any-key', expiresIn: 3600 }],
-        { subscriptionStatus: SubscriptionStatus.Trialing },
-      ),
-    );
-    expect(result).toMatchObject({ statusCode: 402 });
-    expect(mockRecordFirstPresignLifecycle).not.toHaveBeenCalled();
-  });
 
   it('returns 400 for invalid JSON body', async () => {
     const event = buildEvent({

@@ -65,12 +65,6 @@ const WEBHOOK_EVENTS: Stripe.WebhookEndpointCreateParams.EnabledEvent[] = [
   'invoice.finalization_failed',
 ];
 
-function getWebhookEvents(stage: string): Stripe.WebhookEndpointCreateParams.EnabledEvent[] {
-  if (process.env.FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED !== 'true') return WEBHOOK_EVENTS;
-  if (stage !== 'staging') throw new Error('Lifecycle attachment events are staging-only');
-  return [...WEBHOOK_EVENTS, 'payment_method.attached'];
-}
-
 const PROTECTED_STAGES = new Set(['production', 'staging']);
 
 const ssm = new SSMClient({});
@@ -123,7 +117,6 @@ async function setupStripeWebhook(
   siteUrl: string,
   stage: string,
 ): Promise<{ webhookSecret: string; webhookEndpointId: string }> {
-  const enabledEvents = getWebhookEvents(stage);
   const webhookUrl = `${siteUrl}/api/stripe/webhook`;
   const storedSecret = await getStoredWebhookSecret(stage);
 
@@ -132,7 +125,7 @@ async function setupStripeWebhook(
 
   if (existing && storedSecret) {
     await stripe.webhookEndpoints.update(existing.id, {
-      enabled_events: enabledEvents,
+      enabled_events: WEBHOOK_EVENTS,
       metadata: { app: 'filone', stage },
     });
     return { webhookSecret: storedSecret, webhookEndpointId: existing.id };
@@ -156,7 +149,7 @@ async function setupStripeWebhook(
 
   const newEndpoint = await stripe.webhookEndpoints.create({
     url: webhookUrl,
-    enabled_events: enabledEvents,
+    enabled_events: WEBHOOK_EVENTS,
     metadata: { app: 'filone', stage },
   });
 
@@ -471,9 +464,6 @@ export async function handler(event: SetupEvent): Promise<void> {
     `filone-setup-${Stage}`;
 
   try {
-    if (process.env.FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED === 'true' && Stage !== 'staging') {
-      throw new Error('Lifecycle attachment events are staging-only');
-    }
     const ctx = buildStageContext(Stage, siteUrl, siteAliasUrls);
 
     if (event.RequestType === 'Delete') {

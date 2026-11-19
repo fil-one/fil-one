@@ -6,7 +6,6 @@ import { SubscriptionStatus } from '@filone/shared';
 import type { CreateSetupIntentResponse } from '@filone/shared';
 import { Resource } from 'sst';
 import { getStripeClient } from '../lib/stripe-client.ts';
-import { recordLifecycleCustomerBinding } from '../lib/lifecycle-customer-binding.ts';
 import {
   getSubscription,
   updateSubscription,
@@ -91,7 +90,6 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   }
 
   // 2. Create SetupIntent
-  await recordLifecycleCustomerBinding({ orgId, customerId: stripeCustomerId });
   const setupIntent = await stripe.setupIntents.create({
     customer: stripeCustomerId,
     usage: 'off_session',
