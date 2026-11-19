@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { test, expect } from '@playwright/test';
 import {
   isUnexpired,
   parseRestrictionFixture,
   assertStagingRestrictionProof,
   assertDistinctTenantMappings,
-} from '../../../../tests/e2e/destructive/restriction-fixture.util.ts';
+} from './restriction-fixture.util.ts';
 
 const fixture = () => ({
   disposable: true,
@@ -21,14 +21,14 @@ const fixture = () => ({
   ),
 });
 
-describe('restriction isolation fixture', () => {
-  it('accepts only the bound staging stack before any status change', () => {
+test.describe('restriction isolation fixture', () => {
+  test('accepts only the bound staging stack before any status change', () => {
     expect(() => assertStagingRestrictionProof('staging')).not.toThrow();
     expect(() => assertStagingRestrictionProof('production')).toThrow('bound SST staging stack');
     expect(() => assertStagingRestrictionProof('')).toThrow('bound SST staging stack');
   });
 
-  it('requires distinct provisioned tenant mappings in both measured providers', () => {
+  test('requires distinct provisioned tenant mappings in both measured providers', () => {
     const target = { 'eu-west-1': 'any-aurora', 'us-east-1': 'any-fth' };
     const control = { 'eu-west-1': 'other-aurora', 'us-east-1': 'other-fth' };
     expect(() => assertDistinctTenantMappings(target, control)).not.toThrow();
@@ -39,28 +39,29 @@ describe('restriction isolation fixture', () => {
       assertDistinctTenantMappings(target, { ...control, 'us-east-1': undefined }),
     ).toThrow('Distinct provisioned target and control tenants required');
   });
-  it('accepts an explicit distinct disposable control and pre-existing objects', () => {
+  test('accepts an explicit distinct disposable control and pre-existing objects', () => {
     expect(
       parseRestrictionFixture(JSON.stringify(fixture()), 'any-target', ['any-suite-user']),
     ).toStrictEqual(fixture());
   });
 
-  it.each([
+  for (const [name, changes] of [
     ['not disposable', { disposable: false }],
     ['wrong target', { targetUserId: 'different-target' }],
     ['same user', { controlUserId: 'any-target' }],
     ['same Organization', { controlOrganizationId: 'any-target-org' }],
     ['reset by suite setup', { controlUserId: 'any-suite-user' }],
     ['missing authentication state', { controlStorageState: '' }],
-  ])('rejects a fixture that is %s before any status helper can run', (_case, changes) => {
-    expect(() =>
-      parseRestrictionFixture(JSON.stringify({ ...fixture(), ...changes }), 'any-target', [
-        'any-suite-user',
-      ]),
-    ).toThrow('Distinct disposable restriction fixtures required');
-  });
+  ] as const)
+    test(`rejects a fixture that is ${name} before any status helper can run`, () => {
+      expect(() =>
+        parseRestrictionFixture(JSON.stringify({ ...fixture(), ...changes }), 'any-target', [
+          'any-suite-user',
+        ]),
+      ).toThrow('Distinct disposable restriction fixtures required');
+    });
 
-  it('requires a digest and pre-existing object in each measured provider', () => {
+  test('requires a digest and pre-existing object in each measured provider', () => {
     const input = fixture();
     delete input.objects['us-east-1'];
     expect(() => parseRestrictionFixture(JSON.stringify(input), 'any-target')).toThrow(
@@ -68,12 +69,13 @@ describe('restriction isolation fixture', () => {
     );
   });
 
-  it.each([
+  for (const [expiry, expected] of [
     ['2026-11-19T12:00:01Z', true],
     ['2026-11-19T12:00:00Z', false],
     ['2026-11-19T11:59:59Z', false],
     ['not-an-expiry', false],
-  ])('classifies expiry %s without mistaking expiry for revocation', (expiry, expected) => {
-    expect(isUnexpired(expiry, Date.parse('2026-11-19T12:00:00Z'))).toBe(expected);
-  });
+  ] as const)
+    test(`classifies expiry ${expiry} without mistaking expiry for revocation`, () => {
+      expect(isUnexpired(expiry, Date.parse('2026-11-19T12:00:00Z'))).toBe(expected);
+    });
 });
