@@ -31,17 +31,26 @@ def read_detail(image, now=None):
     """Reject corrupted/unexpected outbox rows before putting anything on the bus."""
     row = {key: TypeDeserializer().deserialize(value) for key, value in image.items()}
     detail = row.get("detail")
+    kind = detail.get("event_type") if isinstance(detail, dict) else None
+    extra_fields = ({"email_domain"} if kind == "organization.signup"
+                    else {"observed_tenant"} if kind == "presign.first_issued" else set())
     if (not isinstance(detail, dict) or not REQUIRED <= detail.keys()
-            or detail.keys() - REQUIRED - {"email_domain"}
+            or detail.keys() - REQUIRED - extra_fields
             or isinstance(detail.get("schema_version"), bool)
             or detail.get("schema_version") != 1
-            or detail.get("event_type") != "organization.signup"):
+            or kind not in {"organization.signup", "presign.first_issued"}):
         raise ValueError("Invalid lifecycle fields")
     if any(not isinstance(detail.get(key), str) or not TOKEN.fullmatch(detail[key])
            for key in ("event_id", "organization_id")):
         raise ValueError("Invalid lifecycle identity")
     if row.get("event_id") != detail["event_id"]:
         raise ValueError("Mismatched lifecycle identity")
+    if kind == "presign.first_issued":
+        tenant = detail.get("observed_tenant")
+        if (not isinstance(tenant, dict) or set(tenant) != {"sp", "id"}
+                or any(not isinstance(tenant[key], str) or not TOKEN.fullmatch(tenant[key])
+                       for key in ("sp", "id"))):
+            raise ValueError("Invalid observed tenant mapping")
     occurred = datetime.fromisoformat(detail["occurred_at"].replace("Z", "+00:00"))
     now = now or datetime.now(timezone.utc)
     if occurred.tzinfo is None or not -300 <= (now - occurred).total_seconds() < 180 * 86400:
