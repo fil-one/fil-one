@@ -264,7 +264,7 @@ describe('billed-usage-drift-checker handler', () => {
       // Missing stripeCustomerId: nothing can be billed or read.
       overrides: { stripeCustomerId: undefined },
     },
-  ])('reports a probe failure naming the org when $name', async ({ reason, overrides }) => {
+  ])('reports an unchecked row naming the org when $name', async ({ reason, overrides }) => {
     ddbMock.on(ScanCommand).resolves({
       Items: [subscriptionRow({ orgId: 'org-a', ...overrides })],
     });
@@ -272,7 +272,29 @@ describe('billed-usage-drift-checker handler', () => {
     await handler();
 
     expect(uncheckedLogs(warnSpy)).toMatchObject([{ orgId: 'org-a', reason }]);
-    expect(runSummary()).toMatchObject({ BilledUsageOrgsChecked: 0, BilledUsageProbeFailed: 1 });
+    // Kept apart from probe failures, so a lasting bad row cannot mask a later outage.
+    expect(runSummary()).toMatchObject({
+      BilledUsageOrgsChecked: 0,
+      BilledUsageRowsUnchecked: 1,
+      BilledUsageProbeFailed: 0,
+    });
+  });
+
+  it('does not report an unchecked row for an org that is being deleted', async () => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [
+        subscriptionRow({
+          // A stale period alone would report the row.
+          currentPeriodEnd: new Date(NOW.getTime() - 13 * HOUR_MS).toISOString(),
+        }),
+      ],
+    });
+    mockIsOrgDeletedOrDeleting.mockResolvedValue(true);
+
+    await handler();
+
+    expect(uncheckedLogs(warnSpy)).toStrictEqual([]);
+    expect(runSummary()).toMatchObject({ BilledUsageRowsUnchecked: 0 });
   });
 
   it('skips an org that is being deleted', async () => {

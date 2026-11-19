@@ -14,12 +14,12 @@ What matters is whether the value Stripe will invoice matches the storage the or
 A read-only job, `jobs/billed-usage-drift-checker.ts`, runs at 09:00 and 21:00 UTC, two hours after usage reporting, and follows the [drift telemetry pattern](2026-04-subscription-drift-telemetry.md).
 
 - **Who:** the subscriptions the usage run meters (`METERED_SUBSCRIPTIONS`) whose `currentPeriodEnd` is within 48 hours. Earlier gaps still have runs left to heal them. Trials and grace periods are left out: Stripe does not charge usage during a trial, and a grace-period row's subscription is already canceled, so neither has a usage invoice ahead.
-- **Rows it cannot evaluate:** a metered row with no `stripeCustomerId`, `currentPeriodStart` or `currentPeriodEnd`, or whose `currentPeriodEnd` passed more than 12 hours ago. The last means a renewal webhook was missed, so the worker and this check would both average over the old period and agree on a wrong value. Each is logged as `[billed-usage-drift-checker] unchecked` with `orgId` and `reason`, and counted as a probe failure.
+- **Rows it cannot evaluate:** a metered row with no `stripeCustomerId`, `currentPeriodStart` or `currentPeriodEnd`, or whose `currentPeriodEnd` passed more than 12 hours ago. The last means a renewal webhook was missed, so the worker and this check would both average over the old period and agree on a wrong value. Each is logged as `[billed-usage-drift-checker] unchecked` with `orgId` and `reason`, and counted in `BilledUsageRowsUnchecked`, apart from probe failures so a lasting bad row cannot hide a later outage. A row whose org is being deleted is not counted, since it will never be invoiced.
 - **Blind spot:** a period ending in the two hours between a usage run and the next check is last seen by the check before that usage run. Missing only the final run shifts a period average by well under the 2% tolerance, so this misses only a large storage change in the period's last twelve hours.
 - **Billed:** the meter's value for the current period, from `stripe.billing.meters.listEventSummaries`. No value counts as 0 GB.
 - **Actual:** the period-average GB, computed by `getOrgAggregateUsage`, the same code the worker reports from.
 - **Drift:** the gap exceeds both 2% of the larger value and 1 GB. One missed run moves a monthly average by a fraction of a percent, so a single failure stays under the line.
-- **Signals:** per run, dimensionless EMF metrics `BilledUsageOrgsChecked`, `BilledUsageDrift` and `BilledUsageProbeFailed`. A run that cannot look up the meter or scan subscriptions reports one probe failure before it fails, so the checker-failure alert sees it. Per drifted org, one warning whose message is a JSON string with `event: "[billed-usage-drift-checker] out_of_sync"`, `orgId`, `subscriptionId`, `periodEnd`, `billedGb`, `actualGb`, `gapGb` and `gapPct`. It is a warning because production Lambdas drop `console.log`, and a JSON string because Node's printed objects cannot be parsed in LogQL.
+- **Signals:** per run, dimensionless EMF metrics `BilledUsageOrgsChecked`, `BilledUsageDrift`, `BilledUsageRowsUnchecked` and `BilledUsageProbeFailed`. The metric stream lands them in Mimir as `aws_filone_billed_usage_<name>_{sum,maximum,minimum,average,sample_count}`, for example `aws_filone_billed_usage_probe_failed_maximum`. A run that cannot look up the meter or scan subscriptions reports one probe failure before it fails, so the checker-failure alert sees it. Per drifted org, one warning whose message is a JSON string with `event: "[billed-usage-drift-checker] out_of_sync"`, `orgId`, `subscriptionId`, `periodEnd`, `billedGb`, `actualGb`, `gapGb` and `gapPct`. It is a warning because production Lambdas drop `console.log`, and a JSON string because Node's printed objects cannot be parsed in LogQL.
 
 ### Alert rules
 
@@ -28,19 +28,34 @@ FilOne's rules live in the Grafana UI: folder FilOne, group "FilOne Alerts Evalu
 1. **Billed usage drift before invoicing** (critical, `service_name=filone_billing`). Loki, so the alert names the org and the gap:
 
    ```logql
-   sum by (orgId, gapGb, gapPct, periodEnd) (
-     count_over_time(
+   max by (orgId) (
+     max_over_time(
        {service_name="filone-production", aws_log_group="/aws/lambda/filone-production-BilledUsageDriftChecker"}
-         |= "out_of_sync" | json | line_format "{{.message}}" | json | __error__="" [12h]
+         |= "out_of_sync" | json | line_format "{{.message}}" | json | __error__=""
+         | unwrap gapGb | __error__="" [13h]
      )
    )
    ```
 
-   Fires when the value is above 0. The first `json` reads the Lambda's log envelope, the second the drift line in its `message`. Summary: `Org {{ $labels.orgId }} will be invoiced {{ $labels.gapGb }} GB ({{ $labels.gapPct }}%) off its actual storage; period ends {{ $labels.periodEnd }}.`
+   Fires when the value is above 0. The first `json` reads the Lambda's log envelope, the second the drift line in its `message`. Grouping by `orgId` alone keeps one alert per org across runs; the gap is the query's value, not a label, so a changing gap does not start a new alert. The 13-hour window outlasts the 12-hour cadence, so the alert stays firing while a run is late. Summary: `Org {{ $labels.orgId }} will be invoiced {{ $values.A.Value }} GB off its actual storage.` The `out_of_sync` line has the percentage and period end.
 
-2. **Billed usage drift checker cannot read** (warning). Mimir: `max_over_time(BilledUsageProbeFailed[24h])` above 0 for two consecutive runs. A probe that always fails would otherwise hide real drift. On-call lists the affected orgs with `|= "unchecked"` on the checker's log group.
+2. **Billed usage drift checker cannot read** (warning). Mimir:
 
-3. **Usage Reporting Worker - Daily Cron Success** moves to a non-paging route, and is deleted after one billing cycle in which rule 1 runs clean.
+   ```promql
+   min_over_time(aws_filone_billed_usage_probe_failed_maximum{account_id="811430801166"}[25h]) > 0
+   ```
+
+   The 25-hour minimum covers the last two runs, so it fires only when both had a read failure.
+
+3. **Billed usage rows unchecked** (warning). Mimir:
+
+   ```promql
+   max_over_time(aws_filone_billed_usage_rows_unchecked_maximum{account_id="811430801166"}[13h]) > 0
+   ```
+
+   A missing field or a missed renewal does not heal on its own, so one run is enough. On-call lists the rows with `|= "unchecked"` on the checker's log group.
+
+4. **Usage Reporting Worker - Daily Cron Success** moves to a non-paging route, and is deleted after one billing cycle in which rule 1 runs clean.
 
 ## Consequences
 

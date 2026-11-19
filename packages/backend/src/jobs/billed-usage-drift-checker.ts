@@ -23,7 +23,7 @@ const NOT_INVOICING = new Set<string>([
   SubscriptionStatus.GracePeriod,
 ]);
 
-/** A metered row the checker cannot evaluate, reported as a probe failure. */
+/** A metered row the checker cannot evaluate, counted in BilledUsageRowsUnchecked. */
 interface UncheckedOrg {
   orgId: string;
   reason: 'missing-billing-fields' | 'stale-period';
@@ -84,11 +84,19 @@ export async function handler(): Promise<void> {
     // The checker-failure alert watches BilledUsageProbeFailed, so a run that
     // cannot start must still report one.
     console.error(`${LOG} setup failed`, { error });
-    emitRunSummary({ checked: 0, drift: 0, probeFailed: 1 });
+    emitRunSummary({ checked: 0, drift: 0, rowsUnchecked: 0, probeFailed: 1 });
     throw error;
   }
-  const stats = { checked: 0, drift: 0, probeFailed: unchecked.length };
+  const stats = { checked: 0, drift: 0, rowsUnchecked: 0, probeFailed: 0 };
+
   for (const row of unchecked) {
+    try {
+      // A row mid-teardown is never invoiced, so its stale fields are not a problem.
+      if (await isOrgDeletedOrDeleting(row.orgId)) continue;
+    } catch (error) {
+      console.error(`${LOG} deletion check failed`, { orgId: row.orgId, error });
+    }
+    stats.rowsUnchecked += 1;
     console.warn(JSON.stringify({ event: `${LOG} unchecked`, ...row }));
   }
 
@@ -203,7 +211,12 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function emitRunSummary(stats: { checked: number; drift: number; probeFailed: number }): void {
+function emitRunSummary(stats: {
+  checked: number;
+  drift: number;
+  rowsUnchecked: number;
+  probeFailed: number;
+}): void {
   reportMetric({
     _aws: {
       Timestamp: Date.now(),
@@ -214,6 +227,7 @@ function emitRunSummary(stats: { checked: number; drift: number; probeFailed: nu
           Metrics: [
             { Name: 'BilledUsageOrgsChecked', Unit: 'Count' },
             { Name: 'BilledUsageDrift', Unit: 'Count' },
+            { Name: 'BilledUsageRowsUnchecked', Unit: 'Count' },
             { Name: 'BilledUsageProbeFailed', Unit: 'Count' },
           ],
         },
@@ -221,6 +235,7 @@ function emitRunSummary(stats: { checked: number; drift: number; probeFailed: nu
     },
     BilledUsageOrgsChecked: stats.checked,
     BilledUsageDrift: stats.drift,
+    BilledUsageRowsUnchecked: stats.rowsUnchecked,
     BilledUsageProbeFailed: stats.probeFailed,
   });
 }
