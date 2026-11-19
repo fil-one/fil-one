@@ -4,11 +4,11 @@ import { DatabaseIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
-import { Alert } from './Alert';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ShareObjectModal } from './ShareObjectModal';
 import { EmptyStateCard } from './EmptyStateCard';
+import { ListingPager, type ListingPagerProps } from './ListingPager';
 import { Table } from './Table/Table';
 import { FolderRow, ObjectEntryRows, SECONDARY_COLUMN } from './ObjectBrowserRows';
 import { BulkActionsBar } from './BulkActionsBar';
@@ -16,8 +16,8 @@ import type { RowActions, RowSelection } from './ObjectBrowserRows';
 import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
 import type { BrowseEntry } from '../lib/object-grouping.js';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
-import type { ObjectSelection, SelectableVersion } from '../lib/object-selection.js';
-import { descendantSelectionIds, useObjectSelection } from '../lib/object-selection.js';
+import type { ObjectSelection } from '../lib/object-selection.js';
+import { selectionId, useObjectSelection } from '../lib/object-selection.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 
 export { countObjects } from '../lib/object-grouping.js';
@@ -63,39 +63,6 @@ function PrefixBreadcrumb({
             </span>
           );
         })}
-    </div>
-  );
-}
-
-/**
- * Shown when the bucket holds more objects than one listing page returns. The
- * count in the tab header comes from analytics and covers the whole bucket, so
- * without this the table silently disagrees with it.
- */
-function TruncatedListingNotice({
-  loadedCount,
-  totalObjectCount,
-  selectable,
-}: {
-  loadedCount: number;
-  totalObjectCount?: number;
-  selectable: boolean;
-}) {
-  const total =
-    totalObjectCount !== undefined
-      ? `${totalObjectCount.toLocaleString()} objects`
-      : 'more objects';
-  const scope = selectable
-    ? ' Selection and delete apply only to the objects listed here.'
-    : ' Open a folder to browse the rest.';
-
-  return (
-    <div className="mb-3">
-      <Alert
-        variant="amber"
-        title={`Showing the first ${loadedCount.toLocaleString()}`}
-        description={`This bucket holds ${total}.${scope}`}
-      />
     </div>
   );
 }
@@ -197,13 +164,35 @@ function EmptyBucketState({
   );
 }
 
+/** The bulk delete confirmation's title and line, for one item or several. */
+function describeBulkDelete(count: number): { title: string; description: string } {
+  const one = count === 1;
+  return {
+    title: `Delete ${count} ${one ? 'item' : 'items'}`,
+    description: `${one ? 'This item' : `These ${count} items`} will be permanently deleted. This action cannot be undone.`,
+  };
+}
+
+/**
+ * A listing with no rows in a bucket that has objects: a later page emptied by
+ * deletes, or a folder path with nothing in it.
+ */
+function EmptyListing({ isLaterPage }: { isLaterPage: boolean }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
+      <p className="text-sm text-zinc-500">
+        {isLaterPage ? 'No objects on this page' : 'No objects at this path'}
+      </p>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Object table
 // ---------------------------------------------------------------------------
 
 function ObjectTable({
   entries,
-  latestVersions,
   versioningEnabled,
   expandedKeys,
   onToggleExpand,
@@ -211,11 +200,10 @@ function ObjectTable({
   actions,
   selection,
   rowSelection,
-  idsAtPrefix,
-  listingTruncated,
+  idsOnPage,
+  isPaged,
 }: {
   entries: BrowseEntry[];
-  latestVersions: SelectableVersion[];
   versioningEnabled: boolean;
   expandedKeys: Set<string>;
   onToggleExpand: (key: string) => void;
@@ -223,10 +211,10 @@ function ObjectTable({
   actions: RowActions;
   selection: ObjectSelection;
   rowSelection: RowSelection;
-  idsAtPrefix: string[];
-  listingTruncated: boolean;
+  idsOnPage: string[];
+  isPaged: boolean;
 }) {
-  const allSelected = selection.areAllSelected(idsAtPrefix);
+  const allSelected = selection.areAllSelected(idsOnPage);
 
   return (
     <Table>
@@ -235,8 +223,10 @@ function ObjectTable({
           {rowSelection.selectable && (
             <Table.SelectHead
               checked={allSelected}
-              onChange={() => selection.setMany(idsAtPrefix, !allSelected)}
-              label={listingTruncated ? 'Select all loaded objects' : 'Select all objects'}
+              onChange={() => selection.setMany(idsOnPage, !allSelected)}
+              // A folder spread over pages is selected a page at a time, and
+              // the label says so rather than implying the whole folder.
+              label={isPaged ? 'Select all objects on this page' : 'Select all objects'}
             />
           )}
           <Table.Head>Name</Table.Head>
@@ -254,8 +244,6 @@ function ObjectTable({
       <Table.Body>
         {entries.map((entry) => {
           if (entry.kind === 'folder') {
-            const folderIds = descendantSelectionIds(latestVersions, entry.prefix);
-            const folderSelected = selection.areAllSelected(folderIds);
             return (
               <FolderRow
                 key={`folder:${entry.prefix}`}
@@ -264,8 +252,6 @@ function ObjectTable({
                 versioningEnabled={versioningEnabled}
                 onPrefixChange={onPrefixChange}
                 selectable={rowSelection.selectable}
-                isSelected={folderSelected}
-                onToggleSelect={() => selection.setMany(folderIds, !folderSelected)}
               />
             );
           }
@@ -312,14 +298,10 @@ export type ObjectBrowserProps = {
   canUpload?: boolean;
   /** The API key step the empty state offers beside upload. Absent when there is none to offer. */
   keyAction?: EmptyBucketKeyAction;
-  /**
-   * True when the listing is a partial page. Selection can only ever cover the
-   * objects actually loaded, so the browser says so rather than implying that
-   * "select all" reaches the whole bucket.
-   */
-  listingTruncated?: boolean;
-  /** Full bucket object count from analytics, shown alongside the loaded count. */
-  totalObjectCount?: number;
+  /** Sub-folder prefixes on this page, each ending in '/'. */
+  folders: string[];
+  /** Previous and next through a folder that spans pages. Absent when it does not. */
+  paging?: Omit<ListingPagerProps, 'label'>;
 };
 
 /** The share dialog a row's Share button opens, and whether the plan allows it. */
@@ -355,8 +337,8 @@ export function ObjectBrowser({
   onBulkDelete,
   canUpload = true,
   keyAction,
-  listingTruncated = false,
-  totalObjectCount,
+  folders,
+  paging,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState<{
@@ -405,7 +387,17 @@ export function ObjectBrowser({
     onToggle: selection.toggle,
   };
 
-  if (versions.length === 0) {
+  const groups = groupVersionsByKey(versions);
+  const entries = getEntriesAtPrefix(groups, folders, currentPrefix);
+  const idsOnPage = entries.flatMap((entry) =>
+    entry.kind === 'object' ? [selectionId(entry.group.key, entry.group.latest.versionId)] : [],
+  );
+  const isPaged = paging !== undefined && (paging.hasPrevious || paging.hasNext);
+
+  // Empty only at the bucket's root on its first page: a later page or a
+  // folder with nothing in it is a place in a bucket that has objects.
+  const isBucketEmpty = entries.length === 0 && currentPrefix === '' && !paging?.hasPrevious;
+  if (isBucketEmpty) {
     return (
       <EmptyBucketState
         bucketName={bucketName}
@@ -416,14 +408,6 @@ export function ObjectBrowser({
     );
   }
 
-  const groups = groupVersionsByKey(versions);
-  const entries = getEntriesAtPrefix(groups, currentPrefix);
-  const latestVersions: SelectableVersion[] = groups.map((group) => ({
-    key: group.key,
-    versionId: group.latest.versionId,
-  }));
-  const idsAtPrefix = descendantSelectionIds(latestVersions, currentPrefix);
-
   return (
     <div className="mt-4">
       {currentPrefix && (
@@ -431,14 +415,6 @@ export function ObjectBrowser({
           bucketName={bucketName}
           currentPrefix={currentPrefix}
           onPrefixChange={onPrefixChange}
-        />
-      )}
-
-      {listingTruncated && (
-        <TruncatedListingNotice
-          loadedCount={groups.length}
-          totalObjectCount={totalObjectCount}
-          selectable={rowSelection.selectable}
         />
       )}
 
@@ -452,13 +428,10 @@ export function ObjectBrowser({
       )}
 
       {entries.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
-          <p className="text-sm text-zinc-500">No objects at this path</p>
-        </div>
+        <EmptyListing isLaterPage={paging?.hasPrevious ?? false} />
       ) : (
         <ObjectTable
           entries={entries}
-          latestVersions={latestVersions}
           versioningEnabled={versioningEnabled}
           expandedKeys={expandedKeys}
           onToggleExpand={toggleExpand}
@@ -466,10 +439,12 @@ export function ObjectBrowser({
           actions={rowActions}
           selection={selection}
           rowSelection={rowSelection}
-          idsAtPrefix={idsAtPrefix}
-          listingTruncated={listingTruncated}
+          idsOnPage={idsOnPage}
+          isPaged={isPaged}
         />
       )}
+
+      {paging && <ListingPager {...paging} label="Object pages" />}
 
       <ShareObjectModal
         open={share.open}
@@ -499,8 +474,7 @@ export function ObjectBrowser({
           await onBulkDelete?.(selection.targets());
           selection.clear();
         }}
-        title={`Delete ${selectedCount} ${selectedCount === 1 ? 'item' : 'items'}`}
-        description={`${selectedCount === 1 ? 'This item' : `These ${selectedCount} items`} will be permanently deleted. This action cannot be undone.`}
+        {...describeBulkDelete(selectedCount)}
         confirmLabel="Delete"
       />
     </div>
