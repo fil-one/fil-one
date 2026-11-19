@@ -53,7 +53,9 @@ function AsideItem({ title, value }: { title: string; value: string }) {
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-xs font-medium text-zinc-900">{title}</span>
-      <CodeBlock code={value} minimal wrap />
+      {/* The minimal block has no border, as it expects a card around it. Here it
+          sits on the page background, so the border marks out its edge. */}
+      <CodeBlock code={value} minimal wrap className="border border-zinc-200" />
     </div>
   );
 }
