@@ -13,7 +13,8 @@ What matters is whether the value Stripe will invoice matches the storage the or
 
 A read-only job, `jobs/billed-usage-drift-checker.ts`, runs at 09:00 and 21:00 UTC, two hours after usage reporting, and follows the [drift telemetry pattern](2026-04-subscription-drift-telemetry.md).
 
-- **Who:** the subscriptions the usage run meters (`METERED_SUBSCRIPTIONS`) whose `currentPeriodEnd` is within 48 hours. Earlier gaps still have runs left to heal them. Trials are left out: Stripe does not charge usage during a trial, so their gaps never reach an invoice.
+- **Who:** the subscriptions the usage run meters (`METERED_SUBSCRIPTIONS`) whose `currentPeriodEnd` is within 48 hours. Earlier gaps still have runs left to heal them. Trials and grace periods are left out: Stripe does not charge usage during a trial, and a grace-period row's subscription is already canceled, so neither has a usage invoice ahead.
+- **Rows it cannot evaluate:** a metered row with no `stripeCustomerId`, `currentPeriodStart` or `currentPeriodEnd`, or whose `currentPeriodEnd` passed more than 12 hours ago. The last means a renewal webhook was missed, so the worker and this check would both average over the old period and agree on a wrong value. Each is logged as `[billed-usage-drift-checker] unchecked` with `orgId` and `reason`, and counted as a probe failure.
 - **Blind spot:** a period ending in the two hours between a usage run and the next check is last seen by the check before that usage run. Missing only the final run shifts a period average by well under the 2% tolerance, so this misses only a large storage change in the period's last twelve hours.
 - **Billed:** the meter's value for the current period, from `stripe.billing.meters.listEventSummaries`. No value counts as 0 GB.
 - **Actual:** the period-average GB, computed by `getOrgAggregateUsage`, the same code the worker reports from.
@@ -37,7 +38,7 @@ FilOne's rules live in the Grafana UI: folder FilOne, group "FilOne Alerts Evalu
 
    Fires when the value is above 0. The first `json` reads the Lambda's log envelope, the second the drift line in its `message`. Summary: `Org {{ $labels.orgId }} will be invoiced {{ $labels.gapGb }} GB ({{ $labels.gapPct }}%) off its actual storage; period ends {{ $labels.periodEnd }}.`
 
-2. **Billed usage drift checker cannot read** (warning). Mimir: `max_over_time(BilledUsageProbeFailed[24h])` above 0 for two consecutive runs. A probe that always fails would otherwise hide real drift.
+2. **Billed usage drift checker cannot read** (warning). Mimir: `max_over_time(BilledUsageProbeFailed[24h])` above 0 for two consecutive runs. A probe that always fails would otherwise hide real drift. On-call lists the affected orgs with `|= "unchecked"` on the checker's log group.
 
 3. **Usage Reporting Worker - Daily Cron Success** moves to a non-paging route, and is deleted after one billing cycle in which rule 1 runs clean.
 

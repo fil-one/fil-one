@@ -12,6 +12,22 @@ const INVOICE_WINDOW_MS = 48 * 60 * 60 * 1000;
 /** A gap counts as drift only when it exceeds both limits. */
 const TOLERANCE_PCT = 2;
 const TOLERANCE_GB = 1;
+/** How long after its period ends a row may wait for the renewal webhook. */
+const RENEWAL_GRACE_MS = 12 * 60 * 60 * 1000;
+/**
+ * Statuses with no usage invoice ahead: Stripe does not charge usage during a
+ * trial, and a grace-period row's subscription is already canceled.
+ */
+const NOT_INVOICING = new Set<string>([
+  SubscriptionStatus.Trialing,
+  SubscriptionStatus.GracePeriod,
+]);
+
+/** A metered row the checker cannot evaluate, reported as a probe failure. */
+interface UncheckedOrg {
+  orgId: string;
+  reason: 'missing-billing-fields' | 'stale-period';
+}
 
 interface MeteredOrg {
   pk: string;
@@ -60,9 +76,10 @@ export async function handler(): Promise<void> {
   const now = Date.now();
   let meterId: string;
   let orgs: MeteredOrg[];
+  let unchecked: UncheckedOrg[];
   try {
     meterId = await getMeterId(meterEventName);
-    orgs = await scanOrgsInvoicingSoon(now);
+    ({ orgs, unchecked } = await scanOrgsInvoicingSoon(now));
   } catch (error) {
     // The checker-failure alert watches BilledUsageProbeFailed, so a run that
     // cannot start must still report one.
@@ -70,7 +87,10 @@ export async function handler(): Promise<void> {
     emitRunSummary({ checked: 0, drift: 0, probeFailed: 1 });
     throw error;
   }
-  const stats = { checked: 0, drift: 0, probeFailed: 0 };
+  const stats = { checked: 0, drift: 0, probeFailed: unchecked.length };
+  for (const row of unchecked) {
+    console.warn(JSON.stringify({ event: `${LOG} unchecked`, ...row }));
+  }
 
   for (const org of orgs) {
     try {
@@ -113,25 +133,31 @@ async function getMeterId(eventName: string): Promise<string> {
   return meter.id;
 }
 
-async function scanOrgsInvoicingSoon(now: number): Promise<MeteredOrg[]> {
-  return scanSubscriptions<MeteredOrg>({
+async function scanOrgsInvoicingSoon(
+  now: number,
+): Promise<{ orgs: MeteredOrg[]; unchecked: UncheckedOrg[] }> {
+  const unchecked: UncheckedOrg[] = [];
+  const orgs = await scanSubscriptions<MeteredOrg>({
     job: 'billed-usage-drift-checker',
     ...METERED_SUBSCRIPTIONS,
     select: (record, owner) => {
-      // Stripe does not charge usage during a trial, so a trial's gap never reaches an invoice.
-      if (record.subscriptionStatus === SubscriptionStatus.Trialing) return undefined;
+      if (NOT_INVOICING.has(record.subscriptionStatus as string)) return undefined;
       const { stripeCustomerId, currentPeriodStart, currentPeriodEnd } = record;
       if (
         typeof stripeCustomerId !== 'string' ||
         typeof currentPeriodStart !== 'string' ||
         typeof currentPeriodEnd !== 'string'
       ) {
-        console.warn(`${LOG} Missing billing period or customer, skipping`, {
-          orgId: owner.orgId,
-        });
+        unchecked.push({ orgId: owner.orgId, reason: 'missing-billing-fields' });
         return undefined;
       }
       const msToEnd = Date.parse(currentPeriodEnd) - now;
+      // Stripe renews the period at its end, so a row still naming an ended one
+      // missed the renewal and meters, and checks, the wrong window.
+      if (msToEnd <= -RENEWAL_GRACE_MS) {
+        unchecked.push({ orgId: owner.orgId, reason: 'stale-period' });
+        return undefined;
+      }
       if (!(msToEnd > 0 && msToEnd <= INVOICE_WINDOW_MS)) return undefined;
       return {
         ...owner,
@@ -142,6 +168,7 @@ async function scanOrgsInvoicingSoon(now: number): Promise<MeteredOrg[]> {
       };
     },
   });
+  return { orgs, unchecked };
 }
 
 async function readBilledAndActual(

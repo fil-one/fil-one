@@ -47,18 +47,22 @@ const HOUR_MS = 60 * 60 * 1000;
 
 function subscriptionRow(overrides: Record<string, unknown> = {}) {
   const orgId = (overrides.orgId as string | undefined) ?? 'any-org';
-  return marshall({
-    pk: `ORG#${orgId}`,
-    sk: 'SUBSCRIPTION',
-    orgId,
-    userId: 'any-user',
-    subscriptionId: 'any-sub',
-    stripeCustomerId: 'any-customer',
-    subscriptionStatus: SubscriptionStatus.Active,
-    currentPeriodStart: '2026-10-20T10:00:00.000Z',
-    currentPeriodEnd: new Date(NOW.getTime() + 24 * HOUR_MS).toISOString(),
-    ...overrides,
-  });
+  return marshall(
+    {
+      pk: `ORG#${orgId}`,
+      sk: 'SUBSCRIPTION',
+      orgId,
+      userId: 'any-user',
+      subscriptionId: 'any-sub',
+      stripeCustomerId: 'any-customer',
+      subscriptionStatus: SubscriptionStatus.Active,
+      currentPeriodStart: '2026-10-20T10:00:00.000Z',
+      currentPeriodEnd: new Date(NOW.getTime() + 24 * HOUR_MS).toISOString(),
+      ...overrides,
+    },
+    // Lets a test drop a field by overriding it with undefined.
+    { removeUndefinedValues: true },
+  );
 }
 
 function givenActualGb(gb: number) {
@@ -80,13 +84,15 @@ function runSummary() {
   return mockReportMetric.mock.calls.at(-1)?.[0] as Record<string, unknown>;
 }
 
-/** The drift lines, each a single JSON string, parsed. */
-function outOfSyncLogs(spy: ReturnType<typeof vi.spyOn>) {
+/** The checker's JSON warning lines for one event, parsed. */
+function eventLogs(spy: ReturnType<typeof vi.spyOn>, event: string) {
   const calls = spy.mock.calls as unknown as unknown[][];
   return calls
-    .filter((c) => typeof c[0] === 'string' && c[0].includes('out_of_sync'))
+    .filter((c) => typeof c[0] === 'string' && c[0].includes(event))
     .map((c) => JSON.parse(c[0] as string) as Record<string, unknown>);
 }
+const outOfSyncLogs = (spy: ReturnType<typeof vi.spyOn>) => eventLogs(spy, 'out_of_sync');
+const uncheckedLogs = (spy: ReturnType<typeof vi.spyOn>) => eventLogs(spy, 'unchecked');
 
 describe('measureUsageGap', () => {
   it.each([
@@ -198,8 +204,8 @@ describe('billed-usage-drift-checker handler', () => {
 
   it.each([
     { name: 'the period ends more than 48 hours from now', hoursToEnd: 49 },
-    { name: 'the period has already ended', hoursToEnd: -1 },
-  ])('skips an org when $name', async ({ hoursToEnd }) => {
+    { name: 'the period ended within the last 12 hours, pending renewal', hoursToEnd: -11 },
+  ])('skips an org without a probe failure when $name', async ({ hoursToEnd }) => {
     ddbMock.on(ScanCommand).resolves({
       Items: [
         subscriptionRow({
@@ -211,18 +217,62 @@ describe('billed-usage-drift-checker handler', () => {
     await handler();
 
     expect(mockListEventSummaries).not.toHaveBeenCalled();
-    expect(runSummary()).toMatchObject({ BilledUsageOrgsChecked: 0 });
+    expect(runSummary()).toMatchObject({ BilledUsageOrgsChecked: 0, BilledUsageProbeFailed: 0 });
   });
 
-  it('skips an org on a trial, since Stripe does not charge usage during a trial', async () => {
+  it.each([
+    {
+      name: 'an org on a trial, since Stripe does not charge usage during a trial',
+      status: SubscriptionStatus.Trialing,
+    },
+    {
+      name: 'an org in its grace period, since Stripe has canceled the subscription',
+      status: SubscriptionStatus.GracePeriod,
+    },
+  ])('skips $name', async ({ status }) => {
     ddbMock.on(ScanCommand).resolves({
-      Items: [subscriptionRow({ subscriptionStatus: SubscriptionStatus.Trialing })],
+      Items: [
+        subscriptionRow({
+          subscriptionStatus: status,
+          // A canceled row keeps its old period end, so it can sit in either window.
+          currentPeriodEnd: new Date(NOW.getTime() - 24 * HOUR_MS).toISOString(),
+        }),
+      ],
     });
 
     await handler();
 
     expect(mockListEventSummaries).not.toHaveBeenCalled();
-    expect(runSummary()).toMatchObject({ BilledUsageOrgsChecked: 0 });
+    expect(runSummary()).toMatchObject({ BilledUsageOrgsChecked: 0, BilledUsageProbeFailed: 0 });
+  });
+
+  it.each([
+    {
+      name: 'its period ended over 12 hours ago, so a renewal was missed',
+      reason: 'stale-period',
+      overrides: { currentPeriodEnd: new Date(NOW.getTime() - 13 * HOUR_MS).toISOString() },
+    },
+    {
+      name: 'it has no period start',
+      reason: 'missing-billing-fields',
+      // Missing currentPeriodStart: the usage worker cannot meter it either.
+      overrides: { currentPeriodStart: undefined },
+    },
+    {
+      name: 'it has no Stripe customer',
+      reason: 'missing-billing-fields',
+      // Missing stripeCustomerId: nothing can be billed or read.
+      overrides: { stripeCustomerId: undefined },
+    },
+  ])('reports a probe failure naming the org when $name', async ({ reason, overrides }) => {
+    ddbMock.on(ScanCommand).resolves({
+      Items: [subscriptionRow({ orgId: 'org-a', ...overrides })],
+    });
+
+    await handler();
+
+    expect(uncheckedLogs(warnSpy)).toMatchObject([{ orgId: 'org-a', reason }]);
+    expect(runSummary()).toMatchObject({ BilledUsageOrgsChecked: 0, BilledUsageProbeFailed: 1 });
   });
 
   it('skips an org that is being deleted', async () => {
