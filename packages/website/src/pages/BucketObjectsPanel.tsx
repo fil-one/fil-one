@@ -119,6 +119,7 @@ export function ObjectsPanel({
   paging: ObjectBrowserProps['paging'];
   search: string;
   onSearchChange: (search: string) => void;
+  onFoldersDeleted: () => void;
 }) {
   // An empty bucket's next steps depend on its keys and the caller's permissions, so its
   // empty state waits for both and appears once, in its final form; a bucket with objects

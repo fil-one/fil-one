@@ -13,12 +13,14 @@ import { ObjectSearchBar, PrefixBreadcrumb } from './ObjectBrowserToolbar';
 import { Table } from './Table/Table';
 import { FolderRow, ObjectEntryRows, SECONDARY_COLUMN } from './ObjectBrowserRows';
 import { BulkActionsBar } from './BulkActionsBar';
+import { DeleteFoldersDialog } from './DeleteFoldersDialog';
+import { useFolderDelete } from './use-folder-delete';
 import type { RowActions, RowSelection } from './ObjectBrowserRows';
 import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
 import type { BrowseEntry } from '../lib/object-grouping.js';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
 import type { ObjectSelection } from '../lib/object-selection.js';
-import { selectionId, useObjectSelection } from '../lib/object-selection.js';
+import { folderSelectionId, selectionId, useObjectSelection } from '../lib/object-selection.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 
 export { countObjects } from '../lib/object-grouping.js';
@@ -209,7 +211,7 @@ function ObjectTable({
               onChange={() => selection.setMany(idsOnPage, !allSelected)}
               // A folder spread over pages is selected a page at a time, and
               // the label says so rather than implying the whole folder.
-              label={isPaged ? 'Select all objects on this page' : 'Select all objects'}
+              label={isPaged ? 'Select all items on this page' : 'Select all items'}
             />
           )}
           <Table.Head>Name</Table.Head>
@@ -227,7 +229,7 @@ function ObjectTable({
                 name={entry.name}
                 prefix={entry.prefix}
                 onPrefixChange={onPrefixChange}
-                selectable={rowSelection.selectable}
+                selection={rowSelection}
               />
             );
           }
@@ -282,6 +284,11 @@ export type ObjectBrowserProps = {
   search?: string;
   /** Absent where the browser offers no search, which leaves out the box. */
   onSearchChange?: (search: string) => void;
+  /**
+   * Called when a folder deletion finishes, or when its dialog closes while it
+   * still runs, so the caller can list what is left.
+   */
+  onFoldersDeleted?: () => void;
 };
 
 /** The share dialog a row's Share button opens, and whether the plan allows it. */
@@ -321,6 +328,7 @@ export function ObjectBrowser({
   paging,
   search = '',
   onSearchChange,
+  onFoldersDeleted,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState<{
@@ -330,8 +338,15 @@ export function ObjectBrowser({
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const share = useRowShare();
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
-  const selection = useObjectSelection(versions);
+  const selection = useObjectSelection(versions, folders);
   const selectedCount = selection.selected.size;
+  const folderDelete = useFolderDelete({
+    bucketName,
+    region,
+    selection,
+    onBulkDelete,
+    onFoldersDeleted,
+  });
 
   function toggleExpand(key: string) {
     setExpandedKeys((prev) => {
@@ -371,8 +386,10 @@ export function ObjectBrowser({
 
   const groups = groupVersionsByKey(versions);
   const entries = getEntriesAtPrefix(groups, folders, currentPrefix);
-  const idsOnPage = entries.flatMap((entry) =>
-    entry.kind === 'object' ? [selectionId(entry.group.key, entry.group.latest.versionId)] : [],
+  const idsOnPage = entries.map((entry) =>
+    entry.kind === 'object'
+      ? selectionId(entry.group.key, entry.group.latest.versionId)
+      : folderSelectionId(entry.prefix),
   );
   const isPaged = paging !== undefined && (paging.hasPrevious || paging.hasNext);
   const place = currentPrefix ? 'folder' : 'bucket';
@@ -417,7 +434,11 @@ export function ObjectBrowser({
         <BulkActionsBar
           count={selectedCount}
           onClear={selection.clear}
-          onDelete={() => setConfirmBulkDelete(true)}
+          // A selection holding a folder deletes on the server, in a dialog
+          // that tracks the job; objects alone keep the quick confirmation.
+          onDelete={() => {
+            if (!folderDelete.request()) setConfirmBulkDelete(true);
+          }}
           deleteButtonId="object-browser-bulk-delete-button"
         />
       )}
@@ -471,12 +492,14 @@ export function ObjectBrowser({
         open={confirmBulkDelete}
         onClose={() => setConfirmBulkDelete(false)}
         onConfirm={async () => {
-          await onBulkDelete?.(selection.targets());
+          await onBulkDelete?.(selection.targets().objects);
           selection.clear();
         }}
         {...describeBulkDelete(selectedCount)}
         confirmLabel="Delete"
       />
+
+      <DeleteFoldersDialog {...folderDelete.dialogProps} />
     </div>
   );
 }
