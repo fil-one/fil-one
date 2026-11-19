@@ -74,7 +74,19 @@ function deferPresign() {
   return { resolve, reject };
 }
 
+/**
+ * The page reads whether the bucket locks objects before it presigns the HEAD.
+ * Seeded so that lookup settles at once instead of retrying a request the test
+ * has no server for.
+ */
+function seedBucketWithoutObjectLock() {
+  pageCacheClient.setQueryData(queryKeys.bucket(BUCKET, REGION), {
+    bucket: { bucketName: BUCKET, region: REGION, isPublic: false, objectLockEnabled: false },
+  });
+}
+
 function renderPage(versionId?: string) {
+  seedBucketWithoutObjectLock();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   seedPermissions(client, OrgRole.Owner);
   render(
@@ -91,12 +103,16 @@ function renderPage(versionId?: string) {
   );
 }
 
+// Looked up again once enabled: the header swaps a disabled Share, wrapped in
+// its tooltip, for a new element when the plan turns out to allow sharing.
 const openShare = async () => {
-  const share = screen.getByRole('button', { name: 'Share object' });
-  await waitFor(() => expect(share).toBeEnabled());
-  fireEvent.click(share);
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Share' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Share' }));
 };
-const openDelete = () => fireEvent.click(screen.getByRole('button', { name: 'Delete object' }));
+const openDelete = async () => {
+  fireEvent.click(screen.getByRole('button', { name: 'More object actions' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+};
 
 describe('ObjectDetailPage while the metadata loads', () => {
   beforeEach(() => {
@@ -127,7 +143,7 @@ describe('ObjectDetailPage while the metadata loads', () => {
       open: openShare,
       dialog: 'share-object-modal',
       settle: (p: ReturnType<typeof deferPresign>) => p.resolve(PRESIGNED_HEAD),
-      expectSettled: () => screen.getByRole('heading', { name: 'Object details' }),
+      expectSettled: () => screen.getByRole('heading', { name: 'Details' }),
     },
     {
       control: 'Share',
@@ -143,7 +159,7 @@ describe('ObjectDetailPage while the metadata loads', () => {
       open: openDelete,
       dialog: 'confirm-dialog',
       settle: (p: ReturnType<typeof deferPresign>) => p.resolve(PRESIGNED_HEAD),
-      expectSettled: () => screen.getByRole('heading', { name: 'Object details' }),
+      expectSettled: () => screen.getByRole('heading', { name: 'Details' }),
     },
     {
       control: 'Delete',
@@ -180,7 +196,7 @@ describe('ObjectDetailPage while the metadata loads', () => {
     renderPage('any-version-1');
 
     expect(screen.getByRole('status', { name: 'Loading object details' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Version history (2)' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Version history 2' })).toBeInTheDocument();
   });
 });
 
@@ -190,7 +206,7 @@ describe('ObjectDetailPage API example', () => {
     renderPage();
 
     expect(screen.getByRole('status', { name: 'Loading object details' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'API access example' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'API access' })).toBeInTheDocument();
   });
 });
 
@@ -204,8 +220,8 @@ describe('ObjectDetailPage when the metadata fails to load', () => {
     expect(screen.getByRole('button', { name: 'Back to bucket' })).toBeInTheDocument();
   });
 
-  it.each(['Download object', 'Share object', 'Delete object'])(
-    'hides the %s action, since the object may no longer exist',
+  it.each(['Download', 'Share', 'More object actions'])(
+    'hides the %s button, since the object may no longer exist',
     async (action) => {
       mockBatchPresign.mockRejectedValue(new Error('any failure'));
       renderPage();
