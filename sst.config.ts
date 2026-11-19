@@ -61,6 +61,15 @@ export default $config({
     const billingPublisherEnabled =
       process.env.FILONE_LIFECYCLE_BILLING_PUBLISHER_ENABLED === 'true';
     const billingCaptureEnabled = process.env.FILONE_LIFECYCLE_BILLING_CAPTURE_ENABLED === 'true';
+    const customerBindingsEnabled =
+      process.env.FILONE_LIFECYCLE_CUSTOMER_BINDINGS_ENABLED === 'true';
+    const methodEventsEnabled = process.env.FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED === 'true';
+    if (customerBindingsEnabled && !billingPublisherEnabled) {
+      throw new Error('Customer lifecycle bindings require the staging billing publisher');
+    }
+    if (methodEventsEnabled && !customerBindingsEnabled) {
+      throw new Error('Attachment event subscription requires provisioned customer bindings');
+    }
     if (billingPublisherEnabled && !lifecyclePublisherEnabled) {
       throw new Error('Billing lifecycle publishing requires the staging lifecycle publisher');
     }
@@ -318,6 +327,43 @@ export default $config({
             sst.aws.permission({
               actions: ['dynamodb:PutItem'],
               resources: [billingLifecycleOutbox.arn],
+            }),
+          ],
+        })
+      : undefined;
+
+    const customerLifecycleBindings = customerBindingsEnabled
+      ? new sst.aws.Dynamo('BillingLifecycleBindings', {
+          fields: { customer_hash: 'string' },
+          primaryIndex: { hashKey: 'customer_hash' },
+          ttl: 'expires_at',
+          transform: {
+            table: {
+              pointInTimeRecovery: { enabled: true },
+              deletionProtectionEnabled: true,
+              serverSideEncryption: { enabled: true },
+            },
+          },
+        })
+      : undefined;
+    const customerBindingWriter = customerLifecycleBindings
+      ? new sst.Linkable('LifecycleCustomerBindingWriter', {
+          properties: { name: customerLifecycleBindings.name },
+          include: [
+            sst.aws.permission({
+              actions: ['dynamodb:UpdateItem'],
+              resources: [customerLifecycleBindings.arn],
+            }),
+          ],
+        })
+      : undefined;
+    const customerBindingReader = customerLifecycleBindings
+      ? new sst.Linkable('LifecycleCustomerBindingReader', {
+          properties: { name: customerLifecycleBindings.name },
+          include: [
+            sst.aws.permission({
+              actions: ['dynamodb:GetItem'],
+              resources: [customerLifecycleBindings.arn],
             }),
           ],
         })
@@ -801,6 +847,7 @@ export default $config({
       environment: {
         AUTH0_DOMAIN: auth0Domain,
         AUTH0_MGMT_DOMAIN: auth0MgmtDomain,
+        FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED: methodEventsEnabled ? 'true' : 'false',
       },
       permissions: [
         {
@@ -832,6 +879,7 @@ export default $config({
                 // Bump whenever the Auth0 client settings need re-registering: this
                 // custom resource only re-runs when a property changes.
                 Version: '2.13',
+                ...(methodEventsEnabled ? { LifecyclePaymentMethodEvents: 'v1' } : {}),
               },
             },
           },
@@ -1404,11 +1452,15 @@ export default $config({
         ...allResources,
         stripeEventQueue,
         ...(billingLifecycleWriter ? [billingLifecycleWriter] : []),
+        ...(customerBindingReader ? [customerBindingReader] : []),
       ],
       environment: {
         ...orchestratorEnv,
         ...(billingLifecycleOutbox && billingCaptureEnabled
           ? { FILONE_LIFECYCLE_BILLING_OUTBOX_TABLE: billingLifecycleOutbox.name }
+          : {}),
+        ...(customerLifecycleBindings
+          ? { FILONE_LIFECYCLE_CUSTOMER_BINDINGS_TABLE: customerLifecycleBindings.name }
           : {}),
         ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
       },
@@ -1502,6 +1554,12 @@ export default $config({
     };
 
     const ROUTE_INFRA_CONFIGS: Partial<Record<RouteHandler, RouteInfraConfig>> = {
+      'create-setup-intent': {
+        extraLink: customerBindingWriter ? [customerBindingWriter] : [],
+        extraEnv: customerLifecycleBindings
+          ? { FILONE_LIFECYCLE_CUSTOMER_BINDINGS_TABLE: customerLifecycleBindings.name }
+          : {},
+      },
       // ── Buckets and objects ────────────────────────────────────────
       'list-buckets': {
         extraEnv: { AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL, ...fthEnv, ...forgeEnv },
