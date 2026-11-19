@@ -103,3 +103,35 @@ def test_refuses_first_presign_without_a_valid_exact_mapping(client, mapping):
                                                   observed_tenant=mapping)]}, None) == {
         "batchItemFailures": [{"itemIdentifier": "1"}]}
     client.put_events.assert_not_called()
+
+
+@pytest.mark.parametrize("kind", ["trial.started", "payment.succeeded", "payment.failed"])
+def test_billing_role_emits_only_its_fixed_source_and_outcome_contract(client, monkeypatch, kind):
+    monkeypatch.setenv("LIFECYCLE_SOURCE", "filone.billing")
+    assert publisher.handler({"Records": [record(event_type=kind)]}, None) == {"batchItemFailures": []}
+    entry = client.put_events.call_args.kwargs["Entries"][0]
+    assert entry["Source"] == "filone.billing"
+    assert set(json.loads(entry["Detail"])) == publisher.REQUIRED
+
+
+@pytest.mark.parametrize("source,kind", [
+    ("filone.identity", "trial.started"),
+    ("filone.identity", "payment.succeeded"),
+    ("filone.billing", "organization.signup"),
+    ("filone.billing", "presign.first_issued"),
+])
+def test_distinct_producer_authorities_cannot_impersonate_each_other(client, monkeypatch, source, kind):
+    monkeypatch.setenv("LIFECYCLE_SOURCE", source)
+    assert publisher.handler({"Records": [record(event_type=kind)]}, None) == {
+        "batchItemFailures": [{"itemIdentifier": "1"}]}
+    client.put_events.assert_not_called()
+
+
+def test_unrecognized_source_is_rejected_and_never_copied_to_metrics(client, monkeypatch, capsys):
+    monkeypatch.setenv("LIFECYCLE_SOURCE", "private-misconfigured-value")
+    assert publisher.handler({"Records": [record()]}, None) == {
+        "batchItemFailures": [{"itemIdentifier": "1"}]}
+    client.put_events.assert_not_called()
+    output = capsys.readouterr().out
+    assert "private-misconfigured-value" not in output
+    assert json.loads(output)["Producer"] == "unknown"

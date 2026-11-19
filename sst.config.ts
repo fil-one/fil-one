@@ -58,6 +58,15 @@ export default $config({
     // A production rollout needs separate broker source bindings and acceptance.
     const lifecyclePublisherEnabled = process.env.FILONE_LIFECYCLE_PUBLISHER_ENABLED === 'true';
     const lifecycleCaptureEnabled = process.env.FILONE_LIFECYCLE_CAPTURE_ENABLED === 'true';
+    const billingPublisherEnabled =
+      process.env.FILONE_LIFECYCLE_BILLING_PUBLISHER_ENABLED === 'true';
+    const billingCaptureEnabled = process.env.FILONE_LIFECYCLE_BILLING_CAPTURE_ENABLED === 'true';
+    if (billingPublisherEnabled && !lifecyclePublisherEnabled) {
+      throw new Error('Billing lifecycle publishing requires the staging lifecycle publisher');
+    }
+    if (billingCaptureEnabled && !billingPublisherEnabled) {
+      throw new Error('Billing capture requires the provisioned billing lifecycle publisher');
+    }
     const firstMilestoneEpoch = process.env.FILONE_LIFECYCLE_FIRST_MILESTONE_EPOCH;
     const lifecycleAlarmTopicArn = process.env.FILONE_LIFECYCLE_ALARM_TOPIC_ARN;
     if (lifecycleCaptureEnabled && !lifecyclePublisherEnabled) {
@@ -283,6 +292,33 @@ export default $config({
           properties: { name: lifecycleOutbox.name },
           include: [
             sst.aws.permission({ actions: ['dynamodb:PutItem'], resources: [lifecycleOutbox.arn] }),
+          ],
+        })
+      : undefined;
+
+    const billingLifecycleOutbox = billingPublisherEnabled
+      ? new sst.aws.Dynamo('BillingLifecycleOutbox', {
+          fields: { event_id: 'string' },
+          primaryIndex: { hashKey: 'event_id' },
+          ttl: 'expires_at',
+          stream: 'new-image',
+          transform: {
+            table: {
+              pointInTimeRecovery: { enabled: true },
+              deletionProtectionEnabled: true,
+              serverSideEncryption: { enabled: true },
+            },
+          },
+        })
+      : undefined;
+    const billingLifecycleWriter = billingLifecycleOutbox
+      ? new sst.Linkable('BillingLifecycleWriter', {
+          properties: { name: billingLifecycleOutbox.name },
+          include: [
+            sst.aws.permission({
+              actions: ['dynamodb:PutItem'],
+              resources: [billingLifecycleOutbox.arn],
+            }),
           ],
         })
       : undefined;
@@ -959,21 +995,24 @@ export default $config({
     const createFn = (fnName: string, args: Omit<sst.aws.FunctionArgs, 'name'>) =>
       createFunction(fnName, args, { firehose, cwToFirehoseRole });
 
-    let lifecycleProducerRoleArn: $util.Output<string> | undefined;
-    if (lifecycleOutbox) {
-      const failureArchive = new aws.s3.Bucket('LifecycleFailureArchive', { forceDestroy: false });
-      new aws.s3.BucketPublicAccessBlock('LifecycleFailureArchivePublicBlock', {
+    function createLifecycleProducer(
+      prefix: 'Lifecycle' | 'BillingLifecycle',
+      outbox: sst.aws.Dynamo,
+      source: 'filone.identity' | 'filone.billing',
+    ): $util.Output<string> {
+      const failureArchive = new aws.s3.Bucket(`${prefix}FailureArchive`, { forceDestroy: false });
+      new aws.s3.BucketPublicAccessBlock(`${prefix}FailureArchivePublicBlock`, {
         bucket: failureArchive.id,
         blockPublicAcls: true,
         blockPublicPolicy: true,
         ignorePublicAcls: true,
         restrictPublicBuckets: true,
       });
-      new aws.s3.BucketServerSideEncryptionConfigurationV2('LifecycleFailureArchiveEncryption', {
+      new aws.s3.BucketServerSideEncryptionConfigurationV2(`${prefix}FailureArchiveEncryption`, {
         bucket: failureArchive.id,
         rules: [{ applyServerSideEncryptionByDefault: { sseAlgorithm: 'AES256' } }],
       });
-      new aws.s3.BucketLifecycleConfigurationV2('LifecycleFailureArchiveRetention', {
+      new aws.s3.BucketLifecycleConfigurationV2(`${prefix}FailureArchiveRetention`, {
         bucket: failureArchive.id,
         rules: [
           {
@@ -984,7 +1023,7 @@ export default $config({
           },
         ],
       });
-      new aws.s3.BucketPolicy('LifecycleFailureArchiveTls', {
+      new aws.s3.BucketPolicy(`${prefix}FailureArchiveTls`, {
         bucket: failureArchive.id,
         policy: $jsonStringify({
           Version: '2012-10-17',
@@ -1001,7 +1040,7 @@ export default $config({
       });
       const brokerBusArn =
         'arn:aws:events:us-east-1:654654381893:event-bus/s3-auditbroker-lifecycle';
-      const publisher = createFn('LifecyclePublisher', {
+      const publisher = createFn(`${prefix}Publisher`, {
         runtime: 'python3.12',
         bundle: 'packages/lifecycle-publisher',
         handler: 'handler.handler',
@@ -1010,6 +1049,7 @@ export default $config({
           LIFECYCLE_BUS_ARN: brokerBusArn,
           LIFECYCLE_BROKER_REGION: 'us-east-1',
           FILONE_STAGE: stage,
+          LIFECYCLE_SOURCE: source,
         },
         permissions: [
           {
@@ -1018,7 +1058,7 @@ export default $config({
               'dynamodb:GetShardIterator',
               'dynamodb:DescribeStream',
             ],
-            resources: [lifecycleOutbox.nodes.table.streamArn],
+            resources: [outbox.nodes.table.streamArn],
           },
           // ListStreams has no resource-level authorization in the DynamoDB
           // service authorization reference. Record reads remain stream-scoped.
@@ -1026,7 +1066,7 @@ export default $config({
         ],
       });
       // Bound source, destination and bucket owner prevent permission reuse.
-      const publisherPolicy = new aws.iam.RolePolicy('LifecyclePublisherDelivery', {
+      const publisherPolicy = new aws.iam.RolePolicy(`${prefix}PublisherDelivery`, {
         role: publisher.nodes.role.name,
         policy: $jsonStringify({
           Version: '2012-10-17',
@@ -1037,7 +1077,7 @@ export default $config({
               Resource: brokerBusArn,
               Condition: {
                 StringEquals: {
-                  'events:source': 'filone.identity',
+                  'events:source': source,
                   'events:detail-type': 'filone.lifecycle.v1',
                 },
               },
@@ -1058,9 +1098,9 @@ export default $config({
         }),
       });
       new aws.lambda.EventSourceMapping(
-        'LifecycleOutboxDelivery',
+        `${prefix}OutboxDelivery`,
         {
-          eventSourceArn: lifecycleOutbox.nodes.table.streamArn,
+          eventSourceArn: outbox.nodes.table.streamArn,
           functionName: publisher.arn,
           startingPosition: 'TRIM_HORIZON',
           batchSize: 10,
@@ -1077,7 +1117,7 @@ export default $config({
         ['IteratorAge', 60000],
         ['DestinationDeliveryFailures', 0],
       ] as const) {
-        new aws.cloudwatch.MetricAlarm(`Lifecycle${metricName}`, {
+        new aws.cloudwatch.MetricAlarm(`${prefix}${metricName}`, {
           namespace: 'AWS/Lambda',
           metricName,
           dimensions: { FunctionName: publisher.name },
@@ -1090,10 +1130,10 @@ export default $config({
           alarmActions: [lifecycleAlarmTopicArn!],
         });
       }
-      new aws.cloudwatch.MetricAlarm('LifecyclePublishFailures', {
+      new aws.cloudwatch.MetricAlarm(`${prefix}PublishFailures`, {
         namespace: 'FilOne/Lifecycle',
         metricName: 'PublishFailures',
-        dimensions: { Stage: stage },
+        dimensions: { Stage: stage, Producer: source },
         statistic: 'Sum',
         period: 60,
         evaluationPeriods: 1,
@@ -1102,8 +1142,14 @@ export default $config({
         treatMissingData: 'notBreaching',
         alarmActions: [lifecycleAlarmTopicArn!],
       });
-      lifecycleProducerRoleArn = publisher.nodes.role.arn;
+      return publisher.nodes.role.arn;
     }
+    const lifecycleProducerRoleArn = lifecycleOutbox
+      ? createLifecycleProducer('Lifecycle', lifecycleOutbox, 'filone.identity')
+      : undefined;
+    const billingLifecycleProducerRoleArn = billingLifecycleOutbox
+      ? createLifecycleProducer('BillingLifecycle', billingLifecycleOutbox, 'filone.billing')
+      : undefined;
 
     interface AddRouteProps {
       method: string;
@@ -1354,9 +1400,16 @@ export default $config({
       handler: 'packages/backend/src/jobs/stripe-event-worker.handler',
       // Billing and user tables, Stripe secrets and orchestrator tokens, plus
       // the queue it consumes.
-      link: [...allResources, stripeEventQueue],
+      link: [
+        ...allResources,
+        stripeEventQueue,
+        ...(billingLifecycleWriter ? [billingLifecycleWriter] : []),
+      ],
       environment: {
         ...orchestratorEnv,
+        ...(billingLifecycleOutbox && billingCaptureEnabled
+          ? { FILONE_LIFECYCLE_BILLING_OUTBOX_TABLE: billingLifecycleOutbox.name }
+          : {}),
         ACCOUNT_DELETION_WORKER_FUNCTION_NAME: accountDeletionWorker.name,
       },
       // Each region's status sync retries with 1s/2s/4s backoff on both its
@@ -1367,6 +1420,32 @@ export default $config({
     // Subscribed by ARN so the worker keeps the logging and defaults createFn
     // applies. One event at a time, so a failure redelivers only that event.
     stripeEventQueue.subscribe(stripeEventWorker.arn, { batch: { size: 1 } });
+    if (billingLifecycleOutbox) {
+      new aws.cloudwatch.MetricAlarm('BillingLifecycleCaptureErrors', {
+        namespace: 'AWS/Lambda',
+        metricName: 'Errors',
+        dimensions: { FunctionName: stripeEventWorker.name },
+        statistic: 'Sum',
+        period: 60,
+        evaluationPeriods: 1,
+        comparisonOperator: 'GreaterThanThreshold',
+        threshold: 0,
+        treatMissingData: 'notBreaching',
+        alarmActions: [lifecycleAlarmTopicArn!],
+      });
+      new aws.cloudwatch.MetricAlarm('BillingLifecycleSourceDlq', {
+        namespace: 'AWS/SQS',
+        metricName: 'ApproximateNumberOfMessagesVisible',
+        dimensions: { QueueName: stripeEventDlq.nodes.queue.name },
+        statistic: 'Maximum',
+        period: 60,
+        evaluationPeriods: 1,
+        comparisonOperator: 'GreaterThanThreshold',
+        threshold: 0,
+        treatMissingData: 'notBreaching',
+        alarmActions: [lifecycleAlarmTopicArn!],
+      });
+    }
 
     // ── Routes ───────────────────────────────────────────────────────
     // The manifest is the route list: every entry becomes a Lambda and an API
@@ -2244,6 +2323,7 @@ export default $config({
       ...(s3abBillingReadRoleArn ? { s3abBillingReadRoleArn } : {}),
       ...(s3abRespondRoleArn ? { s3abRespondRoleArn } : {}),
       ...(lifecycleProducerRoleArn ? { lifecycleProducerRoleArn } : {}),
+      ...(billingLifecycleProducerRoleArn ? { billingLifecycleProducerRoleArn } : {}),
     };
   },
 });

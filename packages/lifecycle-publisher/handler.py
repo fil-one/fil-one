@@ -1,4 +1,4 @@
-"""Publish committed, privacy-limited signup outcomes from a durable outbox.
+"""Publish committed, privacy-limited lifecycle outcomes from a durable outbox.
 
 Prebundled Python Lambda: boto3 is supplied by the AWS Python runtime. Never
 log stream payloads, SDK error messages, or producer details.
@@ -17,6 +17,16 @@ from botocore.config import Config
 TOKEN = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
 REQUIRED = {"schema_version", "event_id", "event_type", "occurred_at", "organization_id"}
+PRODUCER_TYPES = {
+    "filone.identity": {"organization.signup", "presign.first_issued"},
+    "filone.billing": {"trial.started", "payment.succeeded", "payment.failed"},
+}
+
+
+def get_source():
+    """Retain only reviewed source labels, never arbitrary environment content."""
+    source = os.environ.get("LIFECYCLE_SOURCE", "filone.identity")
+    return source if source in PRODUCER_TYPES else "unknown"
 
 
 @lru_cache(maxsize=1)
@@ -32,13 +42,14 @@ def read_detail(image, now=None):
     row = {key: TypeDeserializer().deserialize(value) for key, value in image.items()}
     detail = row.get("detail")
     kind = detail.get("event_type") if isinstance(detail, dict) else None
+    allowed_types = PRODUCER_TYPES.get(get_source(), set())
     extra_fields = ({"email_domain"} if kind == "organization.signup"
                     else {"observed_tenant"} if kind == "presign.first_issued" else set())
     if (not isinstance(detail, dict) or not REQUIRED <= detail.keys()
             or detail.keys() - REQUIRED - extra_fields
             or isinstance(detail.get("schema_version"), bool)
             or detail.get("schema_version") != 1
-            or kind not in {"organization.signup", "presign.first_issued"}):
+            or kind not in allowed_types):
         raise ValueError("Invalid lifecycle fields")
     if any(not isinstance(detail.get(key), str) or not TOKEN.fullmatch(detail[key])
            for key in ("event_id", "organization_id")):
@@ -76,7 +87,7 @@ def handler(event, context):
             detail = read_detail(record["dynamodb"]["NewImage"])
             response = get_client().put_events(Entries=[{
                 "EventBusName": os.environ["LIFECYCLE_BUS_ARN"],
-                "Source": "filone.identity",
+                "Source": get_source(),
                 "DetailType": "filone.lifecycle.v1",
                 "Detail": json.dumps(detail, separators=(",", ":")),
             }])
@@ -91,10 +102,11 @@ def handler(event, context):
     # record, Organization identifier, exception text or source address.
     print(json.dumps({
         "_aws": {"Timestamp": int(time.time() * 1000), "CloudWatchMetrics": [{
-            "Namespace": "FilOne/Lifecycle", "Dimensions": [["Stage"]],
+            "Namespace": "FilOne/Lifecycle", "Dimensions": [["Stage", "Producer"]],
             "Metrics": [{"Name": "PublishFailures", "Unit": "Count"}],
         }]},
         "Stage": os.environ.get("FILONE_STAGE", "unknown"),
+        "Producer": get_source(),
         "PublishFailures": len(failures),
     }))
     return {"batchItemFailures": failures}
