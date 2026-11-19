@@ -9,7 +9,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { ShareObjectModal } from './ShareObjectModal';
 import { EmptyStateCard } from './EmptyStateCard';
 import { ListingPager, type ListingPagerProps } from './ListingPager';
-import { PrefixBreadcrumb } from './ObjectBrowserToolbar';
+import { ObjectSearchBar, PrefixBreadcrumb } from './ObjectBrowserToolbar';
 import { Table } from './Table/Table';
 import { FolderRow, ObjectEntryRows, SECONDARY_COLUMN } from './ObjectBrowserRows';
 import { BulkActionsBar } from './BulkActionsBar';
@@ -22,6 +22,7 @@ import { selectionId, useObjectSelection } from '../lib/object-selection.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 
 export { countObjects } from '../lib/object-grouping.js';
+export { describeListingCount } from './ObjectBrowserToolbar';
 
 /** No key can reach the bucket yet, and the caller may create one. */
 export interface CreateKeyAction {
@@ -130,15 +131,41 @@ function describeBulkDelete(count: number): { title: string; description: string
 }
 
 /**
- * A listing with no rows in a bucket that has objects: a later page emptied by
- * deletes, or a folder path with nothing in it.
+ * A listing with no rows in a bucket that has objects: a search that matched
+ * nothing, a later page emptied by deletes, or a folder path with nothing in it.
  */
-function EmptyListing({ isLaterPage }: { isLaterPage: boolean }) {
+function EmptyListing({
+  search,
+  place,
+  isLaterPage,
+  onClearSearch,
+}: {
+  search: string;
+  place: 'folder' | 'bucket';
+  isLaterPage: boolean;
+  onClearSearch: () => void;
+}) {
+  const searchMissed = search !== '' && !isLaterPage;
   return (
     <div className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-6 py-16 text-center">
-      <p className="text-sm text-zinc-500">
-        {isLaterPage ? 'No objects on this page' : 'No objects at this path'}
-      </p>
+      {searchMissed ? (
+        <>
+          <p className="text-sm text-zinc-500">{`No names in this ${place} start with “${search}”`}</p>
+          {/* A miss at the top often means the object sits in a folder, which
+              a search here does not look inside. */}
+          <p className="mt-1 max-w-sm text-xs text-balance text-zinc-400">
+            Search matches the start of a name, case-sensitively, at this level only. To look inside
+            a folder, open it or type its path, like photos/.
+          </p>
+          <Button variant="tertiary" size="sm" className="mt-4" onClick={onClearSearch}>
+            Clear search
+          </Button>
+        </>
+      ) : (
+        <p className="text-sm text-zinc-500">
+          {isLaterPage ? 'No objects on this page' : 'No objects at this path'}
+        </p>
+      )}
     </div>
   );
 }
@@ -251,6 +278,10 @@ export type ObjectBrowserProps = {
   folders: string[];
   /** Previous and next through a folder that spans pages. Absent when it does not. */
   paging?: Omit<ListingPagerProps, 'label'>;
+  /** What the search box holds. The listing narrows to names that start with it. */
+  search?: string;
+  /** Absent where the browser offers no search, which leaves out the box. */
+  onSearchChange?: (search: string) => void;
 };
 
 /** The share dialog a row's Share button opens, and whether the plan allows it. */
@@ -288,6 +319,8 @@ export function ObjectBrowser({
   keyAction,
   folders,
   paging,
+  search = '',
+  onSearchChange,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState<{
@@ -342,10 +375,13 @@ export function ObjectBrowser({
     entry.kind === 'object' ? [selectionId(entry.group.key, entry.group.latest.versionId)] : [],
   );
   const isPaged = paging !== undefined && (paging.hasPrevious || paging.hasNext);
+  const place = currentPrefix ? 'folder' : 'bucket';
 
-  // Empty only at the bucket's root on its first page: a later page or a
-  // folder with nothing in it is a place in a bucket that has objects.
-  const isBucketEmpty = entries.length === 0 && currentPrefix === '' && !paging?.hasPrevious;
+  // Empty only at the bucket's root, on its first page, unsearched: a later
+  // page, a folder with nothing in it, or a search with no match is a place in
+  // a bucket that has objects.
+  const isBucketEmpty =
+    entries.length === 0 && currentPrefix === '' && !paging?.hasPrevious && search === '';
   if (isBucketEmpty) {
     return (
       <EmptyBucketState
@@ -367,6 +403,16 @@ export function ObjectBrowser({
         />
       )}
 
+      {onSearchChange && (
+        <ObjectSearchBar
+          search={search}
+          place={place}
+          onSearchChange={onSearchChange}
+          paging={paging}
+          rowCount={entries.length}
+        />
+      )}
+
       {rowSelection.selectable && selectedCount > 0 && (
         <BulkActionsBar
           count={selectedCount}
@@ -377,7 +423,12 @@ export function ObjectBrowser({
       )}
 
       {entries.length === 0 ? (
-        <EmptyListing isLaterPage={paging?.hasPrevious ?? false} />
+        <EmptyListing
+          search={search}
+          place={place}
+          isLaterPage={paging?.hasPrevious ?? false}
+          onClearSearch={() => onSearchChange?.('')}
+        />
       ) : (
         <ObjectTable
           entries={entries}

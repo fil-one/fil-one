@@ -36,6 +36,7 @@ import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import type { ObjectListingPage } from '../lib/object-listing.js';
 import { removeVersionFromPage } from '../lib/object-listing.js';
+import { useFolderSearch } from '../lib/use-folder-search.js';
 import { useObjectListing } from '../lib/use-object-listing.js';
 
 function formatStorage(bytesUsed: number | undefined): string {
@@ -119,11 +120,13 @@ function useBucketQueries({
   bucketName,
   region,
   prefix,
+  search,
   mayListKeys,
 }: {
   bucketName: string;
   region: S3Region;
   prefix: string;
+  search: string;
   mayListKeys: boolean;
 }) {
   // Cached the way the list pages are (FIL-1078): stepping into a bucket, back
@@ -148,6 +151,7 @@ function useBucketQueries({
     region,
     versioning: bucket?.versioning ?? false,
     prefix,
+    search,
     enabled: bucketQuery.data !== undefined,
   });
 
@@ -280,17 +284,23 @@ const EMPTY_PAGE: ObjectListingPage = { versions: [], folders: [] };
  * What the page needs from the folder listing, worked out in one place so the
  * component stays about layout.
  */
-function describeListing(objects: ReturnType<typeof useObjectListing>, currentPrefix: string) {
+function describeListing(
+  objects: ReturnType<typeof useObjectListing>,
+  currentPrefix: string,
+  search: string,
+) {
   const page = objects.page ?? EMPTY_PAGE;
   const { query } = objects;
-  const isRoot = currentPrefix === '';
+  const isWholeRoot = currentPrefix === '' && search === '';
   return {
     page,
-    // Inside a folder or past the first page the bucket has objects by definition.
+    // Inside a folder, past the first page, or mid-search, the bucket has
+    // objects by definition: a search box only shows over objects.
     hasObjects:
-      !isRoot || !objects.isFirstPage || page.versions.length > 0 || page.folders.length > 0,
-    // The root, on one page, with no folders: the listing is the whole bucket.
-    coversBucket: isRoot && objects.isFirstPage && !objects.hasNext && page.folders.length === 0,
+      !isWholeRoot || !objects.isFirstPage || page.versions.length > 0 || page.folders.length > 0,
+    // The root, unsearched, on one page, with no folders: the listing is the whole bucket.
+    coversBucket:
+      isWholeRoot && objects.isFirstPage && !objects.hasNext && page.folders.length === 0,
     listingError: query.isError
       ? { message: query.error.message, onRetry: () => void query.refetch() }
       : undefined,
@@ -317,6 +327,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const currentPrefix = prefix ?? '';
+  const folderSearch = useFolderSearch(currentPrefix);
   const mayUpload = useHasPermission('objects.write');
   const mayDelete = useHasPermission('objects.delete');
   const { mayList: mayListKeys } = useKeyActionScope();
@@ -352,10 +363,11 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     bucketName,
     region,
     prefix: currentPrefix,
+    search: folderSearch.settledText,
     mayListKeys,
   });
   const objectsQuery = objects.query;
-  const listing = describeListing(objects, currentPrefix);
+  const listing = describeListing(objects, currentPrefix, folderSearch.settledText);
   const { page } = listing;
   const analyticsData = analyticsQuery.data;
 
@@ -502,6 +514,8 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onAddKeyOpenChange={setAddKeyOpen}
               onShowKeys={tabs.showKeysTab}
               paging={listing.paging}
+              search={folderSearch.text}
+              onSearchChange={folderSearch.setText}
             />
           </TabPanel>
 

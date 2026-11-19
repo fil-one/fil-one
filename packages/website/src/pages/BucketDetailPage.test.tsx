@@ -514,3 +514,36 @@ describe('BucketDetailPage: a folder that spans pages', () => {
     expect(screen.getByTestId('listing-pager-range')).toHaveTextContent('Showing 2–2');
   });
 });
+
+describe('BucketDetailPage: searching a folder', () => {
+  it('says how search matches when a search finds nothing', async () => {
+    renderPage(OrgRole.Owner);
+    expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+    // Every listing from here on is the search's, and it matches nothing.
+    mockParseListObjects.mockReturnValue({ objects: [], commonPrefixes: [], isTruncated: false });
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'any-missing' } });
+
+    expect(
+      await screen.findByText('No names in this bucket start with “any-missing”'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/To look inside a folder, open it or type its path/),
+    ).toBeInTheDocument();
+  });
+
+  it('lists the bucket again once the search is cleared', async () => {
+    renderPage(OrgRole.Owner);
+    expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+    mockParseListObjects.mockReturnValue({ objects: [], commonPrefixes: [], isTruncated: false });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'any-missing' } });
+    const miss = await screen.findByText('No names in this bucket start with “any-missing”');
+    mockParseListObjects.mockReturnValue(ONE_OBJECT_LISTING);
+
+    // The empty state's labelled button, not the field's own × (named the same).
+    const emptyState = miss.parentElement ?? document.body;
+    fireEvent.click(within(emptyState).getByRole('button', { name: 'Clear search' }));
+
+    expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+  });
+});

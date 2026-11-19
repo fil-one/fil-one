@@ -116,19 +116,21 @@ export const queryKeys = {
   bucket: (bucketName: string, region: S3Region) => ['bucket', bucketName, region] as const,
   objects: (bucketName: string, region: S3Region) => ['objects', bucketName, region] as const,
   // Shares the objects prefix so one invalidation refreshes every cached page
-  // of every folder. The folder sits at index 3, which the listing's
-  // placeholder relies on to tell a page change from a folder change.
+  // of every folder and search. The folder sits at index 3, which the
+  // listing's placeholder relies on to tell a folder change from the rest.
   objectsPage: ({
     bucketName,
     region,
     prefix,
+    search,
     cursor,
   }: {
     bucketName: string;
     region: S3Region;
     prefix: string;
+    search: string;
     cursor: ListingCursor | null;
-  }) => ['objects', bucketName, region, prefix, cursor] as const,
+  }) => ['objects', bucketName, region, prefix, search, cursor] as const,
   objectMetadata: (bucketName: string, objectKey: string, versionId?: string) =>
     ['object-metadata', bucketName, objectKey, ...(versionId ? [versionId] : [])] as const,
   // ['access-keys'] is the prefix — invalidateQueries on this key also invalidates
