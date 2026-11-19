@@ -9,6 +9,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { ShareObjectModal } from './ShareObjectModal';
 import { EmptyStateCard } from './EmptyStateCard';
 import { ListingPager, type ListingPagerProps } from './ListingPager';
+import { PrefixBreadcrumb } from './ObjectBrowserToolbar';
 import { Table } from './Table/Table';
 import { FolderRow, ObjectEntryRows, SECONDARY_COLUMN } from './ObjectBrowserRows';
 import { BulkActionsBar } from './BulkActionsBar';
@@ -21,51 +22,6 @@ import { selectionId, useObjectSelection } from '../lib/object-selection.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 
 export { countObjects } from '../lib/object-grouping.js';
-
-// ---------------------------------------------------------------------------
-// Prefix breadcrumb
-// ---------------------------------------------------------------------------
-
-function PrefixBreadcrumb({
-  bucketName,
-  currentPrefix,
-  onPrefixChange,
-}: {
-  bucketName: string;
-  currentPrefix: string;
-  onPrefixChange: (prefix: string) => void;
-}) {
-  return (
-    <div className="mb-4 flex items-center gap-2 text-sm">
-      <button
-        type="button"
-        onClick={() => onPrefixChange('')}
-        className="text-zinc-500 hover:text-zinc-700"
-      >
-        {bucketName}
-      </button>
-      {currentPrefix
-        .split('/')
-        .filter(Boolean)
-        .map((segment, idx, arr) => {
-          const segmentPrefix = arr.slice(0, idx + 1).join('/') + '/';
-          const isLast = idx === arr.length - 1;
-          return (
-            <span key={segmentPrefix} className="flex items-center gap-2">
-              <span className="text-zinc-300">/</span>
-              <button
-                type="button"
-                onClick={() => onPrefixChange(segmentPrefix)}
-                className={`hover:text-brand-600 ${isLast ? 'font-medium text-zinc-700' : 'text-brand-600'}`}
-              >
-                {segment}
-              </button>
-            </span>
-          );
-        })}
-    </div>
-  );
-}
 
 /** No key can reach the bucket yet, and the caller may create one. */
 export interface CreateKeyAction {
@@ -230,14 +186,8 @@ function ObjectTable({
             />
           )}
           <Table.Head>Name</Table.Head>
-          {versioningEnabled && (
-            <>
-              <Table.Head className={SECONDARY_COLUMN}>Version</Table.Head>
-              <Table.Head className={SECONDARY_COLUMN}>Status</Table.Head>
-            </>
-          )}
           <Table.Head className={SECONDARY_COLUMN}>Size</Table.Head>
-          <Table.Head className={SECONDARY_COLUMN}>Last Modified</Table.Head>
+          <Table.Head className={SECONDARY_COLUMN}>Last modified</Table.Head>
           <Table.Head aria-label="Actions" />
         </Table.Row>
       </Table.Header>
@@ -249,7 +199,6 @@ function ObjectTable({
                 key={`folder:${entry.prefix}`}
                 name={entry.name}
                 prefix={entry.prefix}
-                versioningEnabled={versioningEnabled}
                 onPrefixChange={onPrefixChange}
                 selectable={rowSelection.selectable}
               />
