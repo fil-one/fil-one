@@ -53,3 +53,47 @@ export function buildSignupLifecycleOutbox({
     },
   ];
 }
+
+/** A first-issuance milestone contains no URL, key, bucket, actor or request. */
+export function buildFirstPresignLifecycleOutbox({
+  orgId,
+  occurredAt,
+  provider,
+  tenantId,
+}: {
+  orgId: string;
+  occurredAt: string;
+  provider: string;
+  tenantId: string;
+}): TransactWriteItem[] {
+  const table = process.env.FILONE_LIFECYCLE_OUTBOX_TABLE;
+  if (!table) return [];
+  if ([orgId, provider, tenantId].some((id) => !OPAQUE_ID.test(id))) {
+    throw new Error('Invalid lifecycle identity');
+  }
+  const timestamp = new Date(occurredAt);
+  if (!Number.isFinite(timestamp.getTime()) || timestamp.toISOString() !== occurredAt) {
+    throw new Error('Invalid lifecycle occurrence timestamp');
+  }
+  const eventId = `presign_${createHash('sha256').update(orgId).digest('hex')}`;
+  return [
+    {
+      Put: {
+        TableName: table,
+        Item: marshall({
+          event_id: eventId,
+          detail: {
+            schema_version: 1,
+            event_id: eventId,
+            event_type: 'presign.first_issued',
+            occurred_at: occurredAt,
+            organization_id: orgId,
+            observed_tenant: { sp: provider, id: tenantId },
+          },
+          expires_at: Math.ceil(timestamp.getTime() / 1000) + 180 * 86400,
+        }),
+        ConditionExpression: 'attribute_not_exists(event_id)',
+      },
+    },
+  ];
+}
