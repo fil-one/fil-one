@@ -106,7 +106,10 @@ alone does not prove that the broker accepted it.
    is not the rollback procedure. No automatic historical backfill occurs.
 
 Local tests are not this live acceptance. This change completes the initial
-signup producer implementation, not sc-455: trial, first bucket/presign,
+signup producer implementation, not sc-455. The
+[first object-presign follow-on](2026-11-first-presign-lifecycle.md) instruments
+new signup cohorts on one reviewed API path; it is not platform-wide first-URL
+coverage. Trial, first bucket, other signing paths,
 payment, flag/restriction/restoration producers, verified tenant mapping,
 broader schema requirements, operator console timeline and live delivery,
 encryption/replay/retention evidence remain separate required work. No raw
