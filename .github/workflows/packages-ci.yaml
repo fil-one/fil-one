@@ -62,6 +62,11 @@ jobs:
       - name: Test
         run: pnpm --filter @filone/backend test
 
+      - name: Test restriction fixture guards without a browser or deployed stack
+        run: pnpm exec playwright test tests/e2e/destructive/restriction-fixture.spec.ts --project=destructive-chromium --no-deps --workers=1 --reporter=line
+        env:
+          BASE_URL: http://127.0.0.1:1
+
   test-unit-lifecycle-publisher:
     runs-on: ubuntu-latest
     steps:
