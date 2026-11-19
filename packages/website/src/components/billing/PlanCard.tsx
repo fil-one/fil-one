@@ -5,7 +5,16 @@ import type { Subscription } from '@filone/shared';
 import { Badge } from '../Badge';
 import { Button } from '../Button';
 import { Card } from '../Card';
-import { discountLabel, planMetaLine, planTitle, statusBadge } from '../../lib/billing-view.js';
+import {
+  discountLabel,
+  formatCents,
+  getAppliedDiscounts,
+  getDiscountedRateCents,
+  planTitle,
+  pricingLine,
+  statusBadge,
+  timelineLine,
+} from '../../lib/billing-view.js';
 
 export type PlanCardProps = {
   subscription: Subscription;
@@ -60,6 +69,10 @@ function planActionLabel(status: SubscriptionStatus): string {
  */
 export function PlanCard({ subscription, mayManage, onManage, onChoosePlan }: PlanCardProps) {
   const badge = statusBadge(subscription.status);
+  const price = pricingLine(subscription);
+  const timeline = timelineLine(subscription);
+  const discounts = getAppliedDiscounts(subscription);
+  const discountedRate = getDiscountedRateCents(subscription);
   const running =
     subscription.status === SubscriptionStatus.Active ||
     subscription.status === SubscriptionStatus.PastDue;
@@ -67,12 +80,37 @@ export function PlanCard({ subscription, mayManage, onManage, onChoosePlan }: Pl
   return (
     <Card>
       <div className="flex flex-col gap-1">
-        {/* Label first, then the value: the same shape as the payment card
-            beside it. Leading with the plan name instead made two identical
-            cards read as different kinds of thing, and left their two identical
-            buttons 32px out of line with each other. */}
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <h3 className="text-sm font-medium text-zinc-900">Plan</h3>
+        {/* The plan's name is the heading: "Plan" above "Pay as you go" said
+            the same thing twice. It shares the row with the action, so the
+            button stays level with the payment card's. `text-sm` on the group,
+            not just its contents, so the row's line box is the 20px of the
+            text and not the card's 24px leading. The row itself never wraps,
+            which at 375px dropped the action onto a line of its own under the
+            heading. Name, badge and action need about 290px, more than a phone
+            leaves, so there the badge wraps under the name and the action
+            stays level with the name rather than centring on both lines. */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
+            <h3 className="font-medium text-zinc-900" data-testid="plan-name">
+              {planTitle(subscription)}
+            </h3>
+            {/* A pill only for a plan that needs attention (`statusBadge`).
+                The wrapper stays either way, so the state is readable from the
+                DOM where there is no pill. A flex box, not inline: inline, it sat
+                the pill on the text baseline and added 2px of descender space,
+                which pushed the name 1px below the payment card's title. */}
+            <span
+              className="flex"
+              data-testid="subscription-status"
+              data-status={subscription.status}
+            >
+              {badge && (
+                <Badge color={badge.tone} size="sm" weight="medium">
+                  {badge.label}
+                </Badge>
+              )}
+            </span>
+          </div>
 
           {/* A running subscription is managed in Stripe; one that is not needs
               a plan picked before there is anything to manage. Only one of the
@@ -106,57 +144,54 @@ export function PlanCard({ subscription, mayManage, onManage, onChoosePlan }: Pl
             ))}
         </div>
 
-        {/* `text-sm` on the row, not just its contents: without it the flex line
-            box inherited the card's 24px leading and stood 4px taller than the
-            payment card's value line beside it. */}
-        <div className="flex items-center gap-2 text-sm">
-          <p className="text-zinc-900" data-testid="plan-name">
-            {planTitle(subscription)}
-          </p>
-          {/* The wrapper stays either way, so the state is readable from the DOM
-              even where the pill would only repeat the name: an account with no
-              plan is already named "No plan", and saying it twice side by side
-              is noise. */}
-          <span data-testid="subscription-status" data-status={subscription.status}>
-            {subscription.status !== SubscriptionStatus.Inactive && (
-              <Badge color={badge.tone} size="sm" weight="medium" dot={badge.dot}>
-                {badge.label}
-              </Badge>
+        {/* The rate, then what happens next: the same value-over-detail pair
+            as the card's brand and expiry in the payment card beside it, so
+            the two cards share a rhythm and a height. On one line, the plan
+            card stood 20px shorter than the payment card and the grid left
+            that as empty space under it. `mt-1` matches the payment card's
+            gap between its label and its details. */}
+        {(price || timeline || discounts.length > 0) && (
+          <div className="mt-1">
+            {/* The rate they pay, then the discount that makes it so: what it
+                takes off, not the code that applied it, since the code was
+                typed once at checkout and can run to 40 characters while the
+                terms are what the customer checks against an invoice. With a
+                discount that changes the rate (`getDiscountedRateCents`), the
+                rate shown is the discounted one and the list rate is not
+                repeated: struck through beside it, two prices on one line read
+                as a puzzle. A tag glyph and text in one dark blue (`brand-800`,
+                9.8:1 on white), not a pill: a second pill was one too many.
+                The row aligns on the text baseline, since the discount is
+                smaller than the rate and centring the two set it high; only
+                the glyph, which has no baseline, centres on the line. The
+                discount wraps under the rate where the card is too narrow. */}
+            {(price || discounts.length > 0) && (
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                {price && (
+                  <p className="text-sm text-zinc-900 tabular-nums" data-testid="plan-price">
+                    {discountedRate === null
+                      ? price
+                      : `${formatCents(discountedRate)}/TB per month`}
+                  </p>
+                )}
+                {discounts.map((discount, index) => (
+                  <span
+                    key={index}
+                    className="flex items-baseline gap-1 text-xs text-brand-800 tabular-nums"
+                    data-testid="plan-discount"
+                  >
+                    <TagIcon size={12} weight="fill" aria-hidden className="shrink-0 self-center" />
+                    {discountLabel(discount)}
+                  </span>
+                ))}
+              </div>
             )}
-          </span>
-        </div>
-
-        <p className="text-xs text-zinc-500 tabular-nums" data-testid="plan-meta">
-          {planMetaLine(subscription)}
-        </p>
-
-        {/* A footer of its own, below a hairline: a discount is not a third
-            fact about the plan but something applied to it, and as one more
-            grey line under the rate it read as small print. The code goes in a
-            pill, since it is the word the customer typed and will look for;
-            the terms stay plain beside it. Brand blue rather than green, so it
-            does not compete with the status pill above. */}
-        {subscription.discounts && subscription.discounts.length > 0 && (
-          // 20px on each side of the hairline: `pt-5` matches the card's own
-          // `p-5` below the pill, and `mt-4` plus the column's 4px gap gives
-          // the same above it.
-          <ul className="mt-4 flex flex-col gap-2 border-t border-zinc-200 pt-5">
-            {subscription.discounts.map((discount, index) => (
-              <li
-                key={index}
-                className="flex flex-wrap items-center gap-x-2 gap-y-1"
-                data-testid="plan-discount"
-              >
-                <Badge color="blue" size="sm" weight="medium">
-                  <TagIcon size={12} weight="fill" aria-hidden />
-                  {discount.promotionCode ?? 'Discount'}
-                </Badge>
-                <span className="text-xs text-zinc-600 tabular-nums">
-                  {discountLabel(discount)}
-                </span>
-              </li>
-            ))}
-          </ul>
+            {timeline && (
+              <p className="text-xs text-zinc-500 tabular-nums" data-testid="plan-timeline">
+                {timeline}
+              </p>
+            )}
+          </div>
         )}
       </div>
     </Card>
