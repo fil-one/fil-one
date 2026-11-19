@@ -111,6 +111,12 @@ failures; no Organization or payment identifier is a metric dimension.
 
 ## Remaining payment-method and sc-455 gaps
 
+The [attachment follow-on](2026-11-payment-method-lifecycle.md) now implements a
+default-off immutable Customer binding and exact `payment_method.attached`
+adapter, with explicit staging-only provider configuration. Its live activation,
+delivery and cohort coverage remain unverified. The earlier implementation
+boundary below explains why current snapshots were insufficient.
+
 `payment.method_added` is not inferred from `customer.updated`: that event may
 merely include a previously saved default method. The current endpoint does
 not subscribe to `payment_method.attached` or `setup_intent.succeeded`, and
