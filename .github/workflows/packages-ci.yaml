@@ -187,17 +187,6 @@ jobs:
     env:
       DEPLOY_STAGE: staging
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-      # Explicit staging environment configuration survives normal deployments.
-      # Defaults keep every lifecycle resource/capture path off; production
-      # intentionally has none of these activation inputs.
-      FILONE_LIFECYCLE_PUBLISHER_ENABLED: ${{ vars.FILONE_LIFECYCLE_PUBLISHER_ENABLED || 'false' }}
-      FILONE_LIFECYCLE_CAPTURE_ENABLED: ${{ vars.FILONE_LIFECYCLE_CAPTURE_ENABLED || 'false' }}
-      FILONE_LIFECYCLE_ALARM_TOPIC_ARN: ${{ vars.FILONE_LIFECYCLE_ALARM_TOPIC_ARN }}
-      FILONE_LIFECYCLE_FIRST_MILESTONE_EPOCH: ${{ vars.FILONE_LIFECYCLE_FIRST_MILESTONE_EPOCH }}
-      FILONE_LIFECYCLE_BILLING_PUBLISHER_ENABLED: ${{ vars.FILONE_LIFECYCLE_BILLING_PUBLISHER_ENABLED || 'false' }}
-      FILONE_LIFECYCLE_BILLING_CAPTURE_ENABLED: ${{ vars.FILONE_LIFECYCLE_BILLING_CAPTURE_ENABLED || 'false' }}
-      FILONE_LIFECYCLE_CUSTOMER_BINDINGS_ENABLED: ${{ vars.FILONE_LIFECYCLE_CUSTOMER_BINDINGS_ENABLED || 'false' }}
-      FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED: ${{ vars.FILONE_LIFECYCLE_METHOD_EVENTS_ENABLED || 'false' }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

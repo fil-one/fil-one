@@ -105,7 +105,7 @@ def test_refuses_first_presign_without_a_valid_exact_mapping(client, mapping):
     client.put_events.assert_not_called()
 
 
-@pytest.mark.parametrize("kind", ["trial.started", "payment.succeeded", "payment.failed", "payment.method_added"])
+@pytest.mark.parametrize("kind", ["trial.started", "payment.succeeded", "payment.failed"])
 def test_billing_role_emits_only_its_fixed_source_and_outcome_contract(client, monkeypatch, kind):
     monkeypatch.setenv("LIFECYCLE_SOURCE", "filone.billing")
     assert publisher.handler({"Records": [record(event_type=kind)]}, None) == {"batchItemFailures": []}
@@ -117,7 +117,6 @@ def test_billing_role_emits_only_its_fixed_source_and_outcome_contract(client, m
 @pytest.mark.parametrize("source,kind", [
     ("filone.identity", "trial.started"),
     ("filone.identity", "payment.succeeded"),
-    ("filone.identity", "payment.method_added"),
     ("filone.billing", "organization.signup"),
     ("filone.billing", "presign.first_issued"),
 ])

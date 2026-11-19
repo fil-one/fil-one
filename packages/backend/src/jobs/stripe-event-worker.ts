@@ -124,9 +124,6 @@ async function processStripeEvent(stripeEvent: Stripe.Event): Promise<(() => voi
       const invoice = stripeEvent.data.object as Stripe.Invoice;
       return () => handlePaymentSucceeded(invoice);
     }
-    case 'payment_method.attached':
-      // The explicitly configured lifecycle adapter owns this outcome.
-      return;
     case 'invoice.payment_failed': {
       const invoice = stripeEvent.data.object as Stripe.Invoice;
       return () => handlePaymentFailed(invoice);
