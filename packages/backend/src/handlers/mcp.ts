@@ -2,12 +2,13 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { buildJsonRpcResponse, isJsonRpcRequest } from '../lib/mcp/json-rpc.ts';
+import { mcpEnabledMiddleware } from '../lib/mcp/mcp-resource.ts';
 import { dispatchMcpRequest } from '../lib/mcp/mcp-server.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
-import { authorize } from '../middleware/authorize.ts';
+import { requireOrgMembershipMiddleware } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
@@ -43,11 +44,12 @@ export async function baseHandler(
   return buildJsonRpcResponse(message.id, outcome);
 }
 
-// Every tool so far only reads buckets, so the whole route takes that permission.
+// Each tool checks its own permission, so the chain gates on membership only.
 export const handler = middy(baseHandler)
+  .use(mcpEnabledMiddleware())
   .use(requestDeadlineMiddleware())
   .use(httpHeaderNormalizer())
   .use(authMiddleware({ bearerToken: true }))
-  .use(authorize('buckets.read'))
+  .use(requireOrgMembershipMiddleware())
   .use(subscriptionGuardMiddleware(AccessLevel.Read))
   .use(errorHandlerMiddleware());

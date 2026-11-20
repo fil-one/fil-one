@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { S3Region } from '@filone/shared';
+import { OrgRole, S3Region } from '@filone/shared';
+import type { OrgMembership } from '../lib/org-membership.ts';
 
 vi.mock('sst', () => ({ Resource: {} }));
 
@@ -8,9 +9,12 @@ vi.mock('../lib/list-org-buckets.ts', () => ({
   listOrgBuckets: (...args: unknown[]) => listOrgBuckets(...args),
 }));
 
-import { baseHandler } from './mcp.ts';
+import type { Context } from 'aws-lambda';
+import { baseHandler, handler as mcpHandler } from './mcp.ts';
+import { handler as mcpGetHandler } from './mcp-get.ts';
+import { handler as mcpResourceMetadataHandler } from './mcp-resource-metadata.ts';
 import { SUPPORTED_PROTOCOL_VERSIONS } from '../lib/mcp/mcp-server.ts';
-import { buildEvent } from '../test/lambda-test-utilities.ts';
+import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
 
 const USER_INFO = { userId: 'any-user', orgId: 'any-org' };
 
@@ -23,9 +27,13 @@ const anyBucket = {
   encrypted: true,
 };
 
-async function send(body: unknown) {
+async function send(body: unknown, membership?: OrgMembership) {
   const result = await baseHandler(
-    buildEvent({ userInfo: USER_INFO, method: 'POST', body: JSON.stringify(body) }),
+    buildEvent({
+      userInfo: { ...USER_INFO, membership },
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   );
   return { statusCode: result.statusCode, body: result.body ? JSON.parse(result.body) : undefined };
 }
@@ -121,6 +129,46 @@ describe('mcp baseHandler', () => {
     });
   });
 
+  it.each([
+    // The schema asks for a string, not a list.
+    ['a region that is not a string', { region: [S3Region.EuWest1] }, 'region must be one of'],
+    // No such region.
+    ['an unknown region', { region: 'any-unknown-region' }, 'region must be one of'],
+    // The schema allows no other properties.
+    ['an argument the tool does not take', { bucket: 'any-bucket' }, 'unknown argument: bucket'],
+    // Arguments are an object.
+    ['arguments that are not an object', S3Region.EuWest1, 'arguments must be an object'],
+  ])('returns a tool error and lists nothing for %s', async (_case, args, problem) => {
+    const response = await callTool('list_buckets', args);
+
+    expect(listOrgBuckets).not.toHaveBeenCalled();
+    expect(response.body.result).toStrictEqual({
+      content: [{ type: 'text', text: expect.stringContaining(`Invalid arguments: ${problem}`) }],
+      isError: true,
+    });
+  });
+
+  it('returns a tool error and lists nothing for a role without buckets.read', async () => {
+    const response = await send(
+      { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'list_buckets' } },
+      // Not a console role, so it holds no permission.
+      membershipFor(USER_INFO.orgId, USER_INFO.userId, 'any-unknown-role' as OrgRole),
+    );
+
+    expect(listOrgBuckets).not.toHaveBeenCalled();
+    expect(response.body.result).toStrictEqual({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            message: 'Your role in this organization does not permit list_buckets.',
+          }),
+        },
+      ],
+      isError: true,
+    });
+  });
+
   it('returns a tool error naming the regions when every network fails', async () => {
     listOrgBuckets.mockResolvedValue({
       buckets: [],
@@ -184,5 +232,24 @@ describe('mcp baseHandler', () => {
       id: null,
       error: { code: -32700, message: 'Parse error' },
     });
+  });
+});
+
+describe('the MCP routes while MCP is off', () => {
+  beforeEach(() => {
+    delete process.env.MCP_ENABLED;
+  });
+
+  it.each([
+    ['POST /api/mcp', mcpHandler],
+    ['GET /api/mcp', mcpGetHandler],
+    ['the resource metadata', mcpResourceMetadataHandler],
+  ])('answers 404 for %s, before any sign-in', async (_route, routeHandler) => {
+    const result = await routeHandler(
+      buildEvent({ userInfo: USER_INFO, method: 'POST' }),
+      {} as Context,
+    );
+
+    expect(result).toMatchObject({ statusCode: 404 });
   });
 });

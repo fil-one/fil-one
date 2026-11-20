@@ -57,6 +57,8 @@ import {
 // reads their base URLs from the environment, so a handler that reaches storage
 // needs these set before the first import.
 process.env.FILONE_STAGE ??= 'test';
+// The MCP routes are dark unless the stage turns them on.
+process.env.MCP_ENABLED = 'true';
 process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
 
 const ORG_ID = 'org-1';
@@ -464,6 +466,19 @@ const IN_HANDLER_PROBES: {
         keyName: 'a key',
         permissions: ['read'],
         region: 'eu-west-1',
+      }),
+    },
+  },
+  {
+    handler: 'mcp',
+    asks: 'list_buckets',
+    permission: 'buckets.read',
+    request: {
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'list_buckets' },
       }),
     },
   },

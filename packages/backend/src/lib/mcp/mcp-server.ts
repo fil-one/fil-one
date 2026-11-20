@@ -1,4 +1,4 @@
-import { listBucketsUnavailableMessage } from '@filone/shared';
+import { listBucketsUnavailableMessage, roleHasPermission, S3Region } from '@filone/shared';
 import type { JsonRpcOutcome, JsonRpcRequest } from './json-rpc.ts';
 import { isRecord } from './json-rpc.ts';
 import { listOrgBuckets } from './list-org-buckets.ts';
@@ -16,7 +16,13 @@ const TOOLS = [
       'Optionally narrow to one region.',
     inputSchema: {
       type: 'object',
-      properties: { region: { type: 'string', description: 'Only buckets in this region.' } },
+      properties: {
+        region: {
+          type: 'string',
+          enum: Object.values(S3Region),
+          description: 'Only buckets in this region.',
+        },
+      },
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true },
@@ -38,11 +44,35 @@ function buildToolResult(payload: unknown, isError = false) {
   };
 }
 
-async function callListBuckets(
-  { caller, signal }: McpRequestContext,
-  args: Record<string, unknown>,
-) {
-  const region = typeof args.region === 'string' ? args.region : undefined;
+const REGIONS: readonly string[] = Object.values(S3Region);
+
+/** list_buckets' arguments checked against its input schema, or what breaks it. */
+function parseListBucketsArguments(args: unknown): { region?: string } | { problem: string } {
+  if (!isRecord(args)) return { problem: 'arguments must be an object' };
+  const unknown = Object.keys(args).filter((key) => key !== 'region');
+  if (unknown.length > 0) return { problem: `unknown argument: ${unknown.join(', ')}` };
+  const { region } = args;
+  if (region === undefined) return {};
+  if (typeof region !== 'string' || !REGIONS.includes(region)) {
+    return { problem: `region must be one of ${REGIONS.join(', ')}` };
+  }
+  return { region };
+}
+
+async function callListBuckets({ caller, signal }: McpRequestContext, args: unknown = {}) {
+  if (!caller.membership || !roleHasPermission(caller.membership.role, 'buckets.read')) {
+    return buildToolResult(
+      { message: 'Your role in this organization does not permit list_buckets.' },
+      true,
+    );
+  }
+  const parsed = parseListBucketsArguments(args);
+  // A tool error rather than Invalid params, so the model can correct the call.
+  if ('problem' in parsed) {
+    return buildToolResult({ message: `Invalid arguments: ${parsed.problem}` }, true);
+  }
+
+  const { region } = parsed;
   const { buckets, unavailableRegions, allFailed } = await listOrgBuckets(caller, {
     region,
     signal,
@@ -81,8 +111,7 @@ export async function dispatchMcpRequest(
     case 'tools/list':
       return { result: { tools: TOOLS } };
     case 'tools/call': {
-      const args = isRecord(params.arguments) ? params.arguments : {};
-      if (params.name === 'list_buckets') return callListBuckets(context, args);
+      if (params.name === 'list_buckets') return callListBuckets(context, params.arguments);
       return { error: { code: -32602, message: `Unknown tool: ${String(params.name)}` } };
     }
     default:

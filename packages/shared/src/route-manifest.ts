@@ -110,8 +110,15 @@ const MANIFEST = [
     path: '/api/mcp',
     handler: 'mcp',
     category: 'authenticated',
-    requires: 'buckets.read',
+    requires: 'in-handler',
     bearerToken: true,
+  },
+  // Streamable HTTP asks a server that offers no event stream to refuse GET with 405.
+  {
+    method: 'GET',
+    path: '/api/mcp',
+    handler: 'mcp-get',
+    category: 'public',
   },
   {
     method: 'GET',

@@ -694,6 +694,8 @@ export default $config({
     const siteUrl = router.url;
     // The MCP endpoint, and the audience of the tokens it accepts. Alias hosts
     // are not separate resources: MCP is served on the canonical host only.
+    // Dark in production until launch; on everywhere else for testing.
+    const mcpEnabled = $app.stage === 'production' ? 'false' : 'true';
     const mcpResourceUrl = siteUrl.apply((url) => `${url.replace(/\/$/, '')}/api/mcp`);
 
     const auth0Domain = getAuth0Domain($app.stage);
@@ -1230,10 +1232,14 @@ export default $config({
           ...fthEnv,
           ...forgeEnv,
           MCP_RESOURCE_URL: mcpResourceUrl,
+          MCP_ENABLED: mcpEnabled,
         },
         permissions: bucketReadPermissions,
       },
-      'mcp-resource-metadata': { extraEnv: { MCP_RESOURCE_URL: mcpResourceUrl } },
+      'mcp-get': { extraEnv: { MCP_ENABLED: mcpEnabled } },
+      'mcp-resource-metadata': {
+        extraEnv: { MCP_RESOURCE_URL: mcpResourceUrl, MCP_ENABLED: mcpEnabled },
+      },
       'create-bucket': {
         extraEnv: orchestratorEnv,
         permissions: [
