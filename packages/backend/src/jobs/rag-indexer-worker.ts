@@ -74,7 +74,9 @@ export async function handler(
       return;
     }
 
-    const networks = await getProvisionedNetworks(orgId);
+    // Indexing is per region and resumes on the next run, so a network that
+    // is not running costs its own regions rather than the whole pass.
+    const networks = await getProvisionedNetworks(orgId, { skipMissingNetworks: true });
     if (networks.length === 0) {
       console.warn(`${LOG} Org not provisioned on any available network, skipping`, { orgId });
       emitWorkerInvocation('success', Date.now() - start, { regionsProcessed, regionFailures });
