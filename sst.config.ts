@@ -1638,6 +1638,22 @@ export default $config({
       function: usageOrchestrator.arn,
     });
 
+    // Compares what Stripe will invoice with actual storage for orgs invoicing
+    // within 48h (sc-622). Read-only against Stripe.
+    const billedUsageDriftChecker = createFn('BilledUsageDriftChecker', {
+      handler: 'packages/backend/src/jobs/billed-usage-drift-checker.handler',
+      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, ...managementApiTokens],
+      environment: { ...orchestratorEnv, STRIPE_METER_EVENT_NAME: stripeMeterEventName },
+      timeout: '300 seconds',
+      memory: '256 MB',
+    });
+
+    new sst.aws.CronV2('BilledUsageDriftCheckerCron', {
+      // run the Lambda every 12 hours, two hours after usage reporting (09:00 and 21:00 UTC).
+      schedule: 'cron(0 9/12 * * ? *)',
+      function: billedUsageDriftChecker.arn,
+    });
+
     // ── Grace period enforcement ────────────────────────────────────
     const gracePeriodEnforcer = createFn('GracePeriodEnforcer', {
       handler: 'packages/backend/src/jobs/grace-period-enforcer.handler',
