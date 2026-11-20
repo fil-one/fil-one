@@ -742,7 +742,7 @@ export default $config({
                 Stage: $app.stage,
                 // Bump whenever the Auth0 client settings need re-registering: this
                 // custom resource only re-runs when a property changes.
-                Version: '2.13',
+                Version: '2.14',
               },
             },
           },
