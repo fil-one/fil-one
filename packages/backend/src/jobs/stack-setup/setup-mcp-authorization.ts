@@ -21,6 +21,7 @@ interface Auth0Connection {
  * Let MCP clients sign a console user in through Auth0 and get a token for the
  * MCP endpoint:
  * - an API whose identifier is the MCP endpoint's URL, the tokens' audience;
+ * - a default grant that lets third-party clients ask for user tokens for it;
  * - Client ID Metadata Documents: a client's id is an https URL on its own
  *   domain that serves its metadata, so Auth0 registers it on first use, and
  *   the consent screen names a domain the client controls;
@@ -55,6 +56,27 @@ export async function setupAuth0McpAuthorization(domain: string, siteUrl: string
     await throwIfNotOk(createResp, 'Auth0 create MCP resource server failed');
   } else {
     await throwIfNotOk(getResp, 'Auth0 get MCP resource server failed');
+  }
+
+  // A client registered through its metadata document is a third-party client,
+  // and Auth0 refuses those a token for an API without a client grant.
+  const grantsResp = await fetch(
+    `${api}/client-grants?audience=${encodeURIComponent(identifier)}&default_for=third_party_clients`,
+    { headers },
+  );
+  await throwIfNotOk(grantsResp, 'Auth0 list MCP client grants failed');
+  if (((await grantsResp.json()) as unknown[]).length === 0) {
+    const grantResp = await fetch(`${api}/client-grants`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        audience: identifier,
+        default_for: 'third_party_clients',
+        subject_type: 'user',
+        scope: [],
+      }),
+    });
+    await throwIfNotOk(grantResp, 'Auth0 grant MCP clients access failed');
   }
 
   const settingsResp = await fetch(`${api}/tenants/settings`, {
