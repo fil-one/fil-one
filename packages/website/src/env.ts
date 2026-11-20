@@ -1,4 +1,5 @@
 import { Stage, getStageFromHostname } from '@filone/shared';
+import type { StageLike } from '@filone/shared';
 
 /**
  * Typed helpers for Vite environment variables.
@@ -9,9 +10,9 @@ import { Stage, getStageFromHostname } from '@filone/shared';
  */
 export const API_URL: string = import.meta.env['VITE_API_URL'] ?? '';
 
-function inferStage(): Stage {
+function inferStage(): StageLike {
   if (typeof window === 'undefined') return Stage.Staging;
   return getStageFromHostname(window.location.hostname);
 }
 
-export const FILONE_STAGE = inferStage();
+export const FILONE_STAGE: StageLike = inferStage();

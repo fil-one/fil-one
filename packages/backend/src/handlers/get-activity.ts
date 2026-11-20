@@ -101,7 +101,9 @@ export async function baseHandler(
   const { result: networks, durationMs: resolveNetworksMs } = await timed(
     event,
     'resolveNetworks',
-    () => getProvisionedNetworks(orgId),
+    // A listing: the activity from the networks that are reachable beats an
+    // error page when one of them is not running.
+    () => getProvisionedNetworks(orgId, { skipMissingNetworks: true }),
   );
 
   const [

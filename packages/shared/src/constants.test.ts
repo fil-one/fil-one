@@ -8,6 +8,8 @@ import {
   getS3Endpoint,
   getAuth0Domain,
   getStageFromHostname,
+  isLocalStage,
+  LOCAL_STAGE,
   PROD_CONSOLE_HOST,
   PROD_CONSOLE_ALIAS_HOSTS,
   MARKETING_URL_BY_CONSOLE_ORIGIN,
@@ -146,12 +148,13 @@ describe('getStageFromHostname', () => {
   const nonProductionHostnames = [
     'staging.fil.one',
     'pr-42.fil.one',
-    'localhost',
     'd123abc.cloudfront.net',
     '',
     // Guards against this ever being relaxed into a suffix or substring match.
     // Each of these is a hostname an attacker could control that ends with,
-    // starts with, or contains a production host.
+    // starts with, or contains a production host, or the dev server's.
+    'localhost.attacker.example',
+    'my-localhost',
     'app.filone.com.attacker.example',
     'app.fil.one.attacker.example',
     'app.filone.ai.attacker.example',
@@ -159,6 +162,15 @@ describe('getStageFromHostname', () => {
     'filone.ai',
     'fil.one',
   ];
+
+  // The dev server is the one console served from the machine running the
+  // stack, so it is the one place the local stage's regions exist.
+  for (const hostname of ['localhost', 'LOCALHOST', '127.0.0.1', '::1']) {
+    it(`returns the local stage for "${hostname}"`, () => {
+      expect(getStageFromHostname(hostname)).toBe(LOCAL_STAGE);
+      expect(isLocalStage(getStageFromHostname(hostname))).toBe(true);
+    });
+  }
 
   for (const hostname of nonProductionHostnames) {
     it(`returns Staging for "${hostname}"`, () => {
@@ -335,6 +347,8 @@ describe('getRegionAccessModel', () => {
       [S3Region.UsEast1]: 'service-keys',
       [S3Region.EuCentral3]: 'iam',
       [S3Region.UsEast9]: 'iam',
+      [S3Region.EuCentral9]: 'iam',
+      [S3Region.UsWest9]: 'iam',
     });
     for (const region of Object.values(S3Region)) {
       expect(supportsIamMethods(region), `${region} supports IAM`).toBe(models[region] === 'iam');

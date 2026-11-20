@@ -34,6 +34,19 @@ export const S3Region = {
    * Appliance. Non-production stages only (see getAvailableRegions).
    */
   UsEast9: 'us-east-9',
+  /**
+   * A second region on the same network as {@link S3Region.UsEast9}, served
+   * by a smelt stack on the developer's machine. Local stages only (see
+   * getAvailableRegions): it exists to exercise a tenant whose keys and
+   * buckets span two regions of one network.
+   */
+  EuCentral9: 'eu-central-9',
+  /**
+   * The only region of a second local network, served by a second Hilt in
+   * the same smelt stack. Local stages only (see getAvailableRegions): it
+   * exists to exercise a console account that reaches two networks.
+   */
+  UsWest9: 'us-west-9',
 } as const;
 export type S3Region = (typeof S3Region)[keyof typeof S3Region];
 
@@ -49,6 +62,8 @@ export const REGION_LABELS: Record<S3Region, string> = {
   [S3Region.UsEast1]: 'US East (Michigan)',
   [S3Region.EuCentral3]: 'Europe (Amsterdam)',
   [S3Region.UsEast9]: 'Forge dev sandbox (US East)',
+  [S3Region.EuCentral9]: 'Local smelt (Europe)',
+  [S3Region.UsWest9]: 'Local smelt network 2 (US West)',
 };
 
 /** Format a region as `"Europe (France) eu-west-1"`. */
@@ -83,8 +98,11 @@ export function isFoundationEmail(email: string | undefined): boolean {
 /**
  * Regions available to users. `eu-west-1` and `us-east-1` are generally
  * available in every stage; the Forge regions `eu-central-3` and `us-east-9`
- * are not yet GA and are only offered on non-production stages. Pass the
- * deployment `stage`; only `production` returns the GA-only set.
+ * are not yet GA and are only offered on non-production stages. On a local
+ * stage two more appear, served by a smelt stack on the developer's own
+ * machine: `eu-central-9`, the second region of the `us-east-9` network, and
+ * `us-west-9`, the one region of a second network. Pass the deployment
+ * `stage`; only `production` returns the GA-only set.
  * The per-region S3 endpoints still vary by stage — see {@link getS3Endpoint}.
  *
  * Note to developers: do not remove stage argument from this function, even if
@@ -92,10 +110,40 @@ export function isFoundationEmail(email: string | undefined): boolean {
  * will want staging only regions temporarily.
  */
 export function getAvailableRegions(stage: StageLike): S3Region[] {
+  if (isLocalStage(stage)) {
+    return [
+      S3Region.EuWest1,
+      S3Region.EuCentral3,
+      S3Region.UsEast1,
+      S3Region.UsEast9,
+      S3Region.EuCentral9,
+      S3Region.UsWest9,
+    ];
+  }
   if (stage !== Stage.Production) {
     return [S3Region.EuWest1, S3Region.EuCentral3, S3Region.UsEast1, S3Region.UsEast9];
   }
   return [S3Region.EuWest1, S3Region.UsEast1];
+}
+
+/**
+ * Whether the stage runs against floci and a smelt stack on the developer's
+ * machine rather than hosted infrastructure. `pnpm deploy:local` deploys the
+ * stage `local`, and `STAGE=<name> pnpm deploy:local` any other name starting
+ * with `local-` (the README's multi-org example uses `local-org`).
+ *
+ * The regions a local stage adds exist only on that machine, so a stage
+ * identified wrongly here would offer a customer a region nothing serves.
+ */
+export const LOCAL_STAGE = 'local';
+
+export function isLocalStage(stage: StageLike): boolean {
+  // Callers reach this with `process.env.FILONE_STAGE!`, which is unset in
+  // unit tests and in a bin/ script run outside `sst shell`, however the type
+  // reads. A stage we cannot name is not a local one.
+  return (
+    typeof stage === 'string' && (stage === LOCAL_STAGE || stage.startsWith(`${LOCAL_STAGE}-`))
+  );
 }
 
 /**
@@ -108,6 +156,10 @@ export const NETWORK_ID_BY_REGION: Record<S3Region, string> = {
   [S3Region.UsEast1]: 'fth',
   [S3Region.EuCentral3]: 'forge',
   [S3Region.UsEast9]: 'forgeDev',
+  // The same network as us-east-9: one Hilt serving both regions, which is
+  // what makes a tenant on it region-free.
+  [S3Region.EuCentral9]: 'forgeDev',
+  [S3Region.UsWest9]: 'forgeDev2',
 };
 
 /** The network behind a region, or undefined for a region the product does not know. */
@@ -194,8 +246,21 @@ export type AccessModel = 'service-keys' | 'iam';
  * without one in hand.
  */
 export function getRegionAccessModel(region: S3Region): AccessModel {
-  return region === S3Region.EuCentral3 || region === S3Region.UsEast9 ? 'iam' : 'service-keys';
+  return IAM_REGIONS.has(region) ? 'iam' : 'service-keys';
 }
+
+/**
+ * The regions whose backend models a principal: every Forge region, local
+ * smelt ones included. The regions of one network must all be here or none
+ * of them: the console reads the model off the first region a network serves
+ * and applies it to the rest.
+ */
+const IAM_REGIONS: ReadonlySet<S3Region> = new Set([
+  S3Region.EuCentral3,
+  S3Region.UsEast9,
+  S3Region.EuCentral9,
+  S3Region.UsWest9,
+]);
 
 /**
  * Whether the orchestrator behind a region serves the `iam` access model:
@@ -327,10 +392,20 @@ const PRODUCTION_HOSTS: ReadonlySet<string> = new Set([
  * staging, per-PR previews and personal dev all share a non-production Auth0
  * tenant and are treated as {@link Stage.Staging} for the purposes of
  * stage-derived config (Auth0 domain, S3 endpoint, etc.).
+ *
+ * The dev server is the one console served from the machine running the
+ * stack, so it is the one place the local stage's regions exist. Naming it
+ * here is what lets the browser offer them; everything else a local stage
+ * derives matches staging, which is what it had before.
  */
-export function getStageFromHostname(hostname: string): Stage {
-  return PRODUCTION_HOSTS.has(hostname.toLowerCase()) ? Stage.Production : Stage.Staging;
+export function getStageFromHostname(hostname: string): StageLike {
+  const host = hostname.toLowerCase();
+  if (PRODUCTION_HOSTS.has(host)) return Stage.Production;
+  return LOCAL_HOSTS.has(host) ? LOCAL_STAGE : Stage.Staging;
 }
+
+/** Hostnames the Vite dev server answers on. */
+const LOCAL_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 /**
  * Product email "from" address. Non-production uses the +staging subaddress so

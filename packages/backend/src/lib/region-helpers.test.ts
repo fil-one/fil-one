@@ -284,6 +284,25 @@ describe('getProvisionedNetworks', () => {
     expect(result).toEqual([]);
   });
 
+  it('hands the profile over, so a tenant on a network that is not running refuses', async () => {
+    // The registry is what refuses; passing the profile is what asks it to.
+    const aurora = fakeOrchestrator('aurora');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    await getProvisionedNetworks('org-1');
+
+    expect(mockGetAvailableOrchestrators).toHaveBeenLastCalledWith(fakeOrgProfile('org-1'));
+  });
+
+  it('withholds it for a caller that would rather have a partial answer', async () => {
+    const aurora = fakeOrchestrator('aurora');
+    mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+
+    await getProvisionedNetworks('org-1', { skipMissingNetworks: true });
+
+    expect(mockGetAvailableOrchestrators).toHaveBeenLastCalledWith(undefined);
+  });
+
   it('fetches the PROFILE row once for all orchestrators', async () => {
     const aurora = fakeOrchestrator('aurora');
     const fth = fakeOrchestrator('fth');

@@ -11,8 +11,11 @@ set -euo pipefail
 # Login needs Auth0ClientId/Secret for the shared dev tenant, with
 # https://localhost:5173 registered there (docs/Auth0OneTimeSetup.md). Billing needs
 # a sandbox StripeSecretKey/StripePublishableKey/StripePriceId and the Stripe CLI.
-# SMELT=true runs the Forge dev region (us-east-9) against a local smelt network
-# instead of the hosted one; SMELT_HOST overrides the host.docker.internal default.
+# SMELT=true runs the Forge dev regions against a local smelt stack instead of
+# the hosted network; SMELT_HOST overrides the host.docker.internal default. A
+# smelt stack on its two-network manifest serves us-east-9 and eu-central-9 on
+# one Hilt and us-west-9 on a second; one running a single network serves
+# us-east-9 alone and the other two regions reach nothing.
 
 cd "$(dirname "$0")/.."
 STAGE="${STAGE:-local}"
@@ -51,16 +54,37 @@ if [ -s "$placeholders" ]; then
   sst secret load "$placeholders"
 fi
 
-# With smelt, its Hilt partner key replaces the hosted network's token. Going back
-# to the hosted network means setting ForgeDevManagementApiToken again.
+# With smelt, each Hilt's partner key replaces the hosted network's token.
+# Going back to the hosted network means setting ForgeDevManagementApiToken
+# again. SMELT_PROJECT names the compose project when it is not the default.
 if [ "${SMELT:-}" = true ]; then
-  smelt_key=$(docker inspect smelt-hilt-1 --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
-    sed -n 's/^HILT_AUTH_PARTNER_KEY=//p' | cut -d, -f1 || true)
+  smelt_project="${SMELT_PROJECT:-smelt}"
+
+  # partner_key <hilt-service>: the HILT_AUTH_PARTNER_KEY of that container,
+  # or empty when it is not running. The value is never printed.
+  partner_key() {
+    docker inspect "${smelt_project}-$1-1" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
+      sed -n 's/^HILT_AUTH_PARTNER_KEY=//p' | cut -d, -f1 || true
+  }
+
+  smelt_key=$(partner_key hilt)
   if [ -z "$smelt_key" ]; then
     echo "SMELT=true but smelt's hilt container is not running" >&2
     exit 1
   fi
   sst secret set ForgeDevManagementApiToken "$smelt_key" >/dev/null
+
+  # The second network is optional: a single-network smelt stack has no
+  # hilt-1. The stage is told which it got, so a request for a region the
+  # stack does not serve fails saying the network is not running.
+  smelt_key2=$(partner_key hilt-1)
+  if [ -n "$smelt_key2" ]; then
+    sst secret set ForgeDev2ManagementApiToken "$smelt_key2" >/dev/null
+    export SMELT_SECOND_NETWORK=true
+    echo "Using smelt networks hilt and hilt-1 (project $smelt_project)"
+  else
+    echo "Using smelt network hilt only (project $smelt_project); us-west-9 will refuse"
+  fi
 fi
 
 pnpm run build

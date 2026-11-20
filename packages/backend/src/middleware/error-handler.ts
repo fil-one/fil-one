@@ -1,7 +1,7 @@
 import type { MiddlewareObj, Request } from '@middy/core';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2, Context } from 'aws-lambda';
 import type { ErrorResponse } from '@filone/shared';
-import { IamRegionRefusedError } from '../lib/errors.ts';
+import { IamRegionRefusedError, NetworkNotRunningError } from '../lib/errors.ts';
 import { OrgDeletingError } from '../lib/org-profile.ts';
 import {
   ResponseBuilder,
@@ -41,6 +41,24 @@ export function errorHandlerMiddleware(): MiddlewareObj<
       request.response = new ResponseBuilder()
         .status(502)
         .body<ErrorResponse>({ message: getIamRegionRefusedMessage(action, regions, succeeded) })
+        .build();
+      return;
+    }
+
+    // The request named a storage network this deployment does not run, so
+    // there is nowhere to send it. Expected on a developer's machine, where
+    // the console may offer the regions of a smelt network the stack is not
+    // running; a 503 rather than a fault, since the region is real and the
+    // deployment simply has no endpoint for it.
+    if (request.error instanceof NetworkNotRunningError) {
+      console.warn('[error-handler] no endpoint for the storage network', {
+        orchestratorId: request.error.orchestratorId,
+      });
+      request.response = new ResponseBuilder()
+        .status(503)
+        .body<ErrorResponse>({
+          message: 'That storage network is not running for this deployment',
+        })
         .build();
       return;
     }
