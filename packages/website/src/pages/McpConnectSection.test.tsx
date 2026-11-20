@@ -14,6 +14,15 @@ function renderSection() {
 }
 
 describe('McpConnectSection', () => {
+  // The AI agents page titles itself with an h1, so the section comes next.
+  it('heads the section at level 2', () => {
+    renderSection();
+
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Connect an agent with MCP' }),
+    ).toBeVisible();
+  });
+
   it('offers each agent as a tab', () => {
     renderSection();
 

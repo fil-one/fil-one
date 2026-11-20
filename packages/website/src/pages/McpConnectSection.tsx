@@ -24,7 +24,7 @@ export function McpConnectSection() {
 
   return (
     <section>
-      <Heading tag="h3" size="sm" className="mb-3">
+      <Heading tag="h2" size="sm" className="mb-3">
         Connect an agent with MCP
       </Heading>
       <p className="mb-3 text-sm text-(--color-paragraph-text)">
