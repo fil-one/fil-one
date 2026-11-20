@@ -13,17 +13,24 @@ import { setupAuth0McpAuthorization } from './setup-mcp-authorization.ts';
 const DOMAIN = 'any-tenant.auth0.invalid';
 const API = `https://${DOMAIN}/api/v2`;
 const RESOURCE_SERVER_URL = `${API}/resource-servers/${encodeURIComponent('https://console.test.invalid/api/mcp')}`;
+const DEFAULT_GRANTS_URL = `${API}/client-grants?audience=${encodeURIComponent('https://console.test.invalid/api/mcp')}&default_for=third_party_clients`;
 
-/** A tenant as setup finds it: what the resource-server GET answers, and its connections. */
+/**
+ * A tenant as setup finds it: what the resource-server GET answers, the default
+ * third-party grants on the MCP API, and its connections.
+ */
 function stubTenant({
   resourceServerStatus,
+  defaultGrants = [],
   connections,
 }: {
   resourceServerStatus: number;
+  defaultGrants?: { id: string }[];
   connections: { id: string; name: string; is_domain_connection?: boolean }[];
 }) {
   mockFetch.mockImplementation(async (url, init) => {
     if (url === RESOURCE_SERVER_URL) return new Response('{}', { status: resourceServerStatus });
+    if (url === DEFAULT_GRANTS_URL) return Response.json(defaultGrants);
     if (url.startsWith(`${API}/connections?name=`)) {
       const name = decodeURIComponent(url.split('name=')[1]);
       return Response.json(connections.filter((c) => c.name === name));
@@ -56,7 +63,7 @@ describe('setupAuth0McpAuthorization', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
-  it('creates the MCP API, turns on CIMD in place of open registration and shares the console’s connections on a fresh tenant', async () => {
+  it('creates the MCP API, grants third-party clients user access to it, turns on CIMD in place of open registration and shares the console’s connections on a fresh tenant', async () => {
     stubTenant({
       resourceServerStatus: 404,
       connections: [
@@ -79,15 +86,26 @@ describe('setupAuth0McpAuthorization', () => {
           allow_offline_access: true,
         },
       ],
+      [
+        'POST',
+        `${API}/client-grants`,
+        {
+          audience: 'https://console.test.invalid/api/mcp',
+          default_for: 'third_party_clients',
+          subject_type: 'user',
+          scope: [],
+        },
+      ],
       TENANT_SETTINGS_WRITE,
       ['PATCH', `${API}/connections/con-db`, { is_domain_connection: true }],
       ['PATCH', `${API}/connections/con-google`, { is_domain_connection: true }],
     ]);
   });
 
-  it('leaves an existing MCP API and domain-level connections as they are', async () => {
+  it('leaves an existing MCP API, its third-party grant and domain-level connections as they are', async () => {
     stubTenant({
       resourceServerStatus: 200,
+      defaultGrants: [{ id: 'any-grant' }],
       connections: [
         { id: 'con-db', name: 'Username-Password-Authentication', is_domain_connection: true },
       ],
