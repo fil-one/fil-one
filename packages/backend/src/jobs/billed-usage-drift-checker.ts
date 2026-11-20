@@ -198,7 +198,15 @@ async function readBilledAndActual(
   ]);
   // The meter keeps the last value reported in the period; no summary means nothing was reported.
   const billedGb = summaries.data[0]?.aggregated_value ?? 0;
-  const actualGb = (aggregate?.averageStorageBytesUsed ?? 0) / GB_BYTES;
+  // No aggregate means no network has a ready tenant: usage is unknown, not zero.
+  // With nothing billed there is nothing to compare; otherwise it is a failed read.
+  if (!aggregate) {
+    if (billedGb > 0) {
+      throw new Error(`usage unmeasured: no ready tenant, Stripe holds ${billedGb} GB`);
+    }
+    return { billedGb, actualGb: 0 };
+  }
+  const actualGb = aggregate.averageStorageBytesUsed / GB_BYTES;
   return { billedGb, actualGb };
 }
 

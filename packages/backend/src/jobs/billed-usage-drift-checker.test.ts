@@ -202,6 +202,40 @@ describe('billed-usage-drift-checker handler', () => {
     expect(outOfSyncLogs(warnSpy)).toMatchObject([{ billedGb: 0, actualGb: 350, gapGb: 350 }]);
   });
 
+  it('reports a probe failure, not drift, when usage cannot be measured but Stripe holds a value', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [subscriptionRow({ orgId: 'org-a' })] });
+    givenBilledGb(300);
+    // No network has a ready tenant for the org, so its usage is unknown rather than zero.
+    mockGetOrgAggregateUsage.mockResolvedValue(undefined);
+
+    await handler();
+
+    expect(outOfSyncLogs(warnSpy)).toStrictEqual([]);
+    expect(errorSpy).toHaveBeenCalledWith('[billed-usage-drift-checker] probe failed', {
+      orgId: 'org-a',
+      error: expect.objectContaining({ message: expect.stringContaining('usage unmeasured') }),
+    });
+    expect(runSummary()).toMatchObject({
+      BilledUsageOrgsChecked: 0,
+      BilledUsageDrift: 0,
+      BilledUsageProbeFailed: 1,
+    });
+  });
+
+  it('counts an org as checked without drift when usage cannot be measured and nothing is billed', async () => {
+    ddbMock.on(ScanCommand).resolves({ Items: [subscriptionRow()] });
+    givenBilledGb(undefined);
+    mockGetOrgAggregateUsage.mockResolvedValue(undefined);
+
+    await handler();
+
+    expect(runSummary()).toMatchObject({
+      BilledUsageOrgsChecked: 1,
+      BilledUsageDrift: 0,
+      BilledUsageProbeFailed: 0,
+    });
+  });
+
   it.each([
     { name: 'the period ends more than 48 hours from now', hoursToEnd: 49 },
     { name: 'the period ended within the last 12 hours, pending renewal', hoursToEnd: -11 },
