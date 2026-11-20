@@ -29,7 +29,7 @@ The hosted container would be a second production system that duplicates what th
 
 ### 1. Hosted MCP is a route in the console backend
 
-Add `POST /api/mcp` on the existing API Gateway, handled by a Lambda built with the project's `createFunction` helper. The handler is stateless [JSON-RPC](https://www.jsonrpc.org/specification) over [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports): one JSON response per request, no sessions and no server-sent events. State lives in the console's existing DynamoDB tables; there is no PostgreSQL. The first tool, `list_buckets`, calls `listOrgBuckets`, the same code the console's bucket list uses.
+Add `POST /api/mcp` on the existing API Gateway, handled by a Lambda built with the project's `createFunction` helper. The handler is stateless [JSON-RPC](https://www.jsonrpc.org/specification) over [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports): one JSON response per request, no sessions and no server-sent events, so a GET answers 405. State lives in the console's existing DynamoDB tables; there is no PostgreSQL. The first tool, `list_buckets`, calls `listOrgBuckets`, the same code the console's bucket list uses. The MCP routes answer 404 until `MCP_ENABLED` is on, which production leaves off until launch.
 
 ### 2. Auth0 is the authorization server
 
@@ -47,7 +47,7 @@ Every read and write of object data goes through a [presigned URL](https://docs.
 
 ### 5. Presigned URLs are signed with the org's console key
 
-The backend checks the user's role and the bucket policy, then signs with the org's console key, as the console's presign handler does. Fil One stores no access key secrets, so it can't sign as a user's key. Lifetimes stay short, because an issued URL stays valid until it expires.
+The backend checks the user's role and the bucket policy, then signs with the org's console key, as the console's presign handler does. Fil One keeps only the console key's secret, in SSM, and no secret of a key a user creates, so it can't sign as a user's key. Lifetimes stay short, because an issued URL stays valid until it expires.
 
 ### 6. No MCP-specific quotas or concurrency limits
 
@@ -81,7 +81,7 @@ The database, the OAuth server and the stored customer keys go away; the remaini
 ### Follow-up work
 
 - Add the tools users need first, written against backend services: access keys, members and roles, usage and billing, bucket creation.
-- Put the route behind a feature flag. Add a docs.filone.com page before launch, or the `docs:gated` label while it's flagged.
+- Add a docs.filone.com page before turning on `MCP_ENABLED` in production; until then the PRs carry the `docs:gated` label.
 
 ## Alternatives considered
 
@@ -95,7 +95,7 @@ Replacing PostgreSQL with DynamoDB would remove the container, but keep a second
 
 ### Act as an access key the agent names
 
-Fil One stores no key secrets, so the backend can't sign as a user's key. Storing every new key's secret would make the console hold all of them. A Hilt route that presigns as a key would cover only Forge, not FTH or Aurora.
+Fil One stores no secret of a key a user creates, so the backend can't sign as that key. Storing every new key's secret would make the console hold all of them. A Hilt route that presigns as a key would cover only Forge, not FTH or Aurora.
 
 ### Auth0 Organizations for picking the org
 
