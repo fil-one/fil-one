@@ -7,6 +7,7 @@ import {
   CreditCardIcon,
   DatabaseIcon,
   KeyIcon,
+  RobotIcon,
   SquaresFourIcon,
   UsersIcon,
 } from '@phosphor-icons/react/dist/ssr';
@@ -14,6 +15,7 @@ import { Link, useMatchRoute } from '@tanstack/react-router';
 
 import { DOCS_URL } from '@filone/shared';
 import type { Permission } from '@filone/shared';
+import { MCP_ENABLED } from '../lib/mcp-connect.js';
 import { usePermissions } from '../lib/use-permissions.js';
 import { useRagAccess } from '../lib/use-rag-access.js';
 import { useSidebarData } from './use-sidebar-data.js';
@@ -45,6 +47,8 @@ type NavItem = {
   permission?: Permission;
   /** Shown only to users on the Bucket Intelligence allowlist (`ragAccess`). */
   ragOnly?: boolean;
+  /** Shown only while the stage serves MCP. */
+  mcpOnly?: boolean;
 };
 
 type NavGroup = {
@@ -66,6 +70,14 @@ const navGroups: NavGroup[] = [
         // ReadOnly holds no `keys.*`, so the list request is refused and the
         // page has nothing but the connection reference to offer.
         permission: 'keys.manage_own',
+      },
+      // No permission: an agent acts with its user's own role.
+      {
+        path: '/agents',
+        icon: RobotIcon,
+        label: 'AI agents',
+        testId: 'nav-agents',
+        mcpOnly: true,
       },
       {
         path: '/bucket-intelligence',
@@ -122,7 +134,10 @@ function NavLinks({ collapsed, matchRoute, onClose, showTestIds }: NavLinksProps
     .map((group) => ({
       ...group,
       items: group.items.filter(
-        (item) => (!item.permission || has(item.permission)) && (ragAccess || !item.ragOnly),
+        (item) =>
+          (!item.permission || has(item.permission)) &&
+          (ragAccess || !item.ragOnly) &&
+          (MCP_ENABLED || !item.mcpOnly),
       ),
     }))
     .filter((group) => group.items.length > 0);

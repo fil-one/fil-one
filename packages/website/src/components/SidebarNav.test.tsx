@@ -1,8 +1,17 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { OrgRole } from '@filone/shared';
 import type { MeResponse } from '@filone/shared';
+
+// The AI agents entry follows the stage's MCP flag; tests that care set it.
+const mcpFlag = vi.hoisted(() => ({ enabled: true }));
+vi.mock('../lib/mcp-connect.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/mcp-connect.js')>()),
+  get MCP_ENABLED() {
+    return mcpFlag.enabled;
+  },
+}));
 
 import { SidebarNav } from './SidebarNav';
 import { ToastProvider } from './Toast/ToastProvider.js';
@@ -131,6 +140,7 @@ const UNIQUE_TESTIDS = [
   'nav-dashboard',
   'nav-buckets',
   'nav-api-keys',
+  'nav-agents',
   'nav-bucket-intelligence',
   'nav-members',
   'nav-billing',
@@ -253,6 +263,26 @@ describe('SidebarNav — the API Keys entry', () => {
   });
 });
 
+describe('SidebarNav, the AI agents entry', () => {
+  beforeEach(() => {
+    mcpFlag.enabled = true;
+  });
+
+  // Agents act with the caller's own role, so every member gets the page.
+  it.each(Object.values(OrgRole))('renders for %s while MCP is on', (role) => {
+    const { container } = renderBothSidebars(role);
+
+    expect(container.querySelectorAll('[data-testid="nav-agents"]')).toHaveLength(1);
+  });
+
+  it('is absent while MCP is off', () => {
+    mcpFlag.enabled = false;
+    const { container } = renderBothSidebars(OrgRole.Owner);
+
+    expect(container.querySelectorAll('[data-testid="nav-agents"]')).toHaveLength(0);
+  });
+});
+
 describe('SidebarNav, the Organization group', () => {
   const ORG_LINK_TESTIDS = ['nav-members', 'nav-billing', 'nav-audit'];
 
@@ -296,6 +326,7 @@ describe('SidebarNav — the billing-blocked gate', () => {
       'nav-dashboard',
       'nav-buckets',
       'nav-api-keys',
+      'nav-agents',
       'nav-members',
       'nav-billing',
       'nav-audit',
