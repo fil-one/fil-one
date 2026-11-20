@@ -29,13 +29,13 @@ The hosted container would be a second production system that duplicates what th
 
 ### 1. Hosted MCP is a route in the console backend
 
-Add `POST /api/mcp` on the existing API Gateway, handled by a Lambda built with the project's `createFunction` helper. The handler is stateless [JSON-RPC](https://www.jsonrpc.org/specification) over [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports): one JSON response per request, no sessions and no server-sent events, so a GET answers 405. State lives in the console's existing DynamoDB tables; there is no PostgreSQL. The first tool, `list_buckets`, calls `listOrgBuckets`, the same code the console's bucket list uses. The MCP routes answer 404 until `MCP_ENABLED` is on, which production leaves off until launch.
+Add `POST /api/mcp` on the existing API Gateway, handled by a Lambda built with the project's `createFunction` helper. The handler is stateless [JSON-RPC](https://www.jsonrpc.org/specification) over [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports): one JSON response per JSON-RPC request, `202` with no body for a notification, no sessions and no server-sent events. A `GET /api/mcp` route answers 405, and a request whose `MCP-Protocol-Version` the server doesn't support gets 400. State lives in the console's existing DynamoDB tables; there is no PostgreSQL. The first tool, `list_buckets`, calls `listOrgBuckets`, the same code the console's bucket list uses. The MCP routes answer 404 until `MCP_ENABLED` is on, which production leaves off until launch.
 
 ### 2. Auth0 is the authorization server
 
 [MCP clients](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization) find Auth0 through the [protected-resource metadata](https://www.rfc-editor.org/rfc/rfc9728) at `/.well-known/oauth-protected-resource/api/mcp`, and sign the user in with the console's own connections. Auth0 issues access tokens whose audience is the MCP URL ([RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)). Clients register through [Client ID Metadata Documents](https://datatracker.ietf.org/doc/draft-ietf-oauth-client-id-metadata-document/); [dynamic client registration](https://www.rfc-editor.org/rfc/rfc7591) stays off. The backend verifies the token and resolves the same user, org and role as a console session.
 
-This change turns on Client ID Metadata Document support in each Auth0 tenant behind the MCP URL. Without it, clients can't register and no tool call authenticates; `auth.fil.one` doesn't advertise it today.
+Stack setup configures each Auth0 tenant behind the MCP URL: Client ID Metadata Document support with dynamic registration of those clients, the resource-parameter compatibility profile (MCP clients name the API with `resource`, not Auth0's `audience`), and a default grant that lets third-party clients ask for user tokens for the MCP API. Without these, clients can't register or get a token; `auth.fil.one` doesn't advertise CIMD today. The setup's Management API client needs `read:resource_servers`, `create:resource_servers`, `update:tenant_settings`, `read:client_grants` and `create:client_grants`.
 
 ### 3. Tools act as the user, with the console's permissions
 
@@ -68,7 +68,7 @@ The database, the OAuth server and the stored customer keys go away; the remaini
 | Storage credentials      | Pasted S3 keys, stored encrypted                                             | None stored per user; the org's console key signs after role and bucket-policy checks |
 | State                    | PostgreSQL                                                                   | The console's existing DynamoDB tables                                                |
 | Quotas and limits        | 50 connections per owner, per-owner request budgets, per-process concurrency | None beyond what console routes have                                                  |
-| Transport                | Long-running HTTP server                                                     | Stateless JSON-RPC, one JSON response per request                                     |
+| Transport                | Long-running HTTP server                                                     | Stateless JSON-RPC, one JSON response per request; 202 for a notification             |
 
 ### Accepted costs
 
