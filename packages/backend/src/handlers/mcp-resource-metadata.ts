@@ -2,7 +2,7 @@ import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { resolveAuth0Domain } from '../lib/auth0-domain.ts';
-import { getMcpResourceUrl } from '../lib/mcp-resource.ts';
+import { getMcpResourceUrl, mcpEnabledMiddleware } from '../lib/mcp-resource.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
 
@@ -25,4 +25,7 @@ export async function baseHandler(
     .build();
 }
 
-export const handler = middy(baseHandler).use(httpHeaderNormalizer()).use(errorHandlerMiddleware());
+export const handler = middy(baseHandler)
+  .use(mcpEnabledMiddleware())
+  .use(httpHeaderNormalizer())
+  .use(errorHandlerMiddleware());

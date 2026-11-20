@@ -64,6 +64,7 @@ describe('ROUTE_MANIFEST', () => {
       entries.filter((route) => route.category === category).map((route) => route.handler);
 
     expect(byCategory('public')).toStrictEqual([
+      'mcp-get',
       'mcp-resource-metadata',
       'auth-login',
       'auth-callback',
@@ -81,12 +82,14 @@ describe('ROUTE_MANIFEST', () => {
     // set-bucket-rag-enablement creates or discards an index depending on the
     // flag. create-org and presign-org-logo create an org (or its logo) the
     // caller holds no role in yet, so there is no membership for a permission
-    // to check. None of the four has a permission the chain could name.
+    // to check. mcp serves tools that each need their own permission. None of
+    // these has a permission the chain could name.
     const inHandler = entries
       .filter((route) => route.requires === 'in-handler')
       .map((route) => route.handler);
     expect(inHandler.sort()).toStrictEqual([
       'create-org',
+      'mcp',
       'presign',
       'presign-org-logo',
       'set-bucket-rag-enablement',
