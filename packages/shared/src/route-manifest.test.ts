@@ -63,9 +63,18 @@ describe('ROUTE_MANIFEST', () => {
     const byCategory = (category: RouteManifestEntry['category']) =>
       entries.filter((route) => route.category === category).map((route) => route.handler);
 
-    expect(byCategory('public')).toStrictEqual(['auth-login', 'auth-callback', 'auth-logout']);
+    expect(byCategory('public')).toStrictEqual([
+      'mcp-get',
+      'mcp-resource-metadata',
+      'auth-login',
+      'auth-callback',
+      'auth-logout',
+    ]);
     expect(byCategory('webhook')).toStrictEqual(['stripe-webhook']);
     expect(byCategory('bearer')).toStrictEqual(['query-bucket']);
+    expect(
+      entries.filter((route) => route.bearerToken).map((route) => route.handler),
+    ).toStrictEqual(['mcp']);
   });
 
   it('checks the routes whose requirement depends on the request in their handlers', () => {
@@ -73,12 +82,14 @@ describe('ROUTE_MANIFEST', () => {
     // set-bucket-rag-enablement creates or discards an index depending on the
     // flag. create-org and presign-org-logo create an org (or its logo) the
     // caller holds no role in yet, so there is no membership for a permission
-    // to check. None of the four has a permission the chain could name.
+    // to check. mcp serves tools that each need their own permission. None of
+    // these has a permission the chain could name.
     const inHandler = entries
       .filter((route) => route.requires === 'in-handler')
       .map((route) => route.handler);
     expect(inHandler.sort()).toStrictEqual([
       'create-org',
+      'mcp',
       'presign',
       'presign-org-logo',
       'set-bucket-rag-enablement',

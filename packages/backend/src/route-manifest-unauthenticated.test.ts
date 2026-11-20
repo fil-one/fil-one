@@ -28,8 +28,11 @@ import { buildContext, buildEvent } from './test/lambda-test-utilities.ts';
 process.env.FILONE_STAGE ??= 'test';
 process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
 process.env.AUTH0_DOMAIN ??= 'test.auth0.invalid';
+// The MCP routes are dark unless the stage turns them on.
+process.env.MCP_ENABLED = 'true';
 process.env.AUTH0_AUDIENCE ??= 'https://api.test.invalid';
 process.env.WEBSITE_URL ??= 'https://console.test.invalid';
+process.env.MCP_RESOURCE_URL ??= 'https://console.test.invalid/api/mcp';
 
 const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
 
@@ -150,6 +153,20 @@ const OPEN_ROUTE_ANSWERS: Record<string, (result: APIGatewayProxyStructuredResul
   'auth-logout': (result) => {
     expect(result.statusCode).toBe(302);
     expect(redirectTarget(result)).toBe(`https://${AUTH0_DOMAIN}/v2/logout`);
+  },
+  // Public by design: it tells an MCP client where to sign in, and nothing more.
+  'mcp-resource-metadata': (result) => {
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      resource: 'https://console.test.invalid/api/mcp',
+      authorization_servers: [`https://${AUTH0_DOMAIN}/`],
+      bearer_methods_supported: ['header'],
+      resource_name: 'Fil One',
+    });
+  },
+  // The MCP endpoint keeps no event stream, which a GET would open.
+  'mcp-get': (result) => {
+    expect(result).toMatchObject({ statusCode: 405, headers: { Allow: 'POST' } });
   },
   // The signature is the webhook's whole authentication, and a body arriving
   // without one is refused before anything is read or written.
