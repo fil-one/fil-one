@@ -222,6 +222,48 @@ describe('mcp baseHandler', () => {
     expect(response).toStrictEqual({ statusCode: 200, body: expected });
   });
 
+  it('refuses a request carrying an MCP-Protocol-Version it does not support with 400', async () => {
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      method: 'POST',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 8,
+        method: 'tools/call',
+        params: { name: 'list_buckets' },
+      }),
+    });
+    event.headers['mcp-protocol-version'] = '1999-01-01';
+
+    const result = await baseHandler(event);
+
+    expect(listOrgBuckets).not.toHaveBeenCalled();
+    expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+      statusCode: 400,
+      body: {
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32600, message: 'Unsupported MCP-Protocol-Version: 1999-01-01' },
+      },
+    });
+  });
+
+  it('serves a request carrying an MCP-Protocol-Version it supports', async () => {
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'ping' }),
+    });
+    event.headers['mcp-protocol-version'] = SUPPORTED_PROTOCOL_VERSIONS[1];
+
+    const result = await baseHandler(event);
+
+    expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+      statusCode: 200,
+      body: { jsonrpc: '2.0', id: 9, result: {} },
+    });
+  });
+
   it('returns a Parse error for a body that is not JSON', async () => {
     const result = await baseHandler(
       buildEvent({ userInfo: USER_INFO, method: 'POST', body: '{not json' }),

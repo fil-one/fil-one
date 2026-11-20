@@ -3,7 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { buildJsonRpcResponse, isJsonRpcRequest } from '../lib/json-rpc.ts';
 import { mcpEnabledMiddleware } from '../lib/mcp-resource.ts';
-import { dispatchMcpRequest } from '../lib/mcp-server.ts';
+import { SUPPORTED_PROTOCOL_VERSIONS, dispatchMcpRequest } from '../lib/mcp-server.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
 import { getUserInfo } from '../lib/user-context.ts';
@@ -21,6 +21,19 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  // Streamable HTTP: an unsupported version is a 400; a missing header means 2025-03-26.
+  const version = event.headers['mcp-protocol-version'];
+  if (version !== undefined && !SUPPORTED_PROTOCOL_VERSIONS.includes(version)) {
+    return new ResponseBuilder()
+      .status(400)
+      .body({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32600, message: `Unsupported MCP-Protocol-Version: ${version}` },
+      })
+      .build();
+  }
+
   let message: unknown;
   try {
     const raw = event.isBase64Encoded
