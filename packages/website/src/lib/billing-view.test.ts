@@ -94,6 +94,14 @@ describe('pricingLine', () => {
     ).toBe('');
   });
 
+  it('states the discounted rate when a recurring percentage comes off it', () => {
+    const discounted = subscription({
+      ...SELF_SERVE,
+      discounts: [{ duration: 'forever', percentOff: 20 }],
+    });
+    expect(pricingLine(discounted)).toBe('$3.99/TB per month');
+  });
+
   it('describes what an inactive account needs', () => {
     expect(pricingLine(subscription({ status: SubscriptionStatus.Inactive }))).toBe(
       'Choose a plan to start storing data',

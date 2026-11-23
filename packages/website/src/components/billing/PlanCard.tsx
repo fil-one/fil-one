@@ -7,9 +7,7 @@ import { Button } from '../Button';
 import { Card } from '../Card';
 import {
   discountLabel,
-  formatCents,
   getAppliedDiscounts,
-  getDiscountedRateCents,
   planTitle,
   pricingLine,
   statusBadge,
@@ -72,7 +70,6 @@ export function PlanCard({ subscription, mayManage, onManage, onChoosePlan }: Pl
   const price = pricingLine(subscription);
   const timeline = timelineLine(subscription);
   const discounts = getAppliedDiscounts(subscription);
-  const discountedRate = getDiscountedRateCents(subscription);
   const running =
     subscription.status === SubscriptionStatus.Active ||
     subscription.status === SubscriptionStatus.PastDue;
@@ -156,8 +153,8 @@ export function PlanCard({ subscription, mayManage, onManage, onChoosePlan }: Pl
                 takes off, not the code that applied it, since the code was
                 typed once at checkout and can run to 40 characters while the
                 terms are what the customer checks against an invoice. With a
-                discount that changes the rate (`getDiscountedRateCents`), the
-                rate shown is the discounted one and the list rate is not
+                discount that changes the rate, `pricingLine` gives the
+                discounted one and the list rate is not
                 repeated: struck through beside it, two prices on one line read
                 as a puzzle. A tag glyph and text in one dark blue (`brand-800`,
                 9.8:1 on white), not a pill: a second pill was one too many.
@@ -169,9 +166,7 @@ export function PlanCard({ subscription, mayManage, onManage, onChoosePlan }: Pl
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 {price && (
                   <p className="text-sm text-zinc-900 tabular-nums" data-testid="plan-price">
-                    {discountedRate === null
-                      ? price
-                      : `${formatCents(discountedRate)}/TB per month`}
+                    {price}
                   </p>
                 )}
                 {discounts.map((discount, index) => (

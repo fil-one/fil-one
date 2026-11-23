@@ -119,13 +119,20 @@ export function formatCents(cents: number): string {
  * usage card right below this one already states the trial's own storage and
  * egress limits, so repeating either fact here is redundant at best and, for
  * the rate, reads as a bill that has not started.
+ *
+ * The rate is the one they pay: after a discount that changes it
+ * (`getDiscountedRateCents`), so the plan card and the dashboard quote the
+ * same number.
  */
 export function pricingLine(subscription: Subscription): string {
   const { pricePerTbCents, status } = subscription;
 
   if (status === SubscriptionStatus.Trialing) return '';
   if (status === SubscriptionStatus.Manual) return 'Billed manually';
-  if (pricePerTbCents) return `${formatCents(pricePerTbCents)}/TB per month`;
+  if (pricePerTbCents) {
+    const rateCents = getDiscountedRateCents(subscription) ?? pricePerTbCents;
+    return `${formatCents(rateCents)}/TB per month`;
+  }
   if (status === SubscriptionStatus.Inactive) return 'Choose a plan to start storing data';
 
   return 'Custom pricing';
@@ -187,8 +194,8 @@ export function getDiscountedRateCents(subscription: Subscription): number | nul
 export function timelineLine(subscription: Subscription): string | null {
   const { status, trialEndsAt, gracePeriodEndsAt, currentPeriodEnd, canceledAt } = subscription;
 
-  // No "Trial" subject: the plan name and the pill beside it already say
-  // it's a trial, and this line's job is just the deadline.
+  // No "Trial" subject: the plan name ("Free trial") already says it's a
+  // trial, and this line's job is just the deadline.
   if (status === SubscriptionStatus.Trialing && trialEndsAt) {
     return endsInLabel(undefined, trialEndsAt);
   }

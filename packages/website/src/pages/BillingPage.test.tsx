@@ -525,3 +525,37 @@ describe('BillingPage — a canceled account', () => {
     expect(container.querySelector('#billing-plan-cta-button')).toBeNull();
   });
 });
+
+describe('BillingPage — the plan and card a paying customer sees', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUsage.mockResolvedValue(USAGE);
+    mockGetInvoices.mockResolvedValue({ invoices: [] });
+  });
+
+  it('shows the discounted rate with the discount beside it for a recurring percentage off', async () => {
+    const billing = payAsYouGoBilling();
+    billing.subscription.discounts = [{ duration: 'forever', percentOff: 20 }];
+    mockGetBilling.mockResolvedValue(billing);
+    renderPage();
+
+    // 20% off $4.99, with the list rate not repeated beside it.
+    expect(await screen.findByTestId('plan-price')).toHaveTextContent(/^\$3\.99\/TB per month$/);
+    expect(screen.getByTestId('plan-discount')).toHaveTextContent(/^20% off every invoice$/);
+  });
+
+  it('names the card by its network and last four', async () => {
+    mockGetBilling.mockResolvedValue({
+      ...payAsYouGoBilling(),
+      paymentMethod: { id: 'any-card', brand: 'amex', last4: '0005', expMonth: 4, expYear: 2031 },
+    });
+    renderPage();
+
+    // The last four sit in a span of their own, so match the whole line.
+    const cardLine = await screen.findByText(
+      (_, element) =>
+        element?.tagName === 'P' && element.textContent === 'American Express •••• 0005',
+    );
+    expect(cardLine).toBeInTheDocument();
+  });
+});
