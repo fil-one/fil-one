@@ -230,6 +230,8 @@ interface ActivityMatch {
 /** What one event type's read found, and where it stopped if it stopped early. */
 interface ActivityTypeRead {
   matches: ActivityMatch[];
+  /** Intents the read found no completion for. Only `bucket.created` reads intents. */
+  openIntents: AuditEvent[];
   cost: AuditQueryCost;
   /**
    * The sort key of the last row examined, when rows older than it were left
@@ -242,6 +244,12 @@ interface ActivityTypeRead {
 export interface ActivityEventsRead {
   /** Every match newer than {@link completeSince}, newest first. Not cut to the limit. */
   events: AuditEvent[];
+  /**
+   * `bucket.created` intents with no completion: the create's outcome is
+   * unknown, such as when the storage call timed out, so the bucket may exist.
+   * Not feed rows; the caller uses them to credit a listed bucket to the console.
+   */
+  openBucketCreations: AuditEvent[];
   cost: AuditQueryCost;
   /**
    * When a read stopped early, the time before which events may be missing.
@@ -259,7 +267,8 @@ export interface ActivityEventsRead {
  * is a row the audit page shows too. Only completions that succeeded qualify:
  * an intent, or an attempt the storage system refused, is history for the audit
  * page but not activity. Key events are S3 keys only, the ones the API keys
- * page lists.
+ * page lists. A bucket creation whose intent was never completed comes back
+ * apart, in `openBucketCreations`, since its bucket may exist.
  *
  * The feed runs on every dashboard load, so its cost must not grow with the
  * org's history. Each event type it shows is read on the `byType`
@@ -318,15 +327,20 @@ export async function queryActivityEvents({
     .filter((match) => cutoff === undefined || match.sortKey >= cutoff)
     .sort((a, b) => (a.sortKey < b.sortKey ? 1 : -1))
     .map((match) => match.event);
+  const openBucketCreations = reads.flatMap((read) => read.openIntents);
 
-  if (cutoff === undefined) return { events, cost };
+  if (cutoff === undefined) return { events, openBucketCreations, cost };
   // The sort key is `{createdAt}#{eventId}`; the time is the part before `#`.
-  return { events, cost, completeSince: cutoff.split('#')[0] };
+  return { events, openBucketCreations, cost, completeSince: cutoff.split('#')[0] };
 }
 
 /**
  * One event type's newest succeeded events, read until `limit` match, the
  * window ends, or the page budget runs out.
+ *
+ * A completion is newer than its intent and the read goes newest first, so by
+ * the time it reaches an intent it has already seen that intent's completion,
+ * if there is one in the window.
  */
 async function readActivityType({
   orgId,
@@ -345,6 +359,8 @@ async function readActivityType({
 }): Promise<ActivityTypeRead> {
   const cost: AuditQueryCost = { pages: 0, rows: 0 };
   const matches: ActivityMatch[] = [];
+  const intents: { correlationId: string; event: AuditEvent }[] = [];
+  const completedCorrelations = new Set<string>();
   let startKey: DynamoCursor;
 
   do {
@@ -357,13 +373,22 @@ async function readActivityType({
     // Every row and `LastEvaluatedKey` read from the index carries its string
     // sort key: DynamoDB indexes only items that have the index's key attributes.
     for (const item of page.Items ?? []) {
-      matches.push({ sortKey: item.gsi1sk!.S!, event: unmarshallAuditEvent(item) });
+      const event = unmarshallAuditEvent(item);
+      if (event.phase === 'intent') {
+        intents.push({ correlationId: event.correlationId, event });
+        continue;
+      }
+      if (event.correlationId) completedCorrelations.add(event.correlationId);
+      if (event.outcome === 'succeeded') matches.push({ sortKey: item.gsi1sk!.S!, event });
     }
     startKey = page.LastEvaluatedKey;
   } while (startKey && matches.length < limit && cost.pages < ACTIVITY_MAX_PAGES_PER_TYPE);
 
-  if (!startKey) return { matches, cost };
-  return { matches, cost, unreadBelow: startKey.gsi1sk!.S! };
+  const openIntents = intents
+    .filter((intent) => !completedCorrelations.has(intent.correlationId))
+    .map((intent) => intent.event);
+  if (!startKey) return { matches, openIntents, cost };
+  return { matches, openIntents, cost, unreadBelow: startKey.gsi1sk!.S! };
 }
 
 function buildActivityQueryInput({
@@ -385,11 +410,20 @@ function buildActivityQueryInput({
     // Exclusive, as `queryInput` explains for the same bound.
     ':to': to,
     ':now': Math.floor(Date.now() / 1000),
-    ':succeeded': 'succeeded',
   };
+  const names: Record<string, string> = { '#ttl': 'ttl' };
   // The TTL clause is the one `queryInput` explains: DynamoDB serves expired
   // rows until it gets round to deleting them.
-  const filterParts = ['#ttl > :now', '#outcome = :succeeded'];
+  const filterParts = ['#ttl > :now'];
+
+  // Bucket creations come back in every phase and outcome, so the read can
+  // tell an intent that was never completed from one that was. The other types
+  // need only the completions that succeeded.
+  if (type !== 'bucket.created') {
+    filterParts.push('#outcome = :succeeded');
+    names['#outcome'] = 'outcome';
+    values[':succeeded'] = 'succeeded';
+  }
 
   if (ACTIVITY_KEY_EVENT_TYPES.includes(type)) {
     filterParts.push('details.keyKind = :s3');
@@ -409,7 +443,7 @@ function buildActivityQueryInput({
     IndexName: EVENT_TYPE_INDEX,
     KeyConditionExpression: 'gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to',
     FilterExpression: filterParts.join(' AND '),
-    ExpressionAttributeNames: { '#ttl': 'ttl', '#outcome': 'outcome' },
+    ExpressionAttributeNames: names,
     ExpressionAttributeValues: marshall(values),
     Limit: ACTIVITY_ROWS_PER_PAGE,
     // Newest first.

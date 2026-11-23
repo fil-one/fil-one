@@ -21,9 +21,11 @@ import {
 
 /**
  * How long before a bucket's creation time its `bucket.created` event may be
- * stamped and still count as the record of it. The console writes the event
- * after the storage system answers, so the event is normally the later of the
- * two; the margin covers clock drift between the storage system and Lambda.
+ * stamped and still count as the record of it. The console writes the
+ * completion after the storage system answers, so it is normally the later of
+ * the two; the margin covers clock drift between the storage system and Lambda.
+ * An intent is written just before the storage call, so the same margin covers
+ * it too.
  */
 const CREATION_MATCH_MARGIN_MS = 5 * 60 * 1000;
 
@@ -80,6 +82,7 @@ export async function baseHandler(
   const unrecorded = getUnrecordedBucketCreations({
     buckets,
     events: auditLog.events,
+    openCreations: auditLog.openBucketCreations,
     // Below the point the audit read stopped, the log's creations are not all
     // in hand, so a bucket there cannot be told apart and is left out.
     since: auditLog.completeSince ?? from,
@@ -93,11 +96,18 @@ export async function baseHandler(
 
 /**
  * Every bucket on the org's provisioned networks. A network that fails to list
- * is logged and skipped: its buckets then lack a creation row, and the audit
- * events still show.
+ * is logged and skipped, and so is the whole listing when the org's networks
+ * cannot be read: those buckets then lack a creation row, and the audit events
+ * still show.
  */
 async function listBuckets(orgId: string, signal: AbortSignal): Promise<BucketSummary[]> {
-  const networks = await getProvisionedNetworks(orgId);
+  let networks: Awaited<ReturnType<typeof getProvisionedNetworks>>;
+  try {
+    networks = await getProvisionedNetworks(orgId);
+  } catch (error) {
+    console.error('[get-activity] getProvisionedNetworks failed', { orgId, error });
+    return [];
+  }
   const settled = await Promise.allSettled(
     // No member id: the feed is for Owner and Admin, who see every bucket.
     networks.map(({ orchestrator, tenantId }) =>
@@ -122,9 +132,14 @@ async function listBuckets(orgId: string, signal: AbortSignal): Promise<BucketSu
 
 /**
  * A creation row for each bucket made since `since` that the audit log has no
- * `bucket.created` for. Made after {@link BUCKET_CREATIONS_AUDITED_SINCE}, that
- * means it was created outside the console, and the row says so; made before,
- * the log could not have recorded it, and the row is a plain creation.
+ * succeeded `bucket.created` for. Made after
+ * {@link BUCKET_CREATIONS_AUDITED_SINCE}, that means it was created outside the
+ * console, and the row says so; made before, the log could not have recorded
+ * it, and the row is a plain creation.
+ *
+ * An open creation (an intent the console never completed, such as when the
+ * storage call timed out) also makes the row a plain creation: someone started
+ * that create in the console, and the audit page shows who.
  *
  * A creation event counts for a bucket when it names the same bucket in the
  * same region and is no older than the bucket, give or take
@@ -134,14 +149,36 @@ async function listBuckets(orgId: string, signal: AbortSignal): Promise<BucketSu
 function getUnrecordedBucketCreations({
   buckets,
   events,
+  openCreations,
   since,
 }: {
   buckets: BucketSummary[];
   events: AuditEvent[];
+  openCreations: AuditEvent[];
   since: string;
 }): RecentActivity[] {
-  // Only the latest creation per bucket matters: if it is too old to cover the
-  // bucket, every earlier one is too.
+  const latestCreationAt = getLatestCreationTimes(events);
+  const latestOpenCreationAt = getLatestCreationTimes(openCreations);
+  return buckets
+    .filter((bucket) => Date.parse(bucket.createdAt) >= Date.parse(since))
+    .filter((bucket) => !isCreationCoveredBy(latestCreationAt, bucket))
+    .map((bucket) => ({
+      // No event id exists; this one is stable for as long as the bucket is.
+      id: `unrecorded:${bucket.region}:${bucket.bucketName}:${bucket.createdAt}`,
+      timestamp: bucket.createdAt,
+      resourceType: 'bucket',
+      action: 'bucket.created',
+      resourceName: bucket.bucketName,
+      ...(Date.parse(bucket.createdAt) >= Date.parse(BUCKET_CREATIONS_AUDITED_SINCE) &&
+        !isCreationCoveredBy(latestOpenCreationAt, bucket) && { createdOutsideConsole: true }),
+    }));
+}
+
+/**
+ * The time of the latest `bucket.created` event per bucket. Only the latest
+ * matters: if it is too old to cover the bucket, every earlier one is too.
+ */
+function getLatestCreationTimes(events: AuditEvent[]): Map<string, number> {
   const latestCreationAt = new Map<string, number>();
   for (const event of events) {
     if (event.type !== 'bucket.created') continue;
@@ -152,26 +189,19 @@ function getUnrecordedBucketCreations({
       Math.max(createdAt, latestCreationAt.get(bucketKey) ?? createdAt),
     );
   }
-  return buckets
-    .filter((bucket) => Date.parse(bucket.createdAt) >= Date.parse(since))
-    .filter((bucket) => {
-      const creationAt = latestCreationAt.get(getBucketKey(bucket));
-      return (
-        creationAt === undefined ||
-        creationAt < Date.parse(bucket.createdAt) - CREATION_MATCH_MARGIN_MS
-      );
-    })
-    .map((bucket) => ({
-      // No event id exists; this one is stable for as long as the bucket is.
-      id: `unrecorded:${bucket.region}:${bucket.bucketName}:${bucket.createdAt}`,
-      timestamp: bucket.createdAt,
-      resourceType: 'bucket',
-      action: 'bucket.created',
-      resourceName: bucket.bucketName,
-      ...(Date.parse(bucket.createdAt) >= Date.parse(BUCKET_CREATIONS_AUDITED_SINCE) && {
-        createdOutsideConsole: true,
-      }),
-    }));
+  return latestCreationAt;
+}
+
+/** Whether one of the creations covers the bucket, by the rule {@link getUnrecordedBucketCreations} gives. */
+function isCreationCoveredBy(
+  latestCreationAt: Map<string, number>,
+  bucket: BucketSummary,
+): boolean {
+  const creationAt = latestCreationAt.get(getBucketKey(bucket));
+  return (
+    creationAt !== undefined &&
+    creationAt >= Date.parse(bucket.createdAt) - CREATION_MATCH_MARGIN_MS
+  );
 }
 
 /** Identifies a bucket across regions, since names are unique only within one. */

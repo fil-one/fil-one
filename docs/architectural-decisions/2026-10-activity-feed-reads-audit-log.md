@@ -46,9 +46,12 @@ entry, nothing ever reads "deleted", and its bucket entries came from a
    "Created outside the console", naming nobody. A bucket made before the console
    started writing `bucket.created` (`BUCKET_CREATIONS_AUDITED_SINCE`, the deploy
    date of this change) gets a plain "Created" row instead, since the log could
-   not have recorded it either way. Bucket Intelligence companion
-   buckets are left out, as on the Buckets page. A region that fails to list is
-   logged and skipped.
+   not have recorded it either way. So does a bucket matching a `bucket.created`
+   intent with no completion (a console create whose storage call timed out), by
+   the same name, region and age rule: someone started it in the console, and the
+   audit page shows who. Bucket Intelligence companion buckets are left out, as on
+   the Buckets page. A region that fails to list is logged and skipped, and so is
+   the whole listing when the org's regions cannot be read.
 6. **The feed's read is bounded.** It runs on every dashboard load, so it reads
    each event type it shows on the `byType` index, in parallel, at most three
    pages of 100 rows per type, under the request deadline. Reading the org
@@ -75,8 +78,9 @@ entry, nothing ever reads "deleted", and its bucket entries came from a
   page.
 - A bucket created through the console whose `bucket.created` write failed (the
   write is best-effort) reads as created outside the console.
-- A bucket created or deleted by a request that timed out never appears in the
-  feed, which shows completions only; the audit page shows its intent.
+- A bucket deleted by a request that timed out never appears in the feed, which
+  shows completions only; the audit page shows its intent. A creation that timed
+  out shows as a plain "Created" row once the bucket is listed.
 - Key events written before the `byType` index existed are not in the feed, the gap
   [the audit log ADR](2026-08-audit-log-v1-m2.md#what-the-index-cannot-reach)
   describes. It closes as the TTL removes those events.
