@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   createMemoryHistory,
@@ -173,6 +173,28 @@ describe('ObjectDetailsDrawer', () => {
     fireEvent.keyDown(await screen.findByTestId('object-details-drawer-panel'), { key });
 
     expect(steps[handler]).toHaveBeenCalledOnce();
+  });
+
+  it('steps on a key pressed straight after opening, before anything is clicked', async () => {
+    const steps = siblings();
+    renderDrawer({ siblings: steps });
+    const drawer = await screen.findByTestId('object-details-drawer');
+    await waitFor(() => expect(document.activeElement).toBe(drawer));
+
+    fireEvent.keyDown(drawer, { key: 'j' });
+
+    expect(steps.onNext).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the object on screen when a key is pressed in the Delete confirmation', async () => {
+    const steps = siblings();
+    renderDrawer({ siblings: steps });
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete object' }));
+    const confirmation = await screen.findByTestId('confirm-dialog');
+
+    fireEvent.keyDown(confirmation, { key: 'j' });
+
+    expect(steps.onNext).not.toHaveBeenCalled();
   });
 
   it('leaves arrow keys to a focused text preview', async () => {

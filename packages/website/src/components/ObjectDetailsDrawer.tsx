@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import {
   Dialog,
   DialogBackdrop,
@@ -75,10 +75,19 @@ export function ObjectDetailsDrawer(props: ObjectDetailsDrawerProps) {
   // Mounted open; closing plays the slide-out, then tells the page to drop it.
   const [open, setOpen] = useState(true);
   const close = () => setOpen(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   return (
     <Transition show={open} appear as={Fragment} afterLeave={props.onClose}>
-      <Dialog data-testid="object-details-drawer" className="relative z-40" onClose={close}>
+      {/* The keys are heard on the dialog's root, not the panel: Headless UI
+          focuses the root when the panel opens, so a handler on the panel
+          would miss every key until the user clicks inside it. */}
+      <Dialog
+        data-testid="object-details-drawer"
+        className="relative z-40"
+        onClose={close}
+        onKeyDown={(e) => handleStepKey(e, panelRef.current, props.siblings)}
+      >
         <TransitionChild
           as={Fragment}
           enter="transition-opacity duration-200 ease-out"
@@ -100,9 +109,9 @@ export function ObjectDetailsDrawer(props: ObjectDetailsDrawerProps) {
             leaveTo="translate-x-full"
           >
             <DialogPanel
+              ref={panelRef}
               data-testid="object-details-drawer-panel"
               className="flex w-full flex-col bg-white shadow-xl"
-              onKeyDown={(e) => handleStepKey(e, props.siblings)}
             >
               <DrawerContent {...props} onClose={close} />
             </DialogPanel>
@@ -120,10 +129,24 @@ const KEYS_KEPT_BY_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'PRE', 'VIDEO'
 const PREVIOUS_KEYS = new Set(['ArrowUp', 'k']);
 const NEXT_KEYS = new Set(['ArrowDown', 'j']);
 
-/** Up and down (or k and j, as in Linear) step to the neighbouring object. */
-function handleStepKey(e: React.KeyboardEvent, siblings?: ObjectDrawerSiblings) {
+/**
+ * Up and down (or k and j, as in Linear) step to the neighbouring object, when
+ * focus is on the panel or on the dialog root it sits in.
+ *
+ * React passes a key pressed in a dialog opened from the panel, such as the
+ * Delete confirmation, up to this handler although that dialog is elsewhere in
+ * the page. Stepping then would put another object behind the confirmation, so
+ * a key from outside the panel is ignored.
+ */
+function handleStepKey(
+  e: React.KeyboardEvent,
+  panel: HTMLElement | null,
+  siblings?: ObjectDrawerSiblings,
+) {
   if (!siblings || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
   const { target } = e;
+  if (!(target instanceof Node)) return;
+  if (target !== e.currentTarget && !panel?.contains(target)) return;
   if (
     target instanceof HTMLElement &&
     (KEYS_KEPT_BY_TAGS.has(target.tagName) || target.isContentEditable)
