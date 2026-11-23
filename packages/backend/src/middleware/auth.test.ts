@@ -2328,8 +2328,8 @@ describe('authMiddleware with bearerToken', () => {
 
   it('attaches the token subject’s identity when the access token carries a verified email', async () => {
     mockAccessTokenPayload({
-      'https://fil.one/email': MOCK_EMAIL,
-      'https://fil.one/email_verified': true,
+      filone_email: MOCK_EMAIL,
+      filone_email_verified: true,
     });
     const request = buildBearerRequest('bearer access-token');
 

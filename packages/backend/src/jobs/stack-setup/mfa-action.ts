@@ -55,14 +55,11 @@ export interface PostLoginApi {
 
 export async function onExecutePostLogin(event: PostLoginEvent, api: PostLoginApi): Promise<void> {
   // Bearer callers (the MCP route) present only an access token, so the claims
-  // the ID token carries for cookie sessions travel on it too. The namespace is
-  // a literal because this function is serialized; it must match
-  // ACCESS_TOKEN_CLAIM_NAMESPACE in middleware/auth.ts.
-  api.accessToken.setCustomClaim('https://fil.one/email', event.user.email ?? null);
-  api.accessToken.setCustomClaim(
-    'https://fil.one/email_verified',
-    event.user.email_verified === true,
-  );
+  // the ID token carries for cookie sessions travel on it too. The names are
+  // literals because this function is serialized; their prefix must match
+  // ACCESS_TOKEN_CLAIM_PREFIX in middleware/auth.ts.
+  api.accessToken.setCustomClaim('filone_email', event.user.email ?? null);
+  api.accessToken.setCustomClaim('filone_email_verified', event.user.email_verified === true);
 
   const mfaTypes = new Set<string>([
     'otp',

@@ -3,7 +3,6 @@ import type { Mock } from 'vitest';
 import vm from 'node:vm';
 
 import { onExecutePostLogin } from './mfa-action.ts';
-import { ACCESS_TOKEN_CLAIM_NAMESPACE } from '../../middleware/auth.ts';
 import type { PostLoginApi, PostLoginEvent } from './mfa-action.ts';
 
 interface CapturedApi extends PostLoginApi {
@@ -249,14 +248,14 @@ describe('onExecutePostLogin access-token claims', () => {
     authentication: { methods: [{ name: 'passkey' }] },
   };
 
-  it('puts the email and its verification on the access token, under the namespace the bearer path reads', async () => {
+  it('puts the email and its verification on the access token, under the names the bearer path reads', async () => {
     const api = buildApi();
 
     await onExecutePostLogin(passkeyLogin, api);
 
     expect(api.accessToken.setCustomClaim.mock.calls).toStrictEqual([
-      [`${ACCESS_TOKEN_CLAIM_NAMESPACE}email`, 'any@example.com'],
-      [`${ACCESS_TOKEN_CLAIM_NAMESPACE}email_verified`, true],
+      ['filone_email', 'any@example.com'],
+      ['filone_email_verified', true],
     ]);
   });
 
@@ -265,10 +264,7 @@ describe('onExecutePostLogin access-token claims', () => {
 
     await onExecutePostLogin({ user: { email: 'any@example.com', app_metadata: {} } }, api);
 
-    expect(api.accessToken.setCustomClaim).toHaveBeenCalledWith(
-      `${ACCESS_TOKEN_CLAIM_NAMESPACE}email_verified`,
-      false,
-    );
+    expect(api.accessToken.setCustomClaim).toHaveBeenCalledWith('filone_email_verified', false);
   });
 });
 
