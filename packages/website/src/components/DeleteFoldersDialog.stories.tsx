@@ -31,6 +31,7 @@ const meta: Meta<typeof DeleteFoldersDialog> = {
     folderPrefixes: ['images/'],
     objectCount: 0,
     jobs: [],
+    unstartedPrefixes: [],
     starting: false,
     isRunning: false,
   },
@@ -113,6 +114,7 @@ export const SomeObjectsRemain: Story = {
   },
 };
 
+/** The one folder's job stopped: the report names the folder and the reason. */
 export const Failed: Story = {
   args: {
     jobs: [
@@ -122,5 +124,31 @@ export const Failed: Story = {
         error: 'Your access to my-bucket no longer permits bulk deletion.',
       }),
     ],
+  },
+};
+
+/**
+ * One folder's job stopped and another never started, while a third finished:
+ * the report names the folders left.
+ */
+export const SomeFoldersRemain: Story = {
+  args: {
+    folderPrefixes: ['images/', 'docs/', 'logs/'],
+    jobs: [
+      job({
+        jobId: 'job-1',
+        prefix: 'images/',
+        status: BulkDeleteJobStatus.Completed,
+        deletedCount: 3400,
+      }),
+      job({
+        jobId: 'job-2',
+        prefix: 'docs/',
+        status: BulkDeleteJobStatus.Failed,
+        deletedCount: 120,
+        error: 'Your access to my-bucket no longer permits bulk deletion.',
+      }),
+    ],
+    unstartedPrefixes: ['logs/'],
   },
 };

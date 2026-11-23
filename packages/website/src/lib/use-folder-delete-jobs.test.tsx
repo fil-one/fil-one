@@ -4,7 +4,7 @@ import { renderHook, act, screen } from '@testing-library/react';
 import { BulkDeleteJobStatus, BulkDeleteScope, S3Region, type BulkDeleteJob } from '@filone/shared';
 
 import { ToastProvider } from '../components/Toast/index.js';
-import { useFolderDeleteJobs } from './use-folder-delete-jobs.js';
+import { JOB_REQUEST_CONCURRENCY, useFolderDeleteJobs } from './use-folder-delete-jobs.js';
 
 vi.mock('./api.js', () => ({ apiRequest: vi.fn() }));
 
@@ -106,6 +106,41 @@ describe('useFolderDeleteJobs: starting', () => {
 
     expect(result.current.jobs.map((j) => j.prefix)).toStrictEqual(['any-folder/']);
     expect(await screen.findByText("Couldn't start deleting 1 of 2 folders")).toBeInTheDocument();
+  });
+
+  it('keeps the folders whose deletion did not start', async () => {
+    mockApiRequest
+      .mockResolvedValueOnce({ job: job('any-folder/') })
+      .mockRejectedValueOnce(new Error('any refusal'));
+    const { result } = renderJobs();
+
+    const outcome = await act(() => result.current.start(['any-folder/', 'other-folder/']));
+
+    expect(outcome).toMatchObject({
+      started: [{ prefix: 'any-folder/' }],
+      unstartedPrefixes: ['other-folder/'],
+    });
+    expect(result.current.unstartedPrefixes).toStrictEqual(['other-folder/']);
+  });
+
+  it(`starts no more than ${JOB_REQUEST_CONCURRENCY} jobs at once`, async () => {
+    let inFlight = 0;
+    let mostInFlight = 0;
+    mockApiRequest.mockImplementation(async (_path, init) => {
+      inFlight += 1;
+      mostInFlight = Math.max(mostInFlight, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      const { prefix } = JSON.parse(init!.body as string) as { prefix: string };
+      return { job: job(prefix) };
+    });
+    const { result } = renderJobs();
+    const prefixes = Array.from({ length: 10 }, (_, i) => `folder-${i}/`);
+
+    await act(() => result.current.start(prefixes));
+
+    expect(mostInFlight).toBe(JOB_REQUEST_CONCURRENCY);
+    expect(result.current.jobs).toHaveLength(10);
   });
 
   it("shows the API's reason when a single folder's deletion cannot start", async () => {

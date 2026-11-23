@@ -20,6 +20,7 @@ import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
 import type { BrowseEntry } from '../lib/object-grouping.js';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
 import type { ObjectSelection } from '../lib/object-selection.js';
+import type { FolderDeleteJobs } from '../lib/use-folder-delete-jobs.js';
 import { folderSelectionId, selectionId, useObjectSelection } from '../lib/object-selection.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 
@@ -285,8 +286,14 @@ export type ObjectBrowserProps = {
   /** Absent where the browser offers no search, which leaves out the box. */
   onSearchChange?: (search: string) => void;
   /**
-   * Called when a folder deletion finishes, or when its dialog closes while it
-   * still runs, so the caller can list what is left.
+   * The folder deletions started from this browser. The caller holds them, so
+   * they are still watched, and refresh the listing when they finish, after
+   * the user opens another folder and this browser is replaced.
+   */
+  folderDeleteJobs: FolderDeleteJobs;
+  /**
+   * Called when a folder deletion dialog closes after its jobs started, so the
+   * caller can list what is left.
    */
   onFoldersDeleted?: () => void;
 };
@@ -328,6 +335,7 @@ export function ObjectBrowser({
   paging,
   search = '',
   onSearchChange,
+  folderDeleteJobs,
   onFoldersDeleted,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
@@ -341,8 +349,7 @@ export function ObjectBrowser({
   const selection = useObjectSelection(versions, folders);
   const selectedCount = selection.selected.size;
   const folderDelete = useFolderDelete({
-    bucketName,
-    region,
+    jobs: folderDeleteJobs,
     selection,
     onBulkDelete,
     onFoldersDeleted,

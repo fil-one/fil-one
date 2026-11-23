@@ -1,15 +1,14 @@
 import { useState } from 'react';
 
-import type { S3Region } from '@filone/shared';
-
 import type { DeleteFoldersDialogProps } from './DeleteFoldersDialog';
+import { folderSelectionId } from '../lib/object-selection.js';
 import type { ObjectSelection, SelectionTargets } from '../lib/object-selection.js';
 import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
-import { useFolderDeleteJobs } from '../lib/use-folder-delete-jobs.js';
+import type { FolderDeleteJobs } from '../lib/use-folder-delete-jobs.js';
 
 export type UseFolderDeleteOptions = {
-  bucketName: string;
-  region: S3Region;
+  /** The page's folder deletions, which outlive this browser. */
+  jobs: FolderDeleteJobs;
   selection: ObjectSelection;
   /** Deletes the objects selected alongside the folders. */
   onBulkDelete?: (targets: ObjectDeleteTarget[]) => Promise<void>;
@@ -22,8 +21,7 @@ export type UseFolderDeleteOptions = {
  * so the dialog keeps naming the same folders once the selection clears.
  */
 export function useFolderDelete({
-  bucketName,
-  region,
+  jobs,
   selection,
   onBulkDelete,
   onFoldersDeleted,
@@ -32,23 +30,27 @@ export function useFolderDelete({
   const [open, setOpen] = useState(false);
   const [request, setRequest] = useState<SelectionTargets>({ folderPrefixes: [], objects: [] });
   const [deletingObjects, setDeletingObjects] = useState(false);
-  const jobs = useFolderDeleteJobs({ bucketName, region, onFinished: () => onFoldersDeleted?.() });
 
   async function confirm() {
     setDeletingObjects(true);
     try {
-      const [started] = await Promise.all([
+      const [{ started, unstartedPrefixes }] = await Promise.all([
         jobs.start(request.folderPrefixes),
         request.objects.length > 0 ? onBulkDelete?.(request.objects) : undefined,
       ]);
-      if (started.length > 0) selection.clear();
+      // Folders whose deletion did not start stay selected, ready to try again.
+      if (started.length > 0) {
+        selection.clear();
+        selection.setMany(unstartedPrefixes.map(folderSelectionId), true);
+      }
     } finally {
       setDeletingObjects(false);
     }
   }
 
-  // The jobs stay watched after the dialog closes, so the listing refreshes
-  // again when they finish; they reset when the next deletion opens the dialog.
+  // The page watches the jobs after the dialog closes, so the listing
+  // refreshes again when they finish; they reset when the next deletion opens
+  // the dialog.
   function close() {
     // Whatever the jobs have deleted is gone, so the listing should say so.
     // Also once they finish: the listing read when they did can still hold a
@@ -64,6 +66,7 @@ export function useFolderDelete({
     objectCount: request.objects.length,
     onConfirm: () => void confirm(),
     jobs: jobs.jobs,
+    unstartedPrefixes: jobs.unstartedPrefixes,
     starting: jobs.starting || deletingObjects,
     isRunning: jobs.isRunning,
   };

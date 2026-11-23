@@ -9,10 +9,11 @@ import { IconBox } from './IconBox';
 import { Modal, ModalBody, ModalFooter } from './Modal';
 import { ProgressBar } from './ProgressBar';
 import { OUTCOME_ICONS } from './bulk-delete-outcome-icons';
-import { describeBulkDeleteOutcome, summarizeBulkDeleteJobs } from '../lib/bulk-delete-outcome.js';
-
-/** Folders named in the confirmation; the rest are counted. */
-const MAX_NAMED_FOLDERS = 3;
+import {
+  MAX_NAMED_FOLDERS,
+  describeFolderDeleteOutcome,
+  summarizeBulkDeleteJobs,
+} from '../lib/bulk-delete-outcome.js';
 
 export type DeleteFoldersDialogProps = {
   open: boolean;
@@ -24,6 +25,8 @@ export type DeleteFoldersDialogProps = {
   onConfirm: () => void;
   /** One job per folder, empty until the deletion starts. */
   jobs: BulkDeleteJob[];
+  /** Folders whose job could not be started, which the report names. */
+  unstartedPrefixes: string[];
   starting: boolean;
   isRunning: boolean;
 };
@@ -50,6 +53,7 @@ export function DeleteFoldersDialog({
   objectCount,
   onConfirm,
   jobs,
+  unstartedPrefixes,
   starting,
   isRunning,
 }: DeleteFoldersDialogProps) {
@@ -61,18 +65,17 @@ export function DeleteFoldersDialog({
   const close = starting ? () => {} : onClose;
   const summary = started ? summarizeBulkDeleteJobs(jobs) : null;
   const outcome =
-    summary && !isRunning
-      ? describeBulkDeleteOutcome(summary, jobs.length === 1 ? 'Folder deleted' : 'Folders deleted')
-      : null;
+    summary && !isRunning ? describeFolderDeleteOutcome(jobs, unstartedPrefixes) : null;
   const icon = outcome
     ? OUTCOME_ICONS[outcome.tone]
     : { icon: WarningCircleIcon, color: 'red' as const };
   // While it runs the title says what is under way, and counts only the
-  // folders: the objects selected with them were deleted when it started.
+  // folders being deleted: the objects selected with them were deleted when it
+  // started, and a folder whose job did not start is not under way.
   const title =
     outcome?.title ??
     (summary
-      ? `Deleting ${pluralize(folderPrefixes.length, 'folder')}`
+      ? `Deleting ${pluralize(jobs.length, 'folder')}`
       : `Delete ${describeSelection(folderPrefixes.length, objectCount)}`);
 
   return (
@@ -134,6 +137,11 @@ export function DeleteFoldersDialog({
   );
 }
 
+/** "The selected object", or "The 3 selected objects". */
+function describeSelectedObjects(count: number): string {
+  return count === 1 ? 'The selected object' : `The ${pluralize(count, 'selected object')}`;
+}
+
 /**
  * Names the folders, since a folder's row shows nothing of what it holds, and
  * says that all of it goes. The full prefix, not the row's name, so a reader
@@ -166,9 +174,11 @@ function ConfirmationLine({
           {part}
         </Fragment>
       ))}{' '}
-      will be permanently deleted, including every previous version
-      {objectCount > 0 && `, along with ${pluralize(objectCount, 'selected object')}`}. This cannot
-      be undone.
+      will be permanently deleted, including every previous version.
+      {/* A separate sentence: the selected objects lose only the version their
+          row shows, not their history. */}
+      {objectCount > 0 && ` ${describeSelectedObjects(objectCount)} will be deleted too.`} This
+      cannot be undone.
     </p>
   );
 }

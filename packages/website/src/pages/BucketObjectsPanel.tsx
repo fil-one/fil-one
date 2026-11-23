@@ -9,6 +9,7 @@ import {
   type ObjectBrowserProps,
 } from '../components/ObjectBrowser';
 import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
+import type { FolderDeleteJobs } from '../lib/use-folder-delete-jobs.js';
 import type { useObjectActions } from '../lib/use-object-actions.js';
 
 // Mirrors ObjectBrowser's columns so the placeholder holds the same shape as the
@@ -119,6 +120,7 @@ export function ObjectsPanel({
   paging: ObjectBrowserProps['paging'];
   search: string;
   onSearchChange: (search: string) => void;
+  folderDeleteJobs: FolderDeleteJobs;
   onFoldersDeleted: () => void;
 }) {
   // An empty bucket's next steps depend on its keys and the caller's permissions, so its

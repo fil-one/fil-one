@@ -8,7 +8,11 @@ import {
   type BulkDeleteJobStatus as Status,
 } from '@filone/shared';
 
-import { describeBulkDeleteOutcome, summarizeBulkDeleteJobs } from './bulk-delete-outcome.js';
+import {
+  describeBulkDeleteOutcome,
+  describeFolderDeleteOutcome,
+  summarizeBulkDeleteJobs,
+} from './bulk-delete-outcome.js';
 
 /** A finished job; each test sets only what it is about. */
 function job(overrides: Partial<BulkDeleteJob> = {}): BulkDeleteJob {
@@ -93,9 +97,80 @@ describe('describeBulkDeleteOutcome', () => {
     });
   });
 
+  it('keeps one period when the reason the provider gives ends in one', () => {
+    const failure = { key: 'any-key', code: 'AccessDenied', message: 'Access Denied.' };
+    const outcome = describeBulkDeleteOutcome(
+      job({ status: CompletedWithErrors, failedCount: 1, failures: [failure] }),
+      'Folder deleted',
+    );
+    expect(outcome.description).toBe(
+      "Deleted 0 objects. 1 object couldn't be deleted because it's Access Denied.",
+    );
+  });
+
   it('reports a stopped deletion with its error', () => {
     expect(
       describeBulkDeleteOutcome(job({ status: Failed, error: 'any reason' }), 'Folder deleted'),
     ).toStrictEqual({ tone: 'error', title: 'Deletion stopped', description: 'any reason' });
+  });
+});
+
+describe('describeFolderDeleteOutcome', () => {
+  it('reports the folders deleted when every job completed and every folder started', () => {
+    const outcome = describeFolderDeleteOutcome(
+      [job({ prefix: 'a/', deletedCount: 2 }), job({ prefix: 'b/', deletedCount: 3 })],
+      [],
+    );
+    expect(outcome).toStrictEqual({
+      tone: 'success',
+      title: 'Folders deleted',
+      description: 'Deleted 5 objects.',
+    });
+  });
+
+  it('names the folder whose job stopped, with its reason, when another folder was emptied', () => {
+    const outcome = describeFolderDeleteOutcome(
+      [
+        job({ prefix: 'a/', deletedCount: 2 }),
+        job({ prefix: 'b/', status: Failed, deletedCount: 1, error: 'any reason.' }),
+      ],
+      [],
+    );
+    expect(outcome).toStrictEqual({
+      tone: 'warning',
+      title: 'Some folders remain',
+      description: 'Deletion stopped in b/: any reason. Deleted 3 objects.',
+    });
+  });
+
+  it('names the folders whose job never started', () => {
+    const outcome = describeFolderDeleteOutcome([job({ prefix: 'a/', deletedCount: 2 })], ['b/']);
+    expect(outcome).toStrictEqual({
+      tone: 'warning',
+      title: 'Some folders remain',
+      description: "Couldn't start deleting b/. Deleted 2 objects.",
+    });
+  });
+
+  it('reports a stop when no folder was emptied', () => {
+    const outcome = describeFolderDeleteOutcome(
+      [job({ prefix: 'a/', status: Failed, error: 'any reason' })],
+      [],
+    );
+    expect(outcome).toStrictEqual({
+      tone: 'error',
+      title: 'Deletion stopped',
+      description: 'Deletion stopped in a/: any reason. Deleted 0 objects.',
+    });
+  });
+
+  it('names three stopped folders and counts the rest', () => {
+    const stopped = ['a/', 'b/', 'c/', 'd/', 'e/'].map((prefix) =>
+      // No error, so the description names no reason.
+      job({ prefix, status: Failed }),
+    );
+    expect(describeFolderDeleteOutcome(stopped, []).description).toBe(
+      'Deletion stopped in a/, b/, c/ and 2 more folders. Deleted 0 objects.',
+    );
   });
 });

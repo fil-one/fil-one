@@ -32,6 +32,7 @@ function renderDialog(props: Partial<DeleteFoldersDialogProps> = {}) {
       objectCount={0}
       onConfirm={() => {}}
       jobs={[]}
+      unstartedPrefixes={[]}
       starting={false}
       isRunning={false}
       {...props}
@@ -59,12 +60,14 @@ describe('DeleteFoldersDialog: confirming', () => {
     expect(getDescription()).toHaveTextContent('Everything in a/, b/, c/ and 2 more folders will');
   });
 
-  it('counts the objects selected alongside the folders', () => {
+  // The selected objects lose only the version their row shows, so their
+  // sentence is apart from the one about every previous version.
+  it('counts the objects selected alongside the folders in a sentence of their own', () => {
     renderDialog({ folderPrefixes: ['a/', 'b/'], objectCount: 3 });
 
     expect(screen.getByText('Delete 2 folders and 3 objects')).toBeInTheDocument();
     expect(getDescription()).toHaveTextContent(
-      'including every previous version, along with 3 selected objects.',
+      'including every previous version. The 3 selected objects will be deleted too. This cannot be undone.',
     );
   });
 });
@@ -79,6 +82,28 @@ describe('DeleteFoldersDialog: once started', () => {
     );
     expect(screen.getByRole('progressbar', { name: 'Deletion progress' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
+
+  it('counts only the folders whose deletion started while it runs', () => {
+    renderDialog({
+      folderPrefixes: ['a/', 'b/'],
+      jobs: [job({ prefix: 'a/' })],
+      unstartedPrefixes: ['b/'],
+      isRunning: true,
+    });
+
+    expect(screen.getByText('Deleting 1 folder')).toBeInTheDocument();
+  });
+
+  it('names the folder left once the others finish', () => {
+    renderDialog({
+      folderPrefixes: ['a/', 'b/'],
+      jobs: [job({ prefix: 'a/', status: BulkDeleteJobStatus.Completed, deletedCount: 2 })],
+      unstartedPrefixes: ['b/'],
+    });
+
+    expect(screen.getByText('Some folders remain')).toBeInTheDocument();
+    expect(screen.getByText("Couldn't start deleting b/. Deleted 2 objects.")).toBeInTheDocument();
   });
 
   it('reports the folders deleted once every job completes', () => {

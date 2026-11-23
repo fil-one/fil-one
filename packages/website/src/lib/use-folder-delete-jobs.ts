@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import PQueue from 'p-queue';
 
 import { isTerminalBulkDeleteStatus, type BulkDeleteJob, type S3Region } from '@filone/shared';
 
 import { useToast } from '../components/Toast/index.js';
 import { POLL_INTERVAL_MS, createBulkDeleteJob, readBulkDeleteJob } from './use-bulk-delete-job.js';
+
+/**
+ * Requests in flight at once, when starting jobs or reading their progress.
+ * Select all on a page of folders can start a hundred jobs, which should not
+ * become a hundred requests every poll.
+ */
+export const JOB_REQUEST_CONCURRENCY = 4;
 
 export type UseFolderDeleteJobsOptions = {
   bucketName: string;
@@ -12,8 +20,23 @@ export type UseFolderDeleteJobsOptions = {
   onFinished?: (jobs: BulkDeleteJob[]) => void;
 };
 
+/** What `start` did: the jobs it started, and the folders it could not start. */
+export interface FolderDeleteStart {
+  started: BulkDeleteJob[];
+  unstartedPrefixes: string[];
+}
+
 function isFinished(jobs: BulkDeleteJob[]): boolean {
   return jobs.every((job) => isTerminalBulkDeleteStatus(job.status));
+}
+
+/** Runs `request` for every item, a few at a time, and settles them all. */
+function settleWithLimit<T, R>(
+  items: T[],
+  request: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const queue = new PQueue({ concurrency: JOB_REQUEST_CONCURRENCY });
+  return Promise.allSettled(items.map((item) => queue.add(() => request(item))));
 }
 
 /**
@@ -23,7 +46,7 @@ function isFinished(jobs: BulkDeleteJob[]): boolean {
  */
 async function readRunningJobs(jobs: BulkDeleteJob[]): Promise<BulkDeleteJob[] | undefined> {
   const running = jobs.filter((job) => !isTerminalBulkDeleteStatus(job.status));
-  const results = await Promise.allSettled(running.map((job) => readBulkDeleteJob(job.jobId)));
+  const results = await settleWithLimit(running, (job) => readBulkDeleteJob(job.jobId));
   const latest = new Map<string, BulkDeleteJob>();
   for (const result of results) {
     // A transient poll failure is not a job failure; keep watching.
@@ -51,6 +74,10 @@ function describeStartFailure(failed: number, total: number, firstError: unknown
  * together until every one finishes. A folder is listed a page at a time, so
  * the browser never holds all of its keys; the job lists and deletes them where
  * they live. Like `useBulkDeleteJob`, closing the tab stops only the watching.
+ *
+ * Call it from a component that outlives the folder being browsed (the bucket
+ * page), so the watching, and the refresh when the jobs finish, go on while
+ * the user opens other folders.
  */
 export function useFolderDeleteJobs({
   bucketName,
@@ -59,6 +86,7 @@ export function useFolderDeleteJobs({
 }: UseFolderDeleteJobsOptions) {
   const { toast } = useToast();
   const [jobs, setJobs] = useState<BulkDeleteJob[]>([]);
+  const [unstartedPrefixes, setUnstartedPrefixes] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
   // Held in a ref so the poll effect never restarts when the callback identity
   // changes, which would reset the interval on every render.
@@ -66,22 +94,24 @@ export function useFolderDeleteJobs({
   onFinishedRef.current = onFinished;
 
   const start = useCallback(
-    async (prefixes: string[]) => {
+    async (prefixes: string[]): Promise<FolderDeleteStart> => {
       setStarting(true);
       try {
-        const results = await Promise.allSettled(
-          prefixes.map((prefix) => createBulkDeleteJob(bucketName, region, { prefix })),
+        const results = await settleWithLimit(prefixes, (prefix) =>
+          createBulkDeleteJob(bucketName, region, { prefix }),
         );
         const started = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+        const unstarted = prefixes.filter((_, i) => results[i].status === 'rejected');
         const refusals = results.flatMap((r) => (r.status === 'rejected' ? [r.reason] : []));
         if (refusals.length > 0) {
           console.error('Failed to start folder deletion:', refusals);
           toast.error(describeStartFailure(refusals.length, prefixes.length, refusals[0]));
         }
         setJobs(started);
+        setUnstartedPrefixes(unstarted);
         // A folder with nothing left in it can finish before the first poll.
         if (started.length > 0 && isFinished(started)) onFinishedRef.current?.(started);
-        return started;
+        return { started, unstartedPrefixes: unstarted };
       } finally {
         setStarting(false);
       }
@@ -95,12 +125,21 @@ export function useFolderDeleteJobs({
     if (!isRunning) return;
 
     let cancelled = false;
+    // A read of many jobs can outlast the interval; skip a tick rather than
+    // start a second read of the same jobs.
+    let reading = false;
     const timer = setInterval(() => {
+      if (reading) return;
+      reading = true;
       void (async () => {
-        const next = await readRunningJobs(jobs);
-        if (cancelled || !next) return;
-        setJobs(next);
-        if (isFinished(next)) onFinishedRef.current?.(next);
+        try {
+          const next = await readRunningJobs(jobs);
+          if (cancelled || !next) return;
+          setJobs(next);
+          if (isFinished(next)) onFinishedRef.current?.(next);
+        } finally {
+          reading = false;
+        }
       })();
     }, POLL_INTERVAL_MS);
 
@@ -110,7 +149,13 @@ export function useFolderDeleteJobs({
     };
   }, [isRunning, jobs]);
 
-  const reset = useCallback(() => setJobs([]), []);
+  const reset = useCallback(() => {
+    setJobs([]);
+    setUnstartedPrefixes([]);
+  }, []);
 
-  return { start, reset, jobs, starting, isRunning };
+  return { start, reset, jobs, unstartedPrefixes, starting, isRunning };
 }
+
+/** The folder deletions a bucket page watches, handed down to its browser. */
+export type FolderDeleteJobs = ReturnType<typeof useFolderDeleteJobs>;
