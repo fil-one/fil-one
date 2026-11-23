@@ -113,7 +113,11 @@ function Seeded({ scenario, children }: { scenario: Scenario; children: React.Re
       client.setQueryDefaults(key, { staleTime: Infinity });
     }
     if (!scenario.network) client.setQueryData(metadataKey, metadataFor(scenario));
-    client.setQueryData(versionsKey, scenario.versions ?? []);
+    // A stubbed network reaches the history too, unless the story names one: an
+    // empty history beside a failed request reads as an object that is gone.
+    if (!scenario.network || scenario.versions) {
+      client.setQueryData(versionsKey, scenario.versions ?? []);
+    }
     client.setQueryData(bucketKey, {
       bucket: {
         bucketName: BUCKET,
@@ -276,6 +280,24 @@ export const VersionOfDeletedObject: Story = {
       objectKey: HISTORY_KEY,
       versionId: '8b2e6d40c19a7f35',
       metadata: { contentType: 'application/pdf', lastModified: '2026-10-14T09:05:00Z' },
+      versions: [
+        version({
+          key: HISTORY_KEY,
+          versionId: 'e1f2a3b4c5d6e7f8',
+          isLatest: true,
+          isDeleteMarker: true,
+        }),
+        ...history.map((v) => ({ ...v, isLatest: false })),
+      ],
+    }),
+};
+
+/** The object's HEAD fails on its delete marker, and the history is the way back. */
+export const DeletedObject: Story = {
+  render: () =>
+    renderPage({
+      objectKey: HISTORY_KEY,
+      network: 'error',
       versions: [
         version({
           key: HISTORY_KEY,

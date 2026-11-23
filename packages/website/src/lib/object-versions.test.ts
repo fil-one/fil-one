@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { S3ObjectVersion } from '@filone/shared';
 
 import {
+  getMissingReason,
   getVersionState,
   getVersionsFromListing,
   hasReadableLatestAfterDeleting,
@@ -70,12 +71,22 @@ describe('getVersionState', () => {
     });
   });
 
-  it('keeps the version from the URL before the history has loaded', () => {
-    expect(getVersionState([], 'v-older')).toMatchObject({
+  it('counts the version the URL names as older while the history is unknown', () => {
+    // The history links its latest row to the object's own URL, so a URL with
+    // a version names an older one.
+    expect(getVersionState(undefined, 'v-older')).toMatchObject({
       shownVersionId: 'v-older',
       shown: undefined,
-      isOlder: false,
+      isOlder: true,
     });
+  });
+
+  it('does not count the object as older when the URL names no version and the history is unknown', () => {
+    expect(getVersionState(undefined)).toMatchObject({ isOlder: false });
+  });
+
+  it('does not count a version the loaded history lacks as older', () => {
+    expect(getVersionState([], 'v-older')).toMatchObject({ isOlder: false });
   });
 });
 
@@ -92,26 +103,53 @@ describe('restoreNullVersionIds', () => {
 
 describe('hasReadableLatestAfterDeleting', () => {
   const marker = version({ versionId: 'v-marker', isLatest: true, isDeleteMarker: true });
+  const olderMarker = version({ versionId: 'v-older-marker', isDeleteMarker: true });
 
-  it('reports the object readable when a version is newest after the delete', () => {
-    expect(hasReadableLatestAfterDeleting([latest, older], 'v-older')).toBe(true);
+  it.each([
+    ['readable when a version is newest after the delete', [latest, older], 'v-older', true],
+    [
+      'readable when deleting the latest leaves an older version on top',
+      [latest, older],
+      'v-latest',
+      true,
+    ],
+    [
+      'unreadable when a delete marker is newest after the delete',
+      [marker, older],
+      'v-older',
+      false,
+    ],
+    [
+      'unreadable when deleting the latest leaves a delete marker on top',
+      [latest, olderMarker, older],
+      'v-latest',
+      false,
+    ],
+    ['unreadable when the deleted version was the only entry', [latest], 'v-latest', false],
+  ])('reports the object %s', (_case, versions, deletedVersionId, expected) => {
+    expect(hasReadableLatestAfterDeleting(versions, deletedVersionId)).toBe(expected);
   });
+});
 
-  it('reports the object readable when deleting the latest leaves an older version on top', () => {
-    expect(hasReadableLatestAfterDeleting([latest, older], 'v-latest')).toBe(true);
-  });
+describe('getMissingReason', () => {
+  const marker = version({ versionId: 'v-marker', isLatest: true, isDeleteMarker: true });
+  const olderMarker = version({ versionId: 'v-older-marker', isDeleteMarker: true });
 
-  it('reports the object unreadable when a delete marker is newest after the delete', () => {
-    expect(hasReadableLatestAfterDeleting([marker, older], 'v-older')).toBe(false);
-  });
-
-  it('reports the object unreadable when deleting the latest leaves a delete marker on top', () => {
-    const olderMarker = version({ versionId: 'v-older-marker', isDeleteMarker: true });
-    expect(hasReadableLatestAfterDeleting([latest, olderMarker, older], 'v-latest')).toBe(false);
-  });
-
-  it('reports the object unreadable when the deleted version was the only entry', () => {
-    expect(hasReadableLatestAfterDeleting([latest], 'v-latest')).toBe(false);
+  it.each([
+    ['deleted when the newest entry is a delete marker', [marker, older], undefined, 'deleted'],
+    [
+      'a delete marker when the URL names one',
+      [latest, olderMarker],
+      'v-older-marker',
+      'delete-marker',
+    ],
+    ['not found when the history is empty', [], undefined, 'not-found'],
+    ['not found when the URL names a version the history lacks', [latest], 'v-gone', 'not-found'],
+    ['nothing missing when the latest is a version', [latest, older], undefined, undefined],
+    ['nothing missing when the URL names a version', [latest, older], 'v-older', undefined],
+    ['nothing missing while the history is unknown', undefined, undefined, undefined],
+  ])('reports %s', (_case, versions, versionId, expected) => {
+    expect(getMissingReason(versions, versionId)).toBe(expected);
   });
 });
 

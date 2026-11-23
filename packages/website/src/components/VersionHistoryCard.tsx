@@ -119,8 +119,9 @@ function VersionRow({
           {formatVersionDate(version.lastModified)}
         </p>
         {/* Status rides beside the ID, not in a column of its own, so the date
-            above keeps the row's width and stays on one line at 375px */}
-        <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+            above keeps the row's width and stays on one line at 375px. The badges
+            keep their labels whole; the ID truncates instead */}
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap">
           <span className="truncate font-mono text-meta text-zinc-500" title={version.versionId}>
             {truncateVersionId(version.versionId, 16)}
           </span>
