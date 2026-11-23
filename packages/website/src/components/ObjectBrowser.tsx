@@ -19,6 +19,7 @@ import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.j
 import type { ObjectSelection } from '../lib/object-selection.js';
 import { selectionId, useObjectSelection } from '../lib/object-selection.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
+import { useListingPageScroll } from '../lib/use-listing-page-scroll.js';
 
 export { countObjects } from '../lib/object-grouping.js';
 
@@ -349,6 +350,7 @@ export function ObjectBrowser({
   const share = useRowShare();
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const selection = useObjectSelection(versions);
+  const pageScroll = useListingPageScroll(paging);
   const selectedCount = selection.selected.size;
 
   function toggleExpand(key: string) {
@@ -409,7 +411,7 @@ export function ObjectBrowser({
   }
 
   return (
-    <div className="mt-4">
+    <div ref={pageScroll.listingRef} className="mt-4 scroll-mt-16 lg:scroll-mt-4">
       {currentPrefix && (
         <PrefixBreadcrumb
           bucketName={bucketName}
@@ -444,7 +446,7 @@ export function ObjectBrowser({
         />
       )}
 
-      {paging && <ListingPager {...paging} label="Object pages" />}
+      {pageScroll.paging && <ListingPager {...pageScroll.paging} label="Object pages" />}
 
       <ShareObjectModal
         open={share.open}

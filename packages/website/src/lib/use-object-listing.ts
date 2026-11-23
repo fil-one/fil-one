@@ -16,6 +16,17 @@ interface VisitedPage {
 
 const FIRST_PAGE: VisitedPage[] = [{ offset: 0 }];
 
+/**
+ * The pages visited in one folder, and the offset of the page that was on
+ * screen when the reader last moved. That page stays on screen until the new
+ * one arrives, so the range label counts from its offset meanwhile.
+ */
+interface PagingState {
+  prefix: string;
+  pages: VisitedPage[];
+  leftOffset: number;
+}
+
 interface ObjectListingOptions {
   bucketName: string;
   region: S3Region;
@@ -60,10 +71,7 @@ export function useObjectListing({
   enabled,
 }: ObjectListingOptions) {
   const queryClient = useQueryClient();
-  const [paging, setPaging] = useState<{ prefix: string; pages: VisitedPage[] }>({
-    prefix,
-    pages: FIRST_PAGE,
-  });
+  const [paging, setPaging] = useState<PagingState>({ prefix, pages: FIRST_PAGE, leftOffset: 0 });
   // Derived rather than reset in an effect, so a new folder never renders one
   // frame of the previous folder's page position.
   const pages = paging.prefix === prefix ? paging.pages : FIRST_PAGE;
@@ -90,13 +98,16 @@ export function useObjectListing({
   }, [queryClient, enabled, nextCursor, bucketName, region, versioning, prefix]);
 
   const rowCount = page ? countRows(page, prefix) : 0;
+  // While the next page loads the table still shows the page the reader left,
+  // so the label describes that page rather than the one on its way.
+  const shownOffset = query.isPlaceholderData ? paging.leftOffset : current.offset;
 
   return {
     query,
     page,
     /** One-based position of the page's first row, for the range label. */
-    rangeStart: current.offset + 1,
-    rangeEnd: current.offset + rowCount,
+    rangeStart: shownOffset + 1,
+    rangeEnd: shownOffset + rowCount,
     hasPrevious: pages.length > 1,
     hasNext: nextCursor !== undefined,
     isFirstPage: pages.length === 1,
@@ -107,10 +118,13 @@ export function useObjectListing({
       setPaging({
         prefix,
         pages: [...pages, { cursor: nextCursor, offset: current.offset + rowCount }],
+        leftOffset: current.offset,
       });
     },
     goToPreviousPage: () => {
-      if (pages.length > 1) setPaging({ prefix, pages: pages.slice(0, -1) });
+      if (pages.length > 1) {
+        setPaging({ prefix, pages: pages.slice(0, -1), leftOffset: current.offset });
+      }
     },
   };
 }
