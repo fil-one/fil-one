@@ -17,6 +17,7 @@ import type {
 } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import {
+  concurrentKeyChangeResponse,
   discardRecordedKey,
   discardUnrecordedKey,
   exceedsRoleResponse,
@@ -30,7 +31,11 @@ import type { KeyMinter, MintedKey } from '../lib/key-mint.ts';
 import { listOrgAccessKeys } from '../lib/member-keys.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
+import {
+  AccessKeyAlreadyExistsError,
+  AccessKeyConcurrentChangeError,
+  AccessKeyValidationError,
+} from '../lib/errors.ts';
 import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
@@ -391,10 +396,10 @@ function duplicateKeyNameResponse(): APIGatewayProxyStructuredResultV2 {
  *
  * A duplicate name is the one that may have created a credential anyway, on an
  * earlier attempt whose row never landed, so it goes through the recovery. A
- * validation error is the vendor rejecting the request, and closing the
- * correlation is what records that. Anything else leaves the intent dangling on
- * purpose: nobody knows whether a credential exists, which is what the operator
- * needs to see.
+ * concurrent change and a validation error both mean the vendor wrote nothing,
+ * and closing the correlation is what records that. Anything else leaves the
+ * intent dangling on purpose: nobody knows whether a credential exists, which
+ * is what the operator needs to see.
  */
 async function handleMintRefusal(
   err: unknown,
@@ -403,6 +408,10 @@ async function handleMintRefusal(
   if (err instanceof AccessKeyAlreadyExistsError) {
     await recoverDuplicateKey(attempt);
     return duplicateKeyNameResponse();
+  }
+  if (err instanceof AccessKeyConcurrentChangeError) {
+    await attempt.mint.complete({ outcome: 'failed' });
+    return concurrentKeyChangeResponse();
   }
   if (err instanceof AccessKeyValidationError) {
     await attempt.mint.complete({ outcome: 'failed' });
