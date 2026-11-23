@@ -15,6 +15,8 @@ export interface S3ObjectVersion extends S3Object {
 
 export interface ListObjectVersionsResponse {
   versions: S3ObjectVersion[];
+  /** Sub-folder prefixes a delimited listing groups keys into, each ending in the delimiter. */
+  commonPrefixes: string[];
   nextKeyMarker?: string;
   nextVersionIdMarker?: string;
   isTruncated: boolean;
@@ -30,6 +32,8 @@ export interface ListObjectsRequest {
 
 export interface ListObjectsResponse {
   objects: S3Object[];
+  /** Sub-folder prefixes a delimited listing groups keys into, each ending in the delimiter. */
+  commonPrefixes: string[];
   prefix?: string;
   nextToken?: string;
   isTruncated: boolean;

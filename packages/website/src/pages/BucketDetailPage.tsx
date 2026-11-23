@@ -17,13 +17,12 @@ import { useBucketTabs } from '../lib/use-bucket-tabs.js';
 import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
 import { BucketPolicyTab } from '../components/BucketPolicyTab';
-import type { S3ObjectVersion, S3Region } from '@filone/shared';
+import type { S3Region } from '@filone/shared';
 import { getS3Endpoint, formatBytes } from '@filone/shared';
 import { FILONE_STAGE } from '../env';
 
 import type {
   BucketDetails,
-  ListObjectVersionsResponse,
   GetBucketResponse,
   ListAccessKeysResponse,
   BucketAnalyticsResponse,
@@ -35,12 +34,9 @@ import { useHasPermission, usePermissions } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
-import { batchPresign } from '../lib/use-presign.js';
-import {
-  parseListObjectVersionsResponse,
-  parseListObjectsResponse,
-  executePresignedUrl,
-} from '../lib/aurora-s3.js';
+import type { ObjectListingPage } from '../lib/object-listing.js';
+import { removeVersionFromPage } from '../lib/object-listing.js';
+import { useObjectListing } from '../lib/use-object-listing.js';
 
 function formatStorage(bytesUsed: number | undefined): string {
   if (bytesUsed === undefined) return '—';
@@ -50,82 +46,19 @@ function formatStorage(bytesUsed: number | undefined): string {
 /**
  * Object count for the tab label.
  *
- * A complete listing is the better source: it is exact, current, and counts the
- * same things the table and its selection do. Analytics cannot match it on
- * either front. It comes from `getBucketUsageMetrics` at a one-day interval, so
- * it is the most recent daily sample rather than a live count and lags anything
- * uploaded or deleted since, and being a usage metric it does not count keys
- * whose current version is a delete marker, which the listing does.
- *
- * Analytics is still right for a truncated listing, where the browser genuinely
- * cannot know the total, so it is used only there.
+ * The listing is exact and current, so it is the better source whenever it
+ * covers the whole bucket: the root, on one page, with no folders. Anywhere
+ * else it covers one page of one folder and analytics is the only total.
+ * Analytics comes from `getBucketUsageMetrics` at a one-day interval, so it lags
+ * recent uploads and deletes, and as a usage metric it does not count keys whose
+ * current version is a delete marker, which the listing does.
  */
 function displayObjectCount(
   analytics: BucketAnalyticsResponse | undefined,
-  versions: S3ObjectVersion[],
-  listingTruncated: boolean,
-): number {
-  if (!listingTruncated) return countObjects(versions);
-  return analytics?.objectCount ?? countObjects(versions);
-}
-
-// Fetch the object listing via presigned URL. Versioned buckets use
-// ListObjectVersions so version history is available inline; non-versioned
-// buckets use ListObjectsV2, which only ever returns live objects (never delete
-// markers). Both paths are normalized to the ListObjectVersionsResponse shape so
-// the cache and invalidation logic stay identical.
-async function fetchObjectListing(
-  region: S3Region,
-  bucketName: string,
-  bucket: BucketDetails | null,
-): Promise<ListObjectVersionsResponse> {
-  if (bucket?.versioning) {
-    const { items } = await batchPresign(region, [
-      { op: 'listObjectVersions', bucket: bucketName },
-    ]);
-    const response = await executePresignedUrl(items[0].url, items[0].method);
-    return parseListObjectVersionsResponse(await response.text());
-  }
-
-  const { items } = await batchPresign(region, [{ op: 'listObjects', bucket: bucketName }]);
-  const response = await executePresignedUrl(items[0].url, items[0].method);
-  const { objects, isTruncated } = parseListObjectsResponse(await response.text());
-  return {
-    versions: objects.map((obj) => ({
-      ...obj,
-      versionId: '',
-      isLatest: true,
-      isDeleteMarker: false,
-    })),
-    isTruncated,
-  };
-}
-
-function removeVersionFromListing(
-  old: ListObjectVersionsResponse | undefined,
-  key: string,
-  versionId: string,
-): ListObjectVersionsResponse | undefined {
-  if (!old) return old;
-  return {
-    ...old,
-    versions: old.versions.filter((v) => !(v.key === key && v.versionId === versionId)),
-  };
-}
-
-/**
- * Unpack the objects query into the two values the browser needs. `isTruncated`
- * matters: the listing is a single page, so anything past it is not loaded and
- * selection cannot reach it.
- */
-function readListing(objectsData: ListObjectVersionsResponse | undefined): {
-  versions: S3ObjectVersion[];
-  isTruncated: boolean;
-} {
-  return {
-    versions: objectsData?.versions ?? [],
-    isTruncated: objectsData?.isTruncated ?? false,
-  };
+  page: ObjectListingPage,
+  coversBucket: boolean,
+): number | undefined {
+  return coversBucket ? countObjects(page.versions) : analytics?.objectCount;
 }
 
 function BucketOverview({
@@ -179,10 +112,20 @@ function BucketOverviewSkeleton() {
 
 /**
  * The page's four reads, grouped so the component body stays about layout. The
- * objects query is gated on bucket metadata because the versioning flag decides
+ * objects listing is gated on bucket metadata because the versioning flag decides
  * which listing operation to use.
  */
-function useBucketQueries(bucketName: string, region: S3Region, mayListKeys: boolean) {
+function useBucketQueries({
+  bucketName,
+  region,
+  prefix,
+  mayListKeys,
+}: {
+  bucketName: string;
+  region: S3Region;
+  prefix: string;
+  mayListKeys: boolean;
+}) {
   // Cached the way the list pages are (FIL-1078): stepping into a bucket, back
   // out and in again repaints from cache instead of blanking to a placeholder
   // each time. Every write to a bucket invalidates these keys, so nothing here
@@ -200,12 +143,12 @@ function useBucketQueries(bucketName: string, region: S3Region, mayListKeys: boo
   });
   const bucket = bucketQuery.data?.bucket ?? null;
 
-  const objectsQuery = useQuery({
-    queryKey: queryKeys.objects(bucketName, region),
+  const objects = useObjectListing({
+    bucketName,
+    region,
+    versioning: bucket?.versioning ?? false,
+    prefix,
     enabled: bucketQuery.data !== undefined,
-    staleTime: LIST_STALE_TIME,
-    gcTime: LIST_GC_TIME,
-    queryFn: () => fetchObjectListing(region, bucketName, bucket),
   });
 
   const analyticsQuery = useQuery({
@@ -239,7 +182,7 @@ function useBucketQueries(bucketName: string, region: S3Region, mayListKeys: boo
   return {
     bucket,
     bucketQuery,
-    objectsQuery,
+    objects,
     analyticsQuery,
     accessKeysQuery,
     // Read through the permission, not just `enabled`: react-query keeps
@@ -331,6 +274,38 @@ export function BucketHeaderActions({
   );
 }
 
+const EMPTY_PAGE: ObjectListingPage = { versions: [], folders: [] };
+
+/**
+ * What the page needs from the folder listing, worked out in one place so the
+ * component stays about layout.
+ */
+function describeListing(objects: ReturnType<typeof useObjectListing>, currentPrefix: string) {
+  const page = objects.page ?? EMPTY_PAGE;
+  const { query } = objects;
+  const isRoot = currentPrefix === '';
+  return {
+    page,
+    // Inside a folder or past the first page the bucket has objects by definition.
+    hasObjects:
+      !isRoot || !objects.isFirstPage || page.versions.length > 0 || page.folders.length > 0,
+    // The root, on one page, with no folders: the listing is the whole bucket.
+    coversBucket: isRoot && objects.isFirstPage && !objects.hasNext && page.folders.length === 0,
+    listingError: query.isError
+      ? { message: query.error.message, onRetry: () => void query.refetch() }
+      : undefined,
+    paging: {
+      rangeStart: objects.rangeStart,
+      rangeEnd: objects.rangeEnd,
+      hasPrevious: objects.hasPrevious,
+      hasNext: objects.hasNext,
+      onPrevious: objects.goToPreviousPage,
+      onNext: objects.goToNextPage,
+      changing: objects.isChangingPage,
+    },
+  };
+}
+
 export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
@@ -368,13 +343,20 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const {
     bucket,
     bucketQuery,
-    objectsQuery,
+    objects,
     analyticsQuery,
     accessKeysQuery,
     accessKeys,
     accessKeysLoading,
-  } = useBucketQueries(bucketName, region, mayListKeys);
-  const { versions, isTruncated } = readListing(objectsQuery.data);
+  } = useBucketQueries({
+    bucketName,
+    region,
+    prefix: currentPrefix,
+    mayListKeys,
+  });
+  const objectsQuery = objects.query;
+  const listing = describeListing(objects, currentPrefix);
+  const { page } = listing;
   const analyticsData = analyticsQuery.data;
 
   // The Add key modal goes with the `keys.create` control inside the tab.
@@ -384,7 +366,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   // Each tab's count, undefined until its list has answered
   const objectCount = objectsQuery.isPending
     ? undefined
-    : displayObjectCount(analyticsData, versions, isTruncated);
+    : displayObjectCount(analyticsData, page, listing.coversBucket);
   const keyCount = accessKeysLoading ? undefined : accessKeys.length;
 
   const refreshAfterBulkDelete = useCallback(() => {
@@ -395,9 +377,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const invalidateObjectsCache = useCallback(
     (key: string, versionId?: string) => {
       if (versionId) {
-        queryClient.setQueryData<ListObjectVersionsResponse>(
-          queryKeys.objects(bucketName, region),
-          (old) => removeVersionFromListing(old, key, versionId),
+        queryClient.setQueriesData<ObjectListingPage>(
+          { queryKey: queryKeys.objects(bucketName, region) },
+          (old) => removeVersionFromPage(old, key, versionId),
         );
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
@@ -431,7 +413,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     );
   }
 
-  if (objectsQuery.isError) {
+  // A later page that fails keeps the page around it, so the reader can step
+  // back or retry; only a folder that cannot be listed at all replaces the page.
+  if (objectsQuery.isError && objects.isFirstPage) {
     return (
       <BucketErrorState
         bucketName={bucketName}
@@ -452,7 +436,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         <BucketHeaderActions
           bucketName={bucketName}
           region={region}
-          hasObjects={versions.length > 0}
+          hasObjects={listing.hasObjects}
           mayDelete={mayDelete}
           mayUpload={mayUpload}
           totalObjectCount={analyticsData?.objectCount}
@@ -499,9 +483,11 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
           <TabPanel>
             <ObjectsPanel
               loading={objectsQuery.isPending}
+              listingError={listing.listingError}
               bucketName={bucketName}
               region={region}
-              versions={versions}
+              versions={page.versions}
+              folders={page.folders}
               versioningEnabled={bucket?.versioning ?? false}
               currentPrefix={currentPrefix}
               onPrefixChange={setCurrentPrefix}
@@ -515,8 +501,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               mayCreateKeys={mayCreateKeys}
               onAddKeyOpenChange={setAddKeyOpen}
               onShowKeys={tabs.showKeysTab}
-              listingTruncated={isTruncated}
-              totalObjectCount={analyticsData?.objectCount}
+              paging={listing.paging}
             />
           </TabPanel>
 
