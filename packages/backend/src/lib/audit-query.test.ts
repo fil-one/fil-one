@@ -11,7 +11,7 @@ vi.mock('sst', () => sstResourceMock());
 const ddbMock = mockClient(DynamoDBClient);
 
 import {
-  queryActivityEvents,
+  queryRecentAuditEvents,
   queryAllAuditEvents,
   queryAuditEvents,
   resolveWindow,
@@ -411,8 +411,10 @@ describe('queryAllAuditEvents', () => {
   });
 });
 
-describe('queryActivityEvents', () => {
-  const ACTIVITY_WINDOW = { from: '2026-08-01T00:00:00.000Z', to: NOW };
+describe('queryRecentAuditEvents', () => {
+  const RECENT_WINDOW = { from: '2026-08-01T00:00:00.000Z', to: NOW };
+  // Any two types: the read treats every type alike.
+  const TYPES = ['bucket.created', 'key.created'] as const;
   const MORE = { LastEvaluatedKey: marshall({ gsi1sk: 'any' }) };
 
   /** The event type a Query reads, from the index partition it names. */
@@ -431,17 +433,14 @@ describe('queryActivityEvents', () => {
     return { LastEvaluatedKey: marshall({ gsi1sk: sortKey }) };
   }
 
-  /**
-   * A row the feed read returns, as a succeeded completion. Bucket creations
-   * come back in every phase, so the read tells them apart by these fields.
-   */
-  function activityRow(
+  /** A stored two-phase row, a succeeded completion unless `phase` says otherwise. */
+  function twoPhaseRow(
     createdAt: string,
     eventId: string,
     type: string,
     phase: Record<string, string> = {
       phase: 'completion',
-      correlationId: `${eventId}-correlation`,
+      correlationId: 'any-correlation',
       outcome: 'succeeded',
     },
   ) {
@@ -452,6 +451,16 @@ describe('queryActivityEvents', () => {
     return ddbMock.commandCalls(QueryCommand).filter((call) => typeOf(call.args[0].input) === type);
   }
 
+  function queryRecent(options: Partial<Parameters<typeof queryRecentAuditEvents>[0]> = {}) {
+    return queryRecentAuditEvents({
+      orgId: ORG_ID,
+      types: [...TYPES],
+      ...RECENT_WINDOW,
+      limit: 5,
+      ...options,
+    });
+  }
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
@@ -460,9 +469,12 @@ describe('queryActivityEvents', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('reads each event type on the type index, newest first, over the window it is given', async () => {
-    await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 10 });
+  it('reads each type it is given on the type index, newest first, over the window it is given', async () => {
+    await queryRecent();
 
+    expect(
+      ddbMock.commandCalls(QueryCommand).map((call) => typeOf(call.args[0].input)),
+    ).toStrictEqual([...TYPES]);
     expect(queryInput()).toMatchObject({
       IndexName: 'byType',
       KeyConditionExpression: 'gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to',
@@ -471,203 +483,50 @@ describe('queryActivityEvents', () => {
     });
     expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
       ':pk': `ORG#${ORG_ID}#TYPE#bucket.created`,
-      ':from': ACTIVITY_WINDOW.from,
-      ':to': ACTIVITY_WINDOW.to,
+      ':from': RECENT_WINDOW.from,
+      ':to': RECENT_WINDOW.to,
     });
   });
 
-  // Asserted whole per type rather than by fragment: a clause on the wrong type,
-  // such as the key-only `keyKind` check on a bucket read, hides every row of it
-  // and would still contain each expected fragment.
-  const UNEXPIRED = '#ttl > :now';
-  const SUCCEEDED = `${UNEXPIRED} AND #outcome = :succeeded`;
-  const S3 = `${SUCCEEDED} AND details.keyKind = :s3`;
-  const NOT_ROTATION = `${S3} AND NOT details.reason = :rotation`;
+  it('filters out expired rows and nothing else, leaving the rest to the caller', async () => {
+    await queryRecent();
 
-  it('reads every bucket creation, and the org’s succeeded bucket deletions and S3 key events, rotation deletes left out', async () => {
-    await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 10 });
-
-    const filters = Object.fromEntries(
-      ddbMock
-        .commandCalls(QueryCommand)
-        .map((call) => [typeOf(call.args[0].input), call.args[0].input.FilterExpression]),
-    );
-    expect(filters).toStrictEqual({
-      // Every phase, so the read can tell which intents were never completed.
-      'bucket.created': UNEXPIRED,
-      'bucket.deleted': SUCCEEDED,
-      'key.created': S3,
-      'key.rotated': S3,
-      'key.deleted': NOT_ROTATION,
-    });
+    expect(
+      ddbMock.commandCalls(QueryCommand).map((call) => call.args[0].input.FilterExpression),
+    ).toStrictEqual(['#ttl > :now', '#ttl > :now']);
   });
 
-  it('merges the types newest first and returns every match, not only the limit', async () => {
-    pagesByType({
-      'bucket.created': [
-        { Items: [activityRow('2026-08-10T00:00:00.000Z', 'evt-old', 'bucket.created')] },
-      ],
-      'key.created': [
-        { Items: [activityRow('2026-08-12T00:00:00.000Z', 'evt-new', 'key.created')] },
-      ],
-      'key.deleted': [
-        { Items: [activityRow('2026-08-11T00:00:00.000Z', 'evt-mid', 'key.deleted')] },
-      ],
-    });
-
-    const result = await queryActivityEvents({
-      orgId: ORG_ID,
-      ...ACTIVITY_WINDOW,
-      limit: 2,
-    });
-
-    // The caller merges rows of its own in before cutting to the limit.
-    expect(result).toMatchObject({
-      events: [{ eventId: 'evt-new' }, { eventId: 'evt-mid' }, { eventId: 'evt-old' }],
-    });
-    expect(result.events).toHaveLength(3);
-  });
-
-  it('keeps reading a type past a page that matched nothing', async () => {
-    pagesByType({
-      'bucket.created': [
-        { Items: [], ...MORE },
-        { Items: [activityRow('2026-08-10T00:00:00.000Z', 'evt-1', 'bucket.created')] },
-      ],
-    });
-
-    const result = await queryActivityEvents({
-      orgId: ORG_ID,
-      ...ACTIVITY_WINDOW,
-      limit: 1,
-    });
-
-    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-1']);
-    expect(readsOf('bucket.created')).toHaveLength(2);
-  });
-
-  it('stops reading a type once the limit is matched', async () => {
-    pagesByType({
-      'bucket.created': [
-        { Items: [activityRow('2026-08-10T00:00:00.000Z', 'evt-1', 'bucket.created')], ...MORE },
-      ],
-    });
-
-    await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 1 });
-
-    expect(readsOf('bucket.created')).toHaveLength(1);
-  });
-
-  it('stops reading a type after three pages however much history is left', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [], ...MORE });
-
-    const result = await queryActivityEvents({
-      orgId: ORG_ID,
-      ...ACTIVITY_WINDOW,
-      limit: 5,
-    });
-
-    expect(readsOf('bucket.created')).toHaveLength(3);
-    expect(result.cost).toStrictEqual({ pages: 15, rows: 0 });
-  });
-
-  it('leaves out events older than where a read stopped early, so the order holds', async () => {
-    // `key.created` stopped on 08-11 with older rows unread, so an 08-10 bucket
-    // event could be outranked by one of them and is not shown.
-    pagesByType({
-      'bucket.created': [
-        { Items: [activityRow('2026-08-10T00:00:00.000Z', 'evt-older', 'bucket.created')] },
-      ],
-      'key.created': [
-        { Items: [], ...MORE },
-        { Items: [], ...MORE },
-        {
-          Items: [activityRow('2026-08-12T00:00:00.000Z', 'evt-newer', 'key.created')],
-          ...stoppedAt('2026-08-11T00:00:00.000Z#any-event'),
-        },
-      ],
-    });
-
-    const result = await queryActivityEvents({
-      orgId: ORG_ID,
-      ...ACTIVITY_WINDOW,
-      limit: 5,
-    });
-
-    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-newer']);
-  });
-
-  it('returns every succeeded bucket creation, including those older than where a read stopped early', async () => {
-    pagesByType({
-      'bucket.created': [
-        { Items: [activityRow('2026-08-10T00:00:00.000Z', 'evt-older', 'bucket.created')] },
-      ],
-      'key.created': [
-        { Items: [], ...MORE },
-        { Items: [], ...MORE },
-        { Items: [], ...stoppedAt('2026-08-11T00:00:00.000Z#any-event') },
-      ],
-    });
-
-    const result = await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 5 });
-
-    expect(result).toMatchObject({ events: [], bucketCreations: [{ eventId: 'evt-older' }] });
-  });
-
-  it('reports the time before which a read stopped early', async () => {
-    pagesByType({
-      'key.created': [
-        { Items: [], ...MORE },
-        { Items: [], ...MORE },
-        { Items: [], ...stoppedAt('2026-08-11T00:00:00.000Z#any-event') },
-      ],
-    });
-
-    const result = await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 5 });
-
-    expect(result).toMatchObject({ completeSince: '2026-08-11T00:00:00.000Z' });
-  });
-
-  it('reports no such time when every read reached the start of the window', async () => {
-    const result = await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 5 });
-
-    expect(result).toStrictEqual({
-      events: [],
-      bucketCreations: [],
-      openBucketCreations: [],
-      cost: { pages: 5, rows: 0 },
-    });
-  });
-
-  it('keeps the event a read stopped on, since that row was read', async () => {
-    // The page budget ran out on a row that matched, so nothing at or above it
-    // is unread.
-    pagesByType({
-      'key.created': [
-        { Items: [], ...MORE },
-        { Items: [], ...MORE },
-        {
-          Items: [activityRow('2026-08-11T00:00:00.000Z', 'evt-edge', 'key.created')],
-          ...stoppedAt('2026-08-11T00:00:00.000Z#evt-edge'),
-        },
-      ],
-    });
-
-    const result = await queryActivityEvents({
-      orgId: ORG_ID,
-      ...ACTIVITY_WINDOW,
-      limit: 5,
-    });
-
-    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-edge']);
-  });
-
-  it('returns a bucket creation intent with no completion apart from the events', async () => {
+  it('merges the types newest first and returns every event, not only the limit', async () => {
     pagesByType({
       'bucket.created': [
         {
           Items: [
-            activityRow('2026-08-10T00:00:00.000Z', 'evt-intent', 'bucket.created', {
+            twoPhaseRow('2026-08-11T00:00:00.000Z', 'evt-mid', 'bucket.created'),
+            twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-old', 'bucket.created'),
+          ],
+        },
+      ],
+      'key.created': [
+        { Items: [twoPhaseRow('2026-08-12T00:00:00.000Z', 'evt-new', 'key.created')] },
+      ],
+    });
+
+    const result = await queryRecent({ limit: 2 });
+
+    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-new', 'evt-mid', 'evt-old']);
+  });
+
+  it('returns events in every phase and outcome', async () => {
+    pagesByType({
+      'bucket.created': [
+        {
+          Items: [
+            twoPhaseRow('2026-08-10T00:00:01.000Z', 'evt-failed', 'bucket.created', {
+              phase: 'completion',
+              correlationId: 'any-correlation',
+              outcome: 'failed',
+            }),
+            twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-intent', 'bucket.created', {
               phase: 'intent',
               correlationId: 'any-correlation',
             }),
@@ -676,75 +535,119 @@ describe('queryActivityEvents', () => {
       ],
     });
 
-    const result = await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 5 });
+    const result = await queryRecent();
 
     expect(result).toMatchObject({
-      events: [],
-      openBucketCreations: [{ eventId: 'evt-intent', phase: 'intent' }],
+      events: [
+        { eventId: 'evt-failed', phase: 'completion', outcome: 'failed' },
+        { eventId: 'evt-intent', phase: 'intent' },
+      ],
     });
   });
 
-  it.each(['succeeded', 'failed'])(
-    'leaves out a bucket creation intent whose completion %s',
-    async (outcome) => {
-      // The completion is newer, so the read reaches it first.
-      pagesByType({
-        'bucket.created': [
-          {
-            Items: [
-              activityRow('2026-08-10T00:00:01.000Z', 'evt-completion', 'bucket.created', {
-                phase: 'completion',
-                correlationId: 'any-correlation',
-                outcome,
-              }),
-              activityRow('2026-08-10T00:00:00.000Z', 'evt-intent', 'bucket.created', {
-                phase: 'intent',
-                correlationId: 'any-correlation',
-              }),
-            ],
-          },
-        ],
-      });
-
-      const result = await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 5 });
-
-      expect(result).toMatchObject({ openBucketCreations: [] });
-    },
-  );
-
-  it('leaves a bucket creation that failed out of the events', async () => {
+  it('keeps reading a type past a page that held nothing', async () => {
     pagesByType({
       'bucket.created': [
-        {
-          Items: [
-            activityRow('2026-08-10T00:00:00.000Z', 'evt-failed', 'bucket.created', {
-              phase: 'completion',
-              correlationId: 'any-correlation',
-              outcome: 'failed',
-            }),
-          ],
-        },
+        { Items: [], ...MORE },
+        { Items: [twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-1', 'bucket.created')] },
       ],
     });
 
-    const result = await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 5 });
+    const result = await queryRecent({ limit: 1 });
 
-    expect(result).toMatchObject({ events: [] });
+    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-1']);
+    expect(readsOf('bucket.created')).toHaveLength(2);
+  });
+
+  it('stops reading a type once the limit is matched', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-1', 'bucket.created')], ...MORE },
+      ],
+    });
+
+    await queryRecent({ limit: 1 });
+
+    expect(readsOf('bucket.created')).toHaveLength(1);
+  });
+
+  it('keeps reading a type past events the caller does not count', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-1', 'bucket.created')], ...MORE },
+        { Items: [twoPhaseRow('2026-08-09T00:00:00.000Z', 'evt-2', 'bucket.created')] },
+      ],
+    });
+
+    await queryRecent({ limit: 1, isMatch: (event) => event.eventId === 'evt-2' });
+
+    expect(readsOf('bucket.created')).toHaveLength(2);
+  });
+
+  it('stops reading a type after three pages however much history is left', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [], ...MORE });
+
+    const result = await queryRecent();
+
+    expect(readsOf('bucket.created')).toHaveLength(3);
+    expect(result.cost).toStrictEqual({ pages: 6, rows: 0 });
+  });
+
+  it('returns events older than where a read stopped early, and the time it stopped at', async () => {
+    // `key.created` stopped on 08-11 with older rows unread; the 08-10 event
+    // still comes back, and the caller decides whether to cut it.
+    pagesByType({
+      'bucket.created': [
+        { Items: [twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-older', 'bucket.created')] },
+      ],
+      'key.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        { Items: [], ...stoppedAt('2026-08-11T00:00:00.000Z#any-event') },
+      ],
+    });
+
+    const result = await queryRecent();
+
+    expect(result).toMatchObject({
+      events: [{ eventId: 'evt-older' }],
+      completeSince: '2026-08-11T00:00:00.000Z',
+    });
+  });
+
+  it('reports the newest time any read stopped at', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        { Items: [], ...stoppedAt('2026-08-09T00:00:00.000Z#any-event') },
+      ],
+      'key.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        { Items: [], ...stoppedAt('2026-08-11T00:00:00.000Z#any-event') },
+      ],
+    });
+
+    const result = await queryRecent();
+
+    expect(result).toMatchObject({ completeSince: '2026-08-11T00:00:00.000Z' });
+  });
+
+  it('reports no such time when every read reached the start of the window', async () => {
+    const result = await queryRecent();
+
+    expect(result).toStrictEqual({ events: [], cost: { pages: 2, rows: 0 } });
   });
 
   it('cancels every read with the signal it is given', async () => {
     const signal = new AbortController().signal;
 
-    await queryActivityEvents({
-      orgId: ORG_ID,
-      ...ACTIVITY_WINDOW,
-      limit: 5,
-      signal,
-    });
+    await queryRecent({ signal });
 
     // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
     // but the recorded call carries every argument `send` received.
     const options = ddbMock.commandCalls(QueryCommand).map((call) => (call.args as unknown[])[1]);
-    expect(options).toStrictEqual(Array(5).fill({ abortSignal: signal }));
+    expect(options).toStrictEqual(Array(2).fill({ abortSignal: signal }));
   });
 });

@@ -202,36 +202,29 @@ export async function queryAllAuditEvents({
   return { ...page, truncated };
 }
 
-/** The bucket events the dashboard feed shows. */
-const ACTIVITY_BUCKET_EVENT_TYPES: AuditEventType[] = ['bucket.created', 'bucket.deleted'];
-/** The key events the dashboard feed shows. */
-const ACTIVITY_KEY_EVENT_TYPES: AuditEventType[] = ['key.created', 'key.rotated', 'key.deleted'];
+/**
+ * Rows one recent-events read examines per round trip. About two rows per
+ * action, since a two-phase action writes an intent and a completion, so a
+ * page holds the feed's largest limit even when every other row is an intent.
+ */
+const RECENT_ROWS_PER_PAGE = 100;
 
 /**
- * Rows one feed read examines per round trip. About two rows per action, since
- * a two-phase action writes an intent and a completion, so a page holds the
- * feed's largest limit even when every other row is an intent.
+ * Round trips one event type may take before a recent-events read stops
+ * reading it. With {@link RECENT_ROWS_PER_PAGE} this caps the rows a read
+ * examines, whatever the size of the org's history.
  */
-const ACTIVITY_ROWS_PER_PAGE = 100;
+const RECENT_MAX_PAGES_PER_TYPE = 3;
 
-/**
- * Round trips one event type may take before the feed stops reading it. With
- * {@link ACTIVITY_ROWS_PER_PAGE} this caps the rows a feed request examines,
- * whatever the size of the org's history.
- */
-const ACTIVITY_MAX_PAGES_PER_TYPE = 3;
-
-/** An event the feed matched, beside the index sort key that orders it. */
-interface ActivityMatch {
+/** An event a read returned, beside the index sort key that orders it. */
+interface SortedAuditEvent {
   sortKey: string;
   event: AuditEvent;
 }
 
-/** What one event type's read found, and where it stopped if it stopped early. */
-interface ActivityTypeRead {
-  matches: ActivityMatch[];
-  /** Intents the read found no completion for. Only `bucket.created` reads intents. */
-  openIntents: AuditEvent[];
+/** What one event type's read returned, and where it stopped if it stopped early. */
+interface AuditEventTypeRead {
+  events: SortedAuditEvent[];
   cost: AuditQueryCost;
   /**
    * The sort key of the last row examined, when rows older than it were left
@@ -240,79 +233,60 @@ interface ActivityTypeRead {
   unreadBelow?: string;
 }
 
-/** What a feed read found: its events, what it cost, and how far back they are complete. */
-export interface ActivityEventsRead {
-  /** Every match newer than {@link completeSince}, newest first. Not cut to the limit. */
+/** What a recent-events read returned, what it cost, and how far back it is complete. */
+export interface RecentAuditEventsRead {
+  /**
+   * Every unexpired event the reads returned, in every phase and outcome,
+   * newest first. Includes events older than {@link completeSince}.
+   */
   events: AuditEvent[];
-  /**
-   * Every succeeded `bucket.created` the read found, including those older
-   * than {@link completeSince}. Not feed rows: the caller matches listed
-   * buckets against them, and a creation may be stamped a little before its
-   * bucket, so one just below the cutoff can still be a newer bucket's record.
-   */
-  bucketCreations: AuditEvent[];
-  /**
-   * `bucket.created` intents with no completion: the create's outcome is
-   * unknown, such as when the storage call timed out, so the bucket may exist.
-   * Not feed rows; the caller uses them to credit a listed bucket to the console.
-   */
-  openBucketCreations: AuditEvent[];
   cost: AuditQueryCost;
   /**
-   * When a read stopped early, the time before which events may be missing.
-   * Absent when every read reached the start of the window. The caller cuts
-   * anything it merges in at the same point, so the feed keeps its order.
+   * When a read stopped early, the time before which events of its type may be
+   * missing. Absent when every read reached the start of the window. A caller
+   * that shows events of several types in one list cuts the list here, so a
+   * missing event cannot belong between two it shows.
    */
   completeSince?: string;
 }
 
 /**
- * The newest bucket and key events that succeeded, for the dashboard's
- * activity feed.
+ * The newest events of each of `types`, read with a bounded cost, for a
+ * caller that shows recent history on every page load, such as the
+ * dashboard's activity feed.
  *
- * The feed is the audit log seen through a narrower filter, so a row it shows
- * is a row the audit page shows too. Only completions that succeeded qualify:
- * an intent, or an attempt the storage system refused, is history for the audit
- * page but not activity. Key events are S3 keys only, the ones the API keys
- * page lists. A bucket creation whose intent was never completed comes back
- * apart, in `openBucketCreations`, since its bucket may exist.
- *
- * The feed runs on every dashboard load, so its cost must not grow with the
- * org's history. Each event type it shows is read on the `byType`
- * index, in parallel, newest first, for at most
- * {@link ACTIVITY_MAX_PAGES_PER_TYPE} pages; reading the org partition instead
- * would examine every membership and policy row too, and for a reader whose
- * filter matches little, the whole window. Events written before the index
+ * Each type is read on the `byType` index, in parallel, newest first, until
+ * `limit` of its events satisfy `isMatch`, the window ends, or the type has
+ * used {@link RECENT_MAX_PAGES_PER_TYPE} round trips. Reading the org
+ * partition instead would examine every other type's rows too, and for a
+ * caller that wants little, the whole window. Events written before the index
  * existed are absent from it, the gap the module comment describes.
  *
- * A type whose read stopped early may hold unread events newer than another
- * type's matches. The merge therefore drops every match older than the newest
- * point any read stopped at, so the feed may come back short but never out of
- * order. Every match newer than that point is returned, not only the first
- * `limit`: the caller merges in rows of its own before cutting to the limit.
- * The bucket creations it matches those rows against come back uncut, in
- * `bucketCreations`.
- * There is no cursor: the feed has no next page.
+ * `isMatch` only decides when a type's read has enough. Every event the reads
+ * returned comes back, whether it matched or not, so the caller filters, and
+ * can use events it does not show, such as the intent that tells it an action
+ * started but never finished. There is no cursor: the read has no next page.
  */
-export async function queryActivityEvents({
+export async function queryRecentAuditEvents({
   orgId,
+  types,
   from,
   to,
   limit,
+  isMatch = () => true,
   signal,
 }: {
   orgId: string;
+  types: AuditEventType[];
   from: string;
   to: string;
   limit: number;
+  isMatch?: (event: AuditEvent) => boolean;
   /** Cancels the reads in flight, so none outlives the request. */
   signal?: AbortSignal;
-}): Promise<ActivityEventsRead> {
-  const window = { orgId, from, to, limit, signal };
+}): Promise<RecentAuditEventsRead> {
   const reads = await Promise.all(
-    [...ACTIVITY_BUCKET_EVENT_TYPES, ...ACTIVITY_KEY_EVENT_TYPES].map((type) =>
-      readActivityType({ ...window, type }),
-    ),
+    types.map((type) => readAuditEventType({ orgId, type, from, to, limit, isMatch, signal })),
   );
 
   const cost: AuditQueryCost = { pages: 0, rows: 0 };
@@ -323,6 +297,10 @@ export async function queryActivityEvents({
 
   // Sort keys are `{createdAt}#{eventId}`, so comparing them as strings orders
   // events by time.
+  const events = reads
+    .flatMap((read) => read.events)
+    .sort((a, b) => (a.sortKey < b.sortKey ? 1 : -1))
+    .map(({ event }) => event);
   const cutoff = reads
     .map((read) => read.unreadBelow)
     .filter((sortKey) => sortKey !== undefined)
@@ -330,37 +308,23 @@ export async function queryActivityEvents({
       (max, sortKey) => (max && max > sortKey ? max : sortKey),
       undefined,
     );
-  const events = reads
-    .flatMap((read) => read.matches)
-    .filter((match) => cutoff === undefined || match.sortKey >= cutoff)
-    .sort((a, b) => (a.sortKey < b.sortKey ? 1 : -1))
-    .map((match) => match.event);
-  const bucketCreations = reads
-    .flatMap((read) => read.matches)
-    .map((match) => match.event)
-    .filter((event) => event.type === 'bucket.created');
-  const openBucketCreations = reads.flatMap((read) => read.openIntents);
 
-  const merged = { events, bucketCreations, openBucketCreations, cost };
-  if (cutoff === undefined) return merged;
-  // The sort key is `{createdAt}#{eventId}`; the time is the part before `#`.
-  return { ...merged, completeSince: cutoff.split('#')[0] };
+  if (cutoff === undefined) return { events, cost };
+  // The time is the part of the sort key before `#`.
+  return { events, cost, completeSince: cutoff.split('#')[0] };
 }
 
 /**
- * One event type's newest succeeded events, read until `limit` match, the
- * window ends, or the page budget runs out.
- *
- * A completion is newer than its intent and the read goes newest first, so by
- * the time it reaches an intent it has already seen that intent's completion,
- * if there is one in the window.
+ * One event type's newest events, read until `limit` of them satisfy
+ * `isMatch`, the window ends, or the page budget runs out.
  */
-async function readActivityType({
+async function readAuditEventType({
   orgId,
   type,
   from,
   to,
   limit,
+  isMatch,
   signal,
 }: {
   orgId: string;
@@ -368,17 +332,17 @@ async function readActivityType({
   from: string;
   to: string;
   limit: number;
+  isMatch: (event: AuditEvent) => boolean;
   signal: AbortSignal | undefined;
-}): Promise<ActivityTypeRead> {
+}): Promise<AuditEventTypeRead> {
   const cost: AuditQueryCost = { pages: 0, rows: 0 };
-  const matches: ActivityMatch[] = [];
-  const intents: { correlationId: string; event: AuditEvent }[] = [];
-  const completedCorrelations = new Set<string>();
+  const events: SortedAuditEvent[] = [];
+  let matched = 0;
   let startKey: DynamoCursor;
 
   do {
     const page = await getDynamoClient().send(
-      new QueryCommand(buildActivityQueryInput({ orgId, type, from, to, startKey })),
+      new QueryCommand(buildRecentQueryInput({ orgId, type, from, to, startKey })),
       { abortSignal: signal },
     );
     cost.pages += 1;
@@ -387,24 +351,17 @@ async function readActivityType({
     // sort key: DynamoDB indexes only items that have the index's key attributes.
     for (const item of page.Items ?? []) {
       const event = unmarshallAuditEvent(item);
-      if (event.phase === 'intent') {
-        intents.push({ correlationId: event.correlationId, event });
-        continue;
-      }
-      if (event.correlationId) completedCorrelations.add(event.correlationId);
-      if (event.outcome === 'succeeded') matches.push({ sortKey: item.gsi1sk!.S!, event });
+      events.push({ sortKey: item.gsi1sk!.S!, event });
+      if (isMatch(event)) matched += 1;
     }
     startKey = page.LastEvaluatedKey;
-  } while (startKey && matches.length < limit && cost.pages < ACTIVITY_MAX_PAGES_PER_TYPE);
+  } while (startKey && matched < limit && cost.pages < RECENT_MAX_PAGES_PER_TYPE);
 
-  const openIntents = intents
-    .filter((intent) => !completedCorrelations.has(intent.correlationId))
-    .map((intent) => intent.event);
-  if (!startKey) return { matches, openIntents, cost };
-  return { matches, openIntents, cost, unreadBelow: startKey.gsi1sk!.S! };
+  if (!startKey) return { events, cost };
+  return { events, cost, unreadBelow: startKey.gsi1sk!.S! };
 }
 
-function buildActivityQueryInput({
+function buildRecentQueryInput({
   orgId,
   type,
   from,
@@ -417,48 +374,22 @@ function buildActivityQueryInput({
   to: string;
   startKey: DynamoCursor;
 }) {
-  const values: Record<string, unknown> = {
-    ':pk': AuditKeys.typePk(orgId, type),
-    ':from': from,
-    // Exclusive, as `queryInput` explains for the same bound.
-    ':to': to,
-    ':now': Math.floor(Date.now() / 1000),
-  };
-  const names: Record<string, string> = { '#ttl': 'ttl' };
-  // The TTL clause is the one `queryInput` explains: DynamoDB serves expired
-  // rows until it gets round to deleting them.
-  const filterParts = ['#ttl > :now'];
-
-  // Bucket creations come back in every phase and outcome, so the read can
-  // tell an intent that was never completed from one that was. The other types
-  // need only the completions that succeeded.
-  if (type !== 'bucket.created') {
-    filterParts.push('#outcome = :succeeded');
-    names['#outcome'] = 'outcome';
-    values[':succeeded'] = 'succeeded';
-  }
-
-  if (ACTIVITY_KEY_EVENT_TYPES.includes(type)) {
-    filterParts.push('details.keyKind = :s3');
-    values[':s3'] = 's3';
-  }
-  if (type === 'key.deleted') {
-    // A rotation writes its own `key.rotated` and then revokes the old
-    // credential under a `key.deleted` with reason `rotation`. The feed shows
-    // the rotation and leaves that delete out: the key it names is still live
-    // under its new credential.
-    filterParts.push('NOT details.reason = :rotation');
-    values[':rotation'] = 'rotation';
-  }
-
   return {
     TableName: auditTableName(),
     IndexName: EVENT_TYPE_INDEX,
     KeyConditionExpression: 'gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to',
-    FilterExpression: filterParts.join(' AND '),
-    ExpressionAttributeNames: names,
-    ExpressionAttributeValues: marshall(values),
-    Limit: ACTIVITY_ROWS_PER_PAGE,
+    // The TTL clause is the one `queryInput` explains: DynamoDB serves expired
+    // rows until it gets round to deleting them.
+    FilterExpression: '#ttl > :now',
+    ExpressionAttributeNames: { '#ttl': 'ttl' },
+    ExpressionAttributeValues: marshall({
+      ':pk': AuditKeys.typePk(orgId, type),
+      ':from': from,
+      // Exclusive, as `queryInput` explains for the same bound.
+      ':to': to,
+      ':now': Math.floor(Date.now() / 1000),
+    }),
+    Limit: RECENT_ROWS_PER_PAGE,
     // Newest first.
     ScanIndexForward: false,
     ...(startKey ? { ExclusiveStartKey: startKey } : {}),

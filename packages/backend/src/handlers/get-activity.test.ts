@@ -6,10 +6,10 @@ import type { AuditEvent, AuditEventType } from '@filone/shared';
 // Mocks
 // ---------------------------------------------------------------------------
 
-const mockQueryActivityEvents = vi.fn();
+const mockQueryRecentAuditEvents = vi.fn();
 vi.mock('../lib/audit-query.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/audit-query.ts')>()),
-  queryActivityEvents: (...args: unknown[]) => mockQueryActivityEvents(...args),
+  queryRecentAuditEvents: (...args: unknown[]) => mockQueryRecentAuditEvents(...args),
 }));
 
 const mockListBuckets = vi.fn();
@@ -62,12 +62,7 @@ function auditEvent(
 }
 
 function resolveEvents(...events: AuditEvent[]) {
-  mockQueryActivityEvents.mockResolvedValue({
-    events,
-    bucketCreations: events.filter((event) => event.type === 'bucket.created'),
-    openBucketCreations: [],
-    cost: { pages: 1, rows: events.length },
-  });
+  mockQueryRecentAuditEvents.mockResolvedValue({ events, cost: { pages: 1, rows: events.length } });
 }
 
 /** A bucket as the storage system lists it; only the name, region and creation time matter here. */
@@ -152,6 +147,63 @@ describe('get-activity baseHandler', () => {
     expect((await getActivities()).body).toMatchObject({ activities: [{ id: 'e-2' }] });
   });
 
+  it('asks the audit log for bucket and key events', async () => {
+    await getActivities();
+
+    expect(mockQueryRecentAuditEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        types: ['bucket.created', 'bucket.deleted', 'key.created', 'key.rotated', 'key.deleted'],
+      }),
+    );
+  });
+
+  const BUCKET = { region: 'any-region', bucketName: 'any-bucket' };
+  it.each([
+    ['an intent', { ...auditEvent('bucket.created', BUCKET), phase: 'intent', outcome: undefined }],
+    ['a failed completion', { ...auditEvent('bucket.created', BUCKET), outcome: 'failed' }],
+    [
+      'an event for a Bucket Intelligence key',
+      auditEvent('key.created', { keyKind: 'rag', keyName: 'any-key' }),
+    ],
+    [
+      'the delete a rotation writes for the old credential',
+      auditEvent('key.deleted', { keyKind: 's3', keyName: 'any-key', reason: 'rotation' }),
+    ],
+  ])('leaves out %s, and does not count it toward the read’s limit', async (_case, event) => {
+    resolveEvents(event as AuditEvent);
+
+    expect((await getActivities()).body).toStrictEqual({ activities: [] });
+    const { isMatch } = mockQueryRecentAuditEvents.mock.calls[0][0];
+    expect(isMatch(event)).toBe(false);
+  });
+
+  it('counts a succeeded S3 key event toward the read’s limit', async () => {
+    await getActivities();
+
+    const { isMatch } = mockQueryRecentAuditEvents.mock.calls[0][0];
+    expect(isMatch(auditEvent('key.deleted', { keyKind: 's3', keyName: 'any-key' }))).toBe(true);
+  });
+
+  it('leaves out events older than where the audit read stopped early, so the order holds', async () => {
+    // Another type's read stopped at 10-01, so an older row could be outranked
+    // by one it left unread.
+    mockQueryRecentAuditEvents.mockResolvedValue({
+      events: [
+        { ...auditEvent('bucket.deleted', BUCKET, 'at-cutoff') },
+        {
+          ...auditEvent('bucket.deleted', BUCKET, 'below-cutoff'),
+          createdAt: '2026-09-30T00:00:00.000Z',
+        },
+      ],
+      cost: { pages: 3, rows: 300 },
+      completeSince: '2026-10-01T00:00:00.000Z',
+    });
+
+    expect((await getActivities()).body.activities).toStrictEqual([
+      expect.objectContaining({ id: 'at-cutoff' }),
+    ]);
+  });
+
   it.each([
     ['the requested limit', { limit: '3' }, 3],
     ['10 when no limit is given', undefined, 10],
@@ -161,7 +213,7 @@ describe('get-activity baseHandler', () => {
   ])('asks the audit log for %s', async (_case, query, limit) => {
     await getActivities(query);
 
-    expect(mockQueryActivityEvents).toHaveBeenCalledWith(
+    expect(mockQueryRecentAuditEvents).toHaveBeenCalledWith(
       expect.objectContaining({ orgId: USER_INFO.orgId, limit }),
     );
   });
@@ -180,7 +232,7 @@ describe('get-activity baseHandler', () => {
       const earliest = new Date(
         Date.parse(NOW) - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
       ).toISOString();
-      expect(mockQueryActivityEvents).toHaveBeenCalledWith(
+      expect(mockQueryRecentAuditEvents).toHaveBeenCalledWith(
         expect.objectContaining({ from: earliest, to: NOW }),
       );
     });
@@ -191,7 +243,7 @@ describe('get-activity baseHandler', () => {
 
     await baseHandler(buildEvent({ userInfo: USER_INFO, requestContext: { deadline } }));
 
-    expect(mockQueryActivityEvents).toHaveBeenCalledWith(
+    expect(mockQueryRecentAuditEvents).toHaveBeenCalledWith(
       expect.objectContaining({ signal: deadline }),
     );
   });
@@ -199,14 +251,9 @@ describe('get-activity baseHandler', () => {
   it('reports the audit query’s own duration, not the bucket listing’s', async () => {
     let now = 0;
     vi.spyOn(performance, 'now').mockImplementation(() => now);
-    mockQueryActivityEvents.mockImplementation(async () => {
+    mockQueryRecentAuditEvents.mockImplementation(async () => {
       now += 10;
-      return {
-        events: [],
-        bucketCreations: [],
-        openBucketCreations: [],
-        cost: { pages: 1, rows: 0 },
-      };
+      return { events: [], cost: { pages: 1, rows: 0 } };
     });
     // The listing finishes after the audit query, 1s later.
     mockListBuckets.mockImplementation(async () => {
@@ -315,12 +362,7 @@ describe('get-activity buckets created outside the console', () => {
 
   it('adds a plain creation row for a bucket whose console create was never completed', async () => {
     // The storage call timed out, so the intent stayed open; the bucket was made.
-    mockQueryActivityEvents.mockResolvedValue({
-      events: [],
-      bucketCreations: [],
-      openBucketCreations: [intent('any-bucket', '2026-12-09T23:59:59.000Z')],
-      cost: { pages: 1, rows: 1 },
-    });
+    resolveEvents(intent('any-bucket', '2026-12-09T23:59:59.000Z'));
     mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
 
     expect((await getActivities()).body).toStrictEqual({
@@ -336,13 +378,22 @@ describe('get-activity buckets created outside the console', () => {
     });
   });
 
-  it('adds an outside-the-console row when the only open console create is for another region', async () => {
-    mockQueryActivityEvents.mockResolvedValue({
-      events: [],
-      bucketCreations: [],
-      openBucketCreations: [intent('any-bucket', '2026-12-09T23:59:59.000Z', 'other-region')],
-      cost: { pages: 1, rows: 1 },
+  it('adds an outside-the-console row for a bucket whose console create failed', async () => {
+    // The console's attempt was refused, so the bucket was made some other way.
+    // The intent and its completion share a correlation id.
+    resolveEvents(
+      { ...created('any-bucket', '2026-12-09T23:59:59.500Z'), outcome: 'failed' } as AuditEvent,
+      intent('any-bucket', '2026-12-09T23:59:59.000Z'),
+    );
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
+
+    expect((await getActivities()).body).toMatchObject({
+      activities: [{ createdOutsideConsole: true }],
     });
+  });
+
+  it('adds an outside-the-console row when the only open console create is for another region', async () => {
+    resolveEvents(intent('any-bucket', '2026-12-09T23:59:59.000Z', 'other-region'));
     mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
 
     expect((await getActivities()).body).toMatchObject({
@@ -399,10 +450,8 @@ describe('get-activity buckets created outside the console', () => {
 
   it('leaves out a bucket created before the point the audit read stopped early', async () => {
     // Older creations were left unread, so the log may hold this one's.
-    mockQueryActivityEvents.mockResolvedValue({
+    mockQueryRecentAuditEvents.mockResolvedValue({
       events: [],
-      bucketCreations: [],
-      openBucketCreations: [],
       cost: { pages: 3, rows: 300 },
       completeSince: '2026-12-12T00:00:00.000Z',
     });
@@ -416,10 +465,8 @@ describe('get-activity buckets created outside the console', () => {
     // stopped between the two, so the creation is not a feed row but still
     // records the bucket.
     const creation = created('any-bucket', '2026-12-09T23:59:55.000Z');
-    mockQueryActivityEvents.mockResolvedValue({
-      events: [],
-      bucketCreations: [creation],
-      openBucketCreations: [],
+    mockQueryRecentAuditEvents.mockResolvedValue({
+      events: [creation],
       cost: { pages: 3, rows: 300 },
       completeSince: '2026-12-09T23:59:58.000Z',
     });

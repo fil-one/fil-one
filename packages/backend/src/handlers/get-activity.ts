@@ -1,9 +1,14 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import type { AuditEvent, RecentActivity, RecentActivityResponse } from '@filone/shared';
+import type {
+  AuditEvent,
+  AuditEventType,
+  RecentActivity,
+  RecentActivityResponse,
+} from '@filone/shared';
 import { isRagCompanionBucket } from '@filone/shared';
-import { queryActivityEvents, resolveWindow } from '../lib/audit-query.ts';
+import { queryRecentAuditEvents, resolveWindow } from '../lib/audit-query.ts';
 import { reportAuditQuery } from '../lib/audit-metrics.ts';
 import type { BucketSummary } from '../lib/bucket-orchestrator.ts';
 import { getProvisionedNetworks } from '../lib/region-helpers.ts';
@@ -38,6 +43,15 @@ const CREATION_MATCH_MARGIN_MS = 5 * 60 * 1000;
  */
 export const BUCKET_CREATIONS_AUDITED_SINCE = '2026-11-10T00:00:00.000Z';
 
+/** The event types the feed shows, which {@link isFeedEvent} narrows further. */
+const FEED_EVENT_TYPES: AuditEventType[] = [
+  'bucket.created',
+  'bucket.deleted',
+  'key.created',
+  'key.rotated',
+  'key.deleted',
+];
+
 /**
  * GET /api/activity — the dashboard's activity feed, for Owner and Admin.
  *
@@ -64,16 +78,30 @@ export async function baseHandler(
   const { from, to } = resolveWindow({ to: new Date().toISOString() });
   // Named steps, so a read cut off by the deadline is logged by name.
   const [{ auditLog, auditQueryMs }, buckets] = await Promise.all([
-    trackRequestStep(event, 'queryActivityEvents', async () => {
+    trackRequestStep(event, 'queryRecentAuditEvents', async () => {
       // Timed on its own: the bucket listing runs beside it and is often slower.
       const start = performance.now();
-      const auditLog = await queryActivityEvents({ orgId, from, to, limit, signal });
+      const auditLog = await queryRecentAuditEvents({
+        orgId,
+        types: FEED_EVENT_TYPES,
+        from,
+        to,
+        limit,
+        isMatch: isFeedEvent,
+        signal,
+      });
       return { auditLog, auditQueryMs: performance.now() - start };
     }),
     trackRequestStep(event, 'listBuckets', () => listBuckets(orgId, signal)),
   ]);
 
-  const recorded = auditLog.events.flatMap(mapToActivities);
+  // Below the point a read stopped early, events of its type may be missing,
+  // so a row there could be outranked by one the feed never saw.
+  const { completeSince } = auditLog;
+  const recorded = auditLog.events
+    .filter(isFeedEvent)
+    .filter((event) => completeSince === undefined || event.createdAt >= completeSince)
+    .flatMap(mapToActivities);
   reportAuditQuery({
     route: 'activity',
     cost: auditLog.cost,
@@ -81,15 +109,19 @@ export async function baseHandler(
     rowsReturned: recorded.length,
   });
 
-  const unrecorded = getUnrecordedBucketCreations({
+  // Every creation read, including those below `completeSince`: one may be
+  // stamped a little before its bucket, so one just below the cutoff can still
+  // be the record of a newer bucket.
+  const bucketCreations = auditLog.events.filter((event) => event.type === 'bucket.created');
+  const external = getExternalBucketCreationEvents({
     buckets,
-    events: auditLog.bucketCreations,
-    openCreations: auditLog.openBucketCreations,
+    events: bucketCreations.filter((event) => event.outcome === 'succeeded'),
+    openCreations: getOpenIntents(bucketCreations),
     // Below the point the audit read stopped, the log's creations are not all
     // in hand, so a bucket there cannot be told apart and is left out.
-    since: auditLog.completeSince ?? from,
+    since: completeSince ?? from,
   });
-  const activities = [...recorded, ...unrecorded]
+  const activities = [...recorded, ...external]
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .slice(0, limit);
 
@@ -148,7 +180,7 @@ async function listBuckets(orgId: string, signal: AbortSignal): Promise<BucketSu
  * {@link CREATION_MATCH_MARGIN_MS}. The age check keeps an old console creation
  * from covering a bucket of the same name deleted and made again over S3.
  */
-function getUnrecordedBucketCreations({
+function getExternalBucketCreationEvents({
   buckets,
   events,
   openCreations,
@@ -194,7 +226,7 @@ function getLatestCreationTimes(events: AuditEvent[]): Map<string, number> {
   return latestCreationAt;
 }
 
-/** Whether one of the creations covers the bucket, by the rule {@link getUnrecordedBucketCreations} gives. */
+/** Whether one of the creations covers the bucket, by the rule {@link getExternalBucketCreationEvents} gives. */
 function isCreationCoveredBy(
   latestCreationAt: Map<string, number>,
   bucket: BucketSummary,
@@ -209,6 +241,45 @@ function isCreationCoveredBy(
 /** Identifies a bucket across regions, since names are unique only within one. */
 function getBucketKey({ region, bucketName }: { region: string; bucketName: string }): string {
   return `${region}:${bucketName}`;
+}
+
+/**
+ * Whether the feed shows an event. Only completions that succeeded qualify: an
+ * intent, or an attempt the storage system refused, is history for the audit
+ * page but not activity. Key events are S3 keys only, the ones the API keys
+ * page lists.
+ */
+function isFeedEvent(event: AuditEvent): boolean {
+  if (event.outcome !== 'succeeded') return false;
+  switch (event.type) {
+    case 'bucket.created':
+    case 'bucket.deleted':
+      return true;
+    case 'key.created':
+    case 'key.rotated':
+      return event.details.keyKind === 's3';
+    case 'key.deleted':
+      // A rotation writes its own `key.rotated` and then revokes the old
+      // credential under a `key.deleted` with reason `rotation`. The feed shows
+      // the rotation and leaves that delete out: the key it names is still live
+      // under its new credential.
+      return event.details.keyKind === 's3' && event.details.reason !== 'rotation';
+    default:
+      return false;
+  }
+}
+
+/**
+ * The intents among `events` with no completion among them: actions whose
+ * outcome is unknown, such as a create whose storage call timed out. A
+ * completion is newer than its intent and the audit read goes newest first,
+ * so a read that reached an intent has already seen its completion, if any.
+ */
+function getOpenIntents(events: AuditEvent[]): AuditEvent[] {
+  const completed = new Set(
+    events.filter((event) => event.phase === 'completion').map((event) => event.correlationId),
+  );
+  return events.filter((event) => event.phase === 'intent' && !completed.has(event.correlationId));
 }
 
 /**
