@@ -597,6 +597,23 @@ describe('queryActivityEvents', () => {
     expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-newer']);
   });
 
+  it('returns every succeeded bucket creation, including those older than where a read stopped early', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [activityRow('2026-08-10T00:00:00.000Z', 'evt-older', 'bucket.created')] },
+      ],
+      'key.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        { Items: [], ...stoppedAt('2026-08-11T00:00:00.000Z#any-event') },
+      ],
+    });
+
+    const result = await queryActivityEvents({ orgId: ORG_ID, ...ACTIVITY_WINDOW, limit: 5 });
+
+    expect(result).toMatchObject({ events: [], bucketCreations: [{ eventId: 'evt-older' }] });
+  });
+
   it('reports the time before which a read stopped early', async () => {
     pagesByType({
       'key.created': [
@@ -616,6 +633,7 @@ describe('queryActivityEvents', () => {
 
     expect(result).toStrictEqual({
       events: [],
+      bucketCreations: [],
       openBucketCreations: [],
       cost: { pages: 5, rows: 0 },
     });

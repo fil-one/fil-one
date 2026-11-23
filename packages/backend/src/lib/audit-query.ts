@@ -245,6 +245,13 @@ export interface ActivityEventsRead {
   /** Every match newer than {@link completeSince}, newest first. Not cut to the limit. */
   events: AuditEvent[];
   /**
+   * Every succeeded `bucket.created` the read found, including those older
+   * than {@link completeSince}. Not feed rows: the caller matches listed
+   * buckets against them, and a creation may be stamped a little before its
+   * bucket, so one just below the cutoff can still be a newer bucket's record.
+   */
+  bucketCreations: AuditEvent[];
+  /**
    * `bucket.created` intents with no completion: the create's outcome is
    * unknown, such as when the storage call timed out, so the bucket may exist.
    * Not feed rows; the caller uses them to credit a listed bucket to the console.
@@ -282,8 +289,9 @@ export interface ActivityEventsRead {
  * type's matches. The merge therefore drops every match older than the newest
  * point any read stopped at, so the feed may come back short but never out of
  * order. Every match newer than that point is returned, not only the first
- * `limit`: the caller merges in rows of its own before cutting to the limit,
- * and needs every bucket creation the log holds to tell which buckets it lacks.
+ * `limit`: the caller merges in rows of its own before cutting to the limit.
+ * The bucket creations it matches those rows against come back uncut, in
+ * `bucketCreations`.
  * There is no cursor: the feed has no next page.
  */
 export async function queryActivityEvents({
@@ -327,11 +335,16 @@ export async function queryActivityEvents({
     .filter((match) => cutoff === undefined || match.sortKey >= cutoff)
     .sort((a, b) => (a.sortKey < b.sortKey ? 1 : -1))
     .map((match) => match.event);
+  const bucketCreations = reads
+    .flatMap((read) => read.matches)
+    .map((match) => match.event)
+    .filter((event) => event.type === 'bucket.created');
   const openBucketCreations = reads.flatMap((read) => read.openIntents);
 
-  if (cutoff === undefined) return { events, openBucketCreations, cost };
+  const merged = { events, bucketCreations, openBucketCreations, cost };
+  if (cutoff === undefined) return merged;
   // The sort key is `{createdAt}#{eventId}`; the time is the part before `#`.
-  return { events, openBucketCreations, cost, completeSince: cutoff.split('#')[0] };
+  return { ...merged, completeSince: cutoff.split('#')[0] };
 }
 
 /**

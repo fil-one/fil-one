@@ -64,6 +64,7 @@ function auditEvent(
 function resolveEvents(...events: AuditEvent[]) {
   mockQueryActivityEvents.mockResolvedValue({
     events,
+    bucketCreations: events.filter((event) => event.type === 'bucket.created'),
     openBucketCreations: [],
     cost: { pages: 1, rows: events.length },
   });
@@ -195,6 +196,30 @@ describe('get-activity baseHandler', () => {
     );
   });
 
+  it('reports the audit query’s own duration, not the bucket listing’s', async () => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    mockQueryActivityEvents.mockImplementation(async () => {
+      now += 10;
+      return {
+        events: [],
+        bucketCreations: [],
+        openBucketCreations: [],
+        cost: { pages: 1, rows: 0 },
+      };
+    });
+    // The listing finishes after the audit query, 1s later.
+    mockListBuckets.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      now += 1000;
+      return [];
+    });
+
+    await getActivities();
+
+    expect(mockReportAuditQuery).toHaveBeenCalledWith(expect.objectContaining({ durationMs: 10 }));
+  });
+
   it('reports the read under the activity route', async () => {
     resolveEvents(auditEvent('bucket.created', { region: 'any-region', bucketName: 'any-bucket' }));
 
@@ -292,6 +317,7 @@ describe('get-activity buckets created outside the console', () => {
     // The storage call timed out, so the intent stayed open; the bucket was made.
     mockQueryActivityEvents.mockResolvedValue({
       events: [],
+      bucketCreations: [],
       openBucketCreations: [intent('any-bucket', '2026-12-09T23:59:59.000Z')],
       cost: { pages: 1, rows: 1 },
     });
@@ -313,6 +339,7 @@ describe('get-activity buckets created outside the console', () => {
   it('adds an outside-the-console row when the only open console create is for another region', async () => {
     mockQueryActivityEvents.mockResolvedValue({
       events: [],
+      bucketCreations: [],
       openBucketCreations: [intent('any-bucket', '2026-12-09T23:59:59.000Z', 'other-region')],
       cost: { pages: 1, rows: 1 },
     });
@@ -374,9 +401,27 @@ describe('get-activity buckets created outside the console', () => {
     // Older creations were left unread, so the log may hold this one's.
     mockQueryActivityEvents.mockResolvedValue({
       events: [],
+      bucketCreations: [],
       openBucketCreations: [],
       cost: { pages: 3, rows: 300 },
       completeSince: '2026-12-12T00:00:00.000Z',
+    });
+    mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
+
+    expect((await getActivities()).body).toStrictEqual({ activities: [] });
+  });
+
+  it('adds no row for a bucket whose recorded creation is just below the point the audit read stopped', async () => {
+    // The creation is stamped a few seconds before the bucket, and the read
+    // stopped between the two, so the creation is not a feed row but still
+    // records the bucket.
+    const creation = created('any-bucket', '2026-12-09T23:59:55.000Z');
+    mockQueryActivityEvents.mockResolvedValue({
+      events: [],
+      bucketCreations: [creation],
+      openBucketCreations: [],
+      cost: { pages: 3, rows: 300 },
+      completeSince: '2026-12-09T23:59:58.000Z',
     });
     mockListBuckets.mockResolvedValue([listedBucket('any-bucket', RECENT)]);
 

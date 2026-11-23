@@ -62,12 +62,14 @@ export async function baseHandler(
 
   // The whole retention window up to now: the feed takes no dates.
   const { from, to } = resolveWindow({ to: new Date().toISOString() });
-  const start = performance.now();
   // Named steps, so a read cut off by the deadline is logged by name.
-  const [auditLog, buckets] = await Promise.all([
-    trackRequestStep(event, 'queryActivityEvents', () =>
-      queryActivityEvents({ orgId, from, to, limit, signal }),
-    ),
+  const [{ auditLog, auditQueryMs }, buckets] = await Promise.all([
+    trackRequestStep(event, 'queryActivityEvents', async () => {
+      // Timed on its own: the bucket listing runs beside it and is often slower.
+      const start = performance.now();
+      const auditLog = await queryActivityEvents({ orgId, from, to, limit, signal });
+      return { auditLog, auditQueryMs: performance.now() - start };
+    }),
     trackRequestStep(event, 'listBuckets', () => listBuckets(orgId, signal)),
   ]);
 
@@ -75,13 +77,13 @@ export async function baseHandler(
   reportAuditQuery({
     route: 'activity',
     cost: auditLog.cost,
-    durationMs: performance.now() - start,
+    durationMs: auditQueryMs,
     rowsReturned: recorded.length,
   });
 
   const unrecorded = getUnrecordedBucketCreations({
     buckets,
-    events: auditLog.events,
+    events: auditLog.bucketCreations,
     openCreations: auditLog.openBucketCreations,
     // Below the point the audit read stopped, the log's creations are not all
     // in hand, so a bucket there cannot be told apart and is left out.

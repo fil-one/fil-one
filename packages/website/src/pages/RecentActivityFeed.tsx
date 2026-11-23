@@ -37,7 +37,9 @@ export function RecentActivityFeed({
     );
   }
 
-  if (activityQuery.isError) {
+  // A failed refetch keeps the rows already loaded, so only a feed that never
+  // loaded shows the error.
+  if (!activityQuery.data) {
     return (
       <Alert
         variant="red"
@@ -114,7 +116,11 @@ export function RecentActivityFeed({
  * of creating says so, since the row names nobody and the audit page lacks it.
  */
 function getActivityLabel(activity: RecentActivity): string {
-  if (activity.resourceType === 'bucket' && activity.createdOutsideConsole) {
+  if (
+    activity.resourceType === 'bucket' &&
+    activity.action === 'bucket.created' &&
+    activity.createdOutsideConsole
+  ) {
     return 'Created outside the console';
   }
   return getActivityActionLabel(activity.action);

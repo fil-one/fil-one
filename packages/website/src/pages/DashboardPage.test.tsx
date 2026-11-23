@@ -32,6 +32,7 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 
 import { DashboardPage } from './DashboardPage.js';
+import { ACTIVITY_LIMIT } from './RecentActivityFeed.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -268,6 +269,52 @@ describe('DashboardPage — recent activity', () => {
 
     expect(await screen.findByText('Created outside the console')).toBeInTheDocument();
     expect(screen.getByText('Created')).toBeInTheDocument();
+  });
+
+  it('labels a deleted bucket as deleted even when it is flagged as made outside the console', async () => {
+    mockGetActivity.mockResolvedValue({
+      activities: [
+        {
+          id: 'any-deleted',
+          resourceType: 'bucket',
+          action: 'bucket.deleted',
+          resourceName: 'any-bucket',
+          timestamp: new Date().toISOString(),
+          // Only a creation can be made outside the console.
+          createdOutsideConsole: true,
+        },
+      ],
+    });
+    renderPage();
+
+    expect(await screen.findByText('Deleted')).toBeInTheDocument();
+    expect(screen.queryByText('Created outside the console')).not.toBeInTheDocument();
+  });
+
+  it('keeps the loaded rows when a later refetch fails', async () => {
+    mockGetActivity.mockResolvedValue({
+      activities: [
+        {
+          id: 'any-event',
+          resourceType: 'bucket',
+          action: 'bucket.created',
+          resourceName: 'any-bucket',
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    });
+    const { client } = renderPage();
+    await screen.findByText('any-bucket');
+
+    mockGetActivity.mockRejectedValue(new Error('any activity error'));
+    const queryKey = queryKeys.activityRecent(ACTIVITY_LIMIT);
+    await act(() => client.refetchQueries({ queryKey }));
+    await waitFor(() => expect(client.getQueryState(queryKey)?.status).toBe('error'));
+    // react-query tells the page about the failure on the next tick.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+    expect(screen.getByText('any-bucket')).toBeInTheDocument();
+    expect(screen.queryByText('Failed to load recent activity')).not.toBeInTheDocument();
   });
 
   it('loads the activity again from "Try again" after a failure', async () => {
