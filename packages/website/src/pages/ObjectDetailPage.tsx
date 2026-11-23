@@ -157,8 +157,11 @@ function useObjectMetadata({ bucketName, region, objectKey, versionId }: ObjectD
  * What Delete will do, which depends on what it targets. A version named in the
  * URL is removed for good and the rest stay. Without one, a versioned bucket
  * keeps every version and hides the object behind a delete marker, so calling
- * that permanent, as this dialog used to, was wrong. `isVersioned` is undefined
- * while the history is unknown, and the copy then claims neither outcome.
+ * that permanent, as this dialog used to, was wrong. `isVersioned` is the
+ * bucket's own setting, not a guess from the history: an object uploaded before
+ * versioning was turned on has only the ID "null", yet deleting it adds a delete
+ * marker. It is undefined until the bucket's settings load, and the copy then
+ * claims neither outcome.
  */
 function getDeleteCopy(
   versionId: string | undefined,
@@ -251,10 +254,7 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
 
   const objectActions = useObjectActions({ bucketName, region, onDeleted: afterDelete });
   const download = () => void objectActions.downloadObject(objectKey, versionId);
-  const deleteCopy = getDeleteCopy(
-    versionId,
-    versionsQuery.data ? versionState.isVersioned : undefined,
-  );
+  const deleteCopy = getDeleteCopy(versionId, bucketQuery.data?.bucket.versioning);
 
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-6 px-5 pt-6 pb-12 sm:px-8 lg:px-10 lg:pt-10 xl:px-0">
@@ -334,7 +334,12 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
           )}
         </div>
 
-        <ObjectAccessAside bucketName={bucketName} region={region} objectKey={objectKey} />
+        <ObjectAccessAside
+          bucketName={bucketName}
+          region={region}
+          objectKey={objectKey}
+          versionId={versionId}
+        />
       </div>
 
       <ShareObjectModal

@@ -31,7 +31,6 @@ describe('getVersionState', () => {
       latest,
       isOlder: false,
       isDeleted: false,
-      isVersioned: true,
     });
   });
 
@@ -57,10 +56,7 @@ describe('getVersionState', () => {
   it('gives no version ID for an object in a bucket without versioning', () => {
     // S3 reports the ID "null" for every object in a bucket that never had versioning
     const unversioned = version({ versionId: 'null', isLatest: true });
-    expect(getVersionState([unversioned])).toMatchObject({
-      shownVersionId: undefined,
-      isVersioned: false,
-    });
+    expect(getVersionState([unversioned])).toMatchObject({ shownVersionId: undefined });
   });
 
   it('keeps the version from the URL before the history has loaded', () => {

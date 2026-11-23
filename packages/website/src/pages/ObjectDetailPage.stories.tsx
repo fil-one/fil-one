@@ -120,6 +120,8 @@ function Seeded({ scenario, children }: { scenario: Scenario; children: React.Re
         region: REGION,
         isPublic: false,
         objectLockEnabled: scenario.objectLockEnabled ?? false,
+        // A history with a real version ID comes from a bucket that keeps versions
+        versioning: scenario.versions?.some((v) => v.versionId !== 'null') ?? false,
       },
     });
     if (scenario.previewUrl) {

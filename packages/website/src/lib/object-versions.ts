@@ -24,8 +24,6 @@ export type VersionState = {
   isOlder: boolean;
   /** True when the newest entry is a delete marker: there is no latest to go back to. */
   isDeleted: boolean;
-  /** True when the bucket keeps versions, which decides what Delete does. */
-  isVersioned: boolean;
 };
 
 /**
@@ -34,7 +32,9 @@ export type VersionState = {
  */
 export function getVersionState(versions: S3ObjectVersion[], versionId?: string): VersionState {
   const latest = versions.find((v) => v.isLatest);
-  const isVersioned = versions.some((v) => v.versionId && v.versionId !== UNVERSIONED_ID);
+  // Only for the Details card: an ID of "null" is not worth showing. Whether the
+  // bucket keeps versions is its own setting, which the history cannot tell.
+  const hasVersionIds = versions.some((v) => v.versionId && v.versionId !== UNVERSIONED_ID);
   const isDeleted = latest?.isDeleteMarker ?? false;
   const shown = versionId
     ? versions.find((v) => v.versionId === versionId)
@@ -42,12 +42,11 @@ export function getVersionState(versions: S3ObjectVersion[], versionId?: string)
       ? undefined
       : latest;
   return {
-    shownVersionId: versionId ?? (isVersioned ? shown?.versionId : undefined),
+    shownVersionId: versionId ?? (hasVersionIds ? shown?.versionId : undefined),
     shown,
     latest,
     isOlder: Boolean(versionId && latest && latest.versionId !== versionId),
     isDeleted,
-    isVersioned,
   };
 }
 
