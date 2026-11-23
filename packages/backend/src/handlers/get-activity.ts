@@ -41,7 +41,7 @@ const CREATION_MATCH_MARGIN_MS = 5 * 60 * 1000;
  * not be earlier than the production deploy of that change: a console bucket
  * made between the two would read as created outside the console.
  */
-export const BUCKET_CREATIONS_AUDITED_SINCE = '2026-11-10T00:00:00.000Z';
+export const BUCKET_CREATIONS_AUDITED_SINCE = '2026-11-24T00:00:00.000Z';
 
 /** The event types the feed shows, which {@link isFeedEvent} narrows further. */
 const FEED_EVENT_TYPES: AuditEventType[] = [
