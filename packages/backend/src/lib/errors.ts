@@ -74,6 +74,16 @@ export class AccessKeyAlreadyExistsError extends Error {
   }
 }
 
+// The storage system answered ConcurrentChange to every attempt: another write
+// to the tenant's keys kept getting in the way. Each attempt was rolled back,
+// so nothing was created, and the caller may send the same request again.
+export class AccessKeyConcurrentChangeError extends Error {
+  constructor(options?: ErrorOptions) {
+    super('Another change to the access keys was in progress', options);
+    this.name = 'AccessKeyConcurrentChangeError';
+  }
+}
+
 export class AccessKeyValidationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
