@@ -58,7 +58,9 @@ export const Heading = forwardRef<HTMLHeadingElement, HeadingProps>(
     return (
       <div className={cn('flex flex-col gap-1', className)}>
         {heading}
-        <p className="text-sm text-(--color-paragraph-text-subtle)">{description}</p>
+        {/* A description can carry a user-chosen name, such as the org's on the
+            audit log, and a long one with no spaces would widen the page. */}
+        <p className="text-sm text-(--color-paragraph-text-subtle) wrap-anywhere">{description}</p>
       </div>
     );
   },

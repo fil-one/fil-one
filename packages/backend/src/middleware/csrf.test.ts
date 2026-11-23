@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { ApiErrorCode } from '@filone/shared';
 import { buildEvent, buildMiddyRequest } from '../test/lambda-test-utilities.ts';
 import {
   expectErrorResponse,
@@ -6,6 +7,9 @@ import {
   REFRESHED_TOKENS,
 } from '../test/assert-helpers.ts';
 import { csrfMiddleware } from './csrf.ts';
+
+/** Coded so the console can retry with the cookie this response sets. */
+const CSRF_REFUSAL = { message: 'CSRF validation failed', code: ApiErrorCode.CSRF_INVALID };
 
 describe('csrfMiddleware', () => {
   describe('safe methods', () => {
@@ -62,7 +66,7 @@ describe('csrfMiddleware', () => {
 
       const result = await before(request);
 
-      expectErrorResponse(result, 403, { message: 'CSRF validation failed' });
+      expectErrorResponse(result, 403, CSRF_REFUSAL);
     });
 
     it('returns 403 when CSRF cookie is missing', async () => {
@@ -72,7 +76,7 @@ describe('csrfMiddleware', () => {
 
       const result = await before(request);
 
-      expectErrorResponse(result, 403, { message: 'CSRF validation failed' });
+      expectErrorResponse(result, 403, CSRF_REFUSAL);
     });
 
     it('returns 403 when header and cookie do not match', async () => {
@@ -82,7 +86,7 @@ describe('csrfMiddleware', () => {
 
       const result = await before(request);
 
-      expectErrorResponse(result, 403, { message: 'CSRF validation failed' });
+      expectErrorResponse(result, 403, CSRF_REFUSAL);
     });
 
     it('passes through when header and cookie match', async () => {

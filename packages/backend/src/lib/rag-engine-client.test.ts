@@ -337,7 +337,8 @@ describe('ragEngineTarget', () => {
       bucketName: 'docs',
     });
 
-    expect(orchestrator.getS3ClientContext).toHaveBeenCalledWith('tenant-1');
+    // The credentials are asked for the bucket's region, not the network's first.
+    expect(orchestrator.getS3ClientContext).toHaveBeenCalledWith('tenant-1', S3Region.EuCentral3);
     expect(target).toStrictEqual(TARGET);
   });
 });

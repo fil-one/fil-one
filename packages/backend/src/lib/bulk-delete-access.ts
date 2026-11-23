@@ -4,10 +4,11 @@
 // queueing a job and the worker again before each run, so access revoked after
 // the job was queued stops it.
 
-import { BulkDeleteScope, supportsIamMethods, type PolicyAction } from '@filone/shared';
+import { BulkDeleteScope, type PolicyAction } from '@filone/shared';
 
 import type { BucketVersioningStatus } from './s3-bucket-operations.ts';
-import type { RegionOrchestrator, ServiceOrchestrator } from './service-orchestrator.ts';
+import { isIamOrchestrator } from './service-orchestrator-ids.ts';
+import type { NetworkOrchestrator, ServiceOrchestrator } from './service-orchestrator.ts';
 
 /**
  * The policy actions the worker's S3 calls need. An all-versions delete lists
@@ -51,14 +52,14 @@ export interface BulkDeleteTarget {
  * the read.
  */
 export async function canBulkDelete(
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
   tenantId: string,
   memberId: string | undefined,
   target: BulkDeleteTarget,
 ): Promise<BulkDeleteAccess> {
-  if (!memberId || !supportsIamMethods(orchestrator.region)) return { ok: true };
-  // Every region serving the iam access model has a ServiceOrchestrator, which
-  // the compiler cannot tell from the region check.
+  if (!memberId || !isIamOrchestrator(orchestrator)) return { ok: true };
+  // Every network serving the iam access model has a ServiceOrchestrator, which
+  // the compiler cannot tell from the access-model check.
   const access = await (orchestrator as ServiceOrchestrator).resolveMemberAccess(
     tenantId,
     memberId,

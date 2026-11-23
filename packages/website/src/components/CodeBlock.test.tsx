@@ -24,4 +24,14 @@ describe('CodeBlock', () => {
     renderWithProviders(<CodeBlock code="x" />);
     expect(screen.getByLabelText('Copy code')).toBeInTheDocument();
   });
+
+  // jsdom does no layout, so the class that sets the wrapping is what can be checked.
+  it.each([
+    ['wraps long lines when asked to', true, 'whitespace-pre-wrap'],
+    ['scrolls long lines sideways by default', undefined, 'overflow-x-auto'],
+  ])('%s', (_case, wrap, className) => {
+    renderWithProviders(<CodeBlock minimal wrap={wrap} code="any-text" />);
+
+    expect(screen.getByText('any-text').closest('pre')).toHaveClass(className);
+  });
 });

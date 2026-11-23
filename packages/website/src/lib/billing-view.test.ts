@@ -2,13 +2,19 @@ import { describe, it, expect } from 'vitest';
 import { PlanId, SubscriptionStatus, TB_BYTES } from '@filone/shared';
 import type { Subscription } from '@filone/shared';
 
+import { formatDate, formatMonthDay } from './time.js';
+
 import {
   billingPeriodRange,
   costDisclosure,
   daysLeftLabel,
+  discountLabel,
+  estimateDiscountNote,
+  getAppliedDiscounts,
+  getCardBrandName,
+  getDiscountedRateCents,
   storageCostCents,
   paymentPosture,
-  planMetaLine,
   planTitle,
   pricingLine,
   showsSalesPitch,
@@ -86,6 +92,14 @@ describe('pricingLine', () => {
     expect(
       pricingLine(subscription({ status: SubscriptionStatus.Trialing, pricePerTbCents: 499 })),
     ).toBe('');
+  });
+
+  it('states the discounted rate when a recurring percentage comes off it', () => {
+    const discounted = subscription({
+      ...SELF_SERVE,
+      discounts: [{ duration: 'forever', percentOff: 20 }],
+    });
+    expect(pricingLine(discounted)).toBe('$3.99/TB per month');
   });
 
   it('describes what an inactive account needs', () => {
@@ -210,6 +224,7 @@ describe('costDisclosure', () => {
       kind: 'estimate',
       cents: 1497,
       minimumApplied: false,
+      discounted: false,
     });
   });
 
@@ -218,6 +233,46 @@ describe('costDisclosure', () => {
       kind: 'estimate',
       cents: 499,
       minimumApplied: true,
+      discounted: false,
+    });
+  });
+
+  it('takes a percentage discount off the estimate', () => {
+    const discounts = [{ duration: 'forever' as const, percentOff: 20 }];
+    expect(costDisclosure(subscription({ ...SELF_SERVE, discounts }), 3 * TB_BYTES)).toEqual({
+      kind: 'estimate',
+      cents: 1198,
+      minimumApplied: false,
+      discounted: true,
+    });
+  });
+
+  it('takes a discount off the monthly minimum when the minimum is what is billed', () => {
+    const discounts = [{ duration: 'once' as const, amountOffCents: 100 }];
+    expect(costDisclosure(subscription({ ...SELF_SERVE, discounts }), 0)).toEqual({
+      kind: 'estimate',
+      cents: 399,
+      minimumApplied: true,
+      discounted: true,
+    });
+  });
+
+  it('applies each discount to what the one before it left', () => {
+    const discounts = [
+      { duration: 'forever' as const, amountOffCents: 100 },
+      { duration: 'forever' as const, percentOff: 50 },
+    ];
+    // 1000 less 100 is 900, then 50% off is 450. Taking the 50% off the
+    // original 1000 instead would give 400.
+    expect(
+      costDisclosure(subscription({ pricePerTbCents: 1000, discounts }), TB_BYTES),
+    ).toMatchObject({ cents: 450 });
+  });
+
+  it('estimates nothing owed, never a credit, when a fixed discount exceeds the bill', () => {
+    const discounts = [{ duration: 'once' as const, amountOffCents: 10_000 }];
+    expect(costDisclosure(subscription({ ...SELF_SERVE, discounts }), 0)).toMatchObject({
+      cents: 0,
     });
   });
 
@@ -292,28 +347,171 @@ describe('paymentPosture', () => {
 });
 
 describe('statusBadge', () => {
-  it('gives every status a label and a tone', () => {
-    for (const status of Object.values(SubscriptionStatus)) {
-      const badge = statusBadge(status);
-      expect(badge.label).not.toBe('');
-      expect(badge.tone).toBeTruthy();
-    }
+  it.each([
+    SubscriptionStatus.Active,
+    SubscriptionStatus.Manual,
+    SubscriptionStatus.Trialing,
+    SubscriptionStatus.Inactive,
+  ])('shows no pill for a %s plan, which needs no attention', (status) => {
+    expect(statusBadge(status)).toBeNull();
   });
 
-  it('reads an org billed manually as active and in good standing', () => {
-    expect(statusBadge(SubscriptionStatus.Manual)).toStrictEqual({
-      label: 'Active',
-      tone: 'green',
-      dot: true,
-    });
+  it.each([
+    [SubscriptionStatus.PastDue, { label: 'Payment failed', tone: 'amber' }],
+    [SubscriptionStatus.GracePeriod, { label: 'Grace period', tone: 'amber' }],
+    [SubscriptionStatus.Canceled, { label: 'Canceled', tone: 'red' }],
+  ])('shows a pill for a %s plan, which needs attention', (status, badge) => {
+    expect(statusBadge(status)).toStrictEqual(badge);
   });
 
   it('reads past due as a payment problem, not as a cancellation', () => {
-    expect(statusBadge(SubscriptionStatus.PastDue)).toEqual({
-      label: 'Payment failed',
-      tone: 'amber',
-      dot: false,
+    expect(statusBadge(SubscriptionStatus.PastDue)).toMatchObject({ tone: 'amber' });
+  });
+});
+
+describe('discountLabel', () => {
+  it.each([
+    [
+      'a percentage for one invoice',
+      { duration: 'once', percentOff: 20 },
+      '20% off your next invoice',
+    ],
+    [
+      'a fixed amount for good',
+      { duration: 'forever', amountOffCents: 1000 },
+      '$10.00 off every invoice',
+    ],
+    [
+      'a checked code lasting months',
+      { duration: 'repeating', durationInMonths: 3, percentOff: 15 },
+      '15% off for 3 months',
+    ],
+    [
+      'a checked code lasting one month',
+      { duration: 'repeating', durationInMonths: 1, percentOff: 15 },
+      '15% off for 1 month',
+    ],
+  ] as const)('describes %s', (_case, discount, expected) => {
+    expect(discountLabel(discount)).toBe(expected);
+  });
+
+  // Noon local time, so no time zone moves either date into another year.
+  const NOW = new Date(2026, 5, 1, 12);
+  const runningUntil = (endsAt: Date) =>
+    discountLabel(
+      { duration: 'repeating', durationInMonths: 3, endsAt: endsAt.toISOString(), percentOff: 15 },
+      NOW,
+    );
+
+  it('gives the end date of a running discount rather than its length, without a year this year', () => {
+    const endsAt = new Date(2026, 10, 11, 12);
+    expect(runningUntil(endsAt)).toBe(`15% off until ${formatMonthDay(endsAt.toISOString())}`);
+  });
+
+  it('states the year of an end date in a later year', () => {
+    const endsAt = new Date(2027, 0, 5, 12);
+    expect(runningUntil(endsAt)).toBe(`15% off until ${formatDate(endsAt.toISOString())}`);
+  });
+});
+
+describe('getAppliedDiscounts', () => {
+  const DISCOUNT = { duration: 'forever', percentOff: 20 } as const;
+  const withDiscount = (status: SubscriptionStatus) =>
+    subscription({ status, pricePerTbCents: 499, discounts: [DISCOUNT] });
+
+  it.each([SubscriptionStatus.Active, SubscriptionStatus.PastDue])(
+    'keeps the discount on a %s subscription, which is still invoiced',
+    (status) => {
+      expect(getAppliedDiscounts(withDiscount(status))).toStrictEqual([DISCOUNT]);
+    },
+  );
+
+  it.each([
+    SubscriptionStatus.Canceled,
+    SubscriptionStatus.GracePeriod,
+    SubscriptionStatus.Trialing,
+    SubscriptionStatus.Manual,
+    SubscriptionStatus.Inactive,
+  ])('drops the discount on a %s subscription, which no invoice will take it off', (status) => {
+    expect(getAppliedDiscounts(withDiscount(status))).toStrictEqual([]);
+  });
+
+  it('estimates a grace period at the full rate, since its subscription is canceled', () => {
+    const grace = withDiscount(SubscriptionStatus.GracePeriod);
+    expect(costDisclosure(grace, TB_BYTES)).toMatchObject({
+      kind: 'estimate',
+      cents: 499,
+      discounted: false,
     });
+  });
+});
+
+describe('getDiscountedRateCents', () => {
+  const running = (discounts: Subscription['discounts']) =>
+    subscription({ status: SubscriptionStatus.Active, pricePerTbCents: 499, discounts });
+
+  it.each([
+    [
+      'a percentage for some months',
+      { duration: 'repeating', durationInMonths: 3, percentOff: 20 },
+    ],
+    ['a percentage for good', { duration: 'forever', percentOff: 20 }],
+  ] as const)('takes %s off the rate', (_case, discount) => {
+    expect(getDiscountedRateCents(running([discount]))).toBe(399);
+  });
+
+  it.each([
+    // Comes off the next invoice only, so it is not a monthly rate.
+    ['a percentage for one invoice', { duration: 'once', percentOff: 20 }],
+    // Comes off the invoice, not each TB.
+    ['a fixed amount', { duration: 'forever', amountOffCents: 100 }],
+  ] as const)('leaves the rate as listed for %s', (_case, discount) => {
+    expect(getDiscountedRateCents(running([discount]))).toBeNull();
+  });
+
+  it('takes only the percentage off when a fixed amount applies alongside it', () => {
+    expect(
+      getDiscountedRateCents(
+        running([
+          { duration: 'forever', percentOff: 20 },
+          { duration: 'forever', amountOffCents: 100 },
+        ]),
+      ),
+    ).toBe(399);
+  });
+
+  it('gives no discounted rate without a discount', () => {
+    expect(getDiscountedRateCents(running([]))).toBeNull();
+  });
+
+  it('gives no discounted rate during a trial, which charges nothing yet', () => {
+    const trial = subscription({
+      status: SubscriptionStatus.Trialing,
+      pricePerTbCents: 499,
+      discounts: [{ duration: 'forever', percentOff: 20 }],
+    });
+    expect(getDiscountedRateCents(trial)).toBeNull();
+  });
+});
+
+describe('estimateDiscountNote', () => {
+  it.each([
+    ['a percentage', [{ duration: 'forever', percentOff: 20 }], 'Including 20% discount'],
+    ['a fixed amount', [{ duration: 'once', amountOffCents: 1000 }], 'Including $10.00 discount'],
+    [
+      'several discounts, without adding them up',
+      [
+        { duration: 'forever', percentOff: 20 },
+        { duration: 'once', amountOffCents: 1000 },
+      ],
+      'Including discounts',
+    ],
+  ] as const)('names %s', (_case, discounts, expected) => {
+    expect(estimateDiscountNote([...discounts])).toBe(expected);
+  });
+
+  it('says nothing when there is no discount', () => {
+    expect(estimateDiscountNote([])).toBeNull();
   });
 });
 
@@ -325,8 +523,12 @@ describe('an org billed manually', () => {
     expect(planTitle(MANUAL)).toBe('Custom plan');
   });
 
-  it('says it is billed manually instead of stating a price or a renewal', () => {
-    expect(planMetaLine(MANUAL)).toBe('Billed manually');
+  it('says it is billed manually instead of stating a price', () => {
+    expect(pricingLine(MANUAL)).toBe('Billed manually');
+  });
+
+  it('states no renewal, since there is no billing period to renew', () => {
+    expect(timelineLine(MANUAL)).toBeNull();
   });
 
   it('points at the agreement instead of estimating a bill', () => {
@@ -335,5 +537,37 @@ describe('an org billed manually', () => {
 
   it('is invoiced rather than missing a card', () => {
     expect(paymentPosture({ subscription: MANUAL })).toBe('invoiced');
+  });
+});
+
+describe('getCardBrandName', () => {
+  it.each([
+    ['amex', 'American Express'],
+    ['jcb', 'JCB'],
+    ['unionpay', 'UnionPay'],
+    ['eftpos_au', 'eftpos'],
+  ])('names a %s card %s, not by its capitalised ID', (brand, name) => {
+    expect(getCardBrandName(brand)).toBe(name);
+  });
+
+  it('matches the brand whatever its case', () => {
+    expect(getCardBrandName('VISA')).toBe('Visa');
+  });
+
+  it.each([
+    // Stripe's own word for a card it could not identify.
+    ['unknown'],
+    // A brand Stripe might add before this list does.
+    ['any-new-brand'],
+    // An empty brand from a payment method saved without one.
+    [''],
+  ])('calls the card "Card" for the brand %j, which has no name', (brand) => {
+    expect(getCardBrandName(brand)).toBe('Card');
+  });
+
+  it('calls the card "Card" for a brand that names an object property', () => {
+    // `constructor` is on every object's prototype, and stays the same once
+    // lowercased; the lookup must not find it there.
+    expect(getCardBrandName('constructor')).toBe('Card');
   });
 });

@@ -6,6 +6,26 @@ Monorepo for the Fil One product and its supporting packages.
 
 For any UI work in `packages/website` (the console, the authenticated product; the directory name is legacy), follow [packages/website/DESIGN.md](packages/website/DESIGN.md) and the loader in [packages/website/CLAUDE.md](packages/website/CLAUDE.md).
 
+## Stories, branches and pull requests
+
+Work is tracked as stories in Shortcut. Shortcut links a branch or pull request to a story only when it mentions the story's Shortcut ID, such as `sc-847`, and then moves the story along the workflow as the pull request progresses.
+
+- Name the branch `<your-name>/sc-<id>/<short-description>`, such as `filipa/sc-847/secret-key-prompt`. The story's Git helpers in Shortcut copy a branch name in this shape.
+- Start the pull request title with the ID: `sc-847 fix(console): ask for the secret key at a prompt`.
+- When a pull request covers more than one story, name every ID in its description.
+
+`FIL-` IDs in older commits, comments and docs refer to Linear issues from before the move to Shortcut. Leave them as they are, and don't use `FIL-` IDs for new work: Shortcut does not recognize them.
+
+## Documentation
+
+A user-facing change is not done until [docs.filone.com](https://docs.filone.com) matches it. User-facing means anything a customer can see or rely on: console labels, screens and flows, S3 API behaviour, limits, pricing, plans, regions, error messages, and security properties.
+
+- Update the docs in [FilecoinFoundationWeb/filone-docs](https://github.com/FilecoinFoundationWeb/filone-docs) as part of the task, following that repo's `AGENTS.md` and `CONTRIBUTING.md` (which maps product paths to docs pages), and link the docs PR in this PR's description.
+- If the change needs no docs update, tick **No docs change needed** in the PR description and say why.
+- If the change is behind a feature flag or beta gate, don't open a docs PR yet: a public docs PR announces the feature. Add the `docs:gated` label and note the docs work for launch.
+
+The **Docs impact** check fails until one of those is done for a PR that touches user-facing paths (`.github/docs-impact-paths.txt`).
+
 ## Code conventions
 
 ### Naming

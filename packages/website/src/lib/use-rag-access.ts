@@ -10,8 +10,9 @@ import { ME_STALE_TIME, queryKeys } from './query-client.js';
  * email OR runtime DynamoDB allowlist) so the gate decision stays consistent
  * between the frontend and backend without a second lookup. Returns `false`
  * while the `/me` query is loading, a safe default that avoids briefly
- * exposing the feature. Exported for FIL-555 to hide the nav item and guard
- * the route; not wired into nav/routes here.
+ * exposing the feature. The sidebar uses it to hide the Bucket Intelligence
+ * link. `BucketIntelligencePage` reads `/me` itself instead, because it must
+ * tell loading apart from no access before it redirects.
  */
 export function useRagAccess(): boolean {
   const { data: me } = useQuery({

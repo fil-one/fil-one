@@ -7,7 +7,6 @@ import type {
   AuditActor,
   ErrorResponse,
   ExcessKeyPermission,
-  S3Region,
   ServiceKeyGrant,
 } from '@filone/shared';
 import { Resource } from 'sst';
@@ -22,7 +21,7 @@ import {
 } from './membership-changes.ts';
 import { resolveMembership } from './org-membership.ts';
 import { ResponseBuilder } from './response-builder.ts';
-import type { RegionOrchestrator } from './service-orchestrator.ts';
+import type { NetworkOrchestrator } from './service-orchestrator.ts';
 
 /**
  * The half of a mint that happens after the vendor has answered.
@@ -51,8 +50,8 @@ export interface MintedKey {
   keyId: string;
   accessKeyId: string;
   keyName: string;
-  region: S3Region;
-  orchestrator: RegionOrchestrator;
+  /** The network that minted it, which is where it lives and what revokes it. */
+  orchestrator: NetworkOrchestrator;
   tenantId: string;
 }
 
@@ -226,7 +225,13 @@ export async function discardRecordedKey({
   actor: AuditActor;
 }): Promise<boolean> {
   try {
-    await revokeAccessKey({ orgId: minter.orgId, ...minted, actor, reason: 'stale_role_at_mint' });
+    await revokeAccessKey({
+      orgId: minter.orgId,
+      ...minted,
+      orchestratorId: minted.orchestrator.id,
+      actor,
+      reason: 'stale_role_at_mint',
+    });
     return true;
   } catch (err) {
     // Left for the operator rather than retried: a second delete against a
@@ -298,6 +303,19 @@ export function mintConflictResponse(): APIGatewayProxyStructuredResultV2 {
     .status(409)
     .body<ErrorResponse>({
       message: 'Another change to this member’s keys was in flight — try again.',
+    })
+    .build();
+}
+
+/**
+ * The storage system rolled the mint back on every attempt because another
+ * write to the organization's keys got in the way. Nothing was created.
+ */
+export function concurrentKeyChangeResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'Another change to this organization’s keys was in progress. Try again.',
     })
     .build();
 }

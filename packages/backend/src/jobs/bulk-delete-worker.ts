@@ -38,7 +38,7 @@ import type { BulkDeleteJobRecord } from '../lib/dynamo-records.ts';
 import { getScopedMemberId } from '../lib/member-scope.ts';
 import { resolveMembership } from '../lib/org-membership.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import type { RegionOrchestrator } from '../lib/service-orchestrator.ts';
+import type { NetworkOrchestrator } from '../lib/service-orchestrator.ts';
 import { getOrgProfile } from '../lib/org-profile.ts';
 import { createS3Client } from '../lib/s3-client.ts';
 import {
@@ -158,7 +158,7 @@ export async function processJob(
 }
 
 interface ResolvedTenant {
-  orchestrator: RegionOrchestrator;
+  orchestrator: NetworkOrchestrator;
   tenantId: string;
 }
 
@@ -174,7 +174,9 @@ async function runPages(
   onProgress: (job: BulkDeleteJobRecord) => void,
 ): Promise<RunOutcome> {
   const tenant = await resolveTenant(initial);
-  const s3 = createS3Client(await tenant.orchestrator.getS3ClientContext(tenant.tenantId));
+  const s3 = createS3Client(
+    await tenant.orchestrator.getS3ClientContext(tenant.tenantId, initial.region),
+  );
   let job = initial;
 
   // A job's bucket doesn't change mid-run, so its versioning is read once per

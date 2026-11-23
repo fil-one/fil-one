@@ -48,7 +48,7 @@ function key(overrides: Partial<MemberAccessKey> = {}): MemberAccessKey {
     id: 'key-1',
     keyName: 'ci',
     accessKeyId: 'AKIAEXAMPLE0001',
-    region: S3Region.UsEast1,
+    orchestratorId: 'fth',
     createdAt: '2026-01-01T00:00:00.000Z',
     createdBy: MEMBER,
     permissions: ['read', 'write'],
@@ -98,10 +98,24 @@ describe('listOrgAccessKeys', () => {
     });
   });
 
-  it('reads a row with no region as Aurora, which is what predates the attribute', async () => {
+  it('reads a row with no network and no region as Aurora, which predates both', async () => {
     ddbMock.on(QueryCommand).resolves({ Items: [row({ region: undefined })] });
 
-    expect((await listOrgAccessKeys(ORG_ID))[0]!.region).toBe(S3Region.EuWest1);
+    expect((await listOrgAccessKeys(ORG_ID))[0]!.orchestratorId).toBe('aurora');
+  });
+
+  it('resolves a row that names only a region to the network that served it', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [row({ region: S3Region.UsEast1 })] });
+
+    expect((await listOrgAccessKeys(ORG_ID))[0]!.orchestratorId).toBe('fth');
+  });
+
+  it('reads the network off a row that names it, whatever region it also carries', async () => {
+    ddbMock
+      .on(QueryCommand)
+      .resolves({ Items: [row({ orchestratorId: 'forge', region: undefined })] });
+
+    expect((await listOrgAccessKeys(ORG_ID))[0]!.orchestratorId).toBe('forge');
   });
 
   it('leaves the optional attributes absent when the row carries none', async () => {
@@ -169,14 +183,29 @@ describe('reviewAccessKeysForRole', () => {
 
   it.each([
     ['Member', OrgRole.Member],
-    ['ReadOnly', OrgRole.ReadOnly],
-  ] as const)('never revokes a principal-bound key when the role becomes %s', (_name, role) => {
-    // The key carries no authority of its own; bucket policies decide.
+    ['Admin', OrgRole.Admin],
+    ['Owner', OrgRole.Owner],
+  ] as const)('keeps a principal-bound key for a role that could mint one (%s)', (_name, role) => {
     const boundToPrincipal = [key({ permissions: undefined, principalId: MEMBER })];
 
     expect(reviewAccessKeysForRole(boundToPrincipal, MEMBER, role)).toStrictEqual({
       keysToRevoke: [],
       retainedKeyCount: 1,
+      unattributedKeyCount: 0,
+    });
+  });
+
+  it('revokes a principal-bound key on a demotion to ReadOnly', () => {
+    // The key carries no permissions of its own: the bucket policy statements
+    // naming its principal are its whole authority, and nothing on the role
+    // change path rewrites them. ReadOnly holds no `keys.create`, so its holder
+    // could not mint this key and cannot list or revoke it either, while it
+    // keeps signing whatever those policies grant.
+    const boundToPrincipal = key({ permissions: undefined, principalId: MEMBER });
+
+    expect(reviewAccessKeysForRole([boundToPrincipal], MEMBER, OrgRole.ReadOnly)).toStrictEqual({
+      keysToRevoke: [{ ...boundToPrincipal, reason: 'role_cannot_mint', excess: [] }],
+      retainedKeyCount: 0,
       unattributedKeyCount: 0,
     });
   });

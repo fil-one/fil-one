@@ -11,6 +11,7 @@ import {
   pollForBillingStatusChange,
   pollForPaymentMethod,
   getBillingRecord,
+  getHubspotSyncFields,
   testOrgId,
   waitForEventHandled,
   waitForWebhookMark,
@@ -46,7 +47,8 @@ describe('Payment Failure (customer.subscription.updated to past_due)', () => {
     });
     await pollForBillingStatusChange({ userId, expectedStatus: 'past_due', fromStatus: 'active' });
 
-    expect(await getBillingRecord(userId)).toStrictEqual({
+    const row = await getBillingRecord(userId);
+    expect(row).toStrictEqual({
       pk: { S: `ORG#${testOrgId(userId)}` },
       sk: { S: 'SUBSCRIPTION' },
       orgId: { S: testOrgId(userId) },
@@ -62,6 +64,7 @@ describe('Payment Failure (customer.subscription.updated to past_due)', () => {
       paymentMethodLast4: { S: '0341' }, // last4 numbers for declined after attach test card
       paymentMethodExpYear: { N: expect.any(String) },
       paymentMethodExpMonth: { N: expect.any(String) },
+      ...getHubspotSyncFields(row),
     });
   }, 420_000);
 

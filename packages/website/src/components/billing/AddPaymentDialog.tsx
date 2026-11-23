@@ -15,7 +15,7 @@ type AddPaymentDialogProps = {
   stripePublishableKey: string;
   onClose: () => void;
   onBack: () => void;
-  onSuccess: () => void;
+  onSuccess: (promotionCode?: string) => void;
   onRefreshSetupIntent: () => Promise<string>;
 };
 

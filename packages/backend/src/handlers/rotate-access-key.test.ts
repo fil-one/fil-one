@@ -18,20 +18,24 @@ import { auditItemIn, expectNoSecrets } from '../test/audit-assertions.ts';
 
 vi.mock('sst', () => sstResourceMock());
 
+const mockFindOrchestratorById = vi.fn();
 const mockEnsureTenantReady = vi.fn();
 const mockIssueAccessKey = vi.fn();
 const mockDeleteAccessKey = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
-  region: 'eu-west-1',
+  regions: ['eu-west-1'],
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
   deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
 };
 
 vi.mock('../lib/service-orchestrator-registry.js', () => ({
-  getOrchestratorForRegion: () => mockOrchestrator,
+  findOrchestratorById: (...args: unknown[]) => {
+    mockFindOrchestratorById(...args);
+    return mockOrchestrator;
+  },
 }));
 
 process.env.FILONE_STAGE = 'test';
@@ -44,14 +48,14 @@ const ddbMock = mockClient(DynamoDBClient);
 vi.mock('../middleware/csrf.js', () => ({
   csrfMiddleware: () => ({ before: () => undefined }),
 }));
-vi.mock('../middleware/subscription-guard.js', () => ({
-  AccessLevel: { Read: 'read', Write: 'write' },
-  subscriptionGuardMiddleware: () => ({ before: () => undefined }),
-}));
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { baseHandler } from './rotate-access-key.ts';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
+import {
+  AccessKeyAlreadyExistsError,
+  AccessKeyConcurrentChangeError,
+  AccessKeyValidationError,
+} from '../lib/errors.ts';
 import { RevocationNotRecordedError } from '../lib/key-revocation.ts';
 import { buildEvent, membershipFor, stubMembershipRead } from '../test/lambda-test-utilities.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
@@ -79,7 +83,7 @@ const STORED_KEY = {
   accessKeyId: 'AKIAOLD00000000',
   createdAt: '2026-01-01T00:00:00Z',
   status: 'active',
-  region: 'eu-west-1',
+  orchestratorId: 'aurora',
   createdBy: USER_INFO.userId,
   permissions: ['read', 'write', 'list'],
   bucketScope: 'specific',
@@ -177,6 +181,17 @@ describe('rotate-access-key baseHandler', () => {
     mockDeleteAccessKey.mockResolvedValue(undefined);
   });
 
+  it('rotates against the network the row names, whichever it is', async () => {
+    // The only row here that is not Aurora's. Every other fixture is, so a
+    // reader that fell back to the default region would still look right.
+    stubStoredKey({ orchestratorId: 'forge', region: undefined });
+    stubWrites();
+
+    await baseHandler(eventFor());
+
+    expect(mockFindOrchestratorById).toHaveBeenCalledWith('forge');
+  });
+
   it('mints a replacement carrying everything the key already had', async () => {
     stubStoredKey();
     stubWrites();
@@ -229,7 +244,7 @@ describe('rotate-access-key baseHandler', () => {
       accessKeyId: 'AKIANEW00000000',
       createdAt: '2026-09-11T10:00:00.000Z',
       status: 'active',
-      region: 'eu-west-1',
+      orchestratorId: 'aurora',
       permissions: ['read', 'write', 'list'],
       granularPermissions: ['GetObjectVersion'],
       bucketScope: 'specific',
@@ -559,7 +574,7 @@ describe('rotate-access-key baseHandler', () => {
         accessKeyId: 'AKIANEW00000000',
         createdAt: '2026-09-11T10:00:00.000Z',
         status: 'active',
-        region: 'eu-west-1',
+        orchestratorId: 'aurora',
         principalId: USER_INFO.userId,
         vendorKeyName: expect.stringMatching(/^My Key\.r[0-9a-f]{6}$/),
         rotatedBy: USER_INFO.userId,
@@ -591,7 +606,7 @@ describe('rotate-access-key baseHandler', () => {
       expect(intent?.details).toStrictEqual({
         keyKind: 's3',
         keyName: 'My Key',
-        region: 'eu-west-1',
+        orchestratorId: 'aurora',
         replacedKeyIdSuffix: expect.any(String),
         isPrincipalKey: true,
       });
@@ -699,6 +714,29 @@ describe('rotate-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(409);
     expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+  });
+
+  describe('when the vendor kept reporting a concurrent change', () => {
+    beforeEach(() => {
+      stubStoredKey();
+      stubWrites();
+      mockIssueAccessKey.mockRejectedValue(new AccessKeyConcurrentChangeError());
+    });
+
+    it('answers 409 asking the caller to try again', async () => {
+      const result = await baseHandler(eventFor());
+
+      expect({ statusCode: result.statusCode, body: body(result) }).toStrictEqual({
+        statusCode: 409,
+        body: { message: 'Another change to this organization’s keys was in progress. Try again.' },
+      });
+    });
+
+    it('closes the correlation as failed', async () => {
+      await baseHandler(eventFor());
+
+      expect(standaloneEvents().at(-1)).toMatchObject({ phase: 'completion', outcome: 'failed' });
+    });
   });
 
   it('takes the replacement back when its row does not land', async () => {

@@ -37,6 +37,8 @@ export const ApiErrorCode = {
   DELETION_RATE_LIMITED: 'DELETION_RATE_LIMITED',
   /** Too many image upload URLs (logos, avatars) requested in the last hour. */
   IMAGE_UPLOAD_RATE_LIMITED: 'IMAGE_UPLOAD_RATE_LIMITED',
+  /** Too many promo codes checked in the last hour — retry after `retryAt`. */
+  PROMOTION_CODE_RATE_LIMITED: 'PROMOTION_CODE_RATE_LIMITED',
   /** The account has been deleted; the session is dead and cannot be revived. */
   ACCOUNT_DELETED: 'ACCOUNT_DELETED',
   /**
@@ -96,6 +98,14 @@ export const ApiErrorCode = {
    * `privileged.grant` may put them in a statement.
    */
   RETENTION_GRANT_FORBIDDEN: 'RETENTION_GRANT_FORBIDDEN',
+  /**
+   * The write's `X-CSRF-Token` header did not match the CSRF cookie. Nothing
+   * ran. Its own code because the routine cause is harmless: the cookie lives
+   * as long as the access token, so the first write after a silent session
+   * refresh arrives without one, and this same response carries the new cookie.
+   * The console retries once with it.
+   */
+  CSRF_INVALID: 'CSRF_INVALID',
 } as const;
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
 

@@ -38,10 +38,10 @@ vi.mock('jose', () => ({
 // secret this suite has no reason to stand up.
 const mockDeleteAccessKey = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  getOrchestratorForRegion: (region: string) => ({
-    id: region === 'us-east-1' ? 'fth' : 'aurora',
-    region,
-    isTenantReady: () => `tenant:${region}`,
+  findOrchestratorById: (id: string) => ({
+    id,
+    regions: [id === 'fth' ? 'us-east-1' : 'eu-west-1'],
+    isTenantReady: () => `tenant:${id}`,
     deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
   }),
 }));

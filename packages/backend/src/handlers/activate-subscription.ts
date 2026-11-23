@@ -9,10 +9,11 @@ import {
   mapStripeStatus,
 } from '@filone/shared';
 import type { ActivateSubscriptionResponse } from '@filone/shared';
+import { findActivePromotionCode } from '../lib/promotion-codes.ts';
 import { getStripeClient, getBillingSecrets } from '../lib/stripe-client.ts';
 import { getSubscription } from '../lib/subscription-store.ts';
 import type { SubscriptionRecord } from '../lib/dynamo-records.ts';
-import { saveBillingRecord, unlockAllProvisionedRegions } from '../lib/billing-activation.ts';
+import { saveBillingRecord, unlockAllProvisionedNetworks } from '../lib/billing-activation.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
 import {
   accountDeletedResponse,
@@ -91,12 +92,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
   // 4. Resolve promo code against Stripe before we mutate any subscription state.
   let promotionCodeId: string | undefined;
   if (promotionCode) {
-    const matches = await stripe.promotionCodes.list({
-      code: promotionCode,
-      active: true,
-      limit: 1,
-    });
-    promotionCodeId = matches.data[0]?.id;
+    promotionCodeId = (await findActivePromotionCode(stripe, promotionCode, stripeCustomerId))?.id;
     if (!promotionCodeId) {
       return new ResponseBuilder()
         .status(400)
@@ -139,7 +135,7 @@ export async function baseHandler(event: AuthenticatedEvent): Promise<APIGateway
 
   // 6. Persist billing record and unlock the tenant on every orchestrator
   await saveBillingRecord({ orgId, userId }, subscription, paymentMethodId, mappedStatus);
-  await unlockAllProvisionedRegions(orgId);
+  await unlockAllProvisionedNetworks(orgId);
 
   const response: ActivateSubscriptionResponse = {
     subscription: {

@@ -448,8 +448,8 @@ function DangerZoneSection() {
           <p className="text-sm font-medium text-zinc-900">Delete account</p>
           <p className="text-xs text-zinc-500">
             To delete your account, please email{' '}
-            <Link href="mailto:support@fil.one" variant="accent">
-              support@fil.one
+            <Link href="mailto:support@filone.com" variant="accent">
+              support@filone.com
             </Link>
             .
           </p>
