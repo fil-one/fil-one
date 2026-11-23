@@ -57,6 +57,20 @@
   --color-brand-error: var(--color-red-500);
   --color-brand-error-dark: var(--color-red-300);
 
+  /* Card networks' own colours, for the tile behind their mark on a saved card
+     (CardBrandMark). Other companies' brand colours, not part of our palette:
+     use them for nothing else. Values as Simple Icons lists them, except Visa:
+     Simple Icons still has its pre-refresh navy (#1a1f71), and Stripe's portal
+     uses Visa's current blue. */
+  --color-card-amex: #006fcf; /* current Amex blue; Simple Icons has the older #2e77bc */
+  --color-card-discover: #ff6000;
+  /* Mastercard's symbol is drawn in its own three colours, not on a tile of
+     one of them. */
+  --color-card-mastercard-red: #eb001b;
+  --color-card-mastercard-yellow: #f79e1b;
+  --color-card-mastercard-orange: #ff5f00;
+  --color-card-visa: #1434cb;
+
   /* Height of every control a user clicks or types into (Button, SplitButton,
      Input, Select), so a button beside an input lines up exactly. Padding sets
      only the horizontal inset; see DESIGN.md §7. */

@@ -213,8 +213,9 @@ describe('DashboardPage — recent activity', () => {
     async (role) => {
       renderPage(role);
 
-      // The usage counters render once the page is past its skeleton.
-      await screen.findByRole('heading', { name: 'Dashboard' });
+      // The usage counters render once the page is past its skeleton; the
+      // heading renders before that, so it cannot tell the two apart.
+      await screen.findByText('STORAGE');
       expect(screen.queryByText('Recent Activity')).not.toBeInTheDocument();
       expect(mockGetActivity).not.toHaveBeenCalled();
     },
@@ -334,6 +335,21 @@ describe('DashboardPage — recent activity', () => {
 
     expect(await screen.findByText('Failed to load recent activity')).toBeInTheDocument();
     expect(screen.queryByText('No recent activity')).not.toBeInTheDocument();
+  });
+});
+
+describe('DashboardPage — while usage loads', () => {
+  it('shows the heading and the new bucket button before usage arrives', () => {
+    // Usage never resolves, so the page stays in its loading state.
+    mockGetUsage.mockReturnValue(new Promise(() => {}));
+    renderPage();
+
+    expect(screen.getByRole('status', { name: 'Loading dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'New bucket' })).toHaveAttribute(
+      'href',
+      '/buckets/create',
+    );
   });
 });
 
