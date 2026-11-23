@@ -33,7 +33,9 @@ export function getObjectCliCommand({
     // `./` keeps the file's own name
     return `aws s3 cp ${quoteShellArg(`s3://${bucketName}/${objectKey}`)} ./ ${options}`;
   }
-  // `./` also stops a file name that starts with `-` reading as an option
+  // A value that starts with `-` reads as the next option, and the CLI then
+  // rejects the one before it as empty. Joined with `=`, a value is always the
+  // option's own; `./` does the same for the output file, which has no option.
   const outfile = quoteShellArg(`./${getObjectFileName(objectKey)}`);
-  return `aws s3api get-object --bucket ${quoteShellArg(bucketName)} --key ${quoteShellArg(objectKey)} --version-id ${quoteShellArg(versionId)} ${outfile} ${options}`;
+  return `aws s3api get-object --bucket=${quoteShellArg(bucketName)} --key=${quoteShellArg(objectKey)} --version-id=${quoteShellArg(versionId)} ${outfile} ${options}`;
 }

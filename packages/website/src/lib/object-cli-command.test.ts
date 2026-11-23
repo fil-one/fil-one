@@ -41,7 +41,7 @@ describe('getObjectCliCommand', () => {
         endpoint,
       }),
     ).toBe(
-      `aws s3api get-object --bucket 'any-bucket' --key 'any/key.csv' --version-id 'any-version' './key.csv' --endpoint-url ${endpoint} --profile filone`,
+      `aws s3api get-object --bucket='any-bucket' --key='any/key.csv' --version-id='any-version' './key.csv' --endpoint-url ${endpoint} --profile filone`,
     );
   });
 
@@ -53,6 +53,16 @@ describe('getObjectCliCommand', () => {
       versionId: 'any-version',
       endpoint,
     });
-    expect(command).toContain(`--key 'x$(touch any-file).csv'`);
+    expect(command).toContain(`--key='x$(touch any-file).csv'`);
+  });
+
+  it('joins a key that starts with a dash to its option, so the CLI does not read it as one', () => {
+    const command = getObjectCliCommand({
+      bucketName: 'any-bucket',
+      objectKey: '-any-key.csv',
+      versionId: 'any-version',
+      endpoint,
+    });
+    expect(command).toContain(`--key='-any-key.csv' --version-id='any-version' './-any-key.csv'`);
   });
 });

@@ -17,6 +17,7 @@ import type {
   ObjectMetadataResponse,
   ObjectRetentionInfo,
   GetBucketResponse,
+  S3ObjectVersion,
   S3Region,
 } from '@filone/shared';
 import { apiRequest } from '../lib/api.js';
@@ -24,6 +25,7 @@ import { getFolderPrefixes } from '../lib/object-preview.js';
 import {
   getVersionState,
   hasReadableLatestAfterDeleting,
+  removeVersion,
   useObjectVersions,
 } from '../lib/object-versions.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
@@ -239,6 +241,19 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
   // to what is now its latest. Anything else, including a delete marker left on
   // top, leaves nothing here to show.
   const afterDelete = () => {
+    if (versionId) {
+      // Out of the cached history before the page moves, so the latest it opens
+      // does not still list the deleted version as "Latest" until the refetch.
+      // The plain key's details may be the deleted version's too.
+      queryClient.setQueryData(
+        queryKeys.objectVersions(bucketName, region, objectKey),
+        (old: S3ObjectVersion[] | undefined) => old && removeVersion(old, versionId),
+      );
+      queryClient.removeQueries({
+        queryKey: queryKeys.objectMetadata(bucketName, objectKey),
+        exact: true,
+      });
+    }
     void queryClient.invalidateQueries({ queryKey: ['objects', bucketName, region] });
     void queryClient.invalidateQueries({ queryKey: ['object-metadata', bucketName, objectKey] });
     if (versionId && hasReadableLatestAfterDeleting(versions, versionId)) {

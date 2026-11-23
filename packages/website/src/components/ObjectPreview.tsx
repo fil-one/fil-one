@@ -291,7 +291,7 @@ export function ObjectPreviewCard({
   const loadable = kind !== null && isWithinPreviewLimit(kind, sizeBytes);
 
   const urlQuery = useQuery({
-    queryKey: queryKeys.objectPreviewUrl(bucketName, objectKey, versionId),
+    queryKey: queryKeys.objectPreviewUrl(bucketName, region, objectKey, versionId),
     enabled: loadable,
     // The URL is short-lived, so its own expiry decides when it goes stale.
     // A refocus or reconnect does not refetch: a new URL would reload a player
@@ -317,7 +317,11 @@ export function ObjectPreviewCard({
   const textQuery = useQuery({
     // Without a version ID the key alone names whatever is latest, so the ETag
     // tells a cached body from the contents of a file overwritten since
-    queryKey: [...queryKeys.objectPreviewUrl(bucketName, objectKey, versionId), 'text', etag],
+    queryKey: [
+      ...queryKeys.objectPreviewUrl(bucketName, region, objectKey, versionId),
+      'text',
+      etag,
+    ],
     enabled: kind === 'text' && url !== undefined,
     // The key carries the ETag, so a cached body stays true to the contents. A
     // refetch could also run on a URL that has since lapsed.
