@@ -103,10 +103,13 @@ describe('ObjectPreviewCard', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     // Stepping back to an object seen before finds its URL cached, so the card
     // goes straight from one image to the next with no loading state between
-    queryClient.setQueryData(queryKeys.objectPreviewUrl('any-bucket', 'second.png'), {
-      url: 'https://any-host/second.png',
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-    });
+    queryClient.setQueryData(
+      queryKeys.objectPreviewUrl('any-bucket', S3Region.EuWest1, 'second.png'),
+      {
+        url: 'https://any-host/second.png',
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      },
+    );
     const { rerender } = render(
       <QueryClientProvider client={queryClient}>{renderCard('first.png')}</QueryClientProvider>,
     );

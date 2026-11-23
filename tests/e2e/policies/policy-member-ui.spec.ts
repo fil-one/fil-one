@@ -218,7 +218,7 @@ test.describe('as the owner', { tag: '@serial' }, () => {
     await page.goto('/api-keys/create');
     await page.locator('#key-name').fill('policy-e2e-ui-key');
     await page.locator('#key-region').click();
-    await page.locator(`[data-testid="region-option"][data-region="${REGION}"]`).click();
+    await page.locator(`[data-testid="network-region-option"][data-region="${REGION}"]`).click();
     await expectPrincipalKeyFields(page);
 
     const created = page.waitForResponse(

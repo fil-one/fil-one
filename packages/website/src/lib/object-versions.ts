@@ -13,7 +13,7 @@ const UNVERSIONED_ID = 'null';
 export type VersionState = {
   /**
    * The ID of the version on screen, for the Details card: the one in the URL,
-   * or the latest's when the bucket keeps versions.
+   * or the latest's. Never S3's "null", which names no version a reader can use.
    */
   shownVersionId?: string;
   /** The version on screen, once the history has loaded. */
@@ -24,8 +24,6 @@ export type VersionState = {
   isOlder: boolean;
   /** True when the newest entry is a delete marker: there is no latest to go back to. */
   isDeleted: boolean;
-  /** True when the bucket keeps versions, which decides what Delete does. */
-  isVersioned: boolean;
 };
 
 /**
@@ -34,20 +32,19 @@ export type VersionState = {
  */
 export function getVersionState(versions: S3ObjectVersion[], versionId?: string): VersionState {
   const latest = versions.find((v) => v.isLatest);
-  const isVersioned = versions.some((v) => v.versionId && v.versionId !== UNVERSIONED_ID);
   const isDeleted = latest?.isDeleteMarker ?? false;
   const shown = versionId
     ? versions.find((v) => v.versionId === versionId)
     : isDeleted
       ? undefined
       : latest;
+  const shownVersionId = versionId ?? shown?.versionId;
   return {
-    shownVersionId: versionId ?? (isVersioned ? shown?.versionId : undefined),
+    shownVersionId: shownVersionId === UNVERSIONED_ID ? undefined : shownVersionId,
     shown,
     latest,
     isOlder: Boolean(versionId && latest && latest.versionId !== versionId),
     isDeleted,
-    isVersioned,
   };
 }
 
@@ -73,17 +70,35 @@ export function hasReadableLatestAfterDeleting(
   return newestLeft !== undefined && !newestLeft.isDeleteMarker;
 }
 
-/** This key's entries from the bucket page's listing, when the user came from there. */
-function getCachedVersions(
-  bucketName: string,
-  region: S3Region,
+/**
+ * The history without one deleted version, so the page does not show it as
+ * "Latest" while the refetch is in flight. When it was the latest, the newest
+ * entry left takes its place, as it does in S3.
+ */
+export function removeVersion(
+  versions: S3ObjectVersion[],
+  deletedVersionId: string,
+): S3ObjectVersion[] {
+  const deleted = versions.find((v) => v.versionId === deletedVersionId);
+  const left = versions.filter((v) => v.versionId !== deletedVersionId);
+  if (!deleted?.isLatest || left.length === 0) return left;
+  return [{ ...left[0], isLatest: true }, ...left.slice(1)];
+}
+
+/**
+ * This key's entries from the bucket page's listing, when the user came from
+ * there. Only a complete listing that holds the key can stand in for its
+ * history: the listing is a single page, so a truncated one may hold some of
+ * the key's versions or none of them, and seeding from it would mark that
+ * partial history fresh and skip the fetch.
+ */
+export function getVersionsFromListing(
+  listing: ListObjectVersionsResponse | undefined,
   objectKey: string,
 ): S3ObjectVersion[] | undefined {
-  const listing = queryClient.getQueryData<ListObjectVersionsResponse>(
-    queryKeys.objects(bucketName, region),
-  );
-  const entries = listing?.versions.filter((v) => v.key === objectKey);
-  return entries && restoreNullVersionIds(entries);
+  if (!listing || listing.isTruncated) return undefined;
+  const entries = listing.versions.filter((v) => v.key === objectKey);
+  return entries.length > 0 ? restoreNullVersionIds(entries) : undefined;
 }
 
 /**
@@ -98,7 +113,11 @@ export function useObjectVersions(bucketName: string, region: S3Region, objectKe
     queryKey: queryKeys.objectVersions(bucketName, region, objectKey),
     staleTime: LIST_STALE_TIME,
     gcTime: LIST_GC_TIME,
-    initialData: () => getCachedVersions(bucketName, region, objectKey),
+    initialData: () =>
+      getVersionsFromListing(
+        queryClient.getQueryData<ListObjectVersionsResponse>(queryKeys.objects(bucketName, region)),
+        objectKey,
+      ),
     initialDataUpdatedAt: () =>
       queryClient.getQueryState(queryKeys.objects(bucketName, region))?.dataUpdatedAt,
     queryFn: async () => {

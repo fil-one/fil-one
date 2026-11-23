@@ -4,7 +4,9 @@ import type { S3ObjectVersion } from '@filone/shared';
 
 import {
   getVersionState,
+  getVersionsFromListing,
   hasReadableLatestAfterDeleting,
+  removeVersion,
   restoreNullVersionIds,
 } from './object-versions.js';
 
@@ -31,7 +33,6 @@ describe('getVersionState', () => {
       latest,
       isOlder: false,
       isDeleted: false,
-      isVersioned: true,
     });
   });
 
@@ -57,9 +58,15 @@ describe('getVersionState', () => {
   it('gives no version ID for an object in a bucket without versioning', () => {
     // S3 reports the ID "null" for every object in a bucket that never had versioning
     const unversioned = version({ versionId: 'null', isLatest: true });
-    expect(getVersionState([unversioned])).toMatchObject({
+    expect(getVersionState([unversioned])).toMatchObject({ shownVersionId: undefined });
+  });
+
+  it('gives no version ID when the URL names the "null" version', () => {
+    // An object uploaded before versioning was turned on keeps the ID "null"
+    const nullVersion = version({ versionId: 'null' });
+    expect(getVersionState([latest, nullVersion], 'null')).toMatchObject({
       shownVersionId: undefined,
-      isVersioned: false,
+      shown: nullVersion,
     });
   });
 
@@ -105,5 +112,50 @@ describe('hasReadableLatestAfterDeleting', () => {
 
   it('reports the object unreadable when the deleted version was the only entry', () => {
     expect(hasReadableLatestAfterDeleting([latest], 'v-latest')).toBe(false);
+  });
+});
+
+describe('getVersionsFromListing', () => {
+  const listingOf = (versions: S3ObjectVersion[], isTruncated = false) => ({
+    versions,
+    isTruncated,
+  });
+
+  it("returns the key's entries from a complete listing", () => {
+    const otherKey = version({ key: 'any-other-key' });
+    expect(getVersionsFromListing(listingOf([latest, otherKey, older]), 'any-key')).toStrictEqual([
+      latest,
+      older,
+    ]);
+  });
+
+  it('returns nothing from a truncated listing, which may hold only some versions', () => {
+    expect(getVersionsFromListing(listingOf([latest], true), 'any-key')).toBeUndefined();
+  });
+
+  it('returns nothing when the listing does not hold the key', () => {
+    const otherKey = version({ key: 'any-other-key' });
+    expect(getVersionsFromListing(listingOf([otherKey]), 'any-key')).toBeUndefined();
+  });
+
+  it('returns nothing when there is no cached listing', () => {
+    expect(getVersionsFromListing(undefined, 'any-key')).toBeUndefined();
+  });
+});
+
+describe('removeVersion', () => {
+  it('makes the newest entry left the latest when the latest is deleted', () => {
+    expect(removeVersion([latest, older], 'v-latest')).toStrictEqual([
+      { ...older, isLatest: true },
+    ]);
+  });
+
+  it('leaves the latest as it is when an older version is deleted', () => {
+    const oldest = version({ versionId: 'v-oldest' });
+    expect(removeVersion([latest, older, oldest], 'v-older')).toStrictEqual([latest, oldest]);
+  });
+
+  it('returns no entries when the only version is deleted', () => {
+    expect(removeVersion([latest], 'v-latest')).toStrictEqual([]);
   });
 });

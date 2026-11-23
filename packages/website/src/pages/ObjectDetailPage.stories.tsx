@@ -106,7 +106,7 @@ function Seeded({ scenario, children }: { scenario: Scenario; children: React.Re
   useState(() => {
     const { objectKey, versionId } = scenario;
     const metadataKey = queryKeys.objectMetadata(BUCKET, objectKey, versionId);
-    const previewKey = queryKeys.objectPreviewUrl(BUCKET, objectKey, versionId);
+    const previewKey = queryKeys.objectPreviewUrl(BUCKET, REGION, objectKey, versionId);
     const versionsKey = queryKeys.objectVersions(BUCKET, REGION, objectKey);
     const bucketKey = queryKeys.bucket(BUCKET, REGION);
     for (const key of [metadataKey, previewKey, versionsKey, bucketKey]) {
@@ -120,6 +120,8 @@ function Seeded({ scenario, children }: { scenario: Scenario; children: React.Re
         region: REGION,
         isPublic: false,
         objectLockEnabled: scenario.objectLockEnabled ?? false,
+        // A history with a real version ID comes from a bucket that keeps versions
+        versioning: scenario.versions?.some((v) => v.versionId !== 'null') ?? false,
       },
     });
     if (scenario.previewUrl) {
@@ -127,7 +129,13 @@ function Seeded({ scenario, children }: { scenario: Scenario; children: React.Re
       const expiresAt = '2099-01-01T00:00:00.000Z';
       client.setQueryData(previewKey, { url: scenario.previewUrl, method: 'GET', expiresAt });
     }
-    if (scenario.previewText) client.setQueryData([...previewKey, 'text'], scenario.previewText);
+    // The card keys the text by the object's ETag, so a cached body matches its contents
+    if (scenario.previewText) {
+      client.setQueryData(
+        [...previewKey, 'text', metadataFor(scenario).etag],
+        scenario.previewText,
+      );
+    }
     return null;
   });
   return <>{children}</>;

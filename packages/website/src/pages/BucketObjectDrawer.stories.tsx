@@ -93,7 +93,7 @@ function Seeded({ children }: { children: React.ReactNode }) {
   useState(() => {
     for (const object of [...FOLDER_OBJECTS, OUTSIDE_OBJECT]) {
       const metadataKey = queryKeys.objectMetadata(BUCKET, object.key);
-      const previewKey = queryKeys.objectPreviewUrl(BUCKET, object.key);
+      const previewKey = queryKeys.objectPreviewUrl(BUCKET, REGION, object.key);
       for (const key of [metadataKey, previewKey]) {
         client.setQueryDefaults(key, { staleTime: Infinity });
       }

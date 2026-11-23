@@ -13,7 +13,7 @@ import { ShareObjectModal } from '../components/ShareObjectModal';
 import { Skeleton } from '../components/Skeleton';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
 
-import type { S3Region } from '@filone/shared';
+import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import {
   bucketQueryOptions,
   getDeleteCopy,
@@ -25,13 +25,14 @@ import { getFolderPrefixes } from '../lib/object-preview.js';
 import {
   getVersionState,
   hasReadableLatestAfterDeleting,
+  removeVersion,
   useObjectVersions,
 } from '../lib/object-versions.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
-import { queryClient } from '../lib/query-client.js';
+import { queryClient, queryKeys } from '../lib/query-client.js';
 
 export type ObjectDetailPageProps = {
   bucketName: string;
@@ -81,6 +82,19 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
   // to what is now its latest. Anything else, including a delete marker left on
   // top, leaves nothing here to show.
   const afterDelete = () => {
+    if (versionId) {
+      // Out of the cached history before the page moves, so the latest it opens
+      // does not still list the deleted version as "Latest" until the refetch.
+      // The plain key's details may be the deleted version's too.
+      queryClient.setQueryData(
+        queryKeys.objectVersions(bucketName, region, objectKey),
+        (old: S3ObjectVersion[] | undefined) => old && removeVersion(old, versionId),
+      );
+      queryClient.removeQueries({
+        queryKey: queryKeys.objectMetadata(bucketName, objectKey),
+        exact: true,
+      });
+    }
     void queryClient.invalidateQueries({ queryKey: ['objects', bucketName, region] });
     invalidateObjectMetadata(bucketName, objectKey);
     if (versionId && hasReadableLatestAfterDeleting(versions, versionId)) {
@@ -96,10 +110,7 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
 
   const objectActions = useObjectActions({ bucketName, region, onDeleted: afterDelete });
   const download = () => void objectActions.downloadObject(objectKey, versionId);
-  const deleteCopy = getDeleteCopy(
-    versionId,
-    versionsQuery.data ? versionState.isVersioned : undefined,
-  );
+  const deleteCopy = getDeleteCopy(versionId, bucketQuery.data?.bucket.versioning);
 
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-6 px-5 pt-6 pb-12 sm:px-8 lg:px-10 lg:pt-10 xl:px-0">
@@ -180,7 +191,12 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
           )}
         </div>
 
-        <ObjectAccessAside bucketName={bucketName} region={region} objectKey={objectKey} />
+        <ObjectAccessAside
+          bucketName={bucketName}
+          region={region}
+          objectKey={objectKey}
+          versionId={versionId}
+        />
       </div>
 
       <ShareObjectModal

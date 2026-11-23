@@ -77,7 +77,7 @@ function Seeded({ scenario, children }: { scenario: Scenario; children: React.Re
   useState(() => {
     const { objectKey, versionId } = scenario;
     const metadataKey = queryKeys.objectMetadata(BUCKET, objectKey, versionId);
-    const previewKey = queryKeys.objectPreviewUrl(BUCKET, objectKey, versionId);
+    const previewKey = queryKeys.objectPreviewUrl(BUCKET, REGION, objectKey, versionId);
     for (const key of [metadataKey, previewKey]) {
       client.setQueryDefaults(key, { staleTime: Infinity });
     }

@@ -4,6 +4,7 @@ import type { S3Region } from '@filone/shared';
 import { CodeBlock } from './CodeBlock';
 import { Overline } from './Overline';
 import { FILONE_STAGE } from '../env';
+import { getObjectCliCommand } from '../lib/object-cli-command.js';
 
 /**
  * How to reach the object from code: a ready-to-run AWS CLI command, and the
@@ -17,16 +18,18 @@ export function ObjectAccessAside({
   bucketName,
   region,
   objectKey,
+  versionId,
 }: {
   bucketName: string;
   region: S3Region;
   objectKey: string;
+  /** The version in the URL, so the command downloads the version on screen. */
+  versionId?: string;
 }) {
   const endpoint = getS3Endpoint(region, FILONE_STAGE);
   // One line, left to wrap: backslash continuations stranded themselves on lines
-  // of their own once the column wrapped them. Quoted, so a key with spaces
-  // survives the shell; `./` keeps the file's own name.
-  const cliCommand = `aws s3 cp "s3://${bucketName}/${objectKey}" ./ --endpoint-url ${endpoint}`;
+  // of their own once the column wrapped them.
+  const cliCommand = getObjectCliCommand({ bucketName, objectKey, versionId, endpoint });
 
   return (
     // xl:pt-5 lines the overline up with the first card's content, under its p-5
@@ -53,7 +56,9 @@ function AsideItem({ title, value }: { title: string; value: string }) {
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-xs font-medium text-zinc-900">{title}</span>
-      <CodeBlock code={value} minimal wrap />
+      {/* The minimal block has no border, as it expects a card around it. Here it
+          sits on the page background, so the border marks out its edge. */}
+      <CodeBlock code={value} minimal wrap className="border border-zinc-200" />
     </div>
   );
 }

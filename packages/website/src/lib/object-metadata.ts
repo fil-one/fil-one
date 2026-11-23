@@ -175,8 +175,10 @@ export function isRetentionActive(retention: ObjectRetentionInfo, now = Date.now
  * What Delete will do, which depends on what it targets. A named version is
  * removed for good and the rest stay. Without one, a versioned bucket keeps every
  * version and hides the object behind a delete marker, so calling that permanent
- * would be wrong. `isVersioned` is undefined while the history is unknown, and the
- * copy then claims neither outcome.
+ * would be wrong. `isVersioned` is the bucket's own setting, not a guess from the
+ * history: an object uploaded before versioning was turned on has only the ID
+ * "null", yet deleting it adds a delete marker. It is undefined until the bucket's
+ * settings load, and the copy then claims neither outcome.
  */
 export function getDeleteCopy(
   versionId: string | undefined,
