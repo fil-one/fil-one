@@ -2345,6 +2345,7 @@ describe('authMiddleware with bearerToken', () => {
       sub: MOCK_SUB,
       userId: existingUserId,
       orgId: existingOrgId,
+      email: MOCK_EMAIL,
       emailVerified: true,
     });
   });

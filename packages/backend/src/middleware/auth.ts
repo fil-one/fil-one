@@ -132,9 +132,10 @@ function bearerUnauthorizedResponse(): APIGatewayProxyStructuredResultV2 {
 /**
  * The prefix of the email claims the post-login Action
  * (jobs/stack-setup/mfa-action.ts) puts on the access token, for callers that
- * present only that. It keeps them apart from the standard OIDC claims.
+ * present only that: `filone_email` and `filone_email_verified`. It keeps them
+ * apart from the standard OIDC claims.
  */
-export const ACCESS_TOKEN_CLAIM_PREFIX = 'filone_';
+export const ACCESS_TOKEN_CLAIM_PREFIX = 'filone';
 
 /** Scheme is case-insensitive (RFC 9110); the token itself is case-sensitive. */
 const BEARER_HEADER_PATTERN = /^bearer\s+(\S+)$/i;
@@ -935,11 +936,11 @@ async function authenticateBearer(
     return bearerUnauthorizedResponse();
   }
 
-  const email = payload[`${ACCESS_TOKEN_CLAIM_PREFIX}email`];
+  const email = payload[`${ACCESS_TOKEN_CLAIM_PREFIX}_email`];
   const claims: IdTokenClaims = {
     ...EMPTY_ID_CLAIMS,
     email: typeof email === 'string' ? email : null,
-    emailVerified: payload[`${ACCESS_TOKEN_CLAIM_PREFIX}email_verified`] === true,
+    emailVerified: payload[`${ACCESS_TOKEN_CLAIM_PREFIX}_email_verified`] === true,
     auth0OrgId: typeof payload.org_id === 'string' ? payload.org_id : null,
   };
   request.internal.idTokenClaims = claims;
