@@ -33,6 +33,7 @@ import { resolveBucketRegion } from './bucket-region.ts';
 import type { FilOneOrchestratorConfig } from './config.ts';
 export type { FilOneOrchestratorConfig } from './config.ts';
 import { withWriteRetry } from './policy-writes.ts';
+import { createAccessKeyWithRetry } from './access-key-writes.ts';
 import { extractApiCode, extractApiMessage } from './api-message.ts';
 import {
   AccessKeyAlreadyExistsError,
@@ -84,7 +85,6 @@ import {
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
   getTenantsByTenantId,
   getTenantsByTenantIdAccessKeys,
-  postTenantsByTenantIdAccessKeys,
   postTenantsByTenantIdStatus,
   type Client,
 } from '@filone/orchestrator-client';
@@ -396,11 +396,12 @@ export class FilOneOrchestrator implements ServiceOrchestrator {
       `Creating ${this.id} access key "${body.name}" for tenant ${tenantId} ${describeAccessKeyBody(body)}`,
     );
 
-    const { data, error, response } = await postTenantsByTenantIdAccessKeys({
+    // A ConcurrentChange that outlasts the retries throws from here; only a
+    // 409 with any other code is the duplicate name below.
+    const { data, error, response } = await createAccessKeyWithRetry({
       client: this.client,
       path: { tenantId },
       body,
-      throwOnError: false,
       ...requestOptions,
     });
 

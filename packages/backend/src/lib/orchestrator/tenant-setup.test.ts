@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
@@ -358,6 +358,42 @@ describe('ensureTenantReady', () => {
       's3:PutBucketTagging',
       's3:PutBucketCORS',
     ]);
+  });
+
+  describe('a ConcurrentChange on the console key', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      stubHappyPath();
+      mockCreateAccessKey.mockResolvedValueOnce({
+        data: undefined,
+        error: { message: 'conflict', code: 'ConcurrentChange' },
+        response: { status: 409 },
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function runSetup() {
+      const promise = ensureTenantReady(deps, orgId);
+      await vi.runAllTimersAsync();
+      return promise;
+    }
+
+    it('stocks SSM with the key the retry creates', async () => {
+      await runSetup();
+
+      expect(ssmMock.commandCalls(PutParameterCommand)[0].args[0].input.Value).toBe(
+        JSON.stringify({ accessKeyId: 'AKIATEST', secretAccessKey: 'SKTEST' }),
+      );
+    });
+
+    it('does not look for an existing key to recover', async () => {
+      await runSetup();
+
+      expect(mockListAccessKeys).not.toHaveBeenCalled();
+    });
   });
 
   describe('409 recovery (crash between key creation and SSM write)', () => {

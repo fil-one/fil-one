@@ -236,6 +236,23 @@ test.describe('as the owner', { tag: '@serial' }, () => {
     await expect(row.getByTestId('permission-badge-follows-bucket-policy')).toBeVisible();
   });
 
+  // The server keeps a principal-bound key in a bucket's list only when the
+  // bucket's policy gives its principal an action, so this list is the one
+  // place the key list reads a policy.
+  test('a bucket on an iam region lists the principal key its policy grants', async ({ page }) => {
+    const bucket = generateBucketName('keys');
+    await owner.createBucket(bucket);
+    buckets.push(bucket);
+    const key = await owner.createAccessKey();
+    createdKeys.push({ api: owner, id: key.id });
+
+    await page.goto(`/buckets/${bucket}?region=${REGION}`);
+    await page.getByTestId('bucket-keys-tab').click();
+    await expect(
+      page.locator(`[data-testid="access-key-row"][data-access-key-id="${key.accessKeyId}"]`),
+    ).toBeVisible();
+  });
+
   test('a bucket created on an iam region names its creator', async ({ page }) => {
     const bucket = generateBucketName('form');
     buckets.push(bucket);
