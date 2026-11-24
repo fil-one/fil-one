@@ -28,6 +28,7 @@ import {
   getMissingReason,
   getVersionState,
   hasReadableLatestAfterDeleting,
+  MISSING_COPY,
   type MissingReason,
   removeVersion,
   useObjectVersions,
@@ -233,18 +234,6 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
 // ---------------------------------------------------------------------------
 // Missing
 // ---------------------------------------------------------------------------
-
-const MISSING_COPY = {
-  deleted: { title: 'This object was deleted' },
-  'delete-marker': {
-    title: 'This version is a delete marker',
-    description: 'It records when the object was deleted and has no content to show.',
-  },
-  'not-found': {
-    title: 'Object not found',
-    description: 'It may have been deleted, or the link may be out of date.',
-  },
-} as const;
 
 /**
  * In place of the preview and details cards when the object's metadata failed

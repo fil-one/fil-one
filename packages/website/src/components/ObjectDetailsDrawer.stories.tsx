@@ -33,6 +33,8 @@ type Scenario = {
   versioningEnabled?: boolean;
   objectLockEnabled?: boolean;
   siblings?: ObjectDrawerSiblings;
+  /** The row opened is a delete marker, so no details are asked for. */
+  isDeleteMarker?: boolean;
   /**
    * Leaves the object's details unseeded and stubs `fetch` while the story is
    * mounted, so it never answers. `loading` shows what the listing knows; `gone`
@@ -56,7 +58,7 @@ function listedVersion(scenario: Scenario): S3ObjectVersion {
     lastModified: '2026-10-21T14:32:00Z',
     etag: '"1de267f54f14b8690462c8a1b8ffa208"',
     isLatest: !scenario.versionId,
-    isDeleteMarker: false,
+    isDeleteMarker: scenario.isDeleteMarker ?? false,
   };
 }
 
@@ -188,6 +190,27 @@ export const ObjectGone: Story = {
     renderDrawer({
       objectKey: 'any-folder/any-photo.png',
       network: 'gone',
+      siblings: SIBLINGS,
+    }),
+};
+
+export const DeletedObject: Story = {
+  render: () =>
+    renderDrawer({
+      objectKey: 'any-folder/any-photo.png',
+      versioningEnabled: true,
+      isDeleteMarker: true,
+      siblings: SIBLINGS,
+    }),
+};
+
+export const OlderDeleteMarker: Story = {
+  render: () =>
+    renderDrawer({
+      objectKey: 'any-folder/any-photo.png',
+      versionId: '9c2e7a14d0b3f581',
+      versioningEnabled: true,
+      isDeleteMarker: true,
       siblings: SIBLINGS,
     }),
 };

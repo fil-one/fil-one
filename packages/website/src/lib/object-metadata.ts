@@ -132,8 +132,9 @@ export function objectMetadataQueryOptions(ref: ObjectRef) {
   };
 }
 
-export function useObjectMetadata(ref: ObjectRef) {
-  return useQuery(objectMetadataQueryOptions(ref));
+/** `enabled: false` asks nothing, for a view that already knows S3 has no content to give. */
+export function useObjectMetadata(ref: ObjectRef, { enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery({ ...objectMetadataQueryOptions(ref), enabled });
 }
 
 /**

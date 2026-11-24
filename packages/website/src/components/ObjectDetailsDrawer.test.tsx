@@ -187,6 +187,24 @@ describe('ObjectDetailsDrawer', () => {
     expect(screen.queryByText('No preview for this file type')).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["the object's own row, when it was deleted", undefined, 'This object was deleted'],
+    ['an older delete marker', 'any-marker', 'This version is a delete marker'],
+  ])(
+    'says a delete marker has no content, asks S3 for nothing and offers no actions, for %s',
+    async (_case, versionId, title) => {
+      // The HEAD request waits on the bucket's settings, which no test API answers
+      queryClient.setQueryData(queryKeys.bucket(BUCKET, REGION), { bucket: {} });
+      renderDrawer({ versionId, listed: { ...listed, isDeleteMarker: true } });
+
+      expect(await screen.findByText(title)).toBeInTheDocument();
+      expect(screen.queryByTestId('object-details-drawer-actions')).not.toBeInTheDocument();
+      expect(batchPresign).not.toHaveBeenCalledWith(REGION, [
+        expect.objectContaining({ op: 'headObject' }),
+      ]);
+    },
+  );
+
   it('says the object no longer exists, with nothing to act on, when S3 has no such object', async () => {
     // The HEAD request waits on the bucket's settings, which no test API answers
     queryClient.setQueryData(queryKeys.bucket(BUCKET, REGION), { bucket: {} });

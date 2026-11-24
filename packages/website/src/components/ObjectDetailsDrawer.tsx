@@ -39,7 +39,12 @@ import {
   useObjectMetadata,
 } from '../lib/object-metadata.js';
 import { getObjectFileName, getPreviewKind } from '../lib/object-preview.js';
-import { getDeleteCopy, UNVERSIONED_ID, useObjectVersions } from '../lib/object-versions.js';
+import {
+  getDeleteCopy,
+  MISSING_COPY,
+  UNVERSIONED_ID,
+  useObjectVersions,
+} from '../lib/object-versions.js';
 import { SHARE_UNAVAILABLE_TOOLTIP, useCanShareObjects } from '../lib/use-can-share-objects.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
@@ -155,9 +160,16 @@ function DrawerContent({
   onDelete,
   onClose,
 }: ObjectDetailsDrawerProps) {
-  const metadataQuery = useObjectMetadata({ bucketName, region, objectKey, versionId });
+  // A delete marker has no content, so S3 is not asked for any: it would answer
+  // with an error, and with a different one in each region
+  const isDeleteMarker = listed?.isDeleteMarker ?? false;
+  const metadataQuery = useObjectMetadata(
+    { bucketName, region, objectKey, versionId },
+    { enabled: !isDeleteMarker },
+  );
   const isGone = metadataQuery.isError && isObjectNotFoundError(metadataQuery.error);
-  const metadata = isGone
+  const hasNoContent = isDeleteMarker || isGone;
+  const metadata = hasNoContent
     ? undefined
     : (metadataQuery.data ?? (listed && getListedMetadata(listed)));
   // Whether Delete removes data for good can turn on the key's history, as in a
@@ -183,7 +195,9 @@ function DrawerContent({
       />
       <div className="flex-1 overflow-y-auto">
         <div className="flex flex-col gap-5 px-5 py-5 text-ui">
-          {isGone ? (
+          {isDeleteMarker ? (
+            <DeleteMarkerCard isVersion={Boolean(versionId)} />
+          ) : isGone ? (
             <EmptyStateCard
               icon={FileDashedIcon}
               iconColor="grey"
@@ -232,8 +246,8 @@ function DrawerContent({
       </div>
       {/* Pinned under the scrolling body, so Download stays in reach however far
           down the facts the user is, and within thumb reach on a phone. Left
-          out once the object is gone: there is nothing left to act on. */}
-      {!isGone && (
+          out when there is no content: nothing is left to download, share or delete. */}
+      {!hasNoContent && (
         <div
           data-testid="object-details-drawer-actions"
           className="flex flex-shrink-0 items-center border-t border-zinc-100 px-5 py-3"
@@ -269,6 +283,25 @@ function DrawerContent({
         })}
       />
     </>
+  );
+}
+
+/**
+ * In place of the preview and facts when the row opened is a delete marker: the
+ * object's own row when it was deleted, or an older marker in its history. Its
+ * versions are on the object page, which Expand opens.
+ */
+function DeleteMarkerCard({ isVersion }: { isVersion: boolean }) {
+  const copy = isVersion
+    ? MISSING_COPY['delete-marker']
+    : { ...MISSING_COPY.deleted, description: 'Open the full page to see its version history.' };
+  return (
+    <EmptyStateCard
+      icon={TrashIcon}
+      iconColor="grey"
+      title={copy.title}
+      description={copy.description}
+    />
   );
 }
 

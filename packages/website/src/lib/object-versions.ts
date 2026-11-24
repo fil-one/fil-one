@@ -62,6 +62,23 @@ export function getVersionState(
 export type MissingReason = 'deleted' | 'delete-marker' | 'not-found';
 
 /**
+ * What a view says in place of an object or version that has nothing to show.
+ * `deleted` has no description of its own: whether earlier versions are kept,
+ * and where to open them, depends on the view.
+ */
+export const MISSING_COPY = {
+  deleted: { title: 'This object was deleted' },
+  'delete-marker': {
+    title: 'This version is a delete marker',
+    description: 'It records when the object was deleted and has no content to show.',
+  },
+  'not-found': {
+    title: 'Object not found',
+    description: 'It may have been deleted, or the link may be out of date.',
+  },
+} as const;
+
+/**
  * Why the object or version in the URL has nothing to show, judged from its
  * history alone. For a page whose metadata request failed: the status that
  * request gets back differs by provider (a delete marker answers 405 in one
