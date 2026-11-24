@@ -445,6 +445,26 @@ export const SearchNoMatch: Story = {
   ),
 };
 
+/**
+ * A search whose listing failed. The error stands where the table would, and the
+ * search box stays above it, so the search can be cleared or retried.
+ */
+export const SearchFailed: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={[]}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      search="report"
+      onSearchChange={() => {}}
+      listingError={{ message: 'Failed to fetch', onRetry: () => {} }}
+    />
+  ),
+};
+
 /** The search box above a folder's listing. */
 export const WithSearch: Story = {
   render: () => (

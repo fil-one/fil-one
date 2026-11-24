@@ -97,6 +97,16 @@ export function useObjectListing({
       previousQuery?.queryKey[3] === prefix ? previous : undefined,
   });
 
+  // The search the rows on screen answered. It trails `search` while a held
+  // page stands in for the new search's, so an empty state can describe the
+  // rows it sits over rather than a listing that has not arrived. Updated
+  // during render, React's pattern for state derived from a previous render,
+  // so it never lags the rows by a frame.
+  const [listedSearch, setListedSearch] = useState(search);
+  if (query.data && !query.isPlaceholderData && listedSearch !== search) {
+    setListedSearch(search);
+  }
+
   const page = query.data;
   const nextCursor = query.isPlaceholderData ? undefined : page?.nextCursor;
 
@@ -112,6 +122,8 @@ export function useObjectListing({
   return {
     query,
     page,
+    /** The search the page's rows answered, which trails `search` until its listing arrives. */
+    listedSearch,
     /** One-based position of the page's first row, for the range label. */
     rangeStart: current.offset + 1,
     rangeEnd: current.offset + rowCount,

@@ -285,20 +285,25 @@ const EMPTY_PAGE: ObjectListingPage = { versions: [], folders: [] };
  * What the page needs from the folder listing, worked out in one place so the
  * component stays about layout.
  */
-function describeListing(
-  objects: ReturnType<typeof useObjectListing>,
-  currentPrefix: string,
-  search: string,
-) {
+function describeListing(objects: ReturnType<typeof useObjectListing>, currentPrefix: string) {
   const page = objects.page ?? EMPTY_PAGE;
   const { query } = objects;
-  const isWholeRoot = currentPrefix === '' && search === '';
+  // The search the rows answered, not the one being typed or still loading,
+  // since the rows are what this describes.
+  const isWholeRoot = currentPrefix === '' && objects.listedSearch === '';
   return {
     page,
     // Inside a folder, past the first page, or mid-search, the bucket has
-    // objects by definition: a search box only shows over objects.
+    // objects by definition: a search box only shows over objects. Rows held
+    // while another listing loads, or a listing that failed, say nothing
+    // about whether it is empty, so the header keeps its actions.
     hasObjects:
-      !isWholeRoot || !objects.isFirstPage || page.versions.length > 0 || page.folders.length > 0,
+      !isWholeRoot ||
+      !objects.isFirstPage ||
+      objects.isChangingPage ||
+      query.isError ||
+      page.versions.length > 0 ||
+      page.folders.length > 0,
     // The root, unsearched, on one page, with no folders: the listing is the whole bucket.
     coversBucket:
       isWholeRoot && objects.isFirstPage && !objects.hasNext && page.folders.length === 0,
@@ -396,7 +401,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     mayListKeys,
   });
   const objectsQuery = objects.query;
-  const listing = describeListing(objects, currentPrefix, folderSearch.settledText);
+  const listing = describeListing(objects, currentPrefix);
   const { page } = listing;
   const analyticsData = analyticsQuery.data;
 
@@ -404,10 +409,12 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const [addKeyOpen, setAddKeyOpen] = usePermittedDialog(false, mayCreateKeys);
   // Controlled so the empty bucket's View API keys button can switch tabs.
   const tabs = useBucketTabs({ hasKeysTab: mayListKeys, hasPolicyTab: isPolicyTabVisible });
-  // Each tab's count, undefined until its list has answered
-  const objectCount = objectsQuery.isPending
-    ? undefined
-    : displayObjectCount(analyticsData, page, listing.coversBucket);
+  // Each tab's count, undefined until its list has answered with rows: still
+  // loading, or failed before any arrived.
+  const objectCount =
+    objectsQuery.data === undefined
+      ? undefined
+      : displayObjectCount(analyticsData, page, listing.coversBucket);
   const keyCount = accessKeysLoading ? undefined : accessKeys.length;
 
   const { refreshAfterBulkDelete, folderDeleteJobs } = useBulkDeleteFollowUp(bucketName, region);
@@ -447,18 +454,6 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         bucketName={bucketName}
         error={bucketQuery.error}
         fallback="Failed to load bucket"
-      />
-    );
-  }
-
-  // A later page that fails keeps the page around it, so the reader can step
-  // back or retry; only a folder that cannot be listed at all replaces the page.
-  if (objectsQuery.isError && objects.isFirstPage) {
-    return (
-      <BucketErrorState
-        bucketName={bucketName}
-        error={objectsQuery.error}
-        fallback="Failed to load objects"
       />
     );
   }
@@ -541,6 +536,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onShowKeys={tabs.showKeysTab}
               paging={listing.paging}
               search={folderSearch.text}
+              listedSearch={objects.listedSearch}
               onSearchChange={folderSearch.setText}
               folderDeleteJobs={folderDeleteJobs}
               onFoldersDeleted={refreshAfterBulkDelete}

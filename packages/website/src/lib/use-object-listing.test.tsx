@@ -147,4 +147,31 @@ describe('useObjectListing', () => {
 
     expect(result.current).toMatchObject({ rangeStart: 1, hasPrevious: false });
   });
+
+  it('names the previous search as listed while the new search loads', async () => {
+    const { result, rerender } = renderListing();
+    await waitFor(() => expect(result.current.page).toBe(firstPage));
+    // The search's listing stays in flight for the rest of the test.
+    mockFetchPage.mockImplementation(() => new Promise(() => {}));
+
+    rerender({ prefix: '', search: 'any-search' });
+
+    expect(result.current).toMatchObject({
+      listedSearch: '',
+      isChangingPage: true,
+      page: firstPage,
+    });
+  });
+
+  it('names the new search as listed once its listing arrives', async () => {
+    const { result, rerender } = renderListing();
+    await waitFor(() => expect(result.current.page).toBe(firstPage));
+    mockFetchPage.mockResolvedValue(secondPage);
+
+    rerender({ prefix: '', search: 'any-search' });
+
+    await waitFor(() =>
+      expect(result.current).toMatchObject({ listedSearch: 'any-search', page: secondPage }),
+    );
+  });
 });
