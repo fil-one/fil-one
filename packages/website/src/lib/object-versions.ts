@@ -121,6 +121,73 @@ export function removeVersion(
   return [{ ...left[0], isLatest: true }, ...left.slice(1)];
 }
 
+/** The Delete dialog's wording. */
+export interface DeleteCopy {
+  title: string;
+  description: string;
+  confirmLabel: string;
+}
+
+const DELETE_OBJECT_COPY = { title: 'Delete object', confirmLabel: 'Delete object' };
+
+/**
+ * What Delete will do, which depends on what it targets and on the bucket.
+ *
+ * - A version named in the URL is removed for good and the rest stay.
+ * - With versioning on, the object is hidden behind a delete marker.
+ * - With versioning off, it depends on whether it was ever on. The bucket's
+ *   setting reads off both for a bucket that never had it and for one where it
+ *   was suspended, but only a suspended bucket can hold a real version ID. There
+ *   S3 adds a delete marker and removes for good only a current version with
+ *   the ID "null"; older versions stay.
+ * - Until the setting and the history load, or if either fails, the copy claims
+ *   neither outcome.
+ */
+export function getDeleteCopy({
+  versionId,
+  isVersioned,
+  versions,
+}: {
+  versionId?: string;
+  isVersioned?: boolean;
+  versions?: S3ObjectVersion[];
+}): DeleteCopy {
+  if (versionId) {
+    return {
+      title: 'Delete version',
+      description:
+        'This version will be permanently deleted. Other versions of the object stay in its history.',
+      confirmLabel: 'Delete version',
+    };
+  }
+  const hidesBehindMarker = {
+    ...DELETE_OBJECT_COPY,
+    description:
+      'The object will be hidden behind a delete marker. Its earlier versions stay in its history.',
+  };
+  if (isVersioned) return hidesBehindMarker;
+  if (isVersioned === false && versions) {
+    if (versions.every((v) => v.versionId === UNVERSIONED_ID)) {
+      return {
+        ...DELETE_OBJECT_COPY,
+        description: 'This object will be permanently deleted. This action cannot be undone.',
+      };
+    }
+    const latest = versions.find((v) => v.isLatest);
+    if (latest?.versionId !== UNVERSIONED_ID) return hidesBehindMarker;
+    return {
+      ...DELETE_OBJECT_COPY,
+      description:
+        'The current version will be permanently deleted and replaced by a delete marker. Its earlier versions stay in its history.',
+    };
+  }
+  return {
+    ...DELETE_OBJECT_COPY,
+    description:
+      'If the bucket keeps versions, the object will be hidden behind a delete marker and its earlier versions stay in its history. If not, it will be permanently deleted.',
+  };
+}
+
 /** Whether a listing page stops partway through this key's versions. */
 function isSplitAt(cursor: ListingCursor | undefined, objectKey: string): boolean {
   return (

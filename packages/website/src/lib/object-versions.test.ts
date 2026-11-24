@@ -4,6 +4,7 @@ import type { S3ObjectVersion } from '@filone/shared';
 
 import type { ListingCursor, ObjectListingPage } from './object-listing.js';
 import {
+  getDeleteCopy,
   getMissingReason,
   getVersionState,
   getVersionsFromListingPage,
@@ -151,6 +152,58 @@ describe('getMissingReason', () => {
     ['nothing missing while the history is unknown', undefined, undefined, undefined],
   ])('reports %s', (_case, versions, versionId, expected) => {
     expect(getMissingReason(versions, versionId)).toBe(expected);
+  });
+});
+
+describe('getDeleteCopy', () => {
+  // S3's ID for a version written while versioning was never on, or suspended
+  const nullLatest = version({ versionId: 'null', isLatest: true });
+
+  it('says a version named in the URL is deleted for good', () => {
+    expect(getDeleteCopy({ versionId: 'any-version', isVersioned: true })).toMatchObject({
+      title: 'Delete version',
+      description:
+        'This version will be permanently deleted. Other versions of the object stay in its history.',
+    });
+  });
+
+  it.each([
+    ['versioning is on', { isVersioned: true }],
+    // Suspended: a real version ID can only come from when versioning was on.
+    [
+      'versioning is suspended and the current version has a real ID',
+      { isVersioned: false, versions: [latest, older] },
+    ],
+  ])('says the object is hidden behind a delete marker when %s', (_case, input) => {
+    expect(getDeleteCopy(input)).toMatchObject({
+      title: 'Delete object',
+      description:
+        'The object will be hidden behind a delete marker. Its earlier versions stay in its history.',
+    });
+  });
+
+  it('says only the current version is deleted for good when versioning is suspended and it has the ID "null"', () => {
+    expect(getDeleteCopy({ isVersioned: false, versions: [nullLatest, older] })).toMatchObject({
+      description:
+        'The current version will be permanently deleted and replaced by a delete marker. Its earlier versions stay in its history.',
+    });
+  });
+
+  it('says the object is deleted for good when versioning was never on', () => {
+    expect(getDeleteCopy({ isVersioned: false, versions: [nullLatest] })).toMatchObject({
+      description: 'This object will be permanently deleted. This action cannot be undone.',
+    });
+  });
+
+  it.each([
+    ['the bucket settings are unknown', { versions: [nullLatest] }],
+    // Versioning off, but whether it was ever on needs the history.
+    ['the history is unknown', { isVersioned: false }],
+  ])('claims neither outcome when %s', (_case, input) => {
+    expect(getDeleteCopy(input)).toMatchObject({
+      description:
+        'If the bucket keeps versions, the object will be hidden behind a delete marker and its earlier versions stay in its history. If not, it will be permanently deleted.',
+    });
   });
 });
 
