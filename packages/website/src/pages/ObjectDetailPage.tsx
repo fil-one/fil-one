@@ -17,7 +17,7 @@ import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import {
   bucketQueryOptions,
   getDeleteCopy,
-  invalidateObjectMetadata,
+  removeObjectMetadata,
   isRetentionActive,
   useObjectMetadata,
 } from '../lib/object-metadata.js';
@@ -85,18 +85,15 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
     if (versionId) {
       // Out of the cached history before the page moves, so the latest it opens
       // does not still list the deleted version as "Latest" until the refetch.
-      // The plain key's details may be the deleted version's too.
       queryClient.setQueryData(
         queryKeys.objectVersions(bucketName, region, objectKey),
         (old: S3ObjectVersion[] | undefined) => old && removeVersion(old, versionId),
       );
-      queryClient.removeQueries({
-        queryKey: queryKeys.objectMetadata(bucketName, objectKey),
-        exact: true,
-      });
     }
     void queryClient.invalidateQueries({ queryKey: ['objects', bucketName, region] });
-    invalidateObjectMetadata(bucketName, objectKey);
+    // Every version's details, the plain key's among them: they may be the
+    // deleted version's too
+    removeObjectMetadata(bucketName, objectKey);
     if (versionId && hasReadableLatestAfterDeleting(versions, versionId)) {
       void navigate({
         to: '/buckets/$bucketName/objects',

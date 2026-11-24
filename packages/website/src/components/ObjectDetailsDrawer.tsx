@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useState } from 'react';
 import {
   Dialog,
   DialogBackdrop,
@@ -14,6 +14,7 @@ import {
   CaretUpIcon,
   DownloadSimpleIcon,
   ExportIcon,
+  FileDashedIcon,
   LinkIcon,
   TrashIcon,
   XIcon,
@@ -26,13 +27,20 @@ import { Badge } from './Badge';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 import { IconButton } from './IconButton';
+import { EmptyStateCard } from './EmptyStateCard';
 import { ObjectFacts } from './ObjectDetailsCard';
-import { ObjectPreviewCard } from './ObjectPreview';
+import { ObjectPreview, ObjectPreviewCard } from './ObjectPreview';
 import { ShareObjectModal } from './ShareObjectModal';
 import { useToast } from './Toast/index.js';
 import { Tooltip } from './Tooltip';
-import { getDeleteCopy, getListedMetadata, useObjectMetadata } from '../lib/object-metadata.js';
-import { getObjectFileName } from '../lib/object-preview.js';
+import {
+  getDeleteCopy,
+  getListedMetadata,
+  isObjectNotFoundError,
+  useObjectMetadata,
+} from '../lib/object-metadata.js';
+import { getObjectFileName, getPreviewKind } from '../lib/object-preview.js';
+import { UNVERSIONED_ID } from '../lib/object-versions.js';
 import { SHARE_UNAVAILABLE_TOOLTIP, useCanShareObjects } from '../lib/use-can-share-objects.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
@@ -75,19 +83,10 @@ export function ObjectDetailsDrawer(props: ObjectDetailsDrawerProps) {
   // Mounted open; closing plays the slide-out, then tells the page to drop it.
   const [open, setOpen] = useState(true);
   const close = () => setOpen(false);
-  const panelRef = useRef<HTMLDivElement>(null);
 
   return (
     <Transition show={open} appear as={Fragment} afterLeave={props.onClose}>
-      {/* The keys are heard on the dialog's root, not the panel: Headless UI
-          focuses the root when the panel opens, so a handler on the panel
-          would miss every key until the user clicks inside it. */}
-      <Dialog
-        data-testid="object-details-drawer"
-        className="relative z-40"
-        onClose={close}
-        onKeyDown={(e) => handleStepKey(e, panelRef.current, props.siblings)}
-      >
+      <Dialog data-testid="object-details-drawer" className="relative z-40" onClose={close}>
         <TransitionChild
           as={Fragment}
           enter="transition-opacity duration-200 ease-out"
@@ -109,7 +108,6 @@ export function ObjectDetailsDrawer(props: ObjectDetailsDrawerProps) {
             leaveTo="translate-x-full"
           >
             <DialogPanel
-              ref={panelRef}
               data-testid="object-details-drawer-panel"
               className="flex w-full flex-col bg-white shadow-xl"
             >
@@ -122,45 +120,17 @@ export function ObjectDetailsDrawer(props: ObjectDetailsDrawerProps) {
   );
 }
 
-// Where an arrow key or j/k already means something: moving a caret, scrolling a
-// text preview, seeking a player. Stepping to another object there would take
-// that key away.
-const KEYS_KEPT_BY_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'PRE', 'VIDEO', 'AUDIO']);
-const PREVIOUS_KEYS = new Set(['ArrowUp', 'k']);
-const NEXT_KEYS = new Set(['ArrowDown', 'j']);
-
 /**
- * Up and down (or k and j, as in Linear) step to the neighbouring object, when
- * focus is on the panel or on the dialog root it sits in.
- *
- * React passes a key pressed in a dialog opened from the panel, such as the
- * Delete confirmation, up to this handler although that dialog is elsewhere in
- * the page. Stepping then would put another object behind the confirmation, so
- * a key from outside the panel is ignored.
+ * The version ID the facts show: the one opened, or the latest's in a versioned
+ * bucket. Never S3's "null", which names no version a reader can use.
  */
-function handleStepKey(
-  e: React.KeyboardEvent,
-  panel: HTMLElement | null,
-  siblings?: ObjectDrawerSiblings,
-) {
-  if (!siblings || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-  const { target } = e;
-  if (!(target instanceof Node)) return;
-  if (target !== e.currentTarget && !panel?.contains(target)) return;
-  if (
-    target instanceof HTMLElement &&
-    (KEYS_KEPT_BY_TAGS.has(target.tagName) || target.isContentEditable)
-  ) {
-    return;
-  }
-  const step = PREVIOUS_KEYS.has(e.key)
-    ? siblings.onPrevious
-    : NEXT_KEYS.has(e.key)
-      ? siblings.onNext
-      : undefined;
-  if (!step) return;
-  e.preventDefault();
-  step();
+function getShownVersionId(
+  versionId: string | undefined,
+  versioningEnabled: boolean,
+  listed: S3ObjectVersion | undefined,
+): string | undefined {
+  const shown = versionId ?? (versioningEnabled ? listed?.versionId : undefined);
+  return shown === UNVERSIONED_ID ? undefined : shown || undefined;
 }
 
 function DrawerContent({
@@ -177,7 +147,10 @@ function DrawerContent({
   onClose,
 }: ObjectDetailsDrawerProps) {
   const metadataQuery = useObjectMetadata({ bucketName, region, objectKey, versionId });
-  const metadata = metadataQuery.data ?? (listed && getListedMetadata(listed));
+  const isGone = metadataQuery.isError && isObjectNotFoundError(metadataQuery.error);
+  const metadata = isGone
+    ? undefined
+    : (metadataQuery.data ?? (listed && getListedMetadata(listed)));
   const mayDelete = useHasPermission('objects.delete');
   const canShare = useCanShareObjects();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = usePermittedDialog(false, mayDelete);
@@ -198,27 +171,45 @@ function DrawerContent({
       />
       <div className="flex-1 overflow-y-auto">
         <div className="flex flex-col gap-5 px-5 py-5 text-ui">
-          {metadataQuery.isError && (
-            <Alert
-              variant="red"
-              description={metadataQuery.error.message || 'Failed to load object details'}
+          {isGone ? (
+            <EmptyStateCard
+              icon={FileDashedIcon}
+              iconColor="grey"
+              title={versionId ? 'This version no longer exists' : 'This object no longer exists'}
+              description="It may have been deleted since the list loaded."
             />
+          ) : (
+            metadataQuery.isError && (
+              <Alert
+                variant="red"
+                description={metadataQuery.error.message || 'Failed to load object details'}
+              />
+            )
           )}
           {metadata && (
             <>
-              <ObjectPreviewCard
-                bucketName={bucketName}
-                region={region}
-                objectKey={objectKey}
-                versionId={versionId}
-                etag={metadata.etag}
-                sizeBytes={metadata.sizeBytes}
-                contentType={metadata.contentType}
-                onDownload={onDownload}
-              />
+              {/* The listing has no content type, so the preview waits for the
+                  object's own details: guessing from the name alone could show
+                  "No preview" for a page that has one, or fetch a binary as text */}
+              {metadataQuery.data ? (
+                <ObjectPreviewCard
+                  bucketName={bucketName}
+                  region={region}
+                  objectKey={objectKey}
+                  versionId={versionId}
+                  etag={metadata.etag}
+                  sizeBytes={metadata.sizeBytes}
+                  contentType={metadata.contentType}
+                  onDownload={onDownload}
+                />
+              ) : (
+                !metadataQuery.isError && (
+                  <ObjectPreview state="loading" kind={getPreviewKind(objectKey) ?? 'image'} />
+                )
+              )}
               <ObjectFacts
                 metadata={metadata}
-                versionId={versionId ?? (versioningEnabled ? listed?.versionId : undefined)}
+                versionId={getShownVersionId(versionId, versioningEnabled, listed)}
                 objectLockEnabled={objectLockEnabled}
                 s3Uri={`s3://${bucketName}/${objectKey}`}
                 pending={!metadataQuery.data}
@@ -228,22 +219,24 @@ function DrawerContent({
         </div>
       </div>
       {/* Pinned under the scrolling body, so Download stays in reach however far
-          down the facts the user is, and within thumb reach on a phone. Quiet,
-          with no primary button: unlike a modal's footer it submits nothing. */}
-      <div
-        data-testid="object-details-drawer-actions"
-        className="flex flex-shrink-0 items-center border-t border-zinc-100 px-5 py-3"
-      >
-        <ObjectDrawerActions
-          consoleLink={new URL(pageHref, window.location.origin).toString()}
-          isVersion={Boolean(versionId)}
-          canShare={canShare}
-          mayDelete={mayDelete}
-          onDownload={onDownload}
-          onShare={() => setShareOpen(true)}
-          onDelete={() => setConfirmDeleteOpen(true)}
-        />
-      </div>
+          down the facts the user is, and within thumb reach on a phone. Left
+          out once the object is gone: there is nothing left to act on. */}
+      {!isGone && (
+        <div
+          data-testid="object-details-drawer-actions"
+          className="flex flex-shrink-0 items-center border-t border-zinc-100 px-5 py-3"
+        >
+          <ObjectDrawerActions
+            consoleLink={new URL(pageHref, window.location.origin).toString()}
+            isVersion={Boolean(versionId)}
+            canShare={canShare}
+            mayDelete={mayDelete}
+            onDownload={onDownload}
+            onShare={() => setShareOpen(true)}
+            onDelete={() => setConfirmDeleteOpen(true)}
+          />
+        </div>
+      )}
 
       <ShareObjectModal
         open={shareOpen}

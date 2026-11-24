@@ -13,6 +13,7 @@ import { S3Region, SubscriptionStatus } from '@filone/shared';
 import type { ObjectMetadataResponse, S3ObjectVersion } from '@filone/shared';
 
 import { ObjectDetailsDrawer, type ObjectDrawerSiblings } from './ObjectDetailsDrawer';
+import { S3RequestError } from '../lib/aurora-s3.js';
 import { queryKeys } from '../lib/query-client.js';
 
 const BUCKET = 'any-bucket';
@@ -34,9 +35,10 @@ type Scenario = {
   siblings?: ObjectDrawerSiblings;
   /**
    * Leaves the object's details unseeded and stubs `fetch` while the story is
-   * mounted: `loading` never answers, so the panel shows what the listing knows.
+   * mounted, so it never answers. `loading` shows what the listing knows; `gone`
+   * seeds the 404 S3 answers for an object deleted since the list loaded.
    */
-  network?: 'loading';
+  network?: 'loading' | 'gone';
 };
 
 const SIBLINGS: ObjectDrawerSiblings = {
@@ -91,6 +93,21 @@ function Seeded({ scenario, children }: { scenario: Scenario; children: React.Re
         metadata: {},
         ...scenario.metadata,
       } satisfies ObjectMetadataResponse);
+    }
+    if (scenario.network === 'gone') {
+      // Without these, mounting or focusing the page would retry the failed
+      // load, and the stubbed fetch would leave it loading
+      client.setQueryDefaults(metadataKey, {
+        staleTime: Infinity,
+        retryOnMount: false,
+        refetchOnWindowFocus: false,
+      });
+      const query = client.getQueryCache().build(client, { queryKey: metadataKey });
+      query.setState({
+        ...query.state,
+        status: 'error',
+        error: new S3RequestError('S3 request failed with status 404', 404),
+      });
     }
     if (scenario.previewUrl) client.setQueryData(previewKey, scenario.previewUrl);
     if (scenario.previewText) client.setQueryData([...previewKey, 'text'], scenario.previewText);
@@ -162,6 +179,15 @@ export const LoadingDetails: Story = {
       objectKey: 'any-folder/any-photo.png',
       network: 'loading',
       objectLockEnabled: true,
+      siblings: SIBLINGS,
+    }),
+};
+
+export const ObjectGone: Story = {
+  render: () =>
+    renderDrawer({
+      objectKey: 'any-folder/any-photo.png',
+      network: 'gone',
       siblings: SIBLINGS,
     }),
 };

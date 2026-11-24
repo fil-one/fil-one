@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   createMemoryHistory,
@@ -14,11 +14,14 @@ import type { ObjectMetadataResponse, S3ObjectVersion } from '@filone/shared';
 
 // Nothing in these tests reaches S3: every request stays in flight, so a test
 // that seeds no details sees the panel as it is before the HEAD request answers.
-vi.mock('../lib/use-presign.js', () => ({
-  batchPresign: () => new Promise(() => {}),
+// A test that needs S3 to answer sets that answer once.
+const { batchPresign } = vi.hoisted(() => ({
+  batchPresign: vi.fn(() => new Promise(() => {})),
 }));
+vi.mock('../lib/use-presign.js', () => ({ batchPresign }));
 
-import { queryKeys } from '../lib/query-client.js';
+import { S3RequestError } from '../lib/aurora-s3.js';
+import { queryClient, queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { ToastProvider } from './Toast/ToastProvider.js';
 import { ObjectDetailsDrawer, type ObjectDetailsDrawerProps } from './ObjectDetailsDrawer';
@@ -92,6 +95,8 @@ function siblings() {
 }
 
 describe('ObjectDetailsDrawer', () => {
+  afterEach(() => queryClient.clear());
+
   it("shows the listing's size before the object's own details arrive", async () => {
     renderDrawer();
 
@@ -161,52 +166,33 @@ describe('ObjectDetailsDrawer', () => {
     expect(within(retention).getByText(/^Compliance, ended /)).toBeInTheDocument();
   });
 
-  it.each([
-    ['j', 'onNext'],
-    ['ArrowDown', 'onNext'],
-    ['k', 'onPrevious'],
-    ['ArrowUp', 'onPrevious'],
-  ] as const)('steps to the neighbouring object on %s', async (key, handler) => {
-    const steps = siblings();
-    renderDrawer({ siblings: steps });
+  it('holds the preview at loading until the type arrives, rather than guessing from the name', async () => {
+    // .html has no preview by name alone, but its content type gives it one
+    renderDrawer({ objectKey: 'any-page.html' });
 
-    fireEvent.keyDown(await screen.findByTestId('object-details-drawer-panel'), { key });
-
-    expect(steps[handler]).toHaveBeenCalledOnce();
+    expect(await screen.findByRole('status', { name: 'Loading preview' })).toBeInTheDocument();
+    expect(screen.queryByText('No preview for this file type')).not.toBeInTheDocument();
   });
 
-  it('steps on a key pressed straight after opening, before anything is clicked', async () => {
-    const steps = siblings();
-    renderDrawer({ siblings: steps });
-    const drawer = await screen.findByTestId('object-details-drawer');
-    await waitFor(() => expect(document.activeElement).toBe(drawer));
+  it('says the object no longer exists, with nothing to act on, when S3 has no such object', async () => {
+    // The HEAD request waits on the bucket's settings, which no test API answers
+    queryClient.setQueryData(queryKeys.bucket(BUCKET, REGION), { bucket: {} });
+    batchPresign.mockRejectedValueOnce(
+      new S3RequestError('S3 request failed with status 404', 404),
+    );
+    renderDrawer();
 
-    fireEvent.keyDown(drawer, { key: 'j' });
-
-    expect(steps.onNext).toHaveBeenCalledOnce();
+    expect(await screen.findByText('This object no longer exists')).toBeInTheDocument();
+    expect(screen.queryByText(/S3 request failed/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('object-details-drawer-actions')).not.toBeInTheDocument();
   });
 
-  it('keeps the object on screen when a key is pressed in the Delete confirmation', async () => {
-    const steps = siblings();
-    renderDrawer({ siblings: steps });
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete object' }));
-    const confirmation = await screen.findByTestId('confirm-dialog');
+  it(`leaves S3's "null" version ID out of the facts`, async () => {
+    renderDrawer({ versionId: 'null', versioningEnabled: true }, {});
 
-    fireEvent.keyDown(confirmation, { key: 'j' });
+    await screen.findByTestId('object-identifiers');
 
-    expect(steps.onNext).not.toHaveBeenCalled();
-  });
-
-  it('leaves arrow keys to a focused text preview', async () => {
-    const steps = siblings();
-    renderDrawer({ siblings: steps });
-    const panel = await screen.findByTestId('object-details-drawer-panel');
-    const pre = document.createElement('pre');
-    panel.append(pre);
-
-    fireEvent.keyDown(pre, { key: 'ArrowDown' });
-
-    expect(steps.onNext).not.toHaveBeenCalled();
+    expect(screen.queryByText('Version ID')).not.toBeInTheDocument();
   });
 
   it('disables Next on the last object in the folder', async () => {

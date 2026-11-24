@@ -6,8 +6,9 @@ import { executePresignedUrl, parseListObjectVersionsResponse } from './aurora-s
 import { LIST_GC_TIME, LIST_STALE_TIME, queryClient, queryKeys } from './query-client.js';
 import { batchPresign } from './use-presign.js';
 
-// S3's version ID for every object in a bucket that has never had versioning on
-const UNVERSIONED_ID = 'null';
+// S3's version ID for every object in a bucket that has never had versioning on,
+// and for a version saved before versioning was turned on
+export const UNVERSIONED_ID = 'null';
 
 /** Where the version on screen sits in the object's history. */
 export type VersionState = {

@@ -24,16 +24,26 @@ const versions = [
 describe('toOpenObject', () => {
   it.each([
     // A bucket without versioning lists every row with an empty ID
-    ['the empty ID of an unversioned bucket', ''],
-    ["the latest version's own ID", 'latest-version'],
-  ])('opens the object itself for %s', (_case, versionId) => {
-    expect(toOpenObject(versions, 'any-key', versionId)).toStrictEqual({ key: 'any-key' });
+    ['the empty ID of an unversioned bucket', [version({ versionId: '', isLatest: true })], ''],
+    ["the latest version's own ID", versions, 'latest-version'],
+  ])('opens the object itself for %s', (_case, listing, versionId) => {
+    expect(toOpenObject(listing, 'any-key', versionId)).toStrictEqual({ key: 'any-key' });
   });
 
   it('opens an older version by its ID', () => {
     expect(toOpenObject(versions, 'any-key', 'older-version')).toStrictEqual({
       key: 'any-key',
       versionId: 'older-version',
+    });
+  });
+
+  it('opens the version saved before versioning was turned on by S3\'s "null" ID', () => {
+    // The listing writes that version's "null" ID as ''
+    const withNullVersion = [...versions, version({ versionId: '' })];
+
+    expect(toOpenObject(withNullVersion, 'any-key', '')).toStrictEqual({
+      key: 'any-key',
+      versionId: 'null',
     });
   });
 });

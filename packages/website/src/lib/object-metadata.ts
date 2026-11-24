@@ -13,6 +13,7 @@ import {
   executePresignedUrl,
   parseGetObjectRetentionResponse,
   parseHeadObjectResponse,
+  S3RequestError,
 } from './aurora-s3.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryClient, queryKeys } from './query-client.js';
 import { batchPresign } from './use-presign.js';
@@ -135,17 +136,23 @@ export function useObjectMetadata(ref: ObjectRef) {
   return useQuery(objectMetadataQueryOptions(ref));
 }
 
-/** Starts loading an object's details ahead of a click that is likely to come. */
 /**
- * Marks every version's details of an object as stale, so a view opened after
- * deleting it asks S3 again rather than showing what was cached before.
+ * Drops every version's cached details of an object, so a view opened after
+ * deleting it asks S3 again. Marking them stale would not do: a view would
+ * still show the old details beside the error S3 answers with.
  */
-export function invalidateObjectMetadata(bucketName: string, objectKey: string): void {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.objectMetadata(bucketName, objectKey) });
+export function removeObjectMetadata(bucketName: string, objectKey: string): void {
+  queryClient.removeQueries({ queryKey: queryKeys.objectMetadata(bucketName, objectKey) });
 }
 
+/** Starts loading an object's details ahead of a click that is likely to come. */
 export function prefetchObjectMetadata(ref: ObjectRef): void {
   void queryClient.prefetchQuery(objectMetadataQueryOptions(ref));
+}
+
+/** Whether loading an object's details failed because S3 has no such object or version. */
+export function isObjectNotFoundError(error: unknown): boolean {
+  return error instanceof S3RequestError && error.status === 404;
 }
 
 /**

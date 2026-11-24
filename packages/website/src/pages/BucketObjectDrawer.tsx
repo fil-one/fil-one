@@ -6,7 +6,8 @@ import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import { ObjectDetailsDrawer, type ObjectDrawerSiblings } from '../components/ObjectDetailsDrawer';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
 import type { VersionGroup } from '../lib/object-grouping.js';
-import { invalidateObjectMetadata, prefetchObjectMetadata } from '../lib/object-metadata.js';
+import { removeObjectMetadata, prefetchObjectMetadata } from '../lib/object-metadata.js';
+import { UNVERSIONED_ID } from '../lib/object-versions.js';
 import { useObjectActions } from '../lib/use-object-actions.js';
 
 /** The object open in the details panel. No version means the object itself, its latest. */
@@ -99,17 +100,25 @@ export function useObjectHoverPrefetch(bucketName: string, region: S3Region) {
 
 /**
  * A row's object and version, as the panel names them. The listing gives every row
- * a version ID: '' in a bucket without versioning, and the latest's own ID on an
- * object's main row. Both mean the object itself, so neither goes in the URL.
+ * a version ID, and the latest's own ID means the object itself, so it stays out
+ * of the URL. The listing writes S3's "null" as '': on the latest, that is an
+ * object in a bucket without versioning, and also the object itself. On an older
+ * row it is the version saved before versioning was turned on, which S3 can only
+ * find again by its "null" ID.
  */
 export function toOpenObject(
   versions: S3ObjectVersion[],
   key: string,
   versionId: string,
 ): OpenObject {
-  if (!versionId) return { key };
   const latest = versions.find((v) => v.key === key && v.isLatest);
-  return latest?.versionId === versionId ? { key } : { key, versionId };
+  if (versionId === (latest?.versionId ?? '')) return { key };
+  return { key, versionId: versionId || UNVERSIONED_ID };
+}
+
+/** Whether a listed version is the one a URL's version ID names. */
+function isNamedVersion(version: S3ObjectVersion, versionId: string): boolean {
+  return (version.versionId || UNVERSIONED_ID) === versionId;
 }
 
 /** The objects in the open folder, in the table's order, without its folders. */
@@ -138,8 +147,8 @@ export type BucketObjectDrawerProps = {
 };
 
 /**
- * The details panel over the Objects tab, for the object named in the URL. Up and
- * down step through the open folder's objects in the table's order, and the
+ * The details panel over the Objects tab, for the object named in the URL. Previous
+ * and next step through the open folder's objects in the table's order, and the
  * neighbours' details load ahead so stepping does not wait.
  */
 export function BucketObjectDrawer({
@@ -161,7 +170,9 @@ export function BucketObjectDrawer({
   );
   const index = folderObjects.findIndex((group) => group.key === key);
   const group = getAt(folderObjects, index);
-  const listed = versionId ? group?.versions.find((v) => v.versionId === versionId) : group?.latest;
+  const listed = versionId
+    ? group?.versions.find((v) => isNamedVersion(v, versionId))
+    : group?.latest;
   const previous = index === -1 ? undefined : getAt(folderObjects, index - 1);
   const next = index === -1 ? undefined : getAt(folderObjects, index + 1);
 
@@ -175,7 +186,7 @@ export function BucketObjectDrawer({
     bucketName,
     region,
     onDeleted: (deletedKey, deletedVersionId) => {
-      invalidateObjectMetadata(bucketName, deletedKey);
+      removeObjectMetadata(bucketName, deletedKey);
       onDeleted(deletedKey, deletedVersionId);
       navigation.close();
     },
