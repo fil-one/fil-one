@@ -69,8 +69,19 @@ export type RowActions = {
   canShare: boolean;
   onShare: (key: string, versionId: string) => void;
   /** Absent for a role without `objects.delete` — the control is not rendered. */
-  onRequestDelete?: (key: string, versionId: string) => void;
+  onRequestDelete?: (target: DeleteRequest) => void;
   onNavigate: (key: string, versionId: string) => void;
+};
+
+/**
+ * The version a row asks to delete. A delete marker is named apart from an
+ * object version, since removing one deletes no data and can bring the object
+ * back, so the confirmation has to say something different.
+ */
+export type DeleteRequest = {
+  key: string;
+  versionId: string;
+  isDeleteMarker: boolean;
 };
 
 /** Selection wiring for a single row. `selectable` is false when bulk delete is off. */
@@ -88,6 +99,10 @@ export type RowSelection = {
  * Download stays one click away, since it is what people come to a file for;
  * the rest sit in the row's menu. Delete in particular is kept out of reach of a
  * slip next to Download.
+ *
+ * A delete marker has no content, so nothing to download or link to; its one
+ * action is to remove the marker, shown as a button of its own rather than a
+ * menu holding a single item.
  */
 function VersionActions({
   version,
@@ -101,40 +116,47 @@ function VersionActions({
   label: string;
 }) {
   const { downloading, onDownload, canShare, onShare, onRequestDelete } = actions;
-  // A delete marker has no content, so nothing to download or link to.
+  const requestDelete = () =>
+    onRequestDelete?.({
+      key: groupKey,
+      versionId: version.versionId,
+      isDeleteMarker: version.isDeleteMarker,
+    });
+
+  if (version.isDeleteMarker) {
+    return (
+      <div className="flex items-center justify-end gap-1">
+        {onRequestDelete && (
+          <IconButton
+            icon={TrashIcon}
+            aria-label={`Remove delete marker on ${label}`}
+            tooltip="Remove delete marker"
+            tooltipSide="top"
+            size="md"
+            onClick={requestDelete}
+          />
+        )}
+      </div>
+    );
+  }
+
   const menu: RowAction[] = [
-    ...(version.isDeleteMarker
-      ? []
-      : [
-          {
-            // The label carries the reason while sharing is unavailable, as a
-            // disabled menu item has no tooltip to explain itself.
-            label: canShare ? 'Share link' : 'Share link (paid plans)',
-            icon: LinkIcon,
-            disabled: !canShare,
-            onSelect: () => onShare(groupKey, version.versionId),
-          },
-        ]),
+    {
+      // The label carries the reason while sharing is unavailable, as a
+      // disabled menu item has no tooltip to explain itself.
+      label: canShare ? 'Share link' : 'Share link (paid plans)',
+      icon: LinkIcon,
+      disabled: !canShare,
+      onSelect: () => onShare(groupKey, version.versionId),
+    },
     ...(onRequestDelete
-      ? [
-          {
-            label: 'Delete',
-            icon: TrashIcon,
-            destructive: true,
-            onSelect: () => onRequestDelete(groupKey, version.versionId),
-          },
-        ]
+      ? [{ label: 'Delete', icon: TrashIcon, destructive: true, onSelect: requestDelete }]
       : []),
   ];
 
   return (
     <div className="flex items-center justify-end gap-1">
-      {version.isDeleteMarker ? (
-        // Holds Download's place so every row's menu lines up in one column.
-        <span className="inline-flex p-1.5" aria-hidden="true">
-          <span className="size-4.5" />
-        </span>
-      ) : downloading === groupKey ? (
+      {downloading === groupKey ? (
         // Same footprint as the IconButton it replaces while the download runs.
         <span className="inline-flex items-center justify-center p-1.5 text-zinc-500">
           <Spinner ariaLabel="Downloading" size={18} />
@@ -432,7 +454,17 @@ export function FolderRow({
       data-testid="folder-row"
       data-folder-prefix={prefix}
       className="group cursor-pointer"
+      // Opens like an object row does, by mouse or keyboard alike.
+      role="button"
+      tabIndex={0}
+      aria-label={`Open folder ${name}`}
       onClick={() => onPrefixChange(prefix)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onPrefixChange(prefix);
+        }
+      }}
     >
       {/* A folder is listed one page at a time, so the browser never holds
           everything inside it and cannot offer to select it. The empty cell
