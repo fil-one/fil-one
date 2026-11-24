@@ -119,9 +119,9 @@ describe('summarizeOutcomes', () => {
     ).toMatchObject({ failed: true });
   });
 
-  it('fails when the org has no provisioned region, so nothing was unlocked', () => {
+  it('fails when the org is provisioned on no network, so nothing was unlocked', () => {
     expect(summarizeOutcomes([])).toStrictEqual({
-      lines: ['  (no provisioned regions)'],
+      lines: ['  (no provisioned networks)'],
       failed: true,
     });
   });

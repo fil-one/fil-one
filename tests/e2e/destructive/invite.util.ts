@@ -8,6 +8,7 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import type { AttributeValue } from '@aws-sdk/client-dynamodb';
+import pRetry, { type Options as RetryOptions } from 'p-retry';
 import { Resource } from 'sst';
 
 // Seeds and tears down the organization state the members specs drive.
@@ -558,16 +559,29 @@ export interface CleanupStep {
  * abandons is the org the next run inherits: two Admins and no Owner fails a
  * `beforeAll`, not the test that caused it.
  *
+ * A step that throws runs again from the top, up to {@link CLEANUP_RETRY}'s
+ * retries, so every step must be safe to repeat. A teardown that gives up on
+ * one transient 500 leaves a policy-suite bucket on staging, still holding
+ * data, until the next run's sweep deletes it.
+ *
  * Steps run in the order given, which is the order the invariants need, and
- * every failure is collected and thrown together at the end so a teardown that
- * could not finish still fails the run.
+ * every failure that outlasts its retries is collected and thrown together at
+ * the end so a teardown that could not finish still fails the run.
  */
 export async function runCleanup(steps: readonly CleanupStep[]): Promise<void> {
   const failures: string[] = [];
 
   for (const { label, run } of steps) {
     try {
-      await run();
+      await pRetry(run, {
+        ...CLEANUP_RETRY,
+        onFailedAttempt: ({ error, attemptNumber, retriesLeft, retryDelay }) => {
+          if (retriesLeft === 0) return;
+          console.warn(
+            `Teardown step "${label}" failed (attempt ${attemptNumber}), retrying in ${retryDelay} ms: ${error.message}`,
+          );
+        },
+      });
     } catch (error) {
       failures.push(`${label}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -579,6 +593,16 @@ export async function runCleanup(steps: readonly CleanupStep[]): Promise<void> {
     );
   }
 }
+
+/**
+ * Three attempts per teardown step, 1 s and then 2 s apart (p-retry's default
+ * backoff). A step that fails every time costs 3 s more than one attempt, so
+ * the largest teardown (16 buckets in a 180 s `afterAll`) stays within its
+ * timeout even when every step fails. p-retry does not retry a `TypeError`
+ * other than a network error: that is a bug in the step, and a retry would
+ * only repeat it.
+ */
+const CLEANUP_RETRY = { retries: 2 } satisfies RetryOptions;
 
 /** Every row under one partition key with one sort-key prefix, paged to the end. */
 async function queryPartition(

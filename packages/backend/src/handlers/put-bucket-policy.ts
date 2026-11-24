@@ -29,6 +29,7 @@ import type {
 import { parseJsonBody } from '../lib/parse-json-body.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
+import type { BucketRef } from '../lib/bucket-orchestrator.ts';
 import { getUserInfo, getVerifiedEmail } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { authorize } from '../middleware/authorize.ts';
@@ -93,7 +94,7 @@ export async function baseHandler(
     const retentionCheck = await checkNewRetentionGrants(
       orchestrator,
       tenantId,
-      bucketName,
+      { region, bucketName },
       policy,
     );
     if ('response' in retentionCheck) return retentionCheck.response;
@@ -116,7 +117,12 @@ export async function baseHandler(
   });
 
   try {
-    const written = await orchestrator.putBucketPolicy(tenantId, bucketName, policy, precondition);
+    const written = await orchestrator.putBucketPolicy(
+      tenantId,
+      { region, bucketName },
+      policy,
+      precondition,
+    );
     await audit.complete({
       outcome: 'succeeded',
       details: { statements: policy.Statement.length, principals: countNamedPrincipals(policy) },
@@ -163,14 +169,14 @@ function getFirstPolicyRetentionRefusal({
 async function checkNewRetentionGrants(
   policies: BucketPolicyOrchestrator,
   tenantId: string,
-  bucketName: string,
+  bucket: BucketRef,
   next: BucketPolicy,
 ): Promise<
   { pinnedPrecondition: PolicyPrecondition } | { response: APIGatewayProxyStructuredResultV2 }
 > {
   let stored: StoredBucketPolicy | null;
   try {
-    stored = await policies.getBucketPolicy(tenantId, bucketName);
+    stored = await policies.getBucketPolicy(tenantId, bucket);
   } catch (err) {
     const response = toPolicyErrorResponse(err);
     if (!response) throw err;

@@ -56,8 +56,8 @@ describe('LeftLastOrgPage', () => {
   it('offers deleting the account instead, pointed at support', async () => {
     render(withRouter());
 
-    const link = await screen.findByRole('link', { name: 'support@fil.one' });
-    expect(link).toHaveAttribute('href', 'mailto:support@fil.one');
+    const link = await screen.findByRole('link', { name: 'support@filone.com' });
+    expect(link).toHaveAttribute('href', 'mailto:support@filone.com');
   });
 
   it('names the signed-in account when given one', async () => {

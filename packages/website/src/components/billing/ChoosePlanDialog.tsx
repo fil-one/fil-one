@@ -16,13 +16,11 @@ const PAY_AS_YOU_GO_FEATURES = [
   '$5.99/month minimum',
   'No egress fees',
   'No API request fees',
-  'Data integrity guarantees',
 ];
 
 const BUSINESS_FEATURES = [
   'Purchase in 1, 3, or 5-year increments',
   'No egress or API request fees',
-  'Data integrity guarantees',
   'Capacity assurance and deployment SLAs',
 ];
 
@@ -131,9 +129,7 @@ export function ChoosePlanDialog({
         </div>
       </ModalBody>
       <ModalFooter>
-        <p className="w-full text-center text-xs text-zinc-500">
-          All plans include unlimited buckets, API keys, and 24/7 support
-        </p>
+        <p className="w-full text-center text-xs text-zinc-500">All plans include 24/7 support</p>
       </ModalFooter>
     </Modal>
   );

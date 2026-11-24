@@ -17,6 +17,7 @@ import type {
 } from '@filone/shared';
 import { AuditSubjects, twoPhaseAudit, userActor } from '../lib/audit.ts';
 import {
+  concurrentKeyChangeResponse,
   discardRecordedKey,
   discardUnrecordedKey,
   exceedsRoleResponse,
@@ -30,11 +31,15 @@ import type { KeyMinter, MintedKey } from '../lib/key-mint.ts';
 import { listOrgAccessKeys } from '../lib/member-keys.ts';
 import type { AuditCorrelation } from '../lib/audit.ts';
 import { getOrchestratorForRegion } from '../lib/service-orchestrator-registry.ts';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
+import {
+  AccessKeyAlreadyExistsError,
+  AccessKeyConcurrentChangeError,
+  AccessKeyValidationError,
+} from '../lib/errors.ts';
 import type {
   IssueAccessKeyOpts,
   IssuedAccessKey,
-  RegionOrchestrator,
+  NetworkOrchestrator,
   ServiceOrchestrator,
 } from '../lib/service-orchestrator.ts';
 import { isOrgDeleting } from '../lib/org-profile.ts';
@@ -63,6 +68,11 @@ import {
   requestDeadlineMiddleware,
 } from '../middleware/request-deadline.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
+import {
+  getRegionsForOrchestrator,
+  isIamOrchestrator,
+  orchestratorIdForRegion,
+} from '../lib/service-orchestrator-ids.ts';
 
 // TODO: Refactor the handler, reducing its complexity and removing the ignore eslint directive.
 // https://linear.app/filecoin-foundation/issue/FIL-320/refactor-create-access-key-handler
@@ -103,6 +113,7 @@ export async function baseHandler(
   const denied = checkServiceKeyAuthority(event, parsed.data, orchestrator);
   if (denied) return denied;
   markRequestStep(event, 'ensureTenantReady');
+  const orchestratorId = orchestrator.id;
   const tenantId = await orchestrator.ensureTenantReady(orgId, { signal });
   if (!tenantId) return tenantNotReadyResponse();
 
@@ -110,7 +121,9 @@ export async function baseHandler(
   // is a request that was never going to produce a key, and writing an intent
   // for it would leave an operator reading a mint that never started.
   markRequestStep(event, 'orgAlreadyShowsKeyName');
-  if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) return duplicateKeyNameResponse();
+  if (await orgAlreadyShowsKeyName({ orgId, keyName, orchestratorId })) {
+    return duplicateKeyNameResponse();
+  }
 
   // A key bound to a principal syncs the principal first: the write is
   // idempotent, a member invited after tenant setup may not be a principal yet,
@@ -136,7 +149,7 @@ export async function baseHandler(
     actor,
     orgId,
     subject: AuditSubjects.org(orgId),
-    details: { keyKind: 's3', keyName, region, ...getKeyAuditDetails(keyOpts) },
+    details: { keyKind: 's3', keyName, region, orchestratorId, ...getKeyAuditDetails(keyOpts) },
   });
 
   let accessKey: IssuedAccessKey;
@@ -163,7 +176,6 @@ export async function baseHandler(
     keyId: accessKey.id,
     accessKeyId: accessKey.accessKeyId,
     keyName,
-    region,
     orchestrator,
     tenantId,
   };
@@ -177,7 +189,9 @@ export async function baseHandler(
       accessKeyId: accessKey.accessKeyId,
       createdAt: accessKey.createdAt,
       status: 'active',
-      region,
+      // The network holding the credential, and no region: the key works at
+      // every region the network serves.
+      orchestratorId,
       ...buildKeyRowFields(parsed.data, accessKey, userId),
       ...attribution,
     },
@@ -247,7 +261,13 @@ function buildIssueAccessKeyOpts(data: CreateKeyRequest, userId: string): IssueA
 function getKeyRoleRequirement(data: CreateKeyRequest): KeyMinter['key'] {
   if (!('permissions' in data)) return { type: 'principal' };
   const { permissions, granularPermissions, region } = data;
-  return { type: 'service', grant: { permissions, granularPermissions, region } };
+  // The request names one region; the grant is judged against the network that
+  // serves it, which is every region that network has.
+  const regions = getRegionsForOrchestrator(
+    orchestratorIdForRegion(region) ?? '',
+    process.env.FILONE_STAGE!,
+  );
+  return { type: 'service', grant: { permissions, granularPermissions, regions } };
 }
 
 /** The principal a key is bound to, or undefined for a service key. */
@@ -285,12 +305,12 @@ function buildKeyRowFields(data: CreateKeyRequest, issued: IssuedAccessKey, user
 function checkServiceKeyAuthority(
   event: AuthenticatedEvent,
   request: CreateKeyRequest,
-  orchestrator: RegionOrchestrator,
+  orchestrator: NetworkOrchestrator,
 ): APIGatewayProxyStructuredResultV2 | undefined {
   // A principal-bound key carries no authority to check.
   if (!('permissions' in request)) return undefined;
   const denied = checkCreatorAuthority(event, request);
-  if (denied || !supportsIamMethods(orchestrator.region)) return denied;
+  if (denied || !isIamOrchestrator(orchestrator)) return denied;
   return requirePermission(
     event,
     'keys.create_service',
@@ -353,14 +373,14 @@ function isPrincipalKeyRequest(rawBody: string | undefined): boolean {
 async function orgAlreadyShowsKeyName({
   orgId,
   keyName,
-  region,
+  orchestratorId,
 }: {
   orgId: string;
   keyName: string;
-  region: S3Region;
+  orchestratorId: string;
 }): Promise<boolean> {
   const keys = await listOrgAccessKeys(orgId);
-  return keys.some((key) => key.keyName === keyName && key.region === region);
+  return keys.some((key) => key.keyName === keyName && key.orchestratorId === orchestratorId);
 }
 
 /** The name is taken, whoever is holding it. */
@@ -376,10 +396,10 @@ function duplicateKeyNameResponse(): APIGatewayProxyStructuredResultV2 {
  *
  * A duplicate name is the one that may have created a credential anyway, on an
  * earlier attempt whose row never landed, so it goes through the recovery. A
- * validation error is the vendor rejecting the request, and closing the
- * correlation is what records that. Anything else leaves the intent dangling on
- * purpose: nobody knows whether a credential exists, which is what the operator
- * needs to see.
+ * concurrent change and a validation error both mean the vendor wrote nothing,
+ * and closing the correlation is what records that. Anything else leaves the
+ * intent dangling on purpose: nobody knows whether a credential exists, which
+ * is what the operator needs to see.
  */
 async function handleMintRefusal(
   err: unknown,
@@ -388,6 +408,10 @@ async function handleMintRefusal(
   if (err instanceof AccessKeyAlreadyExistsError) {
     await recoverDuplicateKey(attempt);
     return duplicateKeyNameResponse();
+  }
+  if (err instanceof AccessKeyConcurrentChangeError) {
+    await attempt.mint.complete({ outcome: 'failed' });
+    return concurrentKeyChangeResponse();
   }
   if (err instanceof AccessKeyValidationError) {
     await attempt.mint.complete({ outcome: 'failed' });
@@ -426,7 +450,7 @@ interface MintAttempt {
   tenantId: string;
   keyName: string;
   region: S3Region;
-  orchestrator: RegionOrchestrator;
+  orchestrator: NetworkOrchestrator;
   attribution: Pick<AccessKeyRecord, 'createdBy' | 'creatorEmail' | 'policyVersion'>;
   /** The intent this attempt already wrote — every exit here closes it. */
   mint: AuditCorrelation<'key.created'>;
@@ -441,7 +465,6 @@ async function recoverDuplicateKey({
   orgId,
   tenantId,
   keyName,
-  region,
   orchestrator,
   attribution,
   mint,
@@ -449,7 +472,7 @@ async function recoverDuplicateKey({
   principalId,
   signal,
 }: MintAttempt): Promise<void> {
-  if (await orgAlreadyShowsKeyName({ orgId, keyName, region })) {
+  if (await orgAlreadyShowsKeyName({ orgId, keyName, orchestratorId: orchestrator.id })) {
     // A plain duplicate name: the vendor refused and there is nothing to
     // recover, so the correlation closes as the rejection it was.
     await mint.complete({ outcome: 'failed' });
@@ -476,7 +499,6 @@ async function recoverDuplicateKey({
     keyId: recovered.id,
     accessKeyId: recovered.accessKeyId,
     keyName,
-    region,
     orchestrator,
     tenantId,
   };
@@ -494,7 +516,9 @@ async function recoverDuplicateKey({
       // key — not this retry's clock, which would date the credential wrong.
       createdAt: recovered.createdAt,
       status: 'active',
-      region,
+      // The network holding the credential, and no region: the key works at
+      // every region the network serves.
+      orchestratorId: orchestrator.id,
       // Attributed to the caller who retried, which in practice is the same
       // person whose first attempt minted the key at the provider. A key with
       // no owner at all is the worse outcome, and `recovered` keeps the

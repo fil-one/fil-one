@@ -40,11 +40,11 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => [],
 }));
 
-const mockSyncTenantStatusInProvisionedRegions = vi.fn();
+const mockSyncTenantStatusInProvisionedNetworks = vi.fn();
 vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/region-helpers.ts')>()),
-  syncTenantStatusInProvisionedRegions: (...args: unknown[]) =>
-    mockSyncTenantStatusInProvisionedRegions(...args),
+  syncTenantStatusInProvisionedNetworks: (...args: unknown[]) =>
+    mockSyncTenantStatusInProvisionedNetworks(...args),
 }));
 
 vi.mock('../lib/stripe-client.ts', () => ({
@@ -129,12 +129,12 @@ describe('activate-subscription baseHandler', () => {
     mockSubscriptionsCreate.mockReset();
     mockSubscriptionsUpdate.mockReset();
     mockPromotionCodesList.mockReset();
-    mockSyncTenantStatusInProvisionedRegions.mockReset();
+    mockSyncTenantStatusInProvisionedNetworks.mockReset();
 
     mockSetupIntentsList.mockResolvedValue({
       data: [{ status: 'succeeded', payment_method: 'pm_test_789' }],
     });
-    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
+    mockSyncTenantStatusInProvisionedNetworks.mockResolvedValue([]);
     mockIsOrgDeleting.mockResolvedValue(false);
     // The billing row is absent unless a test says otherwise, so a row only
     // exists where the test put one.
@@ -270,7 +270,7 @@ describe('activate-subscription baseHandler', () => {
     expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
     expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
   });
 
   it('unlocks every provisioned region on activation', async () => {
@@ -290,7 +290,7 @@ describe('activate-subscription baseHandler', () => {
     });
     await baseHandler(event);
 
-    expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith('org-1', 'active');
+    expect(mockSyncTenantStatusInProvisionedNetworks).toHaveBeenCalledWith('org-1', 'active');
   });
 
   it('attaches payment method before ending trial to prevent cancellation', async () => {
@@ -542,7 +542,7 @@ describe('activate-subscription baseHandler', () => {
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
 
     // Aurora tenant should NOT have been unlocked
-    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
   });
 
   it('returns 402 when subscription status is unpaid after activation', async () => {
@@ -562,7 +562,7 @@ describe('activate-subscription baseHandler', () => {
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
   });
 
   // Turning the throw into a 500 is errorHandlerMiddleware's job, and its own
@@ -574,7 +574,7 @@ describe('activate-subscription baseHandler', () => {
       .resolves({ Item: buildBillingRecord({ subscriptionId: 'sub_trial_123' }) });
     ddbMock.on(UpdateItemCommand).resolves({});
     mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
-    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([
+    mockSyncTenantStatusInProvisionedNetworks.mockResolvedValue([
       {
         orchestratorId: 'aurora',
         tenantId: 'aurora-t-1',
@@ -746,12 +746,21 @@ describe('activate-subscription baseHandler', () => {
 
     expect((result as { statusCode: number }).statusCode).toBe(402);
     expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-    expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+    expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
   });
 
   // ── promotion code ────────────────────────────────────────────────────
 
   describe('promotion code', () => {
+    /** An active code open to every customer, within its limits. */
+    const openPromotionCode = {
+      id: 'promo_xxx',
+      customer: null,
+      expires_at: null,
+      max_redemptions: null,
+      times_redeemed: 0,
+    };
+
     it('applies the discount in its own update between PM-attach and trial-end (trial→paid)', async () => {
       ddbMock
         .on(GetItemCommand, { Key: ORG_KEY })
@@ -765,7 +774,7 @@ describe('activate-subscription baseHandler', () => {
         .resolves(orgProfileWithTenant('aurora-t-1'));
       ddbMock.on(UpdateItemCommand).resolves({});
 
-      mockPromotionCodesList.mockResolvedValue({ data: [{ id: 'promo_xxx' }] });
+      mockPromotionCodesList.mockResolvedValue({ data: [openPromotionCode] });
       mockSubscriptionsUpdate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
 
       const event = buildEvent({
@@ -779,7 +788,8 @@ describe('activate-subscription baseHandler', () => {
       expect(mockPromotionCodesList).toHaveBeenCalledWith({
         code: 'WELCOME20',
         active: true,
-        limit: 1,
+        limit: 100,
+        expand: ['data.promotion.coupon'],
       });
       expect(mockSubscriptionsUpdate).toHaveBeenCalledTimes(3);
       expect(mockSubscriptionsUpdate).toHaveBeenNthCalledWith(1, 'sub_trial_123', {
@@ -803,7 +813,7 @@ describe('activate-subscription baseHandler', () => {
         .resolves(orgProfileWithTenant('aurora-t-1'));
       ddbMock.on(UpdateItemCommand).resolves({});
 
-      mockPromotionCodesList.mockResolvedValue({ data: [{ id: 'promo_xxx' }] });
+      mockPromotionCodesList.mockResolvedValue({ data: [openPromotionCode] });
       mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
 
       const event = buildEvent({
@@ -838,7 +848,7 @@ describe('activate-subscription baseHandler', () => {
         .resolves(orgProfileWithTenant('aurora-t-1'));
       ddbMock.on(UpdateItemCommand).resolves({});
 
-      mockPromotionCodesList.mockResolvedValue({ data: [{ id: 'promo_xxx' }] });
+      mockPromotionCodesList.mockResolvedValue({ data: [openPromotionCode] });
       mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
 
       const event = buildEvent({
@@ -887,6 +897,34 @@ describe('activate-subscription baseHandler', () => {
       expect(mockSubscriptionsCreate).not.toHaveBeenCalled();
       expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
+    });
+
+    it('returns 400 with INVALID_PROMOTION_CODE when the only matching code is restricted to another customer', async () => {
+      ddbMock.on(GetItemCommand, { Key: ORG_KEY }).resolves({
+        Item: buildBillingRecord({
+          subscriptionId: 'sub_trial_123',
+          subscriptionStatus: SubscriptionStatus.Trialing,
+        }),
+      });
+
+      mockPromotionCodesList.mockResolvedValue({
+        data: [{ ...openPromotionCode, customer: 'cus_other_org' }],
+      });
+
+      const result = await baseHandler(
+        buildEvent({
+          userInfo: { userId: 'user-1', email: 'test@example.com', orgId: 'org-1' },
+          method: 'POST',
+          rawPath: '/api/billing/activate',
+          body: JSON.stringify({ promotionCode: 'WELCOME20' }),
+        }),
+      );
+
+      expect(result).toMatchObject({ statusCode: 400 });
+      expect(JSON.parse((result as { body: string }).body)).toMatchObject({
+        code: 'INVALID_PROMOTION_CODE',
+      });
+      expect(mockSubscriptionsUpdate).not.toHaveBeenCalled();
     });
 
     it('returns 400 from Zod for a malformed promo code without calling Stripe', async () => {
@@ -946,7 +984,7 @@ describe('activate-subscription baseHandler', () => {
         .resolves(orgProfileWithTenant('aurora-t-1'));
       ddbMock.on(UpdateItemCommand).resolves({});
 
-      mockPromotionCodesList.mockResolvedValue({ data: [{ id: 'promo_xxx' }] });
+      mockPromotionCodesList.mockResolvedValue({ data: [openPromotionCode] });
       mockSubscriptionsCreate.mockResolvedValue(mockSubscriptionResponse({ status: 'active' }));
 
       const event = buildEvent({

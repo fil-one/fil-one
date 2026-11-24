@@ -34,10 +34,10 @@ vi.mock('jose', () => ({
 // no reason to stand up.
 const mockDeleteAccessKey = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
-  getOrchestratorForRegion: (region: string) => ({
-    id: region === 'us-east-1' ? 'fth' : 'aurora',
-    region,
-    isTenantReady: () => `tenant:${region}`,
+  findOrchestratorById: (id: string) => ({
+    id,
+    regions: [id === 'fth' ? 'us-east-1' : 'eu-west-1'],
+    isTenantReady: () => `tenant:${id}`,
     deleteAccessKey: (...args: unknown[]) => mockDeleteAccessKey(...args),
   }),
 }));
@@ -175,7 +175,7 @@ function stubMemberKeys(...keys: Array<Record<string, unknown>>) {
             accessKeyId: `AKIAEXAMPLE000${index}`,
             createdAt: '2026-02-01T00:00:00.000Z',
             status: 'active',
-            region: S3Region.UsEast1,
+            orchestratorId: 'fth',
             createdBy: TARGET_ID,
             ...key,
           },
@@ -609,13 +609,13 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
         id: 'key-0',
         keyName: 'key 0',
         accessKeyIdSuffix: '0000',
-        region: S3Region.UsEast1,
+        regions: [S3Region.UsEast1],
         createdAt: '2026-02-01T00:00:00.000Z',
         reason: 'exceeds_role',
         excess: ['DeleteBucket'],
       },
     ]);
-    expect(mockDeleteAccessKey.mock.calls).toStrictEqual([['tenant:us-east-1', 'key-0']]);
+    expect(mockDeleteAccessKey.mock.calls).toStrictEqual([['tenant:fth', 'key-0']]);
   });
 
   it('revokes at the vendor before it writes the role', async () => {
@@ -651,7 +651,7 @@ describe('a narrowing revokes the keys the new role could not mint', () => {
   it('leaves the role unchanged when a vendor refuses, and names what already went', async () => {
     stubMemberKeys(
       { permissions: ['read', 'DeleteBucket'] },
-      { permissions: ['DeleteBucket'], region: S3Region.EuWest1 },
+      { permissions: ['DeleteBucket'], orchestratorId: 'aurora' },
     );
     mockDeleteAccessKey.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('down'));
 

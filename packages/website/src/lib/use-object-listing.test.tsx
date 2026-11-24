@@ -100,6 +100,28 @@ describe('useObjectListing', () => {
     });
   });
 
+  it('keeps the shown page’s range while the next page loads', async () => {
+    let serveSecondPage = () => {};
+    mockFetchPage.mockImplementation((request) =>
+      request.cursor
+        ? new Promise((resolve) => (serveSecondPage = () => resolve(secondPage)))
+        : Promise.resolve(firstPage),
+    );
+    const { result } = renderListing();
+    await waitFor(() => expect(result.current.hasNext).toBe(true));
+
+    act(() => result.current.goToNextPage());
+
+    expect(result.current).toMatchObject({
+      page: firstPage,
+      isChangingPage: true,
+      rangeStart: 1,
+      rangeEnd: 3,
+    });
+    act(() => serveSecondPage());
+    await waitFor(() => expect(result.current).toMatchObject({ rangeStart: 4, rangeEnd: 4 }));
+  });
+
   it('returns to the first page on Previous', async () => {
     const { result } = renderListing();
     await waitFor(() => expect(result.current.hasNext).toBe(true));

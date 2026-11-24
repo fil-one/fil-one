@@ -290,11 +290,15 @@ function engineError(text: string): { code?: string; message?: string } {
  * tenant's Forge S3 credentials from the orchestrator.
  */
 export async function ragEngineTarget(
-  orchestrator: { getS3ClientContext(tenantId: string): Promise<S3ClientContext> },
+  orchestrator: {
+    getS3ClientContext(tenantId: string, region: S3Region): Promise<S3ClientContext>;
+  },
   tenantId: string,
   bucket: { orgId: string; region: S3Region; bucketName: string },
 ): Promise<RagEngineTarget> {
-  const ctx = await orchestrator.getS3ClientContext(tenantId);
+  // The credentials are for the region holding the bucket: a network serves
+  // several, and only that region's gateway knows it.
+  const ctx = await orchestrator.getS3ClientContext(tenantId, bucket.region);
   return {
     orgId: bucket.orgId,
     region: bucket.region,

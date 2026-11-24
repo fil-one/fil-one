@@ -30,6 +30,12 @@ describe('AuditPage', () => {
     vi.clearAllMocks();
   });
 
+  it('names the active organization in the subtitle', async () => {
+    renderPage();
+
+    expect(await screen.findByText('Activity in Acme')).toBeInTheDocument();
+  });
+
   it('holds the page while /me is in flight, rendering neither the tab nor the fallback', () => {
     mockGetMe.mockReturnValue(new Promise(() => {}));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
