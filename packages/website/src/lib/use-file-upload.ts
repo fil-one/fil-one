@@ -216,12 +216,14 @@ async function uploadEntries(
   return { failedCount };
 }
 
-// New objects change the bucket's listing and its storage totals. The totals feed
-// the analytics query, which the buckets table and the detail card both read and
-// hold with a multi-minute staleTime, so without this the numbers sit stale for
-// minutes after an upload. Invalidation overrides staleTime.
+// New objects change the bucket's listing, the history of any key they replace,
+// and the bucket's storage totals. The totals feed the analytics query, which the
+// buckets table and the detail card both read and hold with a multi-minute
+// staleTime, so without this the numbers sit stale for minutes after an upload.
+// Invalidation overrides staleTime.
 function invalidateAfterUpload(queryClient: QueryClient, bucketName: string, region: S3Region) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.objectVersions(bucketName, region) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
 }
 

@@ -371,6 +371,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
 
   const refreshAfterBulkDelete = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.objectVersions(bucketName, region) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
   }, [queryClient, bucketName, region]);
 
@@ -383,6 +384,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         );
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.objectVersions(bucketName, region),
+      });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.bucketAnalytics(bucketName, region),
       });

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { ApiErrorCode } from '@filone/shared';
+import { QueryClient } from '@tanstack/react-query';
+import { ApiErrorCode, S3Region } from '@filone/shared';
 import {
   defaultRetry,
   isAccountDeleted,
@@ -130,5 +131,30 @@ describe('the /me query defaults', () => {
     // observer thinks it stale — so a single call site registered without a
     // staleTime would refetch `/me` for all of them.
     expect(queryClient.getQueryDefaults(queryKeys.me).staleTime).toBe(ME_STALE_TIME);
+  });
+});
+
+describe('the object history keys', () => {
+  // The bucket page updates every query under the listing prefix as a listing
+  // page, so a history cached there would be handed to code expecting a page.
+  it("keeps an object's history out of the bucket's listing pages", () => {
+    const client = new QueryClient();
+    client.setQueryData(queryKeys.objectVersions('any-bucket', S3Region.EuWest1, 'any-key'), []);
+
+    expect(
+      client.getQueriesData({ queryKey: queryKeys.objects('any-bucket', S3Region.EuWest1) }),
+    ).toStrictEqual([]);
+  });
+
+  it("invalidates every object's history in a bucket through the bucket's history prefix", () => {
+    const client = new QueryClient();
+    client.setQueryData(queryKeys.objectVersions('any-bucket', S3Region.EuWest1, 'any-key'), []);
+    void client.invalidateQueries({
+      queryKey: queryKeys.objectVersions('any-bucket', S3Region.EuWest1),
+    });
+
+    expect(
+      client.getQueryState(queryKeys.objectVersions('any-bucket', S3Region.EuWest1, 'any-key')),
+    ).toMatchObject({ isInvalidated: true });
   });
 });

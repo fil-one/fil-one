@@ -263,7 +263,10 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
         exact: true,
       });
     }
-    void queryClient.invalidateQueries({ queryKey: ['objects', bucketName, region] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.objectVersions(bucketName, region, objectKey),
+    });
     void queryClient.invalidateQueries({ queryKey: ['object-metadata', bucketName, objectKey] });
     if (versionId && hasReadableLatestAfterDeleting(versions, versionId)) {
       void navigate({

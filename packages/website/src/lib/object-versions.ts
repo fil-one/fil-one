@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 
-import type { ListObjectVersionsResponse, S3ObjectVersion, S3Region } from '@filone/shared';
+import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
 import { executePresignedUrl, parseListObjectVersionsResponse } from './aurora-s3.js';
+import type { ListingCursor, ObjectListingPage } from './object-listing.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryClient, queryKeys } from './query-client.js';
 import { batchPresign } from './use-presign.js';
 
@@ -120,41 +121,68 @@ export function removeVersion(
   return [{ ...left[0], isLatest: true }, ...left.slice(1)];
 }
 
+/** Whether a listing page stops partway through this key's versions. */
+function isSplitAt(cursor: ListingCursor | undefined, objectKey: string): boolean {
+  return (
+    cursor?.kind === 'version' &&
+    cursor.versionIdMarker !== undefined &&
+    cursor.keyMarker === objectKey
+  );
+}
+
 /**
- * This key's entries from the bucket page's listing, when the user came from
- * there. Only a complete listing that holds the key can stand in for its
- * history: the listing is a single page, so a truncated one may hold some of
- * the key's versions or none of them, and seeding from it would mark that
- * partial history fresh and skip the fetch.
+ * This key's entries from one cached page of the bucket listing, when the page
+ * holds its whole history. A partial history would be marked fresh and skip the
+ * fetch, so a page stands in only when:
+ *
+ * - it came from ListObjectVersions: a ListObjectsV2 page carries no version IDs
+ *   and leaves out older versions and delete markers;
+ * - it starts at the key's newest entry, rather than resuming partway through
+ *   the key where the previous page stopped;
+ * - it does not stop partway through the key itself.
+ *
+ * Both parsers read S3's "null" ID as no ID, so an object whose only version
+ * predates versioning is not seeded; it has no history card to flash in.
  */
-export function getVersionsFromListing(
-  listing: ListObjectVersionsResponse | undefined,
+export function getVersionsFromListingPage(
+  page: ObjectListingPage | undefined,
   objectKey: string,
 ): S3ObjectVersion[] | undefined {
-  if (!listing || listing.isTruncated) return undefined;
-  const entries = listing.versions.filter((v) => v.key === objectKey);
-  return entries.length > 0 ? restoreNullVersionIds(entries) : undefined;
+  if (!page) return undefined;
+  const entries = page.versions.filter((v) => v.key === objectKey);
+  if (!entries.some((v) => v.versionId)) return undefined;
+  if (!entries.some((v) => v.isLatest)) return undefined;
+  if (isSplitAt(page.nextCursor, objectKey)) return undefined;
+  return restoreNullVersionIds(entries);
+}
+
+/** The first cached listing page holding the key's whole history, and when it was fetched. */
+function findSeedInListing(bucketName: string, region: S3Region, objectKey: string) {
+  for (const [queryKey, page] of queryClient.getQueriesData<ObjectListingPage>({
+    queryKey: queryKeys.objects(bucketName, region),
+  })) {
+    const versions = getVersionsFromListingPage(page, objectKey);
+    if (versions) {
+      return { versions, updatedAt: queryClient.getQueryState(queryKey)?.dataUpdatedAt };
+    }
+  }
+  return undefined;
 }
 
 /**
  * The object's version history, newest first. Fetched for this key alone, so it
- * is there on a shared link or a reload, and seeded from the bucket listing when
- * the user came from it so the card does not flash in. The listing is by prefix,
- * which also matches longer keys (`a.png.bak` for `a.png`), so it is filtered to
- * the exact key.
+ * is there on a shared link or a reload, and seeded from the bucket listing's
+ * cached pages when the user came from it so the card does not flash in. The
+ * request lists by prefix, which also matches longer keys (`a.png.bak` for
+ * `a.png`), so it is filtered to the exact key.
  */
 export function useObjectVersions(bucketName: string, region: S3Region, objectKey: string) {
   return useQuery({
     queryKey: queryKeys.objectVersions(bucketName, region, objectKey),
     staleTime: LIST_STALE_TIME,
     gcTime: LIST_GC_TIME,
-    initialData: () =>
-      getVersionsFromListing(
-        queryClient.getQueryData<ListObjectVersionsResponse>(queryKeys.objects(bucketName, region)),
-        objectKey,
-      ),
-    initialDataUpdatedAt: () =>
-      queryClient.getQueryState(queryKeys.objects(bucketName, region))?.dataUpdatedAt,
+    initialData: () => findSeedInListing(bucketName, region, objectKey)?.versions,
+    initialDataUpdatedAt: () => findSeedInListing(bucketName, region, objectKey)?.updatedAt,
     queryFn: async () => {
       const { items } = await batchPresign(region, [
         { op: 'listObjectVersions', bucket: bucketName, prefix: objectKey },

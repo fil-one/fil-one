@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { S3ObjectVersion } from '@filone/shared';
 
+import type { ListingCursor, ObjectListingPage } from './object-listing.js';
 import {
   getMissingReason,
   getVersionState,
-  getVersionsFromListing,
+  getVersionsFromListingPage,
   hasReadableLatestAfterDeleting,
   removeVersion,
   restoreNullVersionIds,
@@ -153,31 +154,43 @@ describe('getMissingReason', () => {
   });
 });
 
-describe('getVersionsFromListing', () => {
-  const listingOf = (versions: S3ObjectVersion[], isTruncated = false) => ({
+describe('getVersionsFromListingPage', () => {
+  const pageOf = (versions: S3ObjectVersion[], nextCursor?: ListingCursor): ObjectListingPage => ({
     versions,
-    isTruncated,
+    folders: [],
+    ...(nextCursor && { nextCursor }),
   });
 
-  it("returns the key's entries from a complete listing", () => {
+  it("returns the key's entries from a page that holds its whole history", () => {
     const otherKey = version({ key: 'any-other-key' });
-    expect(getVersionsFromListing(listingOf([latest, otherKey, older]), 'any-key')).toStrictEqual([
+    expect(getVersionsFromListingPage(pageOf([latest, otherKey, older]), 'any-key')).toStrictEqual([
       latest,
       older,
     ]);
   });
 
-  it('returns nothing from a truncated listing, which may hold only some versions', () => {
-    expect(getVersionsFromListing(listingOf([latest], true), 'any-key')).toBeUndefined();
+  it('returns the history from a page that stops after the key', () => {
+    const cursor = { kind: 'version', keyMarker: 'any-key' } as const;
+    expect(getVersionsFromListingPage(pageOf([latest, older], cursor), 'any-key')).toStrictEqual([
+      latest,
+      older,
+    ]);
   });
 
-  it('returns nothing when the listing does not hold the key', () => {
-    const otherKey = version({ key: 'any-other-key' });
-    expect(getVersionsFromListing(listingOf([otherKey]), 'any-key')).toBeUndefined();
-  });
-
-  it('returns nothing when there is no cached listing', () => {
-    expect(getVersionsFromListing(undefined, 'any-key')).toBeUndefined();
+  it.each([
+    // ListObjectsV2 lists the live object alone, with no version ID.
+    ['a page from ListObjectsV2', pageOf([version({ versionId: '', isLatest: true })])],
+    // Resumes where the previous page stopped, after the key's latest.
+    ['a page that resumes partway through the key', pageOf([older])],
+    // The next page resumes after this version of the same key.
+    [
+      'a page that stops partway through the key',
+      pageOf([latest], { kind: 'version', keyMarker: 'any-key', versionIdMarker: 'v-latest' }),
+    ],
+    ['a page without the key', pageOf([version({ key: 'any-other-key', isLatest: true })])],
+    ['no cached page', undefined],
+  ])('returns nothing from %s', (_case, page) => {
+    expect(getVersionsFromListingPage(page, 'any-key')).toBeUndefined();
   });
 });
 

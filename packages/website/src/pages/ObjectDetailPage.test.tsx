@@ -195,12 +195,26 @@ describe('ObjectDetailPage while the metadata loads', () => {
 
   it('shows the version history from the bucket listing before the metadata arrives', () => {
     deferPresign();
-    pageCacheClient.setQueryData(queryKeys.objects(BUCKET, REGION), {
-      versions: [
-        { key: OBJECT_KEY, versionId: 'any-version-1', lastModified: '2026-01-01T00:00:00Z' },
-        { key: OBJECT_KEY, versionId: 'any-version-2', lastModified: '2026-01-02T00:00:00Z' },
-      ],
-    });
+    pageCacheClient.setQueryData(
+      queryKeys.objectsPage({ bucketName: BUCKET, region: REGION, prefix: '', cursor: null }),
+      {
+        versions: [
+          {
+            key: OBJECT_KEY,
+            versionId: 'any-version-2',
+            lastModified: '2026-01-02T00:00:00Z',
+            isLatest: true,
+          },
+          {
+            key: OBJECT_KEY,
+            versionId: 'any-version-1',
+            lastModified: '2026-01-01T00:00:00Z',
+            isLatest: false,
+          },
+        ],
+        folders: [],
+      },
+    );
     renderPage('any-version-1');
 
     expect(screen.getByRole('status', { name: 'Loading object details' })).toBeInTheDocument();
