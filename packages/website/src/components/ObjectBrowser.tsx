@@ -4,6 +4,7 @@ import { DatabaseIcon } from '@phosphor-icons/react/dist/ssr';
 
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
+import { Alert } from './Alert';
 import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ShareObjectModal } from './ShareObjectModal';
@@ -170,6 +171,32 @@ function EmptyListing({
   );
 }
 
+/** A listing S3 did not return: what failed and how to try again. */
+export interface ListingError {
+  message: string;
+  onRetry: () => void;
+}
+
+/**
+ * Stands where the table would. The breadcrumb, search box and pager stay
+ * around it, so the reader can clear a search, leave the folder or step back a
+ * page instead of being stranded on the failure.
+ */
+function ListingErrorState({ error, isLaterPage }: { error: ListingError; isLaterPage: boolean }) {
+  return (
+    <Alert
+      variant="red"
+      title={isLaterPage ? 'This page did not load' : 'Objects did not load'}
+      description={error.message}
+      action={
+        <Button variant="tertiary" size="sm" onClick={error.onRetry}>
+          Try again
+        </Button>
+      }
+    />
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Object table
 // ---------------------------------------------------------------------------
@@ -280,9 +307,47 @@ export type ObjectBrowserProps = {
   paging?: Omit<ListingPagerProps, 'label'>;
   /** What the search box holds. The listing narrows to names that start with it. */
   search?: string;
+  /**
+   * The search the rows answered. It trails `search` while the box's text is
+   * still being debounced or listed, and the empty states read it, so they
+   * describe the rows on screen. Defaults to `search`.
+   */
+  listedSearch?: string;
+  /** Set when the listing failed, which puts the error where the table would be. */
+  listingError?: ListingError;
   /** Absent where the browser offers no search, which leaves out the box. */
   onSearchChange?: (search: string) => void;
 };
+
+/**
+ * Whether the listing shows a bucket with nothing in it. Only the bucket's root
+ * on its first page, unsearched, can: a later page, a folder with nothing in it,
+ * or a search with no match is a place in a bucket that has objects. Rows held
+ * on screen while another listing loads answer that listing, not this one, so
+ * they never count, and nor does a listing that failed.
+ */
+function isBucketEmpty({
+  rowCount,
+  currentPrefix,
+  paging,
+  listedSearch,
+  listingError,
+}: {
+  rowCount: number;
+  currentPrefix: string;
+  paging: ObjectBrowserProps['paging'];
+  listedSearch: string;
+  listingError: ListingError | undefined;
+}): boolean {
+  return (
+    rowCount === 0 &&
+    currentPrefix === '' &&
+    listedSearch === '' &&
+    !paging?.hasPrevious &&
+    !paging?.changing &&
+    listingError === undefined
+  );
+}
 
 /** The share dialog a row's Share button opens, and whether the plan allows it. */
 function useRowShare() {
@@ -320,6 +385,8 @@ export function ObjectBrowser({
   folders,
   paging,
   search = '',
+  listedSearch = search,
+  listingError,
   onSearchChange,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
@@ -376,13 +443,11 @@ export function ObjectBrowser({
   );
   const isPaged = paging !== undefined && (paging.hasPrevious || paging.hasNext);
   const place = currentPrefix ? 'folder' : 'bucket';
+  const isLaterPage = paging?.hasPrevious ?? false;
 
-  // Empty only at the bucket's root, on its first page, unsearched: a later
-  // page, a folder with nothing in it, or a search with no match is a place in
-  // a bucket that has objects.
-  const isBucketEmpty =
-    entries.length === 0 && currentPrefix === '' && !paging?.hasPrevious && search === '';
-  if (isBucketEmpty) {
+  if (
+    isBucketEmpty({ rowCount: entries.length, currentPrefix, paging, listedSearch, listingError })
+  ) {
     return (
       <EmptyBucketState
         bucketName={bucketName}
@@ -409,11 +474,11 @@ export function ObjectBrowser({
           place={place}
           onSearchChange={onSearchChange}
           paging={paging}
-          rowCount={entries.length}
+          rowCount={listingError ? undefined : entries.length}
         />
       )}
 
-      {rowSelection.selectable && selectedCount > 0 && (
+      {rowSelection.selectable && selectedCount > 0 && !listingError && (
         <BulkActionsBar
           count={selectedCount}
           onClear={selection.clear}
@@ -422,11 +487,13 @@ export function ObjectBrowser({
         />
       )}
 
-      {entries.length === 0 ? (
+      {listingError ? (
+        <ListingErrorState error={listingError} isLaterPage={isLaterPage} />
+      ) : entries.length === 0 ? (
         <EmptyListing
-          search={search}
+          search={listedSearch}
           place={place}
-          isLaterPage={paging?.hasPrevious ?? false}
+          isLaterPage={isLaterPage}
           onClearSearch={() => onSearchChange?.('')}
         />
       ) : (

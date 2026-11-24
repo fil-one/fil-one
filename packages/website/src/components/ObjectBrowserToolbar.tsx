@@ -87,14 +87,20 @@ export function ObjectSearchBar({
   place: 'folder' | 'bucket';
   onSearchChange: (search: string) => void;
   paging?: Omit<ListingPagerProps, 'label'>;
-  /** Rows on this page, the count when the listing is not paged. */
-  rowCount: number;
+  /**
+   * Rows on this page, the count when the listing is not paged. Absent when the
+   * listing failed, which leaves the count out rather than state a wrong one.
+   */
+  rowCount?: number;
 }) {
-  const count = describeListingCount({
-    reached: paging ? paging.rangeEnd : rowCount,
-    hasMore: paging?.hasNext ?? false,
-    searching: search !== '',
-  });
+  const count =
+    rowCount === undefined
+      ? undefined
+      : describeListingCount({
+          reached: paging ? paging.rangeEnd : rowCount,
+          hasMore: paging?.hasNext ?? false,
+          searching: search !== '',
+        });
   return (
     // Wraps rather than squeezes, like the other list toolbars: at 375px the
     // search takes the full width.
@@ -109,9 +115,11 @@ export function ObjectSearchBar({
         className="w-full sm:w-64"
       />
       {/* Matches the buckets toolbar, which keeps its count at the row's end. */}
-      <p className="ml-auto text-xs text-zinc-500 tabular-nums" aria-live="polite">
-        {count}
-      </p>
+      {count !== undefined && (
+        <p className="ml-auto text-xs text-zinc-500 tabular-nums" aria-live="polite">
+          {count}
+        </p>
+      )}
     </div>
   );
 }

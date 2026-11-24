@@ -89,9 +89,12 @@ vi.mock('../lib/use-presign.js', () => ({
   batchPresign: () => Promise.resolve({ items: [{ url: 'https://s3.test/list', method: 'GET' }] }),
 }));
 
+// Sends each listing request; a test that needs one held in flight swaps this.
+const sendListing = () => Promise.resolve({ text: () => Promise.resolve('<ListBucketResult/>') });
+const mockExecutePresignedUrl = vi.fn(sendListing);
+
 vi.mock('../lib/aurora-s3.js', () => ({
-  executePresignedUrl: () =>
-    Promise.resolve({ text: () => Promise.resolve('<ListBucketResult/>') }),
+  executePresignedUrl: () => mockExecutePresignedUrl(),
   parseListObjectVersionsResponse: () => ({ versions: [], commonPrefixes: [], isTruncated: false }),
   parseListObjectsResponse: () => mockParseListObjects(),
 }));
@@ -171,6 +174,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockSupportsIamMethods.mockReturnValue(false);
   mockParseListObjects.mockReturnValue(ONE_OBJECT_LISTING);
+  mockExecutePresignedUrl.mockImplementation(sendListing);
   mockBucketKeys.mockReturnValue([ACCESS_KEY]);
   mockApiRequest.mockImplementation((path: string) => respond(path));
   mockSendApiRequest.mockImplementation(
@@ -543,6 +547,87 @@ describe('BucketDetailPage: searching a folder', () => {
     // The empty state's labelled button, not the field's own × (named the same).
     const emptyState = miss.parentElement ?? document.body;
     fireEvent.click(within(emptyState).getByRole('button', { name: 'Clear search' }));
+
+    expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+  });
+});
+
+const NO_MATCH_LISTING: ListObjectsResponse = {
+  objects: [],
+  commonPrefixes: [],
+  isTruncated: false,
+};
+
+/** Searches for a name nothing starts with, and returns the empty state that says so. */
+async function searchForMissingName() {
+  expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+  mockParseListObjects.mockReturnValue(NO_MATCH_LISTING);
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'any-missing' } });
+  return screen.findByText('No names in this bucket start with “any-missing”');
+}
+
+describe('BucketDetailPage: clearing a search that found nothing', () => {
+  it('keeps the miss on screen, not the empty bucket, while the cleared box waits to list', async () => {
+    renderPage(OrgRole.Owner);
+    await searchForMissingName();
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
+
+    expect(screen.queryByText('This bucket is empty')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('No names in this bucket start with “any-missing”'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows no empty bucket while the unsearched listing loads again', async () => {
+    const { client } = renderPage(OrgRole.Owner);
+    await searchForMissingName();
+    // The unsearched listing has left the cache, and its refetch stays in flight.
+    client.removeQueries({
+      queryKey: queryKeys.objectsPage({
+        bucketName: BUCKET,
+        region: REGION,
+        prefix: '',
+        search: '',
+        cursor: null,
+      }),
+    });
+    mockExecutePresignedUrl.mockImplementation(() => new Promise(() => {}));
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
+    await waitFor(() => expect(mockExecutePresignedUrl).toHaveBeenCalledTimes(3));
+
+    expect(screen.queryByText('This bucket is empty')).not.toBeInTheDocument();
+  });
+});
+
+describe('BucketDetailPage: a search whose listing fails', () => {
+  /** Searches with every listing from here on failing, and returns the error shown. */
+  async function searchWithFailingListing() {
+    expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+    mockParseListObjects.mockImplementation(() => {
+      throw new Error('any listing failure');
+    });
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'any-search' } });
+    return screen.findByRole('alert');
+  }
+
+  it('shows the failure with Try again in place of the table', async () => {
+    renderPage(OrgRole.Owner);
+
+    const alert = await searchWithFailingListing();
+
+    expect(alert).toHaveTextContent('Objects did not load');
+    expect(alert).toHaveTextContent('any listing failure');
+    expect(within(alert).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('keeps the search box, so the search can be cleared', async () => {
+    renderPage(OrgRole.Owner);
+    await searchWithFailingListing();
+    mockParseListObjects.mockReturnValue(ONE_OBJECT_LISTING);
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } });
 
     expect(await screen.findByTestId('object-row')).toBeInTheDocument();
   });
