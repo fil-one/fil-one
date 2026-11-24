@@ -49,8 +49,8 @@ export function useFolderDelete({
   }
 
   // The page watches the jobs after the dialog closes, so the listing
-  // refreshes again when they finish; they reset when the next deletion opens
-  // the dialog.
+  // refreshes again when they finish. The next deletion clears them from the
+  // dialog, but any still running stay watched.
   function close() {
     // Whatever the jobs have deleted is gone, so the listing should say so.
     // Also once they finish: the listing read when they did can still hold a

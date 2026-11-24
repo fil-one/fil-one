@@ -16,7 +16,11 @@ export const JOB_REQUEST_CONCURRENCY = 4;
 export type UseFolderDeleteJobsOptions = {
   bucketName: string;
   region: S3Region;
-  /** Called once every job has reached a terminal state, for cache invalidation. */
+  /**
+   * Called once every job being watched has reached a terminal state, for
+   * cache invalidation. That includes jobs from an earlier deletion still
+   * running when the next one started.
+   */
   onFinished?: (jobs: BulkDeleteJob[]) => void;
 };
 
@@ -71,7 +75,10 @@ function describeStartFailure(failed: number, total: number, firstError: unknown
 
 /**
  * Deletes folders on the server: one bulk delete job per folder prefix, polled
- * together until every one finishes. A folder is listed a page at a time, so
+ * together until every one finishes. `jobs` is the latest deletion's, for its
+ * dialog; the jobs being watched also include any earlier deletion's that are
+ * still running, so starting a new deletion never drops the refresh an earlier
+ * one is waiting for. A folder is listed a page at a time, so
  * the browser never holds all of its keys; the job lists and deletes them where
  * they live. Like `useBulkDeleteJob`, closing the tab stops only the watching.
  *
@@ -85,13 +92,20 @@ export function useFolderDeleteJobs({
   onFinished,
 }: UseFolderDeleteJobsOptions) {
   const { toast } = useToast();
-  const [jobs, setJobs] = useState<BulkDeleteJob[]>([]);
+  // Every job not yet seen to finish, plus the latest deletion's, in the order
+  // they started. `shownJobIds` picks out the latest deletion's.
+  const [watched, setWatched] = useState<BulkDeleteJob[]>([]);
+  const [shownJobIds, setShownJobIds] = useState<string[]>([]);
   const [unstartedPrefixes, setUnstartedPrefixes] = useState<string[]>([]);
   const [starting, setStarting] = useState(false);
   // Held in a ref so the poll effect never restarts when the callback identity
   // changes, which would reset the interval on every render.
   const onFinishedRef = useRef(onFinished);
   onFinishedRef.current = onFinished;
+  // Read by `start`, which adds to the jobs being watched and must report
+  // finished against the whole set, not only the jobs it started.
+  const watchedRef = useRef(watched);
+  watchedRef.current = watched;
 
   const start = useCallback(
     async (prefixes: string[]): Promise<FolderDeleteStart> => {
@@ -107,10 +121,15 @@ export function useFolderDeleteJobs({
           console.error('Failed to start folder deletion:', refusals);
           toast.error(describeStartFailure(refusals.length, prefixes.length, refusals[0]));
         }
-        setJobs(started);
+        const nextWatched = [
+          ...watchedRef.current.filter((job) => !isTerminalBulkDeleteStatus(job.status)),
+          ...started,
+        ];
+        setWatched(nextWatched);
+        setShownJobIds(started.map((job) => job.jobId));
         setUnstartedPrefixes(unstarted);
         // A folder with nothing left in it can finish before the first poll.
-        if (started.length > 0 && isFinished(started)) onFinishedRef.current?.(started);
+        if (started.length > 0 && isFinished(nextWatched)) onFinishedRef.current?.(nextWatched);
         return { started, unstartedPrefixes: unstarted };
       } finally {
         setStarting(false);
@@ -119,10 +138,12 @@ export function useFolderDeleteJobs({
     [bucketName, region, toast],
   );
 
+  const jobs = watched.filter((job) => shownJobIds.includes(job.jobId));
   const isRunning = jobs.length > 0 && !isFinished(jobs);
+  const isWatching = watched.length > 0 && !isFinished(watched);
 
   useEffect(() => {
-    if (!isRunning) return;
+    if (!isWatching) return;
 
     let cancelled = false;
     // A read of many jobs can outlast the interval; skip a tick rather than
@@ -133,9 +154,9 @@ export function useFolderDeleteJobs({
       reading = true;
       void (async () => {
         try {
-          const next = await readRunningJobs(jobs);
+          const next = await readRunningJobs(watched);
           if (cancelled || !next) return;
-          setJobs(next);
+          setWatched(next);
           if (isFinished(next)) onFinishedRef.current?.(next);
         } finally {
           reading = false;
@@ -147,11 +168,13 @@ export function useFolderDeleteJobs({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [isRunning, jobs]);
+  }, [isWatching, watched]);
 
+  /** Clears what the dialog shows. Jobs still running stay watched. */
   const reset = useCallback(() => {
-    setJobs([]);
+    setShownJobIds([]);
     setUnstartedPrefixes([]);
+    setWatched((current) => current.filter((job) => !isTerminalBulkDeleteStatus(job.status)));
   }, []);
 
   return { start, reset, jobs, unstartedPrefixes, starting, isRunning };

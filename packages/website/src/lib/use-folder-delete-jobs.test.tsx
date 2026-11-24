@@ -200,6 +200,38 @@ describe('useFolderDeleteJobs: watching', () => {
     ]);
   });
 
+  /** A deletion of `any-folder/` still running when one of `other-folder/` starts. */
+  async function startSecondDeletionWhileFirstRuns(onFinished?: (jobs: BulkDeleteJob[]) => void) {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    createRunningJobs();
+    const hook = renderJobs(onFinished);
+    await act(() => hook.result.current.start(['any-folder/']));
+    act(() => hook.result.current.reset());
+    await act(() => hook.result.current.start(['other-folder/']));
+    return hook;
+  }
+
+  it("shows only the latest deletion's jobs", async () => {
+    const { result } = await startSecondDeletionWhileFirstRuns();
+
+    expect(result.current.jobs).toMatchObject([{ prefix: 'other-folder/' }]);
+  });
+
+  it("reports finished with the earlier deletion's jobs too, once they finish after a new one starts", async () => {
+    const onFinished = vi.fn();
+    await startSecondDeletionWhileFirstRuns(onFinished);
+
+    reportJobs((jobId) =>
+      job(jobId.replace('job-for-', ''), { status: BulkDeleteJobStatus.Completed }),
+    );
+    await advancePoll();
+    await advancePoll();
+
+    expect(onFinished.mock.calls).toMatchObject([
+      [[{ prefix: 'any-folder/' }, { prefix: 'other-folder/' }]],
+    ]);
+  });
+
   it('keeps watching after a progress read fails', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     createRunningJobs();
