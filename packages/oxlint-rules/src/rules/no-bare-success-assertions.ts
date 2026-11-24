@@ -76,22 +76,30 @@ function findSuccessReferences(root: ESTree.Node, sourceCode: SourceCode): ESTre
   return references;
 
   function visit(node: ESTree.Node): void {
-    if (node.type === 'Identifier') {
-      if (isDestructuredFromSuccess(node, sourceCode)) references.push(node);
-      return;
-    }
-    if (node.type === 'MemberExpression') {
-      if (isSuccessKey(node.property, node.computed)) references.push(node);
-      visit(node.object);
-      if (node.computed) visit(node.property);
-      return;
-    }
-    if (node.type === 'Property') {
-      if (node.computed) visit(node.key);
-      visit(node.value);
-      return;
-    }
-    for (const child of getChildNodes(node)) visit(child);
+    if (isSuccessReference(node, sourceCode)) references.push(node);
+    for (const child of getSearchedChildren(node)) visit(child);
+  }
+}
+
+function isSuccessReference(node: ESTree.Node, sourceCode: SourceCode): boolean {
+  if (node.type === 'Identifier') return isDestructuredFromSuccess(node, sourceCode);
+  if (node.type === 'MemberExpression') return isSuccessKey(node.property, node.computed);
+  return false;
+}
+
+// Returns the children that can hold a `success` reference. The name in
+// `x.name` or `{ name: value }` is a key, not a variable, so a non-computed key
+// is skipped.
+function getSearchedChildren(node: ESTree.Node): ESTree.Node[] {
+  switch (node.type) {
+    case 'Identifier':
+      return [];
+    case 'MemberExpression':
+      return node.computed ? [node.object, node.property] : [node.object];
+    case 'Property':
+      return node.computed ? [node.key, node.value] : [node.value];
+    default:
+      return getChildNodes(node);
   }
 }
 
