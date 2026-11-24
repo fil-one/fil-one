@@ -462,13 +462,17 @@ describe('create-bucket baseHandler', () => {
       getAuditEvents().find((e) => e.type === 'bucket.created' && e.phase === phase);
 
     it('records a bucket.created intent naming the region and bucket before the create', async () => {
+      // Read inside the mock, so the assertion below sees the intent as it was
+      // when the storage call began. An assertion inside the mock would throw
+      // into the handler, which rethrows it without its message.
+      let intentAtCreate: ReturnType<typeof findBucketEvent>;
       mockCreateBucket.mockImplementation(async () => {
-        expect(findBucketEvent('intent')).toBeDefined();
+        intentAtCreate = findBucketEvent('intent');
       });
 
       await baseHandler(buildEvent({ body: validBody(), userInfo: USER_INFO }));
 
-      expect(findBucketEvent('intent')).toMatchObject({
+      expect(intentAtCreate).toMatchObject({
         actor: { kind: 'user', id: USER_1 },
         orgId: 'org-1',
         subject: `bucket:${S3_REGION}/my-bucket`,
