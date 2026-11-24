@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand, PutParameterCommand } from '@aws-sdk/client-ssm';
@@ -52,7 +52,7 @@ const ANY_USER = '00000000-0000-0000-0000-000000000011';
 const OTHER_USER = '00000000-0000-0000-0000-000000000012';
 
 const orgId = '00000000-0000-0000-0000-000000000001';
-const deps = { client, id: 'forge', stage: 'test', region: 'us-east-1' };
+const deps = { client, id: 'forge', stage: 'test' };
 const ssmPath = `/filone/test/forge-s3/access-key/${orgId}`;
 
 function profileItem(attrs: Record<string, string>) {
@@ -207,10 +207,13 @@ describe('ensureTenantReady', () => {
       expect.objectContaining({
         client,
         path: { tenantId: orgId },
-        body: { region: 'us-east-1' },
         throwOnError: false,
       }),
     );
+    // The request carries no body: a tenant is not bound to a region. The
+    // assertion above matches on the fields it names, so it would pass with a
+    // body present; this is what holds the request to having none.
+    expect(mockPutTenant.mock.calls[0]?.[0]).not.toHaveProperty('body');
     expect(mockCreateAccessKey).toHaveBeenCalledWith(
       expect.objectContaining({
         client,
@@ -291,8 +294,9 @@ describe('ensureTenantReady', () => {
   });
 
   it('scopes the SSM path and PROFILE attribute per id', async () => {
-    // Region-encoded ids (multi-region Forge) must not collide across regions and
-    // must produce a valid hyphenated DynamoDB attribute name via ExpressionAttributeNames.
+    // One id per Forge network: the tenant it records is shared by every region
+    // the network serves, and the id must produce a valid hyphenated DynamoDB
+    // attribute name via ExpressionAttributeNames.
     const regionDeps = { ...deps, id: 'forge' };
     stubHappyPath();
 
@@ -354,6 +358,42 @@ describe('ensureTenantReady', () => {
       's3:PutBucketTagging',
       's3:PutBucketCORS',
     ]);
+  });
+
+  describe('a ConcurrentChange on the console key', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      stubHappyPath();
+      mockCreateAccessKey.mockResolvedValueOnce({
+        data: undefined,
+        error: { message: 'conflict', code: 'ConcurrentChange' },
+        response: { status: 409 },
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function runSetup() {
+      const promise = ensureTenantReady(deps, orgId);
+      await vi.runAllTimersAsync();
+      return promise;
+    }
+
+    it('stocks SSM with the key the retry creates', async () => {
+      await runSetup();
+
+      expect(ssmMock.commandCalls(PutParameterCommand)[0].args[0].input.Value).toBe(
+        JSON.stringify({ accessKeyId: 'AKIATEST', secretAccessKey: 'SKTEST' }),
+      );
+    });
+
+    it('does not look for an existing key to recover', async () => {
+      await runSetup();
+
+      expect(mockListAccessKeys).not.toHaveBeenCalled();
+    });
   });
 
   describe('409 recovery (crash between key creation and SSM write)', () => {

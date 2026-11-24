@@ -8,10 +8,11 @@ import type {
 import { S3Region, type TenantStatus } from '@filone/shared';
 import { delegateIamMethods, FakeIamOrchestrator } from './fake-iam-orchestrator.ts';
 import { canMemberAccessBucket } from '../lib/orchestrator/member-access.ts';
+import type { BucketRef } from '../lib/bucket-orchestrator.ts';
 
 export interface FakeOrchestrator {
   id: string;
-  region: string;
+  regions: S3Region[];
   isTenantReady: ReturnType<typeof vi.fn>;
   getTenantStatus: ReturnType<typeof vi.fn>;
   updateTenantStatus: ReturnType<typeof vi.fn>;
@@ -30,6 +31,8 @@ export interface FakeOrchestratorOpts {
   status?: TenantStatus;
   /** Region reported by the orchestrator. Defaults to `eu-west-1`. */
   region?: S3Region;
+  /** Every region the orchestrator serves; overrides `region`. Defaults to `[region]`. */
+  regions?: S3Region[];
   /**
    * Add the bucket-policy and member methods: `true` for a fresh
    * {@link FakeIamOrchestrator}, or one the test seeded.
@@ -60,12 +63,13 @@ export interface FakeOrchestratorOpts {
  */
 export function fakeOrchestrator(id: string, opts: FakeOrchestratorOpts = {}): FakeOrchestrator {
   const { ready = true, status = 'active', region = S3Region.EuWest1, failUsage = false } = opts;
+  const regions = opts.regions ?? [region];
   const regionDown = () => vi.fn().mockRejectedValue(new Error('region down'));
   const iam = opts.iam === true ? new FakeIamOrchestrator() : opts.iam;
 
   return {
     id,
-    region,
+    regions,
     ...(iam ? delegateIamMethods(iam) : {}),
     isTenantReady: vi.fn((orgProfile?: { pk?: { S?: string } }) => {
       const orgId = orgProfile?.pk?.S?.replace('ORG#', '');
@@ -136,7 +140,7 @@ export function stubMemberScopedGetBucket(
   bucket: BucketDetails,
 ): void {
   orchestrator.getBucket.mockImplementation(
-    async (tenantId: string, bucketName: string, memberId?: string) =>
+    async (tenantId: string, { bucketName }: BucketRef, memberId?: string) =>
       memberId && !(await canMemberAccessBucket(iam, { tenantId, userId: memberId, bucketName }))
         ? null
         : bucket,

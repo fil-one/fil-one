@@ -14,13 +14,14 @@ import { ObjectSearchBar, PrefixBreadcrumb } from './ObjectBrowserToolbar';
 import { Table } from './Table/Table';
 import { FolderRow, ObjectEntryRows, SECONDARY_COLUMN } from './ObjectBrowserRows';
 import { BulkActionsBar } from './BulkActionsBar';
-import type { RowActions, RowSelection } from './ObjectBrowserRows';
+import type { DeleteRequest, RowActions, RowSelection } from './ObjectBrowserRows';
 import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
 import type { BrowseEntry } from '../lib/object-grouping.js';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
 import type { ObjectSelection } from '../lib/object-selection.js';
 import { selectionId, useObjectSelection } from '../lib/object-selection.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
+import { useListingPageScroll } from '../lib/use-listing-page-scroll.js';
 
 export { countObjects } from '../lib/object-grouping.js';
 export { describeListingCount } from './ObjectBrowserToolbar';
@@ -123,6 +124,30 @@ function EmptyBucketState({
 }
 
 /** The bulk delete confirmation's title and line, for one item or several. */
+/**
+ * Removing a delete marker deletes no data: the versions under it stay, and if
+ * the marker was hiding the object, the version before it becomes current.
+ */
+export function describeDelete(request: DeleteRequest | null): {
+  title: string;
+  description: string;
+  confirmLabel: string;
+} {
+  if (request?.isDeleteMarker) {
+    return {
+      title: 'Remove delete marker',
+      description:
+        'No object data is deleted. If this marker hides the object, the version before it becomes current again.',
+      confirmLabel: 'Remove',
+    };
+  }
+  return {
+    title: 'Delete object',
+    description: 'This object will be permanently deleted. This action cannot be undone.',
+    confirmLabel: 'Delete',
+  };
+}
+
 function describeBulkDelete(count: number): { title: string; description: string } {
   const one = count === 1;
   return {
@@ -390,14 +415,15 @@ export function ObjectBrowser({
   onSearchChange,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
-  const [confirmDelete, setConfirmDelete] = useState<{
-    key: string;
-    versionId?: string;
-  } | null>(null);
+  // The request outlives the dialog's open state, so the copy holds while the
+  // dialog animates out instead of switching to an object's wording.
+  const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const share = useRowShare();
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const selection = useObjectSelection(versions);
+  const pageScroll = useListingPageScroll(paging);
   const selectedCount = selection.selected.size;
 
   function toggleExpand(key: string) {
@@ -409,10 +435,6 @@ export function ObjectBrowser({
     });
   }
 
-  function requestDelete(key: string, versionId: string) {
-    setConfirmDelete({ key, versionId });
-  }
-
   const rowActions: RowActions = {
     downloading,
     onDownload,
@@ -420,7 +442,12 @@ export function ObjectBrowser({
     onShare: share.request,
     // Without a delete handler no row renders the control, so nothing reaches
     // the confirmation dialog below either.
-    ...(onDelete && { onRequestDelete: requestDelete }),
+    ...(onDelete && {
+      onRequestDelete: (request: DeleteRequest) => {
+        setDeleteRequest(request);
+        setConfirmDeleteOpen(true);
+      },
+    }),
     onNavigate: (key, versionId) => {
       void navigate({
         to: '/buckets/$bucketName/objects',
@@ -459,7 +486,7 @@ export function ObjectBrowser({
   }
 
   return (
-    <div className="mt-4">
+    <div ref={pageScroll.listingRef} className="mt-4 scroll-mt-16 lg:scroll-mt-4">
       {currentPrefix && (
         <PrefixBreadcrumb
           bucketName={bucketName}
@@ -511,7 +538,7 @@ export function ObjectBrowser({
         />
       )}
 
-      {paging && <ListingPager {...paging} label="Object pages" />}
+      {pageScroll.paging && <ListingPager {...pageScroll.paging} label="Object pages" />}
 
       <ShareObjectModal
         open={share.open}
@@ -523,15 +550,13 @@ export function ObjectBrowser({
       />
 
       <ConfirmDialog
-        open={confirmDelete !== null}
-        onClose={() => setConfirmDelete(null)}
+        open={confirmDeleteOpen}
+        onClose={() => setConfirmDeleteOpen(false)}
         onConfirm={() => {
-          if (!confirmDelete || !onDelete) return Promise.resolve();
-          return onDelete(confirmDelete.key, confirmDelete.versionId);
+          if (!deleteRequest || !onDelete) return Promise.resolve();
+          return onDelete(deleteRequest.key, deleteRequest.versionId);
         }}
-        title="Delete object"
-        description="This object will be permanently deleted. This action cannot be undone."
-        confirmLabel="Delete"
+        {...describeDelete(deleteRequest)}
       />
 
       <ConfirmDialog

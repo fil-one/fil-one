@@ -59,7 +59,7 @@ export async function baseHandler(
   if (
     !(await orchestrator.getBucket(
       tenantId,
-      bucketName,
+      { region, bucketName },
       getScopedMemberId(membership?.role, userId),
     ))
   ) {

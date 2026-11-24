@@ -29,20 +29,22 @@ vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getAvailableOrchestrators: () => [],
 }));
 
-const mockSyncTenantStatusInProvisionedRegions = vi.fn();
+const mockSyncTenantStatusInProvisionedNetworks = vi.fn();
 vi.mock('../lib/region-helpers.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/region-helpers.ts')>()),
-  syncTenantStatusInProvisionedRegions: (...args: unknown[]) =>
-    mockSyncTenantStatusInProvisionedRegions(...args),
+  syncTenantStatusInProvisionedNetworks: (...args: unknown[]) =>
+    mockSyncTenantStatusInProvisionedNetworks(...args),
 }));
 
 const mockCustomersRetrieve = vi.fn();
 const mockPaymentMethodsRetrieve = vi.fn();
+const mockSubscriptionsRetrieve = vi.fn();
 
 vi.mock('../lib/stripe-client.ts', () => ({
   getStripeClient: () => ({
     customers: { retrieve: mockCustomersRetrieve },
     paymentMethods: { retrieve: mockPaymentMethodsRetrieve },
+    subscriptions: { retrieve: mockSubscriptionsRetrieve },
   }),
 }));
 
@@ -208,7 +210,7 @@ function updatedKeys() {
   return updateInputs().map((input) => input.Key);
 }
 
-// Per-region failure as reported by syncTenantStatusInProvisionedRegions,
+// Per-region failure as reported by syncTenantStatusInProvisionedNetworks,
 // which never throws.
 function regionSyncFailure(cause: Error) {
   return [
@@ -239,8 +241,14 @@ describe('stripe-event-worker handler', () => {
     currentEvent = {};
     mockCustomersRetrieve.mockReset();
     mockPaymentMethodsRetrieve.mockReset();
-    mockSyncTenantStatusInProvisionedRegions.mockReset();
-    mockSyncTenantStatusInProvisionedRegions.mockResolvedValue([]);
+    // Stripe holds the subscription as the event describes it, unless a test
+    // says the event is stale.
+    mockSubscriptionsRetrieve.mockReset();
+    mockSubscriptionsRetrieve.mockImplementation(
+      async () => (currentEvent as { data: { object: unknown } }).data.object,
+    );
+    mockSyncTenantStatusInProvisionedNetworks.mockReset();
+    mockSyncTenantStatusInProvisionedNetworks.mockResolvedValue([]);
     mockStartDeletion.mockReset();
     reportMetricMock.mockReset();
   });
@@ -483,6 +491,29 @@ describe('stripe-event-worker handler', () => {
       });
     });
 
+    it('writes the status Stripe holds now when the event carries an older one', async () => {
+      // A late event from before the upgrade: Stripe has since ended the trial.
+      setupStripeEvent('customer.subscription.updated', mockSubscription({ status: 'trialing' }));
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'active' }));
+
+      await deliver();
+
+      expect(updateInputs()).toMatchObject([
+        { ExpressionAttributeValues: { ':status': { S: SubscriptionStatus.Active } } },
+      ]);
+    });
+
+    it('leaves the row to the deletion when Stripe has already canceled the subscription', async () => {
+      setupStripeEvent('customer.subscription.updated', mockSubscription({ status: 'active' }));
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'canceled' }));
+      const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      await deliver();
+
+      expect(updateInputs()).toStrictEqual([]);
+      infoSpy.mockRestore();
+    });
+
     it('sets currentPeriodEnd from subscription.items.data[0].current_period_end', async () => {
       setupStripeEvent(
         'customer.subscription.updated',
@@ -708,7 +739,7 @@ describe('stripe-event-worker handler', () => {
       await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
       expect(supersededEmissions()).toHaveLength(1);
     });
 
@@ -771,7 +802,7 @@ describe('stripe-event-worker handler', () => {
       await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
     });
 
     it('refuses the grace period write if the org turns manual after the status was read', async () => {
@@ -800,7 +831,7 @@ describe('stripe-event-worker handler', () => {
 
       await deliver();
 
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
     });
   });
 
@@ -1064,7 +1095,7 @@ describe('stripe-event-worker handler', () => {
       await expect(deliver()).rejects.toThrow(MissingOrgIdError);
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toHaveLength(0);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
     });
 
     describe('when the customer is already deleted', () => {
@@ -1133,7 +1164,7 @@ describe('stripe-event-worker handler', () => {
 
       await deliver();
 
-      expect(mockSyncTenantStatusInProvisionedRegions).toHaveBeenCalledWith(
+      expect(mockSyncTenantStatusInProvisionedNetworks).toHaveBeenCalledWith(
         MOCK_ORG_ID,
         'write-locked',
       );
@@ -1142,7 +1173,7 @@ describe('stripe-event-worker handler', () => {
     it('fails the delivery when Aurora WRITE_LOCK fails, so SQS retries it', async () => {
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
-      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
+      mockSyncTenantStatusInProvisionedNetworks.mockResolvedValue(
         regionSyncFailure(new Error('Aurora API error')),
       );
 
@@ -1253,7 +1284,7 @@ describe('stripe-event-worker handler', () => {
       await deliver();
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toStrictEqual([]);
-      expect(mockSyncTenantStatusInProvisionedRegions).not.toHaveBeenCalled();
+      expect(mockSyncTenantStatusInProvisionedNetworks).not.toHaveBeenCalled();
       expect(mockCustomersRetrieve).not.toHaveBeenCalled();
     });
   });
@@ -1444,7 +1475,7 @@ describe('stripe-event-worker handler', () => {
       // cancellation once per attempt.
       setupStripeEvent('customer.subscription.deleted', mockSubscription());
       setupCustomerRetrieve();
-      mockSyncTenantStatusInProvisionedRegions.mockResolvedValue(
+      mockSyncTenantStatusInProvisionedNetworks.mockResolvedValue(
         regionSyncFailure(new Error('Aurora API error')),
       );
 
@@ -1497,6 +1528,39 @@ describe('stripe-event-worker handler', () => {
       expect(dunningEmissions()).toMatchObject([
         { stage: 'recovered', reason: 'past_due', attemptBucket: 'unknown' },
       ]);
+    });
+
+    it('emits stage=recovered for a recovery event that arrives after Stripe has canceled the subscription', async () => {
+      currentEvent = {
+        id: MOCK_EVENT_ID,
+        type: 'customer.subscription.updated',
+        data: { object: mockSubscription(), previous_attributes: { status: 'past_due' } },
+      };
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'canceled' }));
+      const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      await deliver();
+
+      expect(dunningEmissions()).toMatchObject([
+        { stage: 'recovered', reason: 'past_due', attemptBucket: 'unknown' },
+      ]);
+      infoSpy.mockRestore();
+    });
+
+    it('does NOT emit recovered for a late past_due-to-unpaid event after Stripe has recovered', async () => {
+      currentEvent = {
+        id: MOCK_EVENT_ID,
+        type: 'customer.subscription.updated',
+        data: {
+          object: mockSubscription({ status: 'unpaid' }),
+          previous_attributes: { status: 'past_due' },
+        },
+      };
+      mockSubscriptionsRetrieve.mockResolvedValue(mockSubscription({ status: 'active' }));
+
+      await deliver();
+
+      expect(dunningEmissions()).toStrictEqual([]);
     });
 
     it('does NOT emit recovered on an update that leaves the status unchanged', async () => {

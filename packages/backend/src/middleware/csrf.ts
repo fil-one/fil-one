@@ -6,7 +6,7 @@ import type {
   Context,
 } from 'aws-lambda';
 import type { Request } from '@middy/core';
-import { CSRF_COOKIE_NAME } from '@filone/shared';
+import { ApiErrorCode, CSRF_COOKIE_NAME } from '@filone/shared';
 import type { ErrorResponse } from '@filone/shared';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import { parseCookies } from '../lib/cookies.ts';
@@ -33,7 +33,10 @@ export function csrfMiddleware() {
         request,
         new ResponseBuilder()
           .status(403)
-          .body<ErrorResponse>({ message: 'CSRF validation failed' })
+          .body<ErrorResponse>({
+            message: 'CSRF validation failed',
+            code: ApiErrorCode.CSRF_INVALID,
+          })
           .build(),
       );
     }

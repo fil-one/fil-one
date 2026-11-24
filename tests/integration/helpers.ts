@@ -7,6 +7,7 @@ import {
   type AttributeValue,
 } from '@aws-sdk/client-dynamodb';
 import Stripe from 'stripe';
+import { expect } from 'vitest';
 
 // =============================================================================
 // Config (reads from SST Resource, available via `sst shell`)
@@ -142,6 +143,23 @@ export async function getBillingRecord(
     }),
   );
   return result.Item ?? null;
+}
+
+/**
+ * Expected values for the fields the hourly HubSpot contact sync stamps on any
+ * billing row, test rows included. A test whose run crosses the job's schedule
+ * sees them and one that does not never does, so each is expected only when the
+ * row holds it.
+ */
+export function getHubspotSyncFields(row: Record<string, AttributeValue> | null) {
+  return {
+    ...(row &&
+      Object.hasOwn(row, 'hubspotSyncedAt') && { hubspotSyncedAt: { S: expect.any(String) } }),
+    ...(row &&
+      Object.hasOwn(row, 'hubspotSubscriptionStatus') && {
+        hubspotSubscriptionStatus: { S: expect.any(String) },
+      }),
+  };
 }
 
 export async function deleteBillingRecord(userId: string, orgId?: string): Promise<void> {

@@ -20,7 +20,7 @@ export function selfServeDeletionUnavailable(): APIGatewayProxyStructuredResultV
   return new ResponseBuilder()
     .status(501)
     .body<ErrorResponse>({
-      message: 'Organization deletion is not available yet. Contact support@fil.one.',
+      message: 'Organization deletion is not available yet. Contact support@filone.com.',
     })
     .build();
 }

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 
 import type { S3ObjectVersion } from '@filone/shared';
 
-import { countObjects, describeListingCount } from './ObjectBrowser.js';
+import { countObjects, describeDelete, describeListingCount } from './ObjectBrowser.js';
 
 function version(
   overrides: Partial<S3ObjectVersion> & Pick<S3ObjectVersion, 'key'>,
@@ -55,6 +55,29 @@ describe('countObjects', () => {
 
   it('returns 0 for an empty list', () => {
     expect(countObjects([])).toBe(0);
+  });
+});
+
+describe('describeDelete', () => {
+  it('says removing a delete marker deletes no data', () => {
+    expect(
+      describeDelete({ key: 'any-object', versionId: 'any-marker', isDeleteMarker: true }),
+    ).toStrictEqual({
+      title: 'Remove delete marker',
+      description:
+        'No object data is deleted. If this marker hides the object, the version before it becomes current again.',
+      confirmLabel: 'Remove',
+    });
+  });
+
+  it('warns that deleting an object version cannot be undone', () => {
+    expect(
+      describeDelete({ key: 'any-object', versionId: 'any-version', isDeleteMarker: false }),
+    ).toStrictEqual({
+      title: 'Delete object',
+      description: 'This object will be permanently deleted. This action cannot be undone.',
+      confirmLabel: 'Delete',
+    });
   });
 });
 

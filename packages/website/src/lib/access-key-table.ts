@@ -45,9 +45,13 @@ export function hasActiveAccessKeyFilters(filters: AccessKeyFilters): boolean {
   );
 }
 
-/** A key's region, falling back to the default when the API omits it. */
-function regionOf(key: AccessKey): string {
-  return key.region ?? S3_REGION;
+/**
+ * The regions a key works in, falling back to the default when the API lists
+ * none. A key is held by one storage network and works at every region that
+ * network serves.
+ */
+function regionsOf(key: AccessKey): string[] {
+  return key.regions.length > 0 ? key.regions : [S3_REGION];
 }
 
 /** The keys the filters keep, in the order they came in. */
@@ -58,7 +62,7 @@ export function filterAccessKeys(keys: AccessKey[], filters: AccessKeyFilters): 
       (query === '' ||
         key.keyName.toLowerCase().includes(query) ||
         key.accessKeyId.toLowerCase().includes(query)) &&
-      (filters.region === ALL || regionOf(key) === filters.region) &&
+      (filters.region === ALL || regionsOf(key).includes(filters.region)) &&
       (filters.status === ALL || key.status === filters.status) &&
       (filters.type === ALL || key.type === filters.type),
   );
@@ -69,7 +73,7 @@ export function filterAccessKeys(keys: AccessKey[], filters: AccessKeyFilters): 
  * The region filter is only worth showing when this returns more than one.
  */
 export function accessKeyRegions(keys: AccessKey[]): string[] {
-  const regions = [...new Set(keys.map(regionOf))];
+  const regions = [...new Set(keys.flatMap(regionsOf))];
   return regions.sort((a, b) => getRegionLabel(a).localeCompare(getRegionLabel(b)));
 }
 

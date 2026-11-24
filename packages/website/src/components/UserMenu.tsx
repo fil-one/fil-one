@@ -1,14 +1,6 @@
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
-import {
-  ArrowUpRightIcon,
-  BookOpenIcon,
-  CaretUpDownIcon,
-  ChatCircleIcon,
-  GearIcon,
-  SignOutIcon,
-} from '@phosphor-icons/react/dist/ssr';
+import { CaretUpDownIcon, GearIcon, SignOutIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { DOCS_URL } from '@filone/shared';
 import { logout } from '../lib/api.js';
 import { BaseLink } from './BaseLink.js';
 import { UserAvatar } from './UserAvatar.js';
@@ -30,12 +22,9 @@ type UserMenuProps = {
  * footer rather than at the top — smaller, and one level down in visual
  * weight from the org switcher, matching the Vercel/Resend references.
  *
- * Also absorbs what used to be the sidebar's separate Help menu (Documentation,
- * and "Talk to an expert", renamed here to Support since it is the same
- * destination as the sidebar's Organization/Billing-style utility nav would
- * name it): one menu under the account is where people already look for
- * settings and log out, so a second, adjacent popover for docs and support
- * was a second place to check rather than a useful distinction.
+ * Holds only what is about the account: Settings and Log out. Documentation
+ * and Support are rows in the sidebar footer above it, in view without
+ * opening a menu.
  *
  * Opens upward (`anchor="top start"`) since it is the last thing in the
  * sidebar's footer.
@@ -77,15 +66,6 @@ export function UserMenu({ src, initial, displayName, collapsed, testId }: UserM
         <MenuItem as={BaseLink} href="/settings" className={itemClassName}>
           <GearIcon size={13} className="flex-shrink-0 text-zinc-400" />
           Settings
-        </MenuItem>
-        <MenuItem as={BaseLink} href="/support" className={itemClassName}>
-          <ChatCircleIcon size={13} className="flex-shrink-0 text-zinc-400" />
-          Support
-        </MenuItem>
-        <MenuItem as={BaseLink} href={DOCS_URL} className={itemClassName}>
-          <BookOpenIcon size={13} className="flex-shrink-0 text-zinc-400" />
-          Documentation
-          <ArrowUpRightIcon size={12} className="ml-auto flex-shrink-0 text-zinc-400" />
         </MenuItem>
         <div className="my-1 border-t border-zinc-100" />
         {/* The MenuItem is the button: wrapping one, it replaces the child's id with its own. */}

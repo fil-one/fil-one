@@ -5,7 +5,8 @@ import type { BillingInfo } from '@filone/shared';
 import { Button } from '../Button';
 import { Card } from '../Card';
 import { IconBox } from '../IconBox';
-import { paymentPosture } from '../../lib/billing-view.js';
+import { CardBrandMark } from './CardBrandMark';
+import { getCardBrandName, paymentPosture } from '../../lib/billing-view.js';
 import type { PaymentPosture } from '../../lib/billing-view.js';
 
 export type PaymentMethodCardProps = {
@@ -45,8 +46,10 @@ export function PaymentMethodCard({
   const card = billing.paymentMethod;
 
   return (
-    <Card>
-      <div className="flex flex-col gap-1">
+    // A column the full height of the grid cell, so the details below the label
+    // can be centred in whatever height the plan card beside it sets.
+    <Card className="flex flex-col">
+      <div className="flex flex-1 flex-col gap-1">
         {/* The action rides the label row, which is what puts it level with the
             plan card's button beside it. */}
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -57,41 +60,49 @@ export function PaymentMethodCard({
           )}
         </div>
 
-        {posture === 'card' && card && (
-          <div className="mt-1 flex items-center gap-3">
-            <IconBox icon={CreditCardIcon} color="blue" size="md" />
-            <div className="min-w-0">
-              {/* The brand and the last four, which is how a card is named
+        {/* The label stays level with the plan card's; the details centre in
+            the space under it. When the plan card runs taller, for a discount,
+            the difference splits above and below the card instead of
+            collecting as an empty band at the bottom. */}
+        <div className="flex flex-1 flex-col justify-center pt-1">
+          {posture === 'card' && card && (
+            <div className="flex items-center gap-3">
+              {/* The network's own mark, in its colour, rather than a generic
+                  card glyph: it says which card at a glance. */}
+              <CardBrandMark brand={card.brand} />
+              <div className="min-w-0">
+                {/* The brand and the last four, which is how a card is named
                   everywhere else it appears. Four dots, not twelve: the digits
                   nobody has are not information. */}
-              <p className="text-sm whitespace-nowrap text-zinc-900">
-                <span className="capitalize">{card.brand || 'Card'}</span>
-                {' •••• '}
-                <span className="tabular-nums">{card.last4}</span>
-              </p>
-              <p className="text-xs text-zinc-500 tabular-nums">
-                Expires {String(card.expMonth).padStart(2, '0')}/{String(card.expYear).slice(-2)}
-              </p>
+                <p className="text-sm whitespace-nowrap text-zinc-900">
+                  {getCardBrandName(card.brand)}
+                  {' •••• '}
+                  <span className="tabular-nums">{card.last4}</span>
+                </p>
+                <p className="text-xs text-zinc-500 tabular-nums">
+                  Expires {String(card.expMonth).padStart(2, '0')}/{String(card.expYear).slice(-2)}
+                </p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {posture === 'invoiced' && (
-          <div className="mt-1 flex items-center gap-3" data-testid="billed-by-invoice">
-            <IconBox icon={ReceiptIcon} color="grey" size="md" />
-            <p className="text-sm text-zinc-900">Payments via invoice</p>
-          </div>
-        )}
-
-        {posture === 'needs-card' && (
-          <div className="mt-1 flex items-center gap-3">
-            <IconBox icon={CreditCardIcon} color="grey" size="md" />
-            <div className="min-w-0">
-              <p className="text-sm text-zinc-900">No card on file</p>
-              <p className="text-xs text-zinc-500">Needed before your trial ends</p>
+          {posture === 'invoiced' && (
+            <div className="flex items-center gap-3" data-testid="billed-by-invoice">
+              <IconBox icon={ReceiptIcon} color="grey" size="md" />
+              <p className="text-sm text-zinc-900">Payments via invoice</p>
             </div>
-          </div>
-        )}
+          )}
+
+          {posture === 'needs-card' && (
+            <div className="flex items-center gap-3">
+              <IconBox icon={CreditCardIcon} color="grey" size="md" />
+              <div className="min-w-0">
+                <p className="text-sm text-zinc-900">No card on file</p>
+                <p className="text-xs text-zinc-500">Needed before your trial ends</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </Card>
   );

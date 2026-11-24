@@ -58,8 +58,15 @@ export interface ObjectListingRequest {
  * some of a key's versions, signalled by a version id marker. That key's row
  * would then show an incomplete history here and appear again on the next page.
  * Dropping it from this page and resuming after the key before it moves the
- * whole key to the next page. A page holding nothing but that one key is kept
- * as it is, since there is no earlier key to resume from.
+ * whole key to the next page.
+ *
+ * A page with no other object before that key, only folders or nothing, is
+ * kept as it is, since there is no earlier key to resume from. The key then
+ * shows part of its history on this page and the rest as a second row on the
+ * next. Resuming after the last folder instead would rely on how the storage
+ * backend treats a folder prefix as a key marker, which is untested. It takes
+ * folders alone followed by one key with enough versions to fill the page, so
+ * it is rare.
  */
 export function keepLastKeyWhole(page: ObjectListingPage): ObjectListingPage {
   const cursor = page.nextCursor;

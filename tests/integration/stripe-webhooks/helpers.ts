@@ -9,6 +9,7 @@ export {
   PollTimeoutError,
   seedBillingRecord,
   getBillingRecord,
+  getHubspotSyncFields,
   deleteBillingRecord,
   createTestCustomer,
   testOrgId,
@@ -377,7 +378,7 @@ const lambda = new LambdaClient({ region: process.env.AWS_REGION ?? 'us-east-2' 
 export async function deliverToStripeEventWorker(event: {
   id: string;
   type: string;
-  data: { object: Record<string, unknown> };
+  data: { object: object };
 }): Promise<void> {
   const result = await lambda.send(
     new InvokeCommand({

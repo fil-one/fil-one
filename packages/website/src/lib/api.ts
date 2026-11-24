@@ -6,7 +6,9 @@ import {
   clearActiveOrgOnNavigation,
   getActiveOrgId,
   NAVIGATION_GIVE_UP_MS,
+  noteSignedInUser,
   reconcileActiveOrg,
+  settleActiveOrg,
   waitWhileSwitching,
 } from './active-org.js';
 import { redirectToStepUp } from './step-up.js';
@@ -151,6 +153,44 @@ function getCsrfToken(): string | undefined {
     .split('; ')
     .find((c) => c.startsWith(`${CSRF_COOKIE_NAME}=`))
     ?.split('=')[1];
+}
+
+/**
+ * Send a request, and send it once more when the CSRF check alone refused it
+ * and the refusal brought a new CSRF cookie with it.
+ *
+ * The cookie lives as long as the access token (an hour), the session as long as
+ * the refresh token (a month). A write that is the first request after the hour
+ * goes out with no token, the server refreshes the session and sets a new
+ * cookie, and the CSRF check refuses the write anyway. Most pages never see it
+ * because they read before they write, and the read collects the new cookie.
+ * The invitation link is the one that writes first, so an invitee who signed in
+ * yesterday met the refusal as "CSRF validation failed".
+ *
+ * Retrying is safe because the check runs before any handler: the refused write
+ * did nothing, a single-use invitation token included. It retries only when the
+ * cookie changed, so a token that still fails against a cookie it matches is
+ * refused once, not in a loop.
+ */
+async function fetchRetryingStaleCsrf(
+  url: string,
+  init: RequestInit & { headers: Headers },
+): Promise<Response> {
+  const response = await fetch(url, init);
+  if (response.status !== 403) return response;
+
+  const freshToken = getCsrfToken();
+  if (!freshToken || freshToken === init.headers.get('X-CSRF-Token')) return response;
+
+  const body = (await response
+    .clone()
+    .json()
+    .catch(() => ({}))) as { code?: string };
+  if (body.code !== ApiErrorCode.CSRF_INVALID) return response;
+
+  const headers = new Headers(init.headers);
+  headers.set('X-CSRF-Token', freshToken);
+  return fetch(url, { ...init, headers });
 }
 
 /**
@@ -305,12 +345,20 @@ function forbidden(body: ForbiddenBody, behavior: ApiRequestBehavior = {}): Erro
         { status: 403 },
       );
 
+    // Reaches a caller only when the retry in `fetchRetryingStaleCsrf` could not
+    // help, so the server's wording ("CSRF validation failed") would mean nothing
+    // to the person reading it.
+    case ApiErrorCode.CSRF_INVALID:
+      return Object.assign(
+        new Error('Your session changed while this page was open. Reload the page and try again.'),
+        { status: 403, code: ApiErrorCode.CSRF_INVALID },
+      );
+
     // Every other 403 keeps its code, so a caller that knows one can branch on
     // it — the accept page tells INVITE_EMAIL_MISMATCH from the rest — while a
     // caller that does not still renders the message the server sent. A denial
-    // with no code arrives with none and means nothing in particular: an expired
-    // CSRF cookie is the routine one, so no component should read the absence of
-    // a code as a named refusal.
+    // with no code arrives with none and means nothing in particular, so no
+    // component should read the absence of a code as a named refusal.
     default:
       return Object.assign(new Error(body.message ?? 'Access denied'), {
         status: 403,
@@ -381,7 +429,7 @@ export async function sendApiRequest(
   if (activeOrgId) headers.set(ORG_ID_HEADER, activeOrgId);
   if (sentOrg) sentOrg.orgId = activeOrgId;
 
-  const response = await fetch(`${API_URL}/api${path}`, {
+  const response = await fetchRetryingStaleCsrf(`${API_URL}/api${path}`, {
     ...options,
     credentials: 'include',
     headers,
@@ -564,7 +612,14 @@ export async function getMe(options?: {
     clearActiveOrgAfterRefusal((err as { status?: number }).status);
     throw err;
   }
-  if (!options?.skipOrgReconcile) reconcileActiveOrg(me.orgId, sentOrg.orgId);
+  noteSignedInUser(me.userId);
+  if (options?.skipOrgReconcile) return me;
+  // The reconcile catches an org the server would not serve. An org another
+  // user chose for this tab can be one this user belongs to as well, which only
+  // the user check sees.
+  if (!settleActiveOrg(me.userId, me.orgId, sentOrg.orgId)) {
+    reconcileActiveOrg(me.orgId, sentOrg.orgId);
+  }
   return me;
 }
 
@@ -768,6 +823,8 @@ import type {
   BillingInfo,
   CreateSetupIntentResponse,
   ActivateSubscriptionRequest,
+  CheckPromotionCodeRequest,
+  CheckPromotionCodeResponse,
   ActivateSubscriptionResponse,
   CreatePortalSessionResponse,
   ListInvoicesResponse,
@@ -787,6 +844,15 @@ export function activateSubscription(
   return apiRequest<ActivateSubscriptionResponse>('/billing/activate', {
     method: 'POST',
     body: JSON.stringify(opts),
+  });
+}
+
+export function checkPromotionCode(
+  body: CheckPromotionCodeRequest,
+): Promise<CheckPromotionCodeResponse> {
+  return apiRequest<CheckPromotionCodeResponse>('/billing/promotion-code', {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 }
 
@@ -818,16 +884,3 @@ export function createAccessKey(
     body: JSON.stringify(body),
   });
 }
-
-// ── RAG API ──────────────────────────────────────────────────────────────
-
-// The RAG Pipeline client functions live in rag-bucket-api.ts (typed wrappers
-// over apiRequest). Re-exported here so call sites can import RAG and core API
-// functions from a single module, matching the rest of the API surface.
-export {
-  listBucketsForRag,
-  getBucketRagEnabled,
-  setBucketRagEnabled,
-  queryBucket,
-} from './rag-bucket-api.js';
-export { listRagApiKeys, createRagApiKey, deleteRagApiKey } from './rag-api-keys-api.js';

@@ -26,7 +26,7 @@ const mockGetS3ClientContext = vi.fn();
 
 const mockOrchestrator = {
   id: 'aurora',
-  region: 'eu-west-1',
+  regions: ['eu-west-1'],
   isTenantReady: (...args: unknown[]) => mockIsTenantReady(...args),
   getS3ClientContext: (...args: unknown[]) => mockGetS3ClientContext(...args),
 };
@@ -558,7 +558,7 @@ describe('presign baseHandler', () => {
     const iamOrchestrator = {
       ...mockOrchestrator,
       // The region table says us-east-9 serves the `iam` access model.
-      region: 'us-east-9',
+      regions: ['us-east-9'],
       ...delegateIamMethods(new FakeIamOrchestrator()),
       resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args),
     };
@@ -595,7 +595,10 @@ describe('presign baseHandler', () => {
 
       await baseHandler(buildPresignEvent(buildGetObjectOps('b'), { role: OrgRole.Member }));
 
-      expect(mockGetS3ClientContext).toHaveBeenCalledWith('aurora-t-1');
+      // The event names eu-west-1; the registry mock answers with the iam
+      // orchestrator whatever region is asked for, so the request region is what
+      // the handler signs with.
+      expect(mockGetS3ClientContext).toHaveBeenCalledWith('aurora-t-1', 'eu-west-1');
     });
 
     it('returns the same 404 as a missing bucket when no policy grants the Member the bucket', async () => {

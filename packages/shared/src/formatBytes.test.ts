@@ -54,7 +54,12 @@ describe('formatBytesShort', () => {
 describe('bytesAxisFormatter', () => {
   it('renders every tick in the unit taken from the top of the domain', () => {
     const format = bytesAxisFormatter(30_000_000);
-    expect([0, 10_000_000, 20_000_000, 30_000_000].map(format)).toEqual(['0', '10M', '20M', '30M']);
+    expect([0, 10_000_000, 20_000_000, 30_000_000].map(format)).toEqual([
+      '0',
+      '10\u00A0MB',
+      '20\u00A0MB',
+      '30\u00A0MB',
+    ]);
   });
 
   it('does not switch units between neighbouring ticks', () => {
@@ -63,10 +68,10 @@ describe('bytesAxisFormatter', () => {
     const format = bytesAxisFormatter(2_000_000);
     expect([0, 500_000, 1_000_000, 1_500_000, 2_000_000].map(format)).toEqual([
       '0',
-      '0.5M',
-      '1M',
-      '1.5M',
-      '2M',
+      '0.5\u00A0MB',
+      '1\u00A0MB',
+      '1.5\u00A0MB',
+      '2\u00A0MB',
     ]);
   });
 
@@ -77,17 +82,21 @@ describe('bytesAxisFormatter', () => {
   });
 
   it('keeps whole values free of a trailing decimal', () => {
-    expect(bytesAxisFormatter(4_000)(2_000)).toBe('2K');
+    expect(bytesAxisFormatter(4_000)(2_000)).toBe('2\u00A0KB');
+  });
+
+  it('joins number and unit with a non-breaking space so a chart cannot wrap the label', () => {
+    expect(bytesAxisFormatter(30_000_000)(20_000_000)).toBe('20\u00A0MB');
   });
 
   it('falls back to bytes for an empty domain', () => {
     const format = bytesAxisFormatter(0);
     expect(format(0)).toBe('0');
-    expect(format(5)).toBe('5B');
+    expect(format(5)).toBe('5\u00A0B');
   });
 
   it('handles a terabyte domain without running off the unit table', () => {
-    expect(bytesAxisFormatter(3e12)(1.5e12)).toBe('1.5T');
-    expect(bytesAxisFormatter(5e15)(1e15)).toBe('1000T');
+    expect(bytesAxisFormatter(3e12)(1.5e12)).toBe('1.5\u00A0TB');
+    expect(bytesAxisFormatter(5e15)(1e15)).toBe('1000\u00A0TB');
   });
 });
