@@ -58,6 +58,7 @@ import {
 // needs these set before the first import.
 process.env.FILONE_STAGE ??= 'test';
 process.env.FTH_MANAGEMENT_API_URL ??= 'https://fth.test.invalid';
+process.env.FORGE_MANAGEMENT_API_URL ??= 'https://forge.test.invalid';
 
 const ORG_ID = 'org-1';
 const USER_ID = '00000000-0000-4000-8000-000000000001';

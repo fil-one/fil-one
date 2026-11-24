@@ -355,18 +355,52 @@ mkdir -p packages/website/.cert && cd packages/website/.cert && mkcert localhost
 
 #### Running against smelt
 
-`SMELT=true pnpm deploy:local` points the Forge dev region (`us-east-9`) at a [smelt](https://github.com/fil-forge/smelt) network running on the same machine, so the console provisions tenants, keys and buckets in your local Hilt and Ingot. The other regions stay on their hosted services.
+`SMELT=true pnpm deploy:local` points the console's Forge dev regions at a
+[smelt](https://github.com/fil-forge/smelt) stack running on the same machine,
+so the console provisions tenants, keys and buckets in your local Hilt and
+Ingot. The other regions stay on their hosted services.
 
-Smelt needs to run with `INGOT_REGION=us-east-9`, the region the console expects. The deploy then:
+A smelt stack running its default single network serves one region,
+`us-east-9`. Run it with `INGOT_REGION=us-east-9`, the region the console
+expects.
 
-- sets the Hilt URL to `http://host.docker.internal:15110` and the S3 endpoint to `http://host.docker.internal:15130` (`SMELT_HOST` overrides the host name), with presigned URLs on `http://localhost:15130`;
-- copies smelt's Hilt partner key into the stage's `ForgeDevManagementApiToken`.
+Its two-network manifest serves three regions and is what exercises a
+region-free tenant end to end: `us-east-9` and `eu-central-9` on one Hilt, and
+`us-west-9` on a second. In the smelt checkout:
 
-The partner key replaces any hosted Forge dev token on the stage. To go back to the hosted network, set `ForgeDevManagementApiToken` again and deploy without `SMELT`.
+```bash
+SMELT_MANIFEST=manifests/networks-2.yml make up
+```
 
-floci's Lambda containers reach smelt through `host.docker.internal`. Presigned URLs, which the browser fetches directly, use `http://localhost:15130` instead: an `https://` page may fetch `http://localhost` but not other plain-HTTP hosts.
+An access key the console issues on the first network works at both of its
+regions; one issued on the second reaches neither of the first two. The
+console shows the choice as "Region(s)", listing the regions each network
+serves.
 
-Ingot only accepts browser requests from origins in `cors_allowed_origins` (`systems/ingot/config/config.yaml` in smelt). Add `https://localhost:5173` there and restart Ingot. To test Hilt changes, rebuild smelt's workspace binaries as its README describes; smelt runs whatever binary it last built.
+The deploy then:
+
+- sets each network's Hilt URL (`http://host.docker.internal:15110` and
+  `:15113`, with `SMELT_HOST` overriding the host name) and each region's S3
+  endpoint (`:15130`, `:15133`, `:15135`), with presigned URLs on
+  `http://localhost:<port>`;
+- copies each Hilt's partner key into the stage's `ForgeDevManagementApiToken`
+  and `ForgeDev2ManagementApiToken`. A stack with one network has no second
+  Hilt, and the deploy says so and carries on.
+
+The partner key replaces any hosted Forge dev token on the stage. To go back
+to the hosted network, set `ForgeDevManagementApiToken` again and deploy
+without `SMELT`.
+
+floci's Lambda containers reach smelt through `host.docker.internal`.
+Presigned URLs, which the browser fetches directly, use
+`http://localhost:<port>` instead: an `https://` page may fetch
+`http://localhost` but not other plain-HTTP hosts.
+
+Ingot only accepts browser requests from origins in `cors_allowed_origins`
+(`systems/ingot/config/config.yaml.tmpl` in smelt, which every gateway's
+config is rendered from). Add `https://localhost:5173` there and restart.
+To test Hilt changes, rebuild smelt's workspace binaries as its README
+describes; smelt runs whatever binary it last built.
 
 #### Removing
 

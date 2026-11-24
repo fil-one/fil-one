@@ -84,11 +84,17 @@ export default $config({
       isStaging || isEphemeralStage ? new sst.Secret('ForgeManagementApiToken') : undefined;
     const forgeDevManagementApiToken =
       isStaging || isEphemeralStage ? new sst.Secret('ForgeDevManagementApiToken') : undefined;
+    // The second local smelt network. Only a local stage offers its region,
+    // so only a local stage links its token.
+    const forgeDev2ManagementApiToken = isLocal
+      ? new sst.Secret('ForgeDev2ManagementApiToken')
+      : undefined;
     const managementApiTokens = [
       auroraBackofficeToken,
       fthManagementApiToken,
       ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
       ...(forgeDevManagementApiToken ? [forgeDevManagementApiToken] : []),
+      ...(forgeDev2ManagementApiToken ? [forgeDev2ManagementApiToken] : []),
     ];
     // Bucket Intelligence in Forge regions runs on an engine on the Forge
     // appliance (FIL-1709). Like the Forge tokens, these exist only off
@@ -822,11 +828,23 @@ export default $config({
     // Forge (Management-API) — non-prod only. One endpoint per Forge network,
     // serving every region in it; the region is sent per-tenant in the PUT
     // /tenants body.
-    // SMELT=true points a local deploy's dev sandbox slot (us-east-9) at a smelt
-    // network on this machine. Lambdas reach it through host.docker.internal.
-    // Presigned URLs use localhost instead, which https pages may fetch over http.
+    // SMELT=true points a local deploy's dev sandbox slots at a smelt stack on
+    // this machine. Lambdas reach it through host.docker.internal. Presigned
+    // URLs use localhost instead, which https pages may fetch over http.
+    //
+    // A smelt stack running the two-network manifest serves three regions:
+    // us-east-9 and eu-central-9 on one Hilt, us-west-9 on a second. The
+    // ports are smelt's defaults for the first hilt and gateway and the two
+    // after them (fil-forge/smelt docs/MULTI_NETWORK.md). A single-network
+    // stack only answers on the first pair, and the console reaches the other
+    // regions' gateways not at all, which is what a local stage running one
+    // network should look like.
     const useSmelt = isLocal && process.env.SMELT === 'true';
     const smeltHost = process.env.SMELT_HOST ?? 'host.docker.internal';
+    const smeltUrls = (port: number) => ({
+      endpoint: `http://${smeltHost}:${port}`,
+      presign: `http://localhost:${port}`,
+    });
     const forgeEnv = {
       FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.staging.fil-forge.com',
       FORGE_DEV_MANAGEMENT_API_URL: isProduction
@@ -835,9 +853,21 @@ export default $config({
           ? `http://${smeltHost}:15110`
           : 'https://auth.latest.dev.fil-forge.com',
       ...(useSmelt && {
-        FORGE_DEV_S3_ENDPOINT_URL: `http://${smeltHost}:15130`,
-        FORGE_DEV_S3_PRESIGN_ENDPOINT_URL: 'http://localhost:15130',
+        FORGE_DEV_S3_ENDPOINT_URL: smeltUrls(15130).endpoint,
+        FORGE_DEV_S3_PRESIGN_ENDPOINT_URL: smeltUrls(15130).presign,
+        FORGE_DEV_EU_S3_ENDPOINT_URL: smeltUrls(15133).endpoint,
+        FORGE_DEV_EU_S3_PRESIGN_ENDPOINT_URL: smeltUrls(15133).presign,
       }),
+      // The second network only when the stack is running one, which
+      // bin/deploy-local.sh reports. Left unset, a request for its region
+      // fails saying the network is not running, rather than hanging on a
+      // port nothing answers.
+      ...(useSmelt &&
+        process.env.SMELT_SECOND_NETWORK === 'true' && {
+          FORGE_DEV2_MANAGEMENT_API_URL: `http://${smeltHost}:15113`,
+          FORGE_DEV2_S3_ENDPOINT_URL: smeltUrls(15135).endpoint,
+          FORGE_DEV2_S3_PRESIGN_ENDPOINT_URL: smeltUrls(15135).presign,
+        }),
     };
 
     // Everything the service-orchestrator layer needs at runtime. FILONE_STAGE
@@ -853,11 +883,16 @@ export default $config({
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
     const forgeS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-s3/*`;
     const forgeDevS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forgeDev-s3/*`;
+    // The second local smelt network keeps its console key under its own id.
+    // The parameter exists only on a local stage; naming it elsewhere grants
+    // reach to nothing.
+    const forgeDev2S3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forgeDev2-s3/*`;
     const orchestratorS3KeySsmArns = [
       auroraS3KeySsmArn,
       fthS3KeySsmArn,
       forgeS3KeySsmArn,
       forgeDevS3KeySsmArn,
+      forgeDev2S3KeySsmArn,
     ];
     // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
     // handlers that talk to the S3 data plane directly (presign, indexing, …).
@@ -873,7 +908,13 @@ export default $config({
     const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn, forgeDevS3KeySsmArn],
+        resources: [
+          auroraApiKeySsmArn,
+          fthS3KeySsmArn,
+          forgeS3KeySsmArn,
+          forgeDevS3KeySsmArn,
+          forgeDev2S3KeySsmArn,
+        ],
       },
     ];
 
@@ -1083,7 +1124,10 @@ export default $config({
       permissions: [
         ...ragPermissions,
         // The tenant's Forge S3 key, which the engine needs to drop a dataset.
-        { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
+        {
+          actions: ['ssm:GetParameter'],
+          resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn, forgeDev2S3KeySsmArn],
+        },
         { actions: ['sqs:SendMessage'], resources: [accountDeletionDlq.arn] },
         // The one credential in the system that may remove an audit entry. The
         // auditLog link above deliberately withholds this from every route, and
@@ -1210,7 +1254,7 @@ export default $config({
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn],
+          resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn, forgeDev2S3KeySsmArn],
         },
       ],
       timeout: '30 seconds',
@@ -1278,7 +1322,10 @@ export default $config({
       'get-bucket-policy': {
         extraEnv: orchestratorEnv,
         permissions: [
-          { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
+          {
+            actions: ['ssm:GetParameter'],
+            resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn, forgeDev2S3KeySsmArn],
+          },
         ],
       },
       'put-bucket-policy': bucketPolicyWriteRoute,

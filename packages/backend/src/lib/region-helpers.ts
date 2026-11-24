@@ -18,14 +18,22 @@ export interface ProvisionedNetwork {
 export async function getProvisionedNetworks(
   orgId: string,
   // Account teardown snapshots tenant ids from here; a stale read there would
-  // orphan a live tenant permanently.
-  options?: { consistent?: boolean },
+  // orphan a live tenant permanently. `skipMissingNetworks` is for the callers
+  // that would rather have a partial answer than none: a listing, and the
+  // indexer, which works through the networks it can reach. Everything else
+  // takes the refusal, because a tenant left out of a teardown snapshot or a
+  // usage total is a wrong answer rather than a short one.
+  options?: { consistent?: boolean; skipMissingNetworks?: boolean },
 ): Promise<ProvisionedNetwork[]> {
-  const orchestrators = getAvailableOrchestrators();
-  if (orchestrators.length === 0) return [];
+  // Nothing to be provisioned on, so the profile read is not worth making.
+  if (getAvailableOrchestrators().length === 0) return [];
   const orgProfile = await getOrgProfile(
     orgId,
     options ? { consistentRead: options.consistent } : undefined,
+  );
+  // Handing the profile over is what turns a missing network into a refusal.
+  const orchestrators = getAvailableOrchestrators(
+    options?.skipMissingNetworks ? undefined : orgProfile,
   );
   return orchestrators
     .map((orchestrator) => {

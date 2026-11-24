@@ -1,9 +1,11 @@
 // The Forge networks a stage provisions tenants on, and how a script reaches a
 // network's Management API without hand-copied environment variables.
 //
-// Each network runs one Management API serving every region on it. FilOne puts
-// one region on each network today; fil-one/fil-one#773 moves to one tenant
-// per network, which turns `region` below into a list.
+// Each network runs one Management API serving every region on it, and holds
+// one tenant per org across all of them, so the console key and the tenant
+// state a script reads are the network's rather than any one region's. The
+// `region` below names one region the network serves, which is all a script
+// needs to reach it; a network serving several is still visited once.
 //
 // The API URL is read from the deployed AccountDeletionWorker's environment
 // (forgeEnv in sst.config.ts), so a script talks to the endpoint the stage
@@ -24,9 +26,10 @@ import {
 import { S3Region } from '@filone/shared';
 import { findResourceName, type StateResource } from './stage.ts';
 
-export type ForgeNetworkName = 'staging' | 'dev';
+export type ForgeNetworkName = 'staging' | 'dev' | 'dev2';
 
 export interface ForgeNetwork {
+  /** One region this network serves; see the note at the top of the file. */
   region: S3Region;
   /** The Lambda env var holding the network's Management API URL. */
   apiUrlEnv: string;
@@ -49,6 +52,14 @@ export const FORGE_NETWORKS: Record<ForgeNetworkName, ForgeNetwork> = {
     apiUrlEnv: 'FORGE_DEV_MANAGEMENT_API_URL',
     tokenSecret: 'ForgeDevManagementApiToken',
     s3EndpointEnv: 'FORGE_DEV_S3_ENDPOINT_URL',
+  },
+  // A second smelt network on the developer's machine, which only a local
+  // stage deploys; see fil-forge/smelt docs/MULTI_NETWORK.md.
+  dev2: {
+    region: S3Region.UsWest9,
+    apiUrlEnv: 'FORGE_DEV2_MANAGEMENT_API_URL',
+    tokenSecret: 'ForgeDev2ManagementApiToken',
+    s3EndpointEnv: 'FORGE_DEV2_S3_ENDPOINT_URL',
   },
 };
 

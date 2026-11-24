@@ -13,6 +13,8 @@ export {
   getRegionLabel,
   getAvailableRegions,
   getAvailableNetworks,
+  isLocalStage,
+  LOCAL_STAGE,
   NETWORK_ID_BY_REGION,
   getNetworkIdForRegion,
   getRegionsForNetwork,

@@ -214,7 +214,7 @@ describe('rag-indexer-worker', () => {
 
     await handler(payload([{ region: S3Region.EuWest1, bucketName: 'b1' }]), AMPLE_CONTEXT);
 
-    expect(mockGetProvisionedNetworks).toHaveBeenCalledWith('org-1');
+    expect(mockGetProvisionedNetworks).toHaveBeenCalledWith('org-1', { skipMissingNetworks: true });
     expect(mockGetOrchestratorForRegion).toHaveBeenCalledWith(S3Region.EuWest1);
     expect(aurora.getS3ClientContext).toHaveBeenCalledWith('tenant-a', S3Region.EuWest1);
     expect(mockCreateS3Client).toHaveBeenCalledWith(S3_CTX);

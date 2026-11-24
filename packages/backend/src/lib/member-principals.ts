@@ -16,7 +16,9 @@ import type { ServiceOrchestrator } from './service-orchestrator.ts';
 function getReadyIamOrchestrators(
   orgProfile: OrgProfileItem | undefined,
 ): Array<{ orchestrator: ServiceOrchestrator; tenantId: string }> {
-  return getAvailableOrchestrators().flatMap((candidate) => {
+  // A principal removed everywhere but one network is still a live grant
+  // there, so a tenant on a network that is not running stops the pass.
+  return getAvailableOrchestrators(orgProfile).flatMap((candidate) => {
     if (!isIamOrchestrator(candidate)) return [];
     const orchestrator = candidate as ServiceOrchestrator;
     const tenantId = orchestrator.isTenantReady(orgProfile);

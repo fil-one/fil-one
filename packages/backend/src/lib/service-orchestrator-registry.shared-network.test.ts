@@ -26,6 +26,8 @@ vi.mock('./service-orchestrator-ids.ts', async (importOriginal) => {
     [S3Region.UsEast1]: 'fth',
     [S3Region.EuCentral3]: 'forge',
     [S3Region.UsEast9]: 'forge',
+    [S3Region.EuCentral9]: 'forge',
+    [S3Region.UsWest9]: 'forge',
   };
   const { getAvailableRegions } = await import('@filone/shared');
   return {

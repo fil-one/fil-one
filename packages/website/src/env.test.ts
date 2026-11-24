@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { PROD_CONSOLE_ALIAS_HOSTS, Stage } from '@filone/shared';
+import { LOCAL_STAGE, PROD_CONSOLE_ALIAS_HOSTS, Stage } from '@filone/shared';
 
 describe('inferStage', () => {
   beforeEach(() => {
@@ -23,8 +23,16 @@ describe('inferStage', () => {
     });
   }
 
-  it('returns Staging for any other hostname', async () => {
+  // The dev server is the one console served from the machine running the
+  // stack, so it is the one place the local stage's regions exist.
+  it('returns the local stage on the dev server', async () => {
     vi.stubGlobal('window', { location: { hostname: 'localhost' } });
+    const { FILONE_STAGE } = await import('./env.js');
+    expect(FILONE_STAGE).toBe(LOCAL_STAGE);
+  });
+
+  it('returns Staging for any other hostname', async () => {
+    vi.stubGlobal('window', { location: { hostname: 'pr-42.fil.one' } });
     const { FILONE_STAGE } = await import('./env.js');
     expect(FILONE_STAGE).toBe(Stage.Staging);
   });
