@@ -12,13 +12,11 @@ import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSke
 import type { useObjectActions } from '../lib/use-object-actions.js';
 
 // Mirrors ObjectBrowser's columns so the placeholder holds the same shape as the
-// table it stands in for. The Version and Status pair is versioning-only, and
-// versioning is not known until the bucket metadata lands, so the skeleton shows
-// the columns every bucket has rather than guessing at two that may not appear.
+// table it stands in for.
 const OBJECT_SKELETON_COLUMNS: SkeletonColumn[] = [
   { label: 'Name' },
   { label: 'Size' },
-  { label: 'Last Modified' },
+  { label: 'Last modified' },
   {},
 ];
 

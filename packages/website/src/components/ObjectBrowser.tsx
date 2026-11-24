@@ -9,10 +9,11 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { ShareObjectModal } from './ShareObjectModal';
 import { EmptyStateCard } from './EmptyStateCard';
 import { ListingPager, type ListingPagerProps } from './ListingPager';
+import { PrefixBreadcrumb } from './ObjectBrowserToolbar';
 import { Table } from './Table/Table';
 import { FolderRow, ObjectEntryRows, SECONDARY_COLUMN } from './ObjectBrowserRows';
 import { BulkActionsBar } from './BulkActionsBar';
-import type { RowActions, RowSelection } from './ObjectBrowserRows';
+import type { DeleteRequest, RowActions, RowSelection } from './ObjectBrowserRows';
 import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
 import type { BrowseEntry } from '../lib/object-grouping.js';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
@@ -22,51 +23,6 @@ import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 import { useListingPageScroll } from '../lib/use-listing-page-scroll.js';
 
 export { countObjects } from '../lib/object-grouping.js';
-
-// ---------------------------------------------------------------------------
-// Prefix breadcrumb
-// ---------------------------------------------------------------------------
-
-function PrefixBreadcrumb({
-  bucketName,
-  currentPrefix,
-  onPrefixChange,
-}: {
-  bucketName: string;
-  currentPrefix: string;
-  onPrefixChange: (prefix: string) => void;
-}) {
-  return (
-    <div className="mb-4 flex items-center gap-2 text-sm">
-      <button
-        type="button"
-        onClick={() => onPrefixChange('')}
-        className="text-zinc-500 hover:text-zinc-700"
-      >
-        {bucketName}
-      </button>
-      {currentPrefix
-        .split('/')
-        .filter(Boolean)
-        .map((segment, idx, arr) => {
-          const segmentPrefix = arr.slice(0, idx + 1).join('/') + '/';
-          const isLast = idx === arr.length - 1;
-          return (
-            <span key={segmentPrefix} className="flex items-center gap-2">
-              <span className="text-zinc-300">/</span>
-              <button
-                type="button"
-                onClick={() => onPrefixChange(segmentPrefix)}
-                className={`hover:text-brand-600 ${isLast ? 'font-medium text-zinc-700' : 'text-brand-600'}`}
-              >
-                {segment}
-              </button>
-            </span>
-          );
-        })}
-    </div>
-  );
-}
 
 /** No key can reach the bucket yet, and the caller may create one. */
 export interface CreateKeyAction {
@@ -166,6 +122,30 @@ function EmptyBucketState({
 }
 
 /** The bulk delete confirmation's title and line, for one item or several. */
+/**
+ * Removing a delete marker deletes no data: the versions under it stay, and if
+ * the marker was hiding the object, the version before it becomes current.
+ */
+export function describeDelete(request: DeleteRequest | null): {
+  title: string;
+  description: string;
+  confirmLabel: string;
+} {
+  if (request?.isDeleteMarker) {
+    return {
+      title: 'Remove delete marker',
+      description:
+        'No object data is deleted. If this marker hides the object, the version before it becomes current again.',
+      confirmLabel: 'Remove',
+    };
+  }
+  return {
+    title: 'Delete object',
+    description: 'This object will be permanently deleted. This action cannot be undone.',
+    confirmLabel: 'Delete',
+  };
+}
+
 function describeBulkDelete(count: number): { title: string; description: string } {
   const one = count === 1;
   return {
@@ -231,14 +211,8 @@ function ObjectTable({
             />
           )}
           <Table.Head>Name</Table.Head>
-          {versioningEnabled && (
-            <>
-              <Table.Head className={SECONDARY_COLUMN}>Version</Table.Head>
-              <Table.Head className={SECONDARY_COLUMN}>Status</Table.Head>
-            </>
-          )}
           <Table.Head className={SECONDARY_COLUMN}>Size</Table.Head>
-          <Table.Head className={SECONDARY_COLUMN}>Last Modified</Table.Head>
+          <Table.Head className={SECONDARY_COLUMN}>Last modified</Table.Head>
           <Table.Head aria-label="Actions" />
         </Table.Row>
       </Table.Header>
@@ -250,7 +224,6 @@ function ObjectTable({
                 key={`folder:${entry.prefix}`}
                 name={entry.name}
                 prefix={entry.prefix}
-                versioningEnabled={versioningEnabled}
                 onPrefixChange={onPrefixChange}
                 selectable={rowSelection.selectable}
               />
@@ -342,10 +315,10 @@ export function ObjectBrowser({
   paging,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
-  const [confirmDelete, setConfirmDelete] = useState<{
-    key: string;
-    versionId?: string;
-  } | null>(null);
+  // The request outlives the dialog's open state, so the copy holds while the
+  // dialog animates out instead of switching to an object's wording.
+  const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const share = useRowShare();
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
@@ -362,10 +335,6 @@ export function ObjectBrowser({
     });
   }
 
-  function requestDelete(key: string, versionId: string) {
-    setConfirmDelete({ key, versionId });
-  }
-
   const rowActions: RowActions = {
     downloading,
     onDownload,
@@ -373,7 +342,12 @@ export function ObjectBrowser({
     onShare: share.request,
     // Without a delete handler no row renders the control, so nothing reaches
     // the confirmation dialog below either.
-    ...(onDelete && { onRequestDelete: requestDelete }),
+    ...(onDelete && {
+      onRequestDelete: (request: DeleteRequest) => {
+        setDeleteRequest(request);
+        setConfirmDeleteOpen(true);
+      },
+    }),
     onNavigate: (key, versionId) => {
       void navigate({
         to: '/buckets/$bucketName/objects',
@@ -458,15 +432,13 @@ export function ObjectBrowser({
       />
 
       <ConfirmDialog
-        open={confirmDelete !== null}
-        onClose={() => setConfirmDelete(null)}
+        open={confirmDeleteOpen}
+        onClose={() => setConfirmDeleteOpen(false)}
         onConfirm={() => {
-          if (!confirmDelete || !onDelete) return Promise.resolve();
-          return onDelete(confirmDelete.key, confirmDelete.versionId);
+          if (!deleteRequest || !onDelete) return Promise.resolve();
+          return onDelete(deleteRequest.key, deleteRequest.versionId);
         }}
-        title="Delete object"
-        description="This object will be permanently deleted. This action cannot be undone."
-        confirmLabel="Delete"
+        {...describeDelete(deleteRequest)}
       />
 
       <ConfirmDialog
