@@ -104,7 +104,7 @@ export function useObjectHoverPrefetch(bucketName: string, region: S3Region) {
  * of the URL. The listing writes S3's "null" as '': on the latest, that is an
  * object in a bucket without versioning, and also the object itself. On an older
  * row it is the version saved before versioning was turned on, which S3 can only
- * find again by its "null" ID.
+ * find again by its "null" ID, as on a page that holds none of the key's latest.
  */
 export function toOpenObject(
   versions: S3ObjectVersion[],
@@ -112,7 +112,9 @@ export function toOpenObject(
   versionId: string,
 ): OpenObject {
   const latest = versions.find((v) => v.key === key && v.isLatest);
-  if (versionId === (latest?.versionId ?? '')) return { key };
+  // A page that starts partway through the key's history has no latest row, and
+  // then no row is the object itself
+  if (latest && versionId === latest.versionId) return { key };
   return { key, versionId: versionId || UNVERSIONED_ID };
 }
 

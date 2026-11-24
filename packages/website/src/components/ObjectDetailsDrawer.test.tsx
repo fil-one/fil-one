@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   createMemoryHistory,
@@ -100,6 +100,14 @@ describe('ObjectDetailsDrawer', () => {
   afterEach(() => {
     queryClient.clear();
     batchPresign.mockImplementation(() => new Promise(() => {}));
+  });
+
+  it('focuses the panel itself on open, so no button shows its tooltip', async () => {
+    renderDrawer({ siblings: { position: 2, total: 3, onPrevious: vi.fn(), onNext: vi.fn() } });
+
+    const panel = await screen.findByTestId('object-details-drawer-panel');
+    await waitFor(() => expect(panel).toHaveFocus());
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 
   it("shows the listing's size before the object's own details arrive", async () => {

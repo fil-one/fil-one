@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import {
   Dialog,
   DialogBackdrop,
@@ -82,10 +82,18 @@ export function ObjectDetailsDrawer(props: ObjectDetailsDrawerProps) {
   // Mounted open; closing plays the slide-out, then tells the page to drop it.
   const [open, setOpen] = useState(true);
   const close = () => setOpen(false);
+  // Focus starts on the panel itself, not its first button: those buttons show a
+  // tooltip on focus, which would pop up on every open. Tab reaches them next.
+  const panelRef = useRef<HTMLDivElement>(null);
 
   return (
     <Transition show={open} appear as={Fragment} afterLeave={props.onClose}>
-      <Dialog data-testid="object-details-drawer" className="relative z-40" onClose={close}>
+      <Dialog
+        data-testid="object-details-drawer"
+        className="relative z-40"
+        initialFocus={panelRef}
+        onClose={close}
+      >
         <TransitionChild
           as={Fragment}
           enter="transition-opacity duration-200 ease-out"
@@ -107,8 +115,10 @@ export function ObjectDetailsDrawer(props: ObjectDetailsDrawerProps) {
             leaveTo="translate-x-full"
           >
             <DialogPanel
+              ref={panelRef}
+              tabIndex={-1}
               data-testid="object-details-drawer-panel"
-              className="flex w-full flex-col bg-white shadow-xl"
+              className="flex w-full flex-col bg-white shadow-xl outline-none"
             >
               <DrawerContent {...props} onClose={close} />
             </DialogPanel>

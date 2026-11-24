@@ -15,7 +15,12 @@ vi.mock('./aurora-s3.js', () => ({
   parseListObjectsResponse: () => mockParseObjects(),
 }));
 
-import { fetchObjectListingPage, keepLastKeyWhole, OBJECT_PAGE_SIZE } from './object-listing.js';
+import {
+  fetchObjectListingPage,
+  keepLastKeyWhole,
+  OBJECT_PAGE_SIZE,
+  removeVersionFromPage,
+} from './object-listing.js';
 
 function version(key: string, versionId: string): S3ObjectVersion {
   return {
@@ -179,6 +184,24 @@ describe('fetchObjectListingPage', () => {
       versions: [version('any-folder/a', 'a1')],
       folders: [],
       nextCursor: undefined,
+    });
+  });
+});
+
+describe('removeVersionFromPage', () => {
+  it.each([
+    ['its own ID', 'any-version', 'any-version'],
+    // The listing writes S3's "null" ID as '', and a delete names it "null"
+    ["S3's \"null\" ID, which the listing writes as ''", '', 'null'],
+  ])('drops the deleted version named by %s', (_case, listedId, deletedId) => {
+    const page = {
+      versions: [version('any-key', listedId), version('other-key', listedId)],
+      folders: [],
+    };
+
+    expect(removeVersionFromPage(page, 'any-key', deletedId)).toStrictEqual({
+      versions: [version('other-key', listedId)],
+      folders: [],
     });
   });
 });

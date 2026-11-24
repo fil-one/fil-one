@@ -172,11 +172,6 @@ export type ObjectHeaderActionsProps = {
   mayDelete: boolean;
   /** True when the URL names a version, so Delete removes that version alone. */
   isVersion: boolean;
-  /**
-   * The console address Copy console link copies. The page it is on by default;
-   * the bucket page's panel passes the object page, the address an object is shared by.
-   */
-  consoleLink?: string;
   onDownload: () => void;
   onShare: () => void;
   onDelete: () => void;
@@ -193,7 +188,6 @@ export function ObjectHeaderActions({
   canShare,
   mayDelete,
   isVersion,
-  consoleLink,
   onDownload,
   onShare,
   onDelete,
@@ -217,7 +211,7 @@ export function ObjectHeaderActions({
       // and this one only opens for people signed in to this org
       label: 'Copy console link',
       icon: LinkIcon,
-      onSelect: () => void copy(consoleLink ?? window.location.href, 'Console link copied'),
+      onSelect: () => void copy(window.location.href, 'Console link copied'),
       testId: 'object-copy-console-link',
     },
   ];
