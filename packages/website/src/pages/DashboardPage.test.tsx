@@ -191,6 +191,21 @@ describe('DashboardPage — bucket buttons', () => {
   );
 });
 
+describe('DashboardPage — while usage loads', () => {
+  it('shows the heading and the new bucket button before usage arrives', () => {
+    // Usage never resolves, so the page stays in its loading state.
+    mockGetUsage.mockReturnValue(new Promise(() => {}));
+    renderPage();
+
+    expect(screen.getByRole('status', { name: 'Loading dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'New bucket' })).toHaveAttribute(
+      'href',
+      '/buckets/create',
+    );
+  });
+});
+
 describe('DashboardPage — resource counts', () => {
   it.each([
     ['buckets', { buckets: { count: 1_234 } }, '1,234'],

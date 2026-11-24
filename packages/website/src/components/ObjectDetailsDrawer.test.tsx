@@ -16,7 +16,9 @@ import type { ObjectMetadataResponse, S3ObjectVersion } from '@filone/shared';
 // that seeds no details sees the panel as it is before the HEAD request answers.
 // A test that needs S3 to answer sets that answer once.
 const { batchPresign } = vi.hoisted(() => ({
-  batchPresign: vi.fn(() => new Promise(() => {})),
+  batchPresign: vi.fn<(region: string, ops: { op: string }[]) => Promise<unknown>>(
+    () => new Promise(() => {}),
+  ),
 }));
 vi.mock('../lib/use-presign.js', () => ({ batchPresign }));
 
@@ -95,7 +97,10 @@ function siblings() {
 }
 
 describe('ObjectDetailsDrawer', () => {
-  afterEach(() => queryClient.clear());
+  afterEach(() => {
+    queryClient.clear();
+    batchPresign.mockImplementation(() => new Promise(() => {}));
+  });
 
   it("shows the listing's size before the object's own details arrive", async () => {
     renderDrawer();
@@ -177,8 +182,11 @@ describe('ObjectDetailsDrawer', () => {
   it('says the object no longer exists, with nothing to act on, when S3 has no such object', async () => {
     // The HEAD request waits on the bucket's settings, which no test API answers
     queryClient.setQueryData(queryKeys.bucket(BUCKET, REGION), { bucket: {} });
-    batchPresign.mockRejectedValueOnce(
-      new S3RequestError('S3 request failed with status 404', 404),
+    // Only the HEAD request fails; the key's history stays in flight
+    batchPresign.mockImplementation((_region, ops) =>
+      ops[0]?.op === 'headObject'
+        ? Promise.reject(new S3RequestError('S3 request failed with status 404', 404))
+        : new Promise(() => {}),
     );
     renderDrawer();
 

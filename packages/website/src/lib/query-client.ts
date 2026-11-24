@@ -1,6 +1,8 @@
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
 import { ApiErrorCode, type OrgRole, type S3Region, type UsageTrendsPeriod } from '@filone/shared';
 
+import type { ListingCursor } from './object-listing.js';
+
 export const ME_STALE_TIME = 10 * 60_000;
 
 // Usage counters are daily-resolution upstream, and every usage-changing
@@ -113,12 +115,28 @@ export const queryKeys = {
   bucketsFiltered: (params: Record<string, string>) => ['buckets', 'filtered', params] as const,
   bucket: (bucketName: string, region: S3Region) => ['bucket', bucketName, region] as const,
   objects: (bucketName: string, region: S3Region) => ['objects', bucketName, region] as const,
+  // Shares the objects prefix so one invalidation refreshes every cached page
+  // of every folder. The folder sits at index 3, which the listing's
+  // placeholder relies on to tell a page change from a folder change.
+  objectsPage: ({
+    bucketName,
+    region,
+    prefix,
+    cursor,
+  }: {
+    bucketName: string;
+    region: S3Region;
+    prefix: string;
+    cursor: ListingCursor | null;
+  }) => ['objects', bucketName, region, prefix, cursor] as const,
   objectMetadata: (bucketName: string, objectKey: string, versionId?: string) =>
     ['object-metadata', bucketName, objectKey, ...(versionId ? [versionId] : [])] as const,
-  // Under the ['objects', bucket, region] prefix, so invalidating the bucket's
-  // listing after a delete refreshes this key's history too
-  objectVersions: (bucketName: string, region: S3Region, objectKey: string) =>
-    ['objects', bucketName, region, 'versions', objectKey] as const,
+  // Kept out of the ['objects', bucket, region] prefix: everything under it is a
+  // listing page, which the bucket page updates in place and reads by position.
+  // Without a key it is the prefix of every history in the bucket, so whatever
+  // invalidates the listing invalidates that too.
+  objectVersions: (bucketName: string, region: S3Region, objectKey?: string) =>
+    ['object-versions', bucketName, region, ...(objectKey ? [objectKey] : [])] as const,
   objectPreviewUrl: (bucketName: string, region: S3Region, objectKey: string, versionId?: string) =>
     ['object-preview', bucketName, region, objectKey, ...(versionId ? [versionId] : [])] as const,
   // ['access-keys'] is the prefix — invalidateQueries on this key also invalidates

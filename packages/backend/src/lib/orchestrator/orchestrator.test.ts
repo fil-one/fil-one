@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
@@ -74,6 +74,7 @@ const s3Mock = mockClient(S3Client);
 import {
   PolicyPublishError,
   AccessKeyAlreadyExistsError,
+  AccessKeyConcurrentChangeError,
   AccessKeyValidationError,
   BucketAlreadyExistsError,
   BucketConfigurationError,
@@ -1294,6 +1295,56 @@ describe('issueAccessKey', () => {
     await expect(
       orchestrator.issueAccessKey(tenantId, { keyName: 'My Key', permissions: ['read'] }),
     ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
+  });
+
+  describe('when the storage system reports a concurrent change', () => {
+    function conflictWithCode(code: string) {
+      return { data: undefined, error: { message: 'conflict', code }, response: { status: 409 } };
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('returns the key a retry creates after a ConcurrentChange', async () => {
+      mockCreateAccessKey
+        .mockResolvedValueOnce(conflictWithCode('ConcurrentChange'))
+        .mockResolvedValueOnce(ok(createdKey, 201));
+
+      const promise = orchestrator.issueAccessKey(tenantId, {
+        keyName: 'My Key',
+        permissions: ['read'],
+      });
+      await vi.runAllTimersAsync();
+
+      await expect(promise).resolves.toMatchObject({
+        accessKeyId: 'AKIAFORGE',
+        accessKeySecret: 'sk-secret',
+      });
+    });
+
+    it('throws AccessKeyConcurrentChangeError when every attempt gets ConcurrentChange', async () => {
+      mockCreateAccessKey.mockResolvedValue(conflictWithCode('ConcurrentChange'));
+
+      const promise = orchestrator
+        .issueAccessKey(tenantId, { keyName: 'My Key', permissions: ['read'] })
+        .catch((e: unknown) => e);
+      await vi.runAllTimersAsync();
+
+      expect(await promise).toBeInstanceOf(AccessKeyConcurrentChangeError);
+    });
+
+    it('throws AccessKeyAlreadyExistsError on a 409 AccessKeyNameConflict', async () => {
+      mockCreateAccessKey.mockResolvedValue(conflictWithCode('AccessKeyNameConflict'));
+
+      await expect(
+        orchestrator.issueAccessKey(tenantId, { keyName: 'My Key', permissions: ['read'] }),
+      ).rejects.toBeInstanceOf(AccessKeyAlreadyExistsError);
+    });
   });
 
   it('maps a 422 to AccessKeyValidationError with the upstream message', async () => {

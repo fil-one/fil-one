@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 
-import type { ListObjectVersionsResponse, S3ObjectVersion, S3Region } from '@filone/shared';
+import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
 import { executePresignedUrl, parseListObjectVersionsResponse } from './aurora-s3.js';
+import type { ListingCursor, ObjectListingPage } from './object-listing.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryClient, queryKeys } from './query-client.js';
 import { batchPresign } from './use-presign.js';
 
@@ -121,41 +122,135 @@ export function removeVersion(
   return [{ ...left[0], isLatest: true }, ...left.slice(1)];
 }
 
+/** The Delete dialog's wording. */
+export interface DeleteCopy {
+  title: string;
+  description: string;
+  confirmLabel: string;
+}
+
+const DELETE_OBJECT_COPY = { title: 'Delete object', confirmLabel: 'Delete object' };
+
 /**
- * This key's entries from the bucket page's listing, when the user came from
- * there. Only a complete listing that holds the key can stand in for its
- * history: the listing is a single page, so a truncated one may hold some of
- * the key's versions or none of them, and seeding from it would mark that
- * partial history fresh and skip the fetch.
+ * What Delete will do, which depends on what it targets and on the bucket.
+ *
+ * - A version named in the URL is removed for good and the rest stay.
+ * - With versioning on, the object is hidden behind a delete marker.
+ * - With versioning off, it depends on whether it was ever on. The bucket's
+ *   setting reads off both for a bucket that never had it and for one where it
+ *   was suspended, but only a suspended bucket can hold a real version ID. There
+ *   S3 adds a delete marker and removes for good only a current version with
+ *   the ID "null"; older versions stay.
+ * - Until the setting and the history load, or if either fails, the copy claims
+ *   neither outcome.
  */
-export function getVersionsFromListing(
-  listing: ListObjectVersionsResponse | undefined,
+export function getDeleteCopy({
+  versionId,
+  isVersioned,
+  versions,
+}: {
+  versionId?: string;
+  isVersioned?: boolean;
+  versions?: S3ObjectVersion[];
+}): DeleteCopy {
+  if (versionId) {
+    return {
+      title: 'Delete version',
+      description:
+        'This version will be permanently deleted. Other versions of the object stay in its history.',
+      confirmLabel: 'Delete version',
+    };
+  }
+  const hidesBehindMarker = {
+    ...DELETE_OBJECT_COPY,
+    description:
+      'The object will be hidden behind a delete marker. Its earlier versions stay in its history.',
+  };
+  if (isVersioned) return hidesBehindMarker;
+  if (isVersioned === false && versions) {
+    if (versions.every((v) => v.versionId === UNVERSIONED_ID)) {
+      return {
+        ...DELETE_OBJECT_COPY,
+        description: 'This object will be permanently deleted. This action cannot be undone.',
+      };
+    }
+    const latest = versions.find((v) => v.isLatest);
+    if (latest?.versionId !== UNVERSIONED_ID) return hidesBehindMarker;
+    return {
+      ...DELETE_OBJECT_COPY,
+      description:
+        'The current version will be permanently deleted and replaced by a delete marker. Its earlier versions stay in its history.',
+    };
+  }
+  return {
+    ...DELETE_OBJECT_COPY,
+    description:
+      'If the bucket keeps versions, the object will be hidden behind a delete marker and its earlier versions stay in its history. If not, it will be permanently deleted.',
+  };
+}
+
+/** Whether a listing page stops partway through this key's versions. */
+function isSplitAt(cursor: ListingCursor | undefined, objectKey: string): boolean {
+  return (
+    cursor?.kind === 'version' &&
+    cursor.versionIdMarker !== undefined &&
+    cursor.keyMarker === objectKey
+  );
+}
+
+/**
+ * This key's entries from one cached page of the bucket listing, when the page
+ * holds its whole history. A partial history would be marked fresh and skip the
+ * fetch, so a page stands in only when:
+ *
+ * - it came from ListObjectVersions: a ListObjectsV2 page carries no version IDs
+ *   and leaves out older versions and delete markers;
+ * - it starts at the key's newest entry, rather than resuming partway through
+ *   the key where the previous page stopped;
+ * - it does not stop partway through the key itself.
+ *
+ * Both parsers read S3's "null" ID as no ID, so an object whose only version
+ * predates versioning is not seeded; it has no history card to flash in.
+ */
+export function getVersionsFromListingPage(
+  page: ObjectListingPage | undefined,
   objectKey: string,
 ): S3ObjectVersion[] | undefined {
-  if (!listing || listing.isTruncated) return undefined;
-  const entries = listing.versions.filter((v) => v.key === objectKey);
-  return entries.length > 0 ? restoreNullVersionIds(entries) : undefined;
+  if (!page) return undefined;
+  const entries = page.versions.filter((v) => v.key === objectKey);
+  if (!entries.some((v) => v.versionId)) return undefined;
+  if (!entries.some((v) => v.isLatest)) return undefined;
+  if (isSplitAt(page.nextCursor, objectKey)) return undefined;
+  return restoreNullVersionIds(entries);
+}
+
+/** The first cached listing page holding the key's whole history, and when it was fetched. */
+function findSeedInListing(bucketName: string, region: S3Region, objectKey: string) {
+  for (const [queryKey, page] of queryClient.getQueriesData<ObjectListingPage>({
+    queryKey: queryKeys.objects(bucketName, region),
+  })) {
+    const versions = getVersionsFromListingPage(page, objectKey);
+    if (versions) {
+      return { versions, updatedAt: queryClient.getQueryState(queryKey)?.dataUpdatedAt };
+    }
+  }
+  return undefined;
 }
 
 /**
  * The object's version history, newest first. Fetched for this key alone, so it
- * is there on a shared link or a reload, and seeded from the bucket listing when
- * the user came from it so the card does not flash in. The listing is by prefix,
- * which also matches longer keys (`a.png.bak` for `a.png`), so it is filtered to
- * the exact key.
+ * is there on a shared link or a reload, and seeded from the bucket listing's
+ * cached pages when the user came from it so the card does not flash in. The
+ * request lists by prefix, which also matches longer keys (`a.png.bak` for
+ * `a.png`), so it is filtered to the exact key.
  */
 export function useObjectVersions(bucketName: string, region: S3Region, objectKey: string) {
   return useQuery({
     queryKey: queryKeys.objectVersions(bucketName, region, objectKey),
     staleTime: LIST_STALE_TIME,
     gcTime: LIST_GC_TIME,
-    initialData: () =>
-      getVersionsFromListing(
-        queryClient.getQueryData<ListObjectVersionsResponse>(queryKeys.objects(bucketName, region)),
-        objectKey,
-      ),
-    initialDataUpdatedAt: () =>
-      queryClient.getQueryState(queryKeys.objects(bucketName, region))?.dataUpdatedAt,
+    initialData: () => findSeedInListing(bucketName, region, objectKey)?.versions,
+    initialDataUpdatedAt: () => findSeedInListing(bucketName, region, objectKey)?.updatedAt,
     queryFn: async () => {
       const { items } = await batchPresign(region, [
         { op: 'listObjectVersions', bucket: bucketName, prefix: objectKey },

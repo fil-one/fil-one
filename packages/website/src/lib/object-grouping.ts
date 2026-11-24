@@ -32,26 +32,32 @@ export type BrowseEntry =
   | { kind: 'folder'; name: string; prefix: string }
   | { kind: 'object'; name: string; group: VersionGroup };
 
-export function getEntriesAtPrefix(groups: VersionGroup[], prefix: string): BrowseEntry[] {
-  const folders = new Set<string>();
-  const files: BrowseEntry[] = [];
+/**
+ * The rows of one listing page of a folder: its sub-folders, then its objects,
+ * each sorted by name.
+ *
+ * A delimited listing already splits the folder's contents, so `folders` comes
+ * straight from S3 and every key in `groups` sits directly under `prefix`. A key
+ * equal to `prefix` is the zero-byte marker some tools write to create an empty
+ * folder; it is the folder itself rather than something in it, so it gets no row.
+ */
+export function getEntriesAtPrefix(
+  groups: VersionGroup[],
+  folders: string[],
+  prefix: string,
+): BrowseEntry[] {
+  const folderEntries: BrowseEntry[] = folders
+    .map((folder) => ({
+      kind: 'folder' as const,
+      name: folder.slice(prefix.length, -1),
+      prefix: folder,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
-  for (const group of groups) {
-    if (!group.key.startsWith(prefix)) continue;
-    const remainder = group.key.slice(prefix.length);
-    const slashIdx = remainder.indexOf('/');
-    if (slashIdx === -1) {
-      files.push({ kind: 'object', name: remainder, group });
-    } else {
-      folders.add(remainder.slice(0, slashIdx));
-    }
-  }
-
-  const folderEntries: BrowseEntry[] = [...folders]
-    .sort()
-    .map((f) => ({ kind: 'folder', name: f, prefix: `${prefix}${f}/` }));
-
-  files.sort((a, b) => a.name.localeCompare(b.name));
+  const files: BrowseEntry[] = groups
+    .filter((group) => group.key !== prefix)
+    .map((group) => ({ kind: 'object' as const, name: group.key.slice(prefix.length), group }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return [...folderEntries, ...files];
 }

@@ -34,13 +34,12 @@ import { ShareObjectModal } from './ShareObjectModal';
 import { useToast } from './Toast/index.js';
 import { Tooltip } from './Tooltip';
 import {
-  getDeleteCopy,
   getListedMetadata,
   isObjectNotFoundError,
   useObjectMetadata,
 } from '../lib/object-metadata.js';
 import { getObjectFileName, getPreviewKind } from '../lib/object-preview.js';
-import { UNVERSIONED_ID } from '../lib/object-versions.js';
+import { getDeleteCopy, UNVERSIONED_ID, useObjectVersions } from '../lib/object-versions.js';
 import { SHARE_UNAVAILABLE_TOOLTIP, useCanShareObjects } from '../lib/use-can-share-objects.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
@@ -151,6 +150,9 @@ function DrawerContent({
   const metadata = isGone
     ? undefined
     : (metadataQuery.data ?? (listed && getListedMetadata(listed)));
+  // Whether Delete removes data for good can turn on the key's history, as in a
+  // bucket whose versioning was suspended. The listing's cache seeds it when it can.
+  const versionsQuery = useObjectVersions(bucketName, region, objectKey);
   const mayDelete = useHasPermission('objects.delete');
   const canShare = useCanShareObjects();
   const [confirmDeleteOpen, setConfirmDeleteOpen] = usePermittedDialog(false, mayDelete);
@@ -250,7 +252,11 @@ function DrawerContent({
         open={confirmDeleteOpen}
         onClose={() => setConfirmDeleteOpen(false)}
         onConfirm={onDelete}
-        {...getDeleteCopy(versionId, versioningEnabled)}
+        {...getDeleteCopy({
+          versionId,
+          isVersioned: versioningEnabled,
+          versions: versionsQuery.data,
+        })}
       />
     </>
   );

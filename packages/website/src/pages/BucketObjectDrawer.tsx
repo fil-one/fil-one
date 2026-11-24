@@ -121,9 +121,12 @@ function isNamedVersion(version: S3ObjectVersion, versionId: string): boolean {
   return (version.versionId || UNVERSIONED_ID) === versionId;
 }
 
-/** The objects in the open folder, in the table's order, without its folders. */
+/**
+ * The objects on the open folder's listing page, in the table's order. Sub-folders
+ * never take a step, so none are passed in.
+ */
 function getFolderObjects(versions: S3ObjectVersion[], prefix: string): VersionGroup[] {
-  return getEntriesAtPrefix(groupVersionsByKey(versions), prefix).flatMap((entry) =>
+  return getEntriesAtPrefix(groupVersionsByKey(versions), [], prefix).flatMap((entry) =>
     entry.kind === 'object' ? [entry.group] : [],
   );
 }

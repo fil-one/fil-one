@@ -1,18 +1,23 @@
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 
-import { ObjectBrowser, type EmptyBucketKeyAction } from '../components/ObjectBrowser';
+import { Alert } from '../components/Alert';
+import { Button } from '../components/Button';
+import { ListingPager } from '../components/ListingPager';
+import {
+  ObjectBrowser,
+  type EmptyBucketKeyAction,
+  type ObjectBrowserProps,
+} from '../components/ObjectBrowser';
 import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import type { useObjectActions } from '../lib/use-object-actions.js';
 import { useBucketObjectDrawer, type OpenObject } from './BucketObjectDrawer';
 
 // Mirrors ObjectBrowser's columns so the placeholder holds the same shape as the
-// table it stands in for. The Version and Status pair is versioning-only, and
-// versioning is not known until the bucket metadata lands, so the skeleton shows
-// the columns every bucket has rather than guessing at two that may not appear.
+// table it stands in for.
 const OBJECT_SKELETON_COLUMNS: SkeletonColumn[] = [
   { label: 'Name' },
   { label: 'Size' },
-  { label: 'Last Modified' },
+  { label: 'Last modified' },
   {},
 ];
 
@@ -44,12 +49,43 @@ function getEmptyBucketKeyAction({
 }
 
 /**
+ * A page past the first that failed to load. The pager stays, so the reader can
+ * go back to a page that did load instead of being stranded on this one.
+ */
+function PageErrorState({
+  message,
+  onRetry,
+  paging,
+}: {
+  message: string;
+  onRetry: () => void;
+  paging: ObjectBrowserProps['paging'];
+}) {
+  return (
+    <div className="mt-4">
+      <Alert
+        variant="red"
+        title="This page did not load"
+        description={message}
+        action={
+          <Button variant="tertiary" size="sm" onClick={onRetry}>
+            Try again
+          </Button>
+        }
+      />
+      {paging && <ListingPager {...paging} label="Object pages" />}
+    </div>
+  );
+}
+
+/**
  * The Objects tab's body: the listing, or a table-shaped placeholder while it
  * loads. Extracted so the page component stays about layout, and so the
  * loading branch sits next to the table it stands in for.
  */
 export function ObjectsPanel({
   loading,
+  listingError,
   objectActions,
   mayUpload,
   mayDelete,
@@ -66,9 +102,11 @@ export function ObjectsPanel({
   ...browser
 }: {
   loading: boolean;
+  listingError?: { message: string; onRetry: () => void };
   bucketName: string;
   region: S3Region;
   versions: S3ObjectVersion[];
+  folders: string[];
   versioningEnabled: boolean;
   currentPrefix: string;
   onPrefixChange: (prefix: string) => void;
@@ -82,8 +120,7 @@ export function ObjectsPanel({
   mayCreateKeys: boolean;
   onAddKeyOpenChange: (open: boolean) => void;
   onShowKeys: () => void;
-  listingTruncated: boolean;
-  totalObjectCount: number | undefined;
+  paging: ObjectBrowserProps['paging'];
   /** The object open in the details panel, from the URL. */
   openObject?: OpenObject;
   objectLockEnabled: boolean;
@@ -100,9 +137,20 @@ export function ObjectsPanel({
     onDeleted: onObjectDeleted,
   });
 
+  // A reload or a link with an object open shows the panel over the error or the
+  // placeholder too
+  if (listingError) {
+    return (
+      <>
+        <PageErrorState {...listingError} paging={browser.paging} />
+        {objectDrawer.drawer}
+      </>
+    );
+  }
+
   const isEmptyStateUnsettled = accessKeysLoading || permissionsLoading;
-  if (loading || (browser.versions.length === 0 && isEmptyStateUnsettled)) {
-    // A reload or a link with an object open shows the panel while the list loads
+  const looksEmpty = browser.versions.length === 0 && browser.folders.length === 0;
+  if (loading || (looksEmpty && isEmptyStateUnsettled)) {
     return (
       <>
         <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />

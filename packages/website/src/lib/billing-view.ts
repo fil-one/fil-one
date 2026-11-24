@@ -13,36 +13,39 @@ import type { BillingInfo, Subscription, SubscriptionDiscount } from '@filone/sh
 
 import { daysUntil, formatDate, formatDaysLeft, formatMonthDay, pluralizeDays } from './time.js';
 
-export type StatusTone = 'green' | 'blue' | 'amber' | 'red' | 'grey';
+export type StatusTone = 'amber' | 'red';
 
 /** What the plan card's status pill says, and in what colour. */
 export interface StatusBadge {
   label: string;
   tone: StatusTone;
-  /** A dot suits a steady state; a change of state reads better without one. */
-  dot: boolean;
 }
 
-export function statusBadge(status: SubscriptionStatus): StatusBadge {
+/**
+ * The plan card's status pill, for a plan that needs attention, and null for
+ * one that does not.
+ *
+ * A plan in good standing (running, billed manually, or mid-trial) gets no
+ * pill: it is the normal state, and an "Active" pill on it said nothing the
+ * card did not already, while making the pills that matter easier to miss.
+ * An account with no plan gets none either, since its name already says so.
+ */
+export function statusBadge(status: SubscriptionStatus): StatusBadge | null {
   switch (status) {
     case SubscriptionStatus.Active:
     case SubscriptionStatus.Manual:
-      return { label: 'Active', tone: 'green', dot: true };
-    // Past due is active access with a failed payment. The banner above the
-    // cards is what says so; a red pill here would read as cancelled.
-    case SubscriptionStatus.PastDue:
-      return { label: 'Payment failed', tone: 'amber', dot: false };
-    // "Active", not "Trial": the plan name and the meta line beside it already
-    // say a trial is running, and this pill is read at a glance as "is this
-    // account in good standing" — which, mid-trial, it is.
     case SubscriptionStatus.Trialing:
-      return { label: 'Active', tone: 'blue', dot: true };
-    case SubscriptionStatus.GracePeriod:
-      return { label: 'Grace period', tone: 'amber', dot: false };
-    case SubscriptionStatus.Canceled:
-      return { label: 'Canceled', tone: 'red', dot: false };
     case SubscriptionStatus.Inactive:
-      return { label: 'No plan', tone: 'grey', dot: false };
+      return null;
+    // Past due is a failed payment Stripe is still retrying: the subscription
+    // stands, though the account is read-only until it is paid. The banner
+    // above the cards says so; a red pill here would read as cancelled.
+    case SubscriptionStatus.PastDue:
+      return { label: 'Payment failed', tone: 'amber' };
+    case SubscriptionStatus.GracePeriod:
+      return { label: 'Grace period', tone: 'amber' };
+    case SubscriptionStatus.Canceled:
+      return { label: 'Canceled', tone: 'red' };
   }
 }
 
@@ -116,27 +119,69 @@ export function formatCents(cents: number): string {
  * usage card right below this one already states the trial's own storage and
  * egress limits, so repeating either fact here is redundant at best and, for
  * the rate, reads as a bill that has not started.
+ *
+ * The rate is the one they pay: after a discount that changes it
+ * (`getDiscountedRateCents`), so the plan card and the dashboard quote the
+ * same number.
  */
 export function pricingLine(subscription: Subscription): string {
   const { pricePerTbCents, status } = subscription;
 
   if (status === SubscriptionStatus.Trialing) return '';
   if (status === SubscriptionStatus.Manual) return 'Billed manually';
-  if (pricePerTbCents) return `${formatCents(pricePerTbCents)}/TB per month`;
+  if (pricePerTbCents) {
+    const rateCents = getDiscountedRateCents(subscription) ?? pricePerTbCents;
+    return `${formatCents(rateCents)}/TB per month`;
+  }
   if (status === SubscriptionStatus.Inactive) return 'Choose a plan to start storing data';
 
   return 'Custom pricing';
 }
 
 /**
- * The plan's one line of detail: what it charges, then what happens next.
- *
- * One line rather than two stacked ones. They are both meta about the same
- * thing, and a card whose every line is a different shade of grey has no
- * hierarchy left to give the plan name.
+ * A date as "Nov 11" when it falls in the current year and "Jan 5, 2027" when
+ * not. Years compared in local time, the zone both formatters display in, so
+ * the rule and the text agree across New Year's Eve.
  */
-export function planMetaLine(subscription: Subscription): string {
-  return [pricingLine(subscription), timelineLine(subscription)].filter(Boolean).join(' · ');
+function formatEndDate(isoString: string, now: Date): string {
+  return new Date(isoString).getFullYear() === now.getFullYear()
+    ? formatMonthDay(isoString)
+    : formatDate(isoString);
+}
+
+/**
+ * The discounts that still come off an invoice: those on a subscription that
+ * is running, or retrying a failed payment. Stripe can keep a discount on a
+ * subscription after it is canceled, and a grace period starts with that
+ * cancellation, so neither shows one: it would advertise a saving on a bill
+ * that is not coming, and reactivating starts a new subscription without it.
+ */
+export function getAppliedDiscounts(subscription: Subscription): SubscriptionDiscount[] {
+  const { status, discounts = [] } = subscription;
+  return status === SubscriptionStatus.Active || status === SubscriptionStatus.PastDue
+    ? discounts
+    : [];
+}
+
+/**
+ * The per-TB rate after the discounts that change it, or null when none do.
+ *
+ * Only a percentage that keeps applying (for some months, or for good) changes
+ * the rate: a fixed amount comes off the invoice, not each TB, and a one-off
+ * discount comes off the next invoice only, so "per month" would overstate it.
+ * Those stay in words on the detail line, and the rate stays as listed.
+ * Taken off the same way as the estimate's discounts (`applyDiscounts`), so
+ * the two cannot disagree.
+ */
+export function getDiscountedRateCents(subscription: Subscription): number | null {
+  const { pricePerTbCents } = subscription;
+  if (!pricePerTbCents) return null;
+
+  const rateDiscounts = getAppliedDiscounts(subscription).filter(
+    (discount) => 'percentOff' in discount && discount.duration !== 'once',
+  );
+  if (rateDiscounts.length === 0) return null;
+  return applyDiscounts(pricePerTbCents, rateDiscounts);
 }
 
 /**
@@ -149,8 +194,8 @@ export function planMetaLine(subscription: Subscription): string {
 export function timelineLine(subscription: Subscription): string | null {
   const { status, trialEndsAt, gracePeriodEndsAt, currentPeriodEnd, canceledAt } = subscription;
 
-  // No "Trial" subject: the plan name and the pill beside it already say
-  // it's a trial, and this line's job is just the deadline.
+  // No "Trial" subject: the plan name ("Free trial") already says it's a
+  // trial, and this line's job is just the deadline.
   if (status === SubscriptionStatus.Trialing && trialEndsAt) {
     return endsInLabel(undefined, trialEndsAt);
   }
@@ -245,8 +290,9 @@ export function costDisclosure(
 ): CostDisclosure {
   if (!isBilling(subscription.status)) return { kind: 'none' };
 
-  const { pricePerTbCents, monthlyMinimumCents = 0, discounts = [] } = subscription;
+  const { pricePerTbCents, monthlyMinimumCents = 0 } = subscription;
   if (!pricePerTbCents) return { kind: 'agreement' };
+  const discounts = getAppliedDiscounts(subscription);
 
   const usageCents = Math.round((storageBytesUsed / TB_BYTES) * pricePerTbCents);
   // The minimum is part of the subtotal Stripe discounts, so the floor comes
@@ -295,9 +341,11 @@ export function estimateDiscountNote(discounts: SubscriptionDiscount[] = []): st
  *
  * A discount already on the subscription carries the date it ends, which is
  * the more useful fact once it is running. One checked before it is applied
- * has no start yet, so it can only say how many months it lasts.
+ * has no start yet, so it can only say how many months it lasts. The end date
+ * leaves out the year when it is this year ("until Nov 11"), and states it
+ * when it is not, where "until Jan 5" alone could mean either year.
  */
-export function discountLabel(discount: SubscriptionDiscount): string {
+export function discountLabel(discount: SubscriptionDiscount, now: Date = new Date()): string {
   const amount =
     'percentOff' in discount ? `${discount.percentOff}%` : formatCents(discount.amountOffCents);
 
@@ -307,7 +355,7 @@ export function discountLabel(discount: SubscriptionDiscount): string {
     case 'forever':
       return `${amount} off every invoice`;
     case 'repeating':
-      if (discount.endsAt) return `${amount} off until ${formatDate(discount.endsAt)}`;
+      if (discount.endsAt) return `${amount} off until ${formatEndDate(discount.endsAt, now)}`;
       if (discount.durationInMonths) {
         const months = discount.durationInMonths;
         return `${amount} off for ${months} ${months === 1 ? 'month' : 'months'}`;
@@ -373,4 +421,30 @@ export type PaymentPosture = 'card' | 'invoiced' | 'needs-card';
 export function paymentPosture(billing: BillingInfo): PaymentPosture {
   if (billing.paymentMethod) return 'card';
   return isBilling(billing.subscription.status) ? 'invoiced' : 'needs-card';
+}
+
+/**
+ * Stripe's `card.brand` IDs, by the names the networks use for themselves.
+ * Capitalising the ID gave "Jcb", "Unionpay" and "Eftpos_au".
+ */
+const CARD_BRAND_NAMES: Record<string, string> = {
+  amex: 'American Express',
+  cartes_bancaires: 'Cartes Bancaires',
+  diners: 'Diners Club',
+  discover: 'Discover',
+  eftpos_au: 'eftpos',
+  jcb: 'JCB',
+  link: 'Link',
+  mastercard: 'Mastercard',
+  unionpay: 'UnionPay',
+  visa: 'Visa',
+};
+
+/**
+ * What a saved card is called: "Visa", "American Express". "Card" for a brand
+ * Stripe could not name, or one it adds before this list does.
+ */
+export function getCardBrandName(brand: string): string {
+  const key = brand.toLowerCase();
+  return Object.hasOwn(CARD_BRAND_NAMES, key) ? CARD_BRAND_NAMES[key] : 'Card';
 }

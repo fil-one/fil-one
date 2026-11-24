@@ -18,13 +18,13 @@ import { VersionHistoryCard } from '../components/VersionHistoryCard';
 import type { S3ObjectVersion, S3Region } from '@filone/shared';
 import {
   bucketQueryOptions,
-  getDeleteCopy,
   removeObjectMetadata,
   isRetentionActive,
   useObjectMetadata,
 } from '../lib/object-metadata.js';
 import { getFolderPrefixes } from '../lib/object-preview.js';
 import {
+  getDeleteCopy,
   getMissingReason,
   getVersionState,
   hasReadableLatestAfterDeleting,
@@ -99,7 +99,10 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
         (old: S3ObjectVersion[] | undefined) => old && removeVersion(old, versionId),
       );
     }
-    void queryClient.invalidateQueries({ queryKey: ['objects', bucketName, region] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.objectVersions(bucketName, region, objectKey),
+    });
     // Every version's details, the plain key's among them: they may be the
     // deleted version's too
     removeObjectMetadata(bucketName, objectKey);
@@ -116,7 +119,11 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
 
   const objectActions = useObjectActions({ bucketName, region, onDeleted: afterDelete });
   const download = () => void objectActions.downloadObject(objectKey, versionId);
-  const deleteCopy = getDeleteCopy(versionId, bucketQuery.data?.bucket.versioning);
+  const deleteCopy = getDeleteCopy({
+    versionId,
+    isVersioned: bucketQuery.data?.bucket.versioning,
+    versions: versionsQuery.data,
+  });
 
   return (
     <div className="mx-auto flex max-w-[860px] flex-col gap-6 px-5 pt-6 pb-12 sm:px-8 lg:px-10 lg:pt-10 xl:px-0">
