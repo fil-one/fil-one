@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import type { ListingPagerProps } from './ListingPager';
 import { SearchInput } from './SearchInput';
 
@@ -78,12 +80,15 @@ export function describeListingCount({
 /** Narrows the listing to names that start with what is typed, beside its count. */
 export function ObjectSearchBar({
   search,
+  listedSearch,
   place,
   onSearchChange,
   paging,
   rowCount,
 }: {
   search: string;
+  /** The search the rows on screen answered, which trails `search` until its listing arrives. */
+  listedSearch: string;
   place: 'folder' | 'bucket';
   onSearchChange: (search: string) => void;
   paging?: Omit<ListingPagerProps, 'label'>;
@@ -93,14 +98,24 @@ export function ObjectSearchBar({
    */
   rowCount?: number;
 }) {
-  const count =
+  const settledCount =
     rowCount === undefined
       ? undefined
       : describeListingCount({
           reached: paging ? paging.rangeEnd : rowCount,
           hasMore: paging?.hasNext ?? false,
-          searching: search !== '',
+          // The rows' search, not the box's: typed text describes rows that
+          // have not arrived yet.
+          searching: listedSearch !== '',
         });
+  // While a page or search loads, the listing reports no next page and the old
+  // page's range, which would read as an exact total. The count holds at the
+  // last one that described a settled listing until the new one arrives.
+  // Updated during render, like `listedSearch`, so it never lags by a frame.
+  const isChanging = paging?.changing ?? false;
+  const [heldCount, setHeldCount] = useState(settledCount);
+  if (!isChanging && heldCount !== settledCount) setHeldCount(settledCount);
+  const count = rowCount === undefined ? undefined : isChanging ? heldCount : settledCount;
   return (
     // Wraps rather than squeezes, like the other list toolbars: at 375px the
     // search takes the full width.

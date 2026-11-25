@@ -522,6 +522,7 @@ export function ObjectBrowser({
       {onSearchChange && (
         <ObjectSearchBar
           search={search}
+          listedSearch={listedSearch}
           place={place}
           onSearchChange={onSearchChange}
           paging={paging}
