@@ -21,17 +21,6 @@ export function parseSelectionId(id: string): ObjectDeleteTarget {
   return { key: id.slice(idx + 1), ...(versionId && { versionId }) };
 }
 
-/**
- * Selection ids for every object under a prefix, including objects nested in
- * sub-folders. Backs the header "select all" checkbox and folder rows, which
- * both stand in for their whole subtree.
- */
-export function descendantSelectionIds(latest: SelectableVersion[], prefix: string): string[] {
-  return latest
-    .filter((entry) => entry.key.startsWith(prefix))
-    .map((entry) => selectionId(entry.key, entry.versionId));
-}
-
 export type ObjectSelection = {
   selected: Set<string>;
   toggle: (id: string) => void;
@@ -64,7 +53,7 @@ export function useObjectSelection(versions: S3ObjectVersion[]): ObjectSelection
     });
   }, []);
 
-  /** Select or clear a whole subtree at once (header and folder rows). */
+  /** Select or clear several rows at once (the header checkbox). */
   const setMany = useCallback((ids: string[], shouldSelect: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev);
