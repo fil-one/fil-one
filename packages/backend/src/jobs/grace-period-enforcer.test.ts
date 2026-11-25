@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, ScanCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  ScanCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -110,6 +115,10 @@ describe('grace-period-enforcer', () => {
   beforeEach(() => {
     ddbMock.reset();
     ddbMock.on(UpdateItemCommand).resolves({});
+    // The row the enforcer reads back after a lock, still in grace.
+    ddbMock
+      .on(GetItemCommand)
+      .resolves({ Item: buildBillingItem({ subscriptionStatus: SubscriptionStatus.GracePeriod }) });
     vi.clearAllMocks();
     aurora = fakeOrchestrator('aurora');
     mockIsOrgDeletedOrDeleting.mockResolvedValue(false);
@@ -671,6 +680,21 @@ describe('grace-period-enforcer', () => {
       },
     );
 
+    it('leaves the cancel of a trial whose trial ends by the grace deadline to Stripe', async () => {
+      // Stripe cancels a trial without a card at its trial end. A cancel from
+      // here could land after a card added at the deadline ended the trial.
+      mockSubscriptionsRetrieve.mockResolvedValue({
+        id: 'sub_any',
+        status: 'trialing',
+        trial_end: Math.floor(new Date(pastDate(1)).getTime() / 1000),
+      });
+
+      await handler();
+
+      expect(order).toStrictEqual(['disable', 'write']);
+      expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
+    });
+
     it.each(['canceled', 'incomplete_expired'])(
       'marks the row canceled without a Stripe cancel when Stripe reports the subscription %s',
       async (status) => {
@@ -693,10 +717,18 @@ describe('grace-period-enforcer', () => {
       expect(order).toStrictEqual(['disable', 'write']);
     });
 
-    it.each(['active', 'trialing'])(
+    it.each([
+      ['active', null],
+      ['trialing with a trial that outlasts the grace period', futureDate(3)],
+    ])(
       'leaves the row in grace and the tenant enabled when Stripe reports the subscription %s',
-      async (status) => {
-        mockSubscriptionsRetrieve.mockResolvedValue({ id: 'sub_any', status });
+      async (_case, trialEnd) => {
+        const status = trialEnd ? 'trialing' : 'active';
+        mockSubscriptionsRetrieve.mockResolvedValue({
+          id: 'sub_any',
+          status,
+          trial_end: trialEnd && Math.floor(new Date(trialEnd).getTime() / 1000),
+        });
         const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
         const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
@@ -764,6 +796,135 @@ describe('grace-period-enforcer', () => {
           ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
         }),
       });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // A trial past its end
+  // -----------------------------------------------------------------------
+  describe('a trial past its end', () => {
+    const trialEndsAt = '2026-10-01T00:00:00.000Z';
+
+    it('asks DynamoDB for trialing rows whose trial has ended as well as grace rows', async () => {
+      ddbMock.on(ScanCommand).resolves({ Items: [] });
+
+      await handler();
+
+      expect(ddbMock.commandCalls(ScanCommand)[0].args[0].input).toMatchObject({
+        FilterExpression:
+          'sk = :sk AND (subscriptionStatus = :gracePeriod OR (subscriptionStatus = :trialing AND trialEndsAt < :now))',
+        ExpressionAttributeValues: {
+          ':sk': { S: 'SUBSCRIPTION' },
+          ':gracePeriod': { S: SubscriptionStatus.GracePeriod },
+          ':trialing': { S: SubscriptionStatus.Trialing },
+          ':now': { S: expect.any(String) },
+        },
+      });
+    });
+
+    it('moves the row into grace 7 days past its trial and write-locks the tenant', async () => {
+      // An org that only uses its S3 keys never reaches the console, which is
+      // the other place an expired trial moves into grace.
+      aurora = fakeOrchestrator('aurora', { status: 'active' });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+      ddbMock.on(ScanCommand).resolves({
+        Items: [buildBillingItem({ subscriptionStatus: SubscriptionStatus.Trialing, trialEndsAt })],
+      });
+
+      await handler();
+
+      expect(ddbMock.commandCalls(UpdateItemCommand).map((c) => c.args[0].input)).toStrictEqual([
+        {
+          TableName: 'BillingTable',
+          Key: ORG_KEY,
+          UpdateExpression:
+            'SET subscriptionStatus = :status, gracePeriodEndsAt = :grace, updatedAt = :now',
+          ExpressionAttributeValues: {
+            ':status': { S: SubscriptionStatus.GracePeriod },
+            ':grace': { S: '2026-10-08T00:00:00.000Z' },
+            ':now': { S: expect.any(String) },
+            ':trialing': { S: SubscriptionStatus.Trialing },
+          },
+          ConditionExpression: 'attribute_exists(pk) AND (subscriptionStatus = :trialing)',
+        },
+      ]);
+      expect(aurora.updateTenantStatus).toHaveBeenCalledWith(tenantFor('aurora'), 'write-locked');
+    });
+
+    it('leaves a trialing row alone while its trial runs', async () => {
+      ddbMock.on(ScanCommand).resolves({
+        Items: [
+          buildBillingItem({
+            subscriptionStatus: SubscriptionStatus.Trialing,
+            trialEndsAt: futureDate(3),
+          }),
+        ],
+      });
+
+      await handler();
+
+      expect(ddbMock.commandCalls(UpdateItemCommand)).toStrictEqual([]);
+      expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+    });
+
+    it('unlocks the tenant again when activation moved the row on during the lock', async () => {
+      // Activation saved the row and unlocked the tenant between this run's
+      // row write and its lock, so the lock landed last.
+      aurora = fakeOrchestrator('aurora', { status: 'active' });
+      aurora.getTenantStatus
+        .mockResolvedValueOnce({ kind: 'ok', status: 'active' })
+        .mockResolvedValueOnce({ kind: 'ok', status: 'write-locked' });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+      ddbMock.on(ScanCommand).resolves({
+        Items: [buildBillingItem({ subscriptionStatus: SubscriptionStatus.Trialing, trialEndsAt })],
+      });
+      ddbMock
+        .on(GetItemCommand)
+        .resolves({ Item: buildBillingItem({ subscriptionStatus: SubscriptionStatus.Active }) });
+
+      await handler();
+
+      expect(aurora.updateTenantStatus.mock.calls).toStrictEqual([
+        [tenantFor('aurora'), 'write-locked'],
+        [tenantFor('aurora'), 'active'],
+      ]);
+    });
+
+    it('keeps the lock when the row is still in grace after it', async () => {
+      aurora = fakeOrchestrator('aurora', { status: 'active' });
+      aurora.getTenantStatus
+        .mockResolvedValueOnce({ kind: 'ok', status: 'active' })
+        .mockResolvedValueOnce({ kind: 'ok', status: 'write-locked' });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+      ddbMock.on(ScanCommand).resolves({
+        Items: [buildBillingItem({ subscriptionStatus: SubscriptionStatus.Trialing, trialEndsAt })],
+      });
+
+      await handler();
+
+      expect(aurora.updateTenantStatus.mock.calls).toStrictEqual([
+        [tenantFor('aurora'), 'write-locked'],
+      ]);
+    });
+
+    it('does not lock the tenant when the row moved on before the write', async () => {
+      // A card added since the scan ends the trial; the conditional write
+      // refuses and the tenant stays as activation left it.
+      ddbMock.on(ScanCommand).resolves({
+        Items: [buildBillingItem({ subscriptionStatus: SubscriptionStatus.Trialing, trialEndsAt })],
+      });
+      ddbMock.on(UpdateItemCommand).rejects(
+        Object.assign(new Error('The conditional request failed'), {
+          name: 'ConditionalCheckFailedException',
+        }),
+      );
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await handler();
+
+      expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
     });
   });
 });
