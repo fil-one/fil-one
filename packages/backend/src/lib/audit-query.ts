@@ -203,9 +203,9 @@ export async function queryAllAuditEvents({
 }
 
 /**
- * Rows one recent-events read examines per round trip. About two rows per
- * action, since a two-phase action writes an intent and a completion, so a
- * page holds the feed's largest limit even when every other row is an intent.
+ * Rows one recent-events read examines per round trip. A two-phase action
+ * writes an intent and a completion, so a page holds at least 50 actions even
+ * when every other row is an intent.
  */
 const RECENT_ROWS_PER_PAGE = 100;
 
