@@ -4,16 +4,59 @@ import { STORAGE_STATE } from './roles.util.ts';
 import { REGIONS, type Region } from './regions.util.ts';
 import { uniqueBucketName } from './buckets.util.ts';
 
-// In-memory upload fixture so the test does not depend on a checked-in file.
-// The object key is minted per upload (see `uniqueObjectName`) so reusing a
+// In-memory upload fixtures so the tests do not depend on checked-in files.
+// Each object key is minted per upload (see `uniqueObjectName`) so reusing a
 // bucket across runs never collides with a previously uploaded object.
-const UPLOAD_FILE = {
-  mimeType: 'text/plain',
-  buffer: Buffer.from('e2e test upload content'),
+//
+// The image is a 1x1 PNG, so uploading it also checks that the object panel
+// can load a preview from the region's S3 endpoint.
+const IMAGE_FILE = {
+  mimeType: 'image/png',
+  buffer: Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+    'base64',
+  ),
+  extension: 'png',
 } as const;
 
-function uniqueObjectName(): string {
-  return `e2e-upload-${randomUUID()}.txt`;
+const AUDIO_FILE = {
+  mimeType: 'audio/wav',
+  buffer: buildSilentWav(),
+  extension: 'wav',
+} as const;
+
+type UploadFile = typeof IMAGE_FILE | typeof AUDIO_FILE;
+
+// A file to upload and the object key it is stored under
+interface Upload {
+  file: UploadFile;
+  objectName: string;
+}
+
+function uniqueObjectName(file: UploadFile): string {
+  return `e2e-upload-${randomUUID()}.${file.extension}`;
+}
+
+// A tenth of a second of silence as 8 kHz, 8-bit mono PCM: the smallest file
+// every browser's <audio> decodes.
+function buildSilentWav(): Buffer {
+  const sampleRate = 8000;
+  const samples = Buffer.alloc(sampleRate / 10, 0x80); // 0x80 is silence at 8 bits
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + samples.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16); // size of the format chunk
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate, 28); // bytes per second
+  header.writeUInt16LE(1, 32); // bytes per sample
+  header.writeUInt16LE(8, 34); // bits per sample
+  header.write('data', 36);
+  header.writeUInt32LE(samples.length, 40);
+  return Buffer.concat([header, samples]);
 }
 
 async function createBucketWithKey(page: Page, bucketName: string, region: Region): Promise<void> {
@@ -79,9 +122,10 @@ const UPLOAD_TEST_TIMEOUT_MS = 120_000;
 async function submitUploadExpectingSuccess(
   page: Page,
   bucketName: string,
-  objectName: string,
+  upload: Upload,
   region: Region,
 ): Promise<void> {
+  const { objectName } = upload;
   const presignResponse = page.waitForResponse(
     (response) =>
       new URL(response.url()).pathname.endsWith('/api/presign') &&
@@ -98,7 +142,7 @@ async function submitUploadExpectingSuccess(
     { timeout: UPLOAD_PUT_TIMEOUT_MS },
   );
 
-  await submitUpload(page, bucketName, objectName);
+  await submitUpload(page, bucketName, upload);
 
   const presign = await presignResponse;
   if (!presign.ok()) {
@@ -125,7 +169,11 @@ async function submitUploadExpectingSuccess(
 // Drives the upload form on the bucket detail page: opens the upload page,
 // selects the in-memory file under the given object name, and submits. Stops
 // at submit so callers can assert success or failure for their role.
-async function submitUpload(page: Page, bucketName: string, objectName: string): Promise<void> {
+async function submitUpload(
+  page: Page,
+  bucketName: string,
+  { file, objectName }: Upload,
+): Promise<void> {
   // The page header CTA renders only for non-empty buckets; an empty bucket
   // offers the upload CTA in the object browser's empty state instead. The
   // unpaid role's buckets are always empty, since that role can never upload.
@@ -135,9 +183,67 @@ async function submitUpload(page: Page, bucketName: string, objectName: string):
   // Setting files directly on the (hidden) files input triggers React's
   // onChange handler, which derives the object key from the file name (empty
   // prefix → key is the file name verbatim).
-  await page.locator('#upload-file-input').setInputFiles({ ...UPLOAD_FILE, name: objectName });
+  await page
+    .locator('#upload-file-input')
+    .setInputFiles({ mimeType: file.mimeType, buffer: file.buffer, name: objectName });
 
   await page.locator('#upload-submit-button').click();
+}
+
+// Uploads a file and opens it in the object panel from the bucket's list.
+async function uploadAndOpenInPanel(
+  page: Page,
+  region: Region,
+  file: UploadFile,
+): Promise<{ bucketName: string; objectName: string }> {
+  const bucketName = await openFirstBucketInRegion(page, region);
+  const objectName = uniqueObjectName(file);
+
+  await submitUploadExpectingSuccess(page, bucketName, { file, objectName }, region);
+
+  // On success the upload page navigates back to the bucket detail page.
+  await expect(page).toHaveURL(
+    (url) => url.pathname === `/buckets/${bucketName}` && url.searchParams.get('region') === region,
+  );
+
+  // The object row is keyed by its object key via data-object-key. Clicking it
+  // opens the object panel beside the list, named in the URL's `object` param.
+  await page.locator(`[data-testid="object-row"][data-object-key="${objectName}"]`).click();
+  await expect(page).toHaveURL(
+    (url) =>
+      url.pathname === `/buckets/${bucketName}` &&
+      url.searchParams.get('region') === region &&
+      url.searchParams.get('object') === objectName,
+  );
+  await expect(page.getByTestId('object-details-drawer-panel')).toBeVisible();
+  return { bucketName, objectName };
+}
+
+// The preview loads straight from a presigned URL on the region's S3 endpoint,
+// so the page's CSP must allow that host for images and media. A blocked or
+// failed load swaps the element for the "Preview didn't load" placeholder, so
+// the element never reaches the state polled for here.
+async function expectImagePreviewLoaded(page: Page, objectName: string): Promise<void> {
+  const image = page
+    .getByTestId('object-details-drawer-panel')
+    .locator('img[data-testid="object-preview-media"]');
+  await expect
+    .poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth), {
+      message: `the preview of ${objectName} never decoded`,
+    })
+    .toBeGreaterThan(0);
+}
+
+async function expectAudioPreviewLoaded(page: Page, objectName: string): Promise<void> {
+  const audio = page
+    .getByTestId('object-details-drawer-panel')
+    .locator('audio[data-testid="object-preview-media"]');
+  // HAVE_METADATA (1) or later: the browser fetched and parsed the file
+  await expect
+    .poll(() => audio.evaluate((element: HTMLAudioElement) => element.readyState), {
+      message: `the player for ${objectName} never loaded its metadata`,
+    })
+    .toBeGreaterThanOrEqual(1);
 }
 
 for (const region of REGIONS) {
@@ -154,28 +260,31 @@ for (const region of REGIONS) {
       await createBucketWithKey(page, uniqueBucketName('paid', region), region);
     });
 
-    test(`paid user can upload object and navigate to it (${region})`, async ({ page }) => {
+    test(`paid user can upload an image and preview it in the object panel (${region})`, async ({
+      page,
+    }) => {
       test.setTimeout(UPLOAD_TEST_TIMEOUT_MS);
 
-      const bucketName = await openFirstBucketInRegion(page, region);
-      const objectName = uniqueObjectName();
+      const { bucketName, objectName } = await uploadAndOpenInPanel(page, region, IMAGE_FILE);
+      await expectImagePreviewLoaded(page, objectName);
 
-      await submitUploadExpectingSuccess(page, bucketName, objectName, region);
-
-      // On success the upload page navigates back to the bucket detail page.
-      await expect(page).toHaveURL(
-        (url) =>
-          url.pathname === `/buckets/${bucketName}` && url.searchParams.get('region') === region,
-      );
-
-      // The object row is keyed by its object key via data-object-key.
-      await page.locator(`[data-testid="object-row"][data-object-key="${objectName}"]`).click();
+      // The panel's expand button leads to the object's own page
+      await page.getByTestId('object-details-drawer-expand').click();
       await expect(page).toHaveURL(
         (url) =>
           url.pathname === `/buckets/${bucketName}/objects` &&
           url.searchParams.get('region') === region &&
           url.searchParams.get('key') === objectName,
       );
+    });
+
+    test(`paid user can play an uploaded audio file in the object panel (${region})`, async ({
+      page,
+    }) => {
+      test.setTimeout(UPLOAD_TEST_TIMEOUT_MS);
+
+      const { objectName } = await uploadAndOpenInPanel(page, region, AUDIO_FILE);
+      await expectAudioPreviewLoaded(page, objectName);
     });
   });
 
@@ -192,26 +301,31 @@ for (const region of REGIONS) {
       await createBucketWithKey(page, uniqueBucketName('trial', region), region);
     });
 
-    test(`trial user can upload object and navigate to it (${region})`, async ({ page }) => {
+    test(`trial user can upload an image and preview it in the object panel (${region})`, async ({
+      page,
+    }) => {
       test.setTimeout(UPLOAD_TEST_TIMEOUT_MS);
 
-      const bucketName = await openFirstBucketInRegion(page, region);
-      const objectName = uniqueObjectName();
+      const { bucketName, objectName } = await uploadAndOpenInPanel(page, region, IMAGE_FILE);
+      await expectImagePreviewLoaded(page, objectName);
 
-      await submitUploadExpectingSuccess(page, bucketName, objectName, region);
-
-      await expect(page).toHaveURL(
-        (url) =>
-          url.pathname === `/buckets/${bucketName}` && url.searchParams.get('region') === region,
-      );
-
-      await page.locator(`[data-testid="object-row"][data-object-key="${objectName}"]`).click();
+      // The panel's expand button leads to the object's own page
+      await page.getByTestId('object-details-drawer-expand').click();
       await expect(page).toHaveURL(
         (url) =>
           url.pathname === `/buckets/${bucketName}/objects` &&
           url.searchParams.get('region') === region &&
           url.searchParams.get('key') === objectName,
       );
+    });
+
+    test(`trial user can play an uploaded audio file in the object panel (${region})`, async ({
+      page,
+    }) => {
+      test.setTimeout(UPLOAD_TEST_TIMEOUT_MS);
+
+      const { objectName } = await uploadAndOpenInPanel(page, region, AUDIO_FILE);
+      await expectAudioPreviewLoaded(page, objectName);
     });
   });
 
@@ -256,7 +370,10 @@ for (const region of REGIONS) {
     test(`unpaid user cannot upload object (${region})`, async ({ page }) => {
       const bucketName = await openFirstBucketInRegion(page, region);
 
-      await submitUpload(page, bucketName, uniqueObjectName());
+      await submitUpload(page, bucketName, {
+        file: IMAGE_FILE,
+        objectName: uniqueObjectName(IMAGE_FILE),
+      });
 
       // Presign endpoint returns 403 (GRACE_PERIOD_WRITE_BLOCKED) for past_due
       // accounts; the upload hook catches the error, marks the file as failed,

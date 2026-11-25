@@ -212,9 +212,20 @@ export function parseS3ErrorResponse(xml: string): { code: string; message: stri
   return { code, message };
 }
 
+/** A non-2xx answer from S3, with its HTTP status. */
+export class S3RequestError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'S3RequestError';
+    this.status = status;
+  }
+}
+
 /**
  * Execute a presigned URL and handle S3-level errors.
- * Throws an Error with the S3 error message on non-2xx responses.
+ * Throws an `S3RequestError` with the S3 error message on non-2xx responses.
  */
 export async function executePresignedUrl(url: string, method: string): Promise<Response> {
   const response = await fetch(url, { method });
@@ -223,9 +234,9 @@ export async function executePresignedUrl(url: string, method: string): Promise<
     const body = await response.text();
     if (body) {
       const s3Error = parseS3ErrorResponse(body);
-      throw new Error(`S3 error: ${s3Error.code} - ${s3Error.message}`);
+      throw new S3RequestError(`S3 error: ${s3Error.code} - ${s3Error.message}`, response.status);
     }
-    throw new Error(`S3 request failed with status ${response.status}`);
+    throw new S3RequestError(`S3 request failed with status ${response.status}`, response.status);
   }
 
   return response;

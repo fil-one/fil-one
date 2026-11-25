@@ -55,6 +55,7 @@ const mockParseListObjects = vi.fn<() => ListObjectsResponse>(() => ONE_OBJECT_L
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
+  useRouter: () => ({ history: { back: vi.fn() } }),
   Link: ({ to, children }: { to: string; children: React.ReactNode }) => (
     <a href={to}>{children}</a>
   ),

@@ -15,20 +15,20 @@ import { ShareObjectModal } from '../components/ShareObjectModal';
 import { Skeleton } from '../components/Skeleton';
 import { VersionHistoryCard } from '../components/VersionHistoryCard';
 
-import type {
-  ObjectMetadataResponse,
-  ObjectRetentionInfo,
-  GetBucketResponse,
-  S3ObjectVersion,
-  S3Region,
-} from '@filone/shared';
-import { apiRequest } from '../lib/api.js';
+import type { S3ObjectVersion, S3Region } from '@filone/shared';
+import {
+  bucketQueryOptions,
+  removeObjectMetadata,
+  isRetentionActive,
+  useObjectMetadata,
+} from '../lib/object-metadata.js';
 import { getFolderPrefixes } from '../lib/object-preview.js';
 import {
   getDeleteCopy,
   getMissingReason,
   getVersionState,
   hasReadableLatestAfterDeleting,
+  MISSING_COPY,
   type MissingReason,
   removeVersion,
   useObjectVersions,
@@ -37,32 +37,7 @@ import { useObjectActions } from '../lib/use-object-actions.js';
 import { useHasPermission } from '../lib/use-permissions.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
-import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys, queryClient } from '../lib/query-client.js';
-import { batchPresign } from '../lib/use-presign.js';
-import {
-  parseHeadObjectResponse,
-  parseGetObjectRetentionResponse,
-  executePresignedUrl,
-} from '../lib/aurora-s3.js';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function buildMetadataResponse(
-  head: ReturnType<typeof parseHeadObjectResponse>,
-  retention?: ObjectRetentionInfo,
-): ObjectMetadataResponse {
-  return {
-    key: head.key,
-    sizeBytes: head.sizeBytes,
-    lastModified: head.lastModified,
-    ...(head.etag && { etag: head.etag }),
-    ...(head.contentType && { contentType: head.contentType }),
-    metadata: head.metadata,
-    ...(retention && { retention }),
-  };
-}
+import { queryClient, queryKeys } from '../lib/query-client.js';
 
 export type ObjectDetailPageProps = {
   bucketName: string;
@@ -70,95 +45,6 @@ export type ObjectDetailPageProps = {
   objectKey: string;
   versionId?: string;
 };
-
-async function fetchObjectRetention(
-  url: string,
-  method: string,
-): Promise<ObjectRetentionInfo | undefined> {
-  try {
-    const response = await executePresignedUrl(url, method);
-    const xml = await response.text();
-    return parseGetObjectRetentionResponse(xml) ?? undefined;
-  } catch (err) {
-    // Objects without retention configured return an S3 error — this is expected.
-    const msg = err instanceof Error ? err.message : '';
-    const isExpected =
-      msg.includes('NoSuchObjectLockConfiguration') ||
-      msg.includes('ObjectLockConfigurationNotFoundError');
-    if (!isExpected) {
-      console.error('Failed to fetch object retention:', err);
-    }
-    return undefined;
-  }
-}
-
-/**
- * The bucket's settings, under the bucket page's own key and cache times, so
- * arriving from there costs nothing. Fetched here too because a shared link or a
- * reload lands on this page cold, and Object Lock decides whether the object can
- * hold a retention period at all.
- */
-function bucketQueryOptions(bucketName: string, region: S3Region) {
-  return {
-    queryKey: queryKeys.bucket(bucketName, region),
-    staleTime: LIST_STALE_TIME,
-    gcTime: LIST_GC_TIME,
-    queryFn: () =>
-      apiRequest<GetBucketResponse>(
-        `/buckets/${encodeURIComponent(bucketName)}?${new URLSearchParams({ region }).toString()}`,
-      ),
-  };
-}
-
-async function isObjectLockEnabled(bucketName: string, region: S3Region): Promise<boolean> {
-  try {
-    const { bucket } = await queryClient.ensureQueryData(bucketQueryOptions(bucketName, region));
-    return bucket.objectLockEnabled ?? false;
-  } catch {
-    // Without the bucket's settings the object's own details still load; only the
-    // retention lookup is skipped
-    return false;
-  }
-}
-
-function useObjectMetadata({ bucketName, region, objectKey, versionId }: ObjectDetailPageProps) {
-  return useQuery({
-    queryKey: queryKeys.objectMetadata(bucketName, objectKey, versionId),
-    queryFn: async (): Promise<ObjectMetadataResponse> => {
-      const hasObjectLock = await isObjectLockEnabled(bucketName, region);
-
-      const ops = [
-        {
-          op: 'headObject' as const,
-          bucket: bucketName,
-          key: objectKey,
-          ...(versionId && { versionId }),
-        },
-        ...(hasObjectLock
-          ? [
-              {
-                op: 'getObjectRetention' as const,
-                bucket: bucketName,
-                key: objectKey,
-                ...(versionId && { versionId }),
-              },
-            ]
-          : []),
-      ];
-      const { items } = await batchPresign(region, ops);
-
-      const headResponse = await executePresignedUrl(items[0].url, items[0].method);
-      const head = parseHeadObjectResponse(headResponse, objectKey);
-
-      const retention =
-        hasObjectLock && items[1]
-          ? await fetchObjectRetention(items[1].url, items[1].method)
-          : undefined;
-
-      return buildMetadataResponse(head, retention);
-    },
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -209,21 +95,18 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
     if (versionId) {
       // Out of the cached history before the page moves, so the latest it opens
       // does not still list the deleted version as "Latest" until the refetch.
-      // The plain key's details may be the deleted version's too.
       queryClient.setQueryData(
         queryKeys.objectVersions(bucketName, region, objectKey),
         (old: S3ObjectVersion[] | undefined) => old && removeVersion(old, versionId),
       );
-      queryClient.removeQueries({
-        queryKey: queryKeys.objectMetadata(bucketName, objectKey),
-        exact: true,
-      });
     }
     void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
     void queryClient.invalidateQueries({
       queryKey: queryKeys.objectVersions(bucketName, region, objectKey),
     });
-    void queryClient.invalidateQueries({ queryKey: ['object-metadata', bucketName, objectKey] });
+    // Every version's details, the plain key's among them: they may be the
+    // deleted version's too
+    removeObjectMetadata(bucketName, objectKey);
     if (versionId && hasReadableLatestAfterDeleting(versions, versionId)) {
       void navigate({
         to: '/buckets/$bucketName/objects',
@@ -256,7 +139,6 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
         actions={
           !isError && (
             <ObjectHeaderActions
-              s3Uri={`s3://${bucketName}/${objectKey}`}
               isVersion={Boolean(versionId)}
               canShare={canShare}
               mayDelete={mayDelete}
@@ -282,13 +164,14 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
             <ObjectBodySkeleton />
           ) : (
             <>
-              {metadata.retention?.mode === 'COMPLIANCE' && (
-                <Alert
-                  variant="red"
-                  title="Compliance retention lock"
-                  description={`This object is locked until ${formatRetainUntil(metadata.retention.retainUntilDate)}. It cannot be deleted before this date.`}
-                />
-              )}
+              {metadata.retention?.mode === 'COMPLIANCE' &&
+                isRetentionActive(metadata.retention) && (
+                  <Alert
+                    variant="red"
+                    title="Compliance retention lock"
+                    description={`This object is locked until ${formatRetainUntil(metadata.retention.retainUntilDate)}. It cannot be deleted before this date.`}
+                  />
+                )}
               <ObjectPreviewCard
                 bucketName={bucketName}
                 region={region}
@@ -300,6 +183,7 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
                 onDownload={download}
               />
               <ObjectDetailsCard
+                s3Uri={`s3://${bucketName}/${objectKey}`}
                 metadata={metadata}
                 versionId={versionState.shownVersionId}
                 objectLockEnabled={bucketQuery.data?.bucket.objectLockEnabled ?? false}
@@ -350,18 +234,6 @@ export function ObjectDetailPage(props: ObjectDetailPageProps) {
 // ---------------------------------------------------------------------------
 // Missing
 // ---------------------------------------------------------------------------
-
-const MISSING_COPY = {
-  deleted: { title: 'This object was deleted' },
-  'delete-marker': {
-    title: 'This version is a delete marker',
-    description: 'It records when the object was deleted and has no content to show.',
-  },
-  'not-found': {
-    title: 'Object not found',
-    description: 'It may have been deleted, or the link may be out of date.',
-  },
-} as const;
 
 /**
  * In place of the preview and details cards when the object's metadata failed

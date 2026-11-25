@@ -10,6 +10,7 @@ import {
 } from '../components/ObjectBrowser';
 import { TableSkeleton, type SkeletonColumn } from '../components/Table/TableSkeleton';
 import type { useObjectActions } from '../lib/use-object-actions.js';
+import { useBucketObjectDrawer, type OpenObject } from './BucketObjectDrawer';
 
 // Mirrors ObjectBrowser's columns so the placeholder holds the same shape as the
 // table it stands in for.
@@ -95,6 +96,9 @@ export function ObjectsPanel({
   mayCreateKeys,
   onAddKeyOpenChange,
   onShowKeys,
+  openObject,
+  objectLockEnabled,
+  onObjectDeleted,
   ...browser
 }: {
   loading: boolean;
@@ -117,35 +121,63 @@ export function ObjectsPanel({
   onAddKeyOpenChange: (open: boolean) => void;
   onShowKeys: () => void;
   paging: ObjectBrowserProps['paging'];
+  /** The object open in the details panel, from the URL. */
+  openObject?: OpenObject;
+  objectLockEnabled: boolean;
+  onObjectDeleted: (key: string, versionId?: string) => void;
 }) {
   // An empty bucket's next steps depend on its keys and the caller's permissions, so its
   // empty state waits for both and appears once, in its final form; a bucket with objects
   // does not wait.
+  const objectDrawer = useBucketObjectDrawer({
+    ...browser,
+    openObject,
+    objectLockEnabled,
+    onDownload: objectActions.downloadObject,
+    onDeleted: onObjectDeleted,
+  });
+
+  // A reload or a link with an object open shows the panel over the error or the
+  // placeholder too
   if (listingError) {
-    return <PageErrorState {...listingError} paging={browser.paging} />;
+    return (
+      <>
+        <PageErrorState {...listingError} paging={browser.paging} />
+        {objectDrawer.drawer}
+      </>
+    );
   }
 
   const isEmptyStateUnsettled = accessKeysLoading || permissionsLoading;
   const looksEmpty = browser.versions.length === 0 && browser.folders.length === 0;
   if (loading || (looksEmpty && isEmptyStateUnsettled)) {
-    return <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />;
+    return (
+      <>
+        <TableSkeleton columns={OBJECT_SKELETON_COLUMNS} aria-label="Loading objects" />
+        {objectDrawer.drawer}
+      </>
+    );
   }
 
   return (
-    <ObjectBrowser
-      {...browser}
-      onDownload={objectActions.downloadObject}
-      downloading={objectActions.downloading}
-      canUpload={mayUpload}
-      keyAction={getEmptyBucketKeyAction({
-        activeAccessKeyCount,
-        accessKeysFailed,
-        mayCreateKeys,
-        onAddKeyOpenChange,
-        onShowKeys,
-      })}
-      onDelete={mayDelete ? objectActions.deleteObject : undefined}
-      onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
-    />
+    <>
+      <ObjectBrowser
+        {...browser}
+        {...objectDrawer.browserProps}
+        onDownload={objectActions.downloadObject}
+        downloading={objectActions.downloading}
+        canUpload={mayUpload}
+        keyAction={getEmptyBucketKeyAction({
+          activeAccessKeyCount,
+          accessKeysFailed,
+          mayCreateKeys,
+          onAddKeyOpenChange,
+          onShowKeys,
+        })}
+        onDelete={mayDelete ? objectActions.deleteObject : undefined}
+        onBulkDelete={mayDelete ? objectActions.deleteObjects : undefined}
+      />
+      {objectDrawer.drawer}
+    </>
   );
 }

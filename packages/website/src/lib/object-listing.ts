@@ -5,6 +5,7 @@ import {
   parseListObjectVersionsResponse,
   parseListObjectsResponse,
 } from './aurora-s3.js';
+import { UNVERSIONED_ID } from './object-versions.js';
 import { batchPresign } from './use-presign.js';
 
 /**
@@ -166,15 +167,22 @@ export function fetchObjectListingPage(request: ObjectListingRequest): Promise<O
   return request.versioning ? fetchVersionsPage(request) : fetchObjectsPage(request);
 }
 
-/** A cached page with one version removed, after that version was deleted. */
+/**
+ * A cached page with one version removed, after that version was deleted. The
+ * listing writes S3's "null" ID as '', while a delete names it "null", so the two
+ * are read as one ID.
+ */
 export function removeVersionFromPage(
   page: ObjectListingPage | undefined,
   key: string,
   versionId: string,
 ): ObjectListingPage | undefined {
   if (!page) return page;
+  const deletedId = versionId || UNVERSIONED_ID;
   return {
     ...page,
-    versions: page.versions.filter((v) => !(v.key === key && v.versionId === versionId)),
+    versions: page.versions.filter(
+      (v) => !(v.key === key && (v.versionId || UNVERSIONED_ID) === deletedId),
+    ),
   };
 }

@@ -272,6 +272,14 @@ export type ObjectBrowserProps = {
   canUpload?: boolean;
   /** The API key step the empty state offers beside upload. Absent when there is none to offer. */
   keyAction?: EmptyBucketKeyAction;
+  /**
+   * Opens a row's object in place, in the bucket page's details panel. Without it
+   * a row opens the object page.
+   */
+  onOpenObject?: (key: string, versionId: string) => void;
+  /** The pointer rests on a row, or a row takes focus. */
+  onHoverObject?: (key: string, versionId: string) => void;
+  onHoverObjectEnd?: () => void;
   /** Sub-folder prefixes on this page, each ending in '/'. */
   folders: string[];
   /** Previous and next through a folder that spans pages. Absent when it does not. */
@@ -311,6 +319,9 @@ export function ObjectBrowser({
   onBulkDelete,
   canUpload = true,
   keyAction,
+  onOpenObject,
+  onHoverObject,
+  onHoverObjectEnd,
   folders,
   paging,
 }: ObjectBrowserProps) {
@@ -348,7 +359,13 @@ export function ObjectBrowser({
         setConfirmDeleteOpen(true);
       },
     }),
+    onHover: onHoverObject,
+    onHoverEnd: onHoverObjectEnd,
     onNavigate: (key, versionId) => {
+      if (onOpenObject) {
+        onOpenObject(key, versionId);
+        return;
+      }
       void navigate({
         to: '/buckets/$bucketName/objects',
         params: { bucketName },

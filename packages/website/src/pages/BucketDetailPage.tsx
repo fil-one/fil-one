@@ -13,6 +13,7 @@ import { AddBucketKeyModal } from '../components/AddBucketKeyModal';
 import { BucketPropertyCards } from '../components/BucketPropertiesCard';
 import { countObjects } from '../components/ObjectBrowser';
 import { ObjectsPanel } from './BucketObjectsPanel';
+import type { OpenObject } from './BucketObjectDrawer';
 import { useBucketTabs } from '../lib/use-bucket-tabs.js';
 import { EmptyBucketAction } from '../components/EmptyBucketAction';
 import { BucketAccessTab } from '../components/BucketAccessTab';
@@ -306,13 +307,54 @@ function describeListing(objects: ReturnType<typeof useObjectListing>, currentPr
   };
 }
 
+/**
+ * Brings the bucket's cached listing, histories and usage up to date after
+ * objects are deleted, from the table or the details panel alike.
+ */
+function useObjectCacheRefresh(bucketName: string, region: S3Region) {
+  const queryClient = useQueryClient();
+  const refreshAfterBulkDelete = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.objectVersions(bucketName, region) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
+  }, [queryClient, bucketName, region]);
+
+  const invalidateObjectsCache = useCallback(
+    (key: string, versionId?: string) => {
+      if (versionId) {
+        queryClient.setQueriesData<ObjectListingPage>(
+          { queryKey: queryKeys.objects(bucketName, region) },
+          (old) => removeVersionFromPage(old, key, versionId),
+        );
+      }
+      void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.objectVersions(bucketName, region),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.bucketAnalytics(bucketName, region),
+      });
+    },
+    [queryClient, bucketName, region],
+  );
+
+  return { refreshAfterBulkDelete, invalidateObjectsCache };
+}
+
 export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
   region: S3Region;
+  /** The object open in the details panel, from the URL. */
+  openObject?: OpenObject;
 };
 
-export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPageProps) {
+export function BucketDetailPage({
+  bucketName,
+  prefix,
+  region,
+  openObject,
+}: BucketDetailPageProps) {
   const s3Endpoint = getS3Endpoint(region, FILONE_STAGE);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -369,29 +411,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     : displayObjectCount(analyticsData, page, listing.coversBucket);
   const keyCount = accessKeysLoading ? undefined : accessKeys.length;
 
-  const refreshAfterBulkDelete = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.objectVersions(bucketName, region) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
-  }, [queryClient, bucketName, region]);
-
-  const invalidateObjectsCache = useCallback(
-    (key: string, versionId?: string) => {
-      if (versionId) {
-        queryClient.setQueriesData<ObjectListingPage>(
-          { queryKey: queryKeys.objects(bucketName, region) },
-          (old) => removeVersionFromPage(old, key, versionId),
-        );
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.objectVersions(bucketName, region),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.bucketAnalytics(bucketName, region),
-      });
-    },
-    [queryClient, bucketName, region],
+  const { refreshAfterBulkDelete, invalidateObjectsCache } = useObjectCacheRefresh(
+    bucketName,
+    region,
   );
 
   const objectActions = useObjectActions({
@@ -506,6 +528,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onAddKeyOpenChange={setAddKeyOpen}
               onShowKeys={tabs.showKeysTab}
               paging={listing.paging}
+              openObject={openObject}
+              objectLockEnabled={bucket?.objectLockEnabled ?? false}
+              onObjectDeleted={invalidateObjectsCache}
             />
           </TabPanel>
 
