@@ -3,14 +3,14 @@ import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftIcon, CaretRightIcon } from '@phosphor-icons/react/dist/ssr';
 
-import { S3_REGION, CreateBucketSchema } from '@filone/shared';
+import { ApiErrorCode, S3_REGION, CreateBucketSchema } from '@filone/shared';
 import type {
   CreateBucketResponse,
   RetentionMode,
   RetentionDurationType,
   S3Region,
 } from '@filone/shared';
-import { apiRequest, errorStatusOf } from '../lib/api.js';
+import { apiRequest, errorCodeOf, errorMessageOf, errorStatusOf } from '../lib/api.js';
 import { queryKeys } from '../lib/query-client.js';
 
 import { Heading } from '../components/Heading/Heading';
@@ -61,6 +61,10 @@ function buildCreateBucketBody(fields: {
 }
 
 const TAKEN_NAME_MESSAGE = 'This name is already taken. Try another.';
+
+// The toast for a bucket created without its settings tells the user how to recover, so it
+// stays open long enough to read, like the delete flow's "bucket is not empty" toast.
+const CONFIGURATION_FAILED_TOAST_DURATION_MS = 12_000;
 
 // ---------------------------------------------------------------------------
 // Component
@@ -135,6 +139,14 @@ export function CreateBucketPage() {
     if (errorStatusOf(err) === 409) {
       setTakenBucket({ name: bucketName.trim(), region });
       return refuseName(TAKEN_NAME_MESSAGE);
+    }
+    // The bucket exists without its settings, and the message asks the user to delete it on
+    // the Buckets page, so the cached list must not hide it
+    if (errorCodeOf(err) === ApiErrorCode.BUCKET_CONFIGURATION_FAILED) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.buckets });
+      return toast.error(errorMessageOf(err, 'Failed to create bucket'), {
+        duration: CONFIGURATION_FAILED_TOAST_DURATION_MS,
+      });
     }
     toast.error(err instanceof Error ? err.message : 'Failed to create bucket');
   }

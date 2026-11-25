@@ -35,6 +35,11 @@ export const ApiErrorCode = {
   BUCKET_NOT_INDEXED: 'BUCKET_NOT_INDEXED',
   /** The bucket still holds objects or object versions — it must be emptied before deletion. */
   BUCKET_NOT_EMPTY: 'BUCKET_NOT_EMPTY',
+  /**
+   * The bucket was created but its versioning or object lock settings could not be
+   * applied. It exists, so the user deletes it and creates it again.
+   */
+  BUCKET_CONFIGURATION_FAILED: 'BUCKET_CONFIGURATION_FAILED',
   /** The submitted account-deletion code does not match the issued one. */
   DELETION_CODE_INVALID: 'DELETION_CODE_INVALID',
   /** The account-deletion code has expired or its attempt budget is spent. */

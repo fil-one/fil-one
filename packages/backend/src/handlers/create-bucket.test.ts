@@ -159,18 +159,23 @@ describe('create-bucket baseHandler', () => {
     expect(result.statusCode).toBe(409);
   });
 
-  it('surfaces the actionable message when configuration fails after create', async () => {
-    const err = new BucketConfigurationError('my-bucket');
-    mockCreateBucket.mockRejectedValue(err);
+  it('answers 500 with advice to delete and recreate the bucket when configuration fails after create', async () => {
+    mockCreateBucket.mockRejectedValue(new BucketConfigurationError('my-bucket'));
 
     const event = buildEvent({ body: validBody(), userInfo: USER_INFO });
     const result = await baseHandler(event);
 
-    expect(result.statusCode).toBe(500);
-    const body = JSON.parse(result.body as string);
-    // Not the generic errorHandlerMiddleware message — the caller gets remediation guidance.
-    expect(body.message).toBe(err.message);
-    expect(body.message).toContain('apply the remaining settings manually with the S3 API');
+    // Not the generic errorHandlerMiddleware message: the caller gets steps they can take.
+    expect({ ...result, body: parseResponseBody(result) }).toMatchObject({
+      statusCode: 500,
+      body: {
+        message:
+          'Bucket "my-bucket" was created, but its versioning or object lock settings could not be applied. ' +
+          'Delete the bucket on the Buckets page and create it again. ' +
+          'If this keeps happening, contact support@filone.com.',
+        code: 'BUCKET_CONFIGURATION_FAILED',
+      },
+    });
   });
 
   it('passes versioning, lock, and retention to orchestrator.createBucket', async () => {

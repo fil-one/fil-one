@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+import { queryKeys } from '../lib/query-client.js';
 import { seedPermissions } from '../lib/test-permissions.js';
 import { ToastProvider } from '../components/Toast/ToastProvider.js';
 
@@ -20,8 +21,7 @@ import { CreateBucketPage } from './CreateBucketPage.js';
 
 const BUCKET = 'my-bucket';
 
-function renderPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   seedPermissions(qc);
   return render(
     <QueryClientProvider client={qc}>
@@ -210,6 +210,56 @@ describe('CreateBucketPage — a name that is already taken', () => {
     fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: 'any-other-name' } });
 
     expect(screen.queryByText('This name is already taken. Try another.')).not.toBeInTheDocument();
+  });
+});
+
+describe('CreateBucketPage — a bucket created without its settings', () => {
+  // What apiRequest throws for the backend's 500 when the bucket exists but its
+  // versioning or object lock settings could not be applied.
+  const configurationError = Object.assign(new Error('any configuration message'), {
+    status: 500,
+    code: 'BUCKET_CONFIGURATION_FAILED',
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows the message the create call answers with', async () => {
+    mockApiRequest.mockRejectedValue(configurationError);
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
+    expect(await screen.findByText('any configuration message')).toBeInTheDocument();
+  });
+
+  it('keeps the message open past the default toast duration', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    mockApiRequest.mockRejectedValue(configurationError);
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+    await screen.findByText('any configuration message');
+
+    // Past the 4 seconds every other toast stays open.
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+
+    expect(screen.getByText('any configuration message')).toBeInTheDocument();
+  });
+
+  it('refreshes the bucket list so the bucket can be deleted from the Buckets page', async () => {
+    mockApiRequest.mockRejectedValue(configurationError);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(queryKeys.buckets, { buckets: [] });
+    renderPage(qc);
+    fireEvent.change(screen.getByLabelText('Bucket name'), { target: { value: BUCKET } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create bucket' }));
+
+    await screen.findByText('any configuration message');
+    expect(qc.getQueryState(queryKeys.buckets)).toMatchObject({ isInvalidated: true });
   });
 });
 
