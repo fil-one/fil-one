@@ -13,6 +13,7 @@ import {
   getBillingRecord,
   getHubspotSyncFields,
   testOrgId,
+  CLOCK_TIMEOUT_MS,
 } from './helpers.js';
 
 describe('Past Due Recovery (customer.subscription.updated to active)', () => {
@@ -36,7 +37,7 @@ describe('Past Due Recovery (customer.subscription.updated to active)', () => {
       paymentMethodId: decliningId,
     });
     await pollForBillingStatusChange({ userId, expectedStatus: 'past_due', fromStatus: 'active' });
-  }, 420_000);
+  }, CLOCK_TIMEOUT_MS);
 
   afterAll(async () => {
     // Deleting the clock deletes its customer and subscriptions with it.

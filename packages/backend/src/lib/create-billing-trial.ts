@@ -2,7 +2,7 @@ import { SubscriptionStatus } from '@filone/shared';
 import { isOrgDeleting, OrgDeletingError } from './org-profile.ts';
 import { getStripeClient, getBillingSecrets } from './stripe-client.ts';
 import { getSubscription, updateSubscription } from './subscription-store.ts';
-import { TRIAL_DURATION_DAYS } from '@filone/shared/src/constants.ts';
+import { TRIAL_DURATION_DAYS, TRIAL_GRACE_DAYS } from '@filone/shared/src/constants.ts';
 
 export interface CreateBillingTrialParams {
   userId: string;
@@ -52,7 +52,13 @@ export async function createBillingTrial({
   const now = new Date();
   const trialDurationMs = TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000;
   const trialEndsAt = new Date(now.getTime() + trialDurationMs);
-  const trialEndsAtUnix = Math.floor(trialEndsAt.getTime() / 1000);
+  // Stripe's trial runs on through the grace period that follows ours, so the
+  // subscription bills nothing during grace and a card added then ends the
+  // trial on this subscription. Stripe cancels it when grace runs out. It cannot
+  // pause instead: Stripe refuses a pause at trial end on a metered price, and
+  // pausing a trialing subscription.
+  const stripeTrialEndUnix =
+    Math.floor(trialEndsAt.getTime() / 1000) + TRIAL_GRACE_DAYS * 24 * 60 * 60;
 
   const stripe = getStripeClient();
   const secrets = getBillingSecrets();
@@ -78,7 +84,7 @@ export async function createBillingTrial({
     {
       customer: stripeCustomerId,
       items: [{ price: secrets.STRIPE_PRICE_ID }],
-      trial_end: trialEndsAtUnix,
+      trial_end: stripeTrialEndUnix,
       trial_settings: { end_behavior: { missing_payment_method: 'cancel' } },
       metadata: { userId, orgId },
     },
