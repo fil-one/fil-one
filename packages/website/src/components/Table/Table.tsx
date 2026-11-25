@@ -25,6 +25,7 @@ Table.Body = TableBody;
 Table.Row = TableRow;
 Table.Head = TableHead;
 Table.Cell = TableCell;
+Table.RowButton = TableRowButton;
 Table.SelectHead = TableSelectHead;
 Table.SelectCell = TableSelectCell;
 
@@ -46,17 +47,69 @@ type TableRowProps = React.ComponentProps<'tr'> & {
    * background in `className` should only do so for the unselected case.
    */
   selected?: boolean;
+  /**
+   * Runs when a pointer clicks anywhere in the row outside its own controls.
+   *
+   * A mouse convenience only. The row takes no role and no tab stop: a row that
+   * is a button hides its cells from table navigation, and the buttons inside it
+   * become controls nested in a control, which screen readers cannot reach
+   * reliably. The same action must also be a `Table.RowButton` in the row, which
+   * is how a keyboard or screen reader gets to it.
+   */
+  onActivate?: () => void;
 };
 
-function TableRow({ selected, className, ...props }: TableRowProps) {
+function TableRow({ selected, onActivate, className, onClick, ...props }: TableRowProps) {
   return (
     <tr
       data-slot="table-row"
       data-selected={selected ? '' : undefined}
       className={clsx(
         'border-b border-zinc-100 transition-colors last:border-0 hover:bg-zinc-50',
+        onActivate && 'cursor-pointer',
         className,
         selected && 'bg-(--color-row-selected) hover:bg-(--color-row-selected)',
+      )}
+      onClick={(event) => {
+        onClick?.(event);
+        if (onActivate && isRowItself(event.currentTarget, event.target)) onActivate();
+      }}
+      {...props}
+    />
+  );
+}
+
+/**
+ * Whether a click landed on the row itself rather than on one of its controls
+ * (a checkbox, a button, a link), which does its own job and not the row's too.
+ *
+ * React passes events up through portals, so a click in a menu or dialog opened
+ * from the row reaches the row as well; those are outside the row's elements.
+ */
+function isRowItself(row: Element, target: EventTarget): boolean {
+  return (
+    target instanceof Element &&
+    row.contains(target) &&
+    target.closest('button, a, input, label, [role="checkbox"]') === null
+  );
+}
+
+/**
+ * The row's main action as a real button, usually the name in the first cell.
+ * Pair it with `onActivate` on the row so a click anywhere in the row does the
+ * same; this button is what a keyboard reaches and a screen reader announces.
+ *
+ * It truncates with its text, so a long name never pushes the row's other
+ * controls out of view.
+ */
+function TableRowButton({ className, ...props }: React.ComponentProps<'button'>) {
+  return (
+    <button
+      type="button"
+      data-slot="table-row-button"
+      className={clsx(
+        'min-w-0 cursor-pointer truncate rounded-md text-left hover:underline focus-visible:brand-outline',
+        className,
       )}
       {...props}
     />

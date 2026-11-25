@@ -151,7 +151,7 @@ describe('OrganizationAuditTab', () => {
   // Without it the viewer can say a role changed but not what it changed to.
   it('shows the payload when a row is expanded', async () => {
     renderTab();
-    fireEvent.click(await screen.findByRole('button', { name: 'Show details' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Role changed', expanded: false }));
 
     expect(screen.getByText('Previous role')).toBeInTheDocument();
     expect(screen.getByText(OrgRole.Member)).toBeInTheDocument();
@@ -161,7 +161,7 @@ describe('OrganizationAuditTab', () => {
     // So a screen reader announces which content the button owns, not just
     // that something, somewhere, changed.
     renderTab();
-    const toggle = await screen.findByRole('button', { name: 'Show details' });
+    const toggle = await screen.findByRole('button', { name: 'Role changed' });
     fireEvent.click(toggle);
 
     const controlsId = toggle.getAttribute('aria-controls');
@@ -171,8 +171,8 @@ describe('OrganizationAuditTab', () => {
 
   it('collapses a row that is already open', async () => {
     renderTab();
-    fireEvent.click(await screen.findByRole('button', { name: 'Show details' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Hide details' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Role changed', expanded: false }));
+    fireEvent.click(screen.getByRole('button', { name: 'Role changed', expanded: true }));
 
     expect(screen.queryByText('Previous role')).not.toBeInTheDocument();
   });

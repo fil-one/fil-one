@@ -72,19 +72,27 @@ function VersionRow({
       className={`border-b border-zinc-100 last:border-0 ${
         isCurrent ? 'bg-(--color-row-selected)' : 'cursor-pointer hover:bg-zinc-50'
       }`}
+      // A mouse convenience: the row is not a control, so the version id below is
+      // the button a keyboard or screen reader opens the version with.
       onClick={isCurrent ? undefined : navigateToVersion}
-      role={isCurrent ? undefined : 'button'}
-      tabIndex={isCurrent ? undefined : 0}
-      onKeyDown={
-        isCurrent
-          ? undefined
-          : (e) => {
-              if (e.key === 'Enter' || e.key === ' ') navigateToVersion();
-            }
-      }
     >
       <td className="px-3 py-2 font-mono text-zinc-700">
-        {truncatedId}
+        {isCurrent ? (
+          truncatedId
+        ) : (
+          <button
+            type="button"
+            aria-label={`Open version ${version.versionId}`}
+            className="cursor-pointer rounded-md hover:underline focus-visible:brand-outline"
+            onClick={(clicked) => {
+              // The row would open it a second time.
+              clicked.stopPropagation();
+              navigateToVersion();
+            }}
+          >
+            {truncatedId}
+          </button>
+        )}
         {isCurrent && (
           <span className="ml-1.5 text-meta font-medium text-brand-600">(viewing)</span>
         )}

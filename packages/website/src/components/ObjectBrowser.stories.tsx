@@ -179,7 +179,9 @@ const meta: Meta<typeof ObjectBrowser> = {
   component: ObjectBrowser,
   decorators: [withRouter],
   // Rows offer Share only on a paid plan; an unknown plan would show it disabled.
-  parameters: { billingStatus: SubscriptionStatus.Active },
+  // a11y: fails the story tests on any axe violation, so a row control nested
+  // in another or a column without a header cannot come back unnoticed.
+  parameters: { billingStatus: SubscriptionStatus.Active, a11y: { test: 'error' } },
 };
 
 export default meta;

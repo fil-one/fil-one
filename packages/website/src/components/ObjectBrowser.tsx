@@ -213,7 +213,9 @@ function ObjectTable({
           <Table.Head>Name</Table.Head>
           <Table.Head className={SECONDARY_COLUMN}>Size</Table.Head>
           <Table.Head className={SECONDARY_COLUMN}>Last modified</Table.Head>
-          <Table.Head aria-label="Actions" />
+          <Table.Head>
+            <span className="sr-only">Actions</span>
+          </Table.Head>
         </Table.Row>
       </Table.Header>
       <Table.Body>
