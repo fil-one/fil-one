@@ -94,7 +94,8 @@ Eight decisions carry the design:
    account-deletion worker the one credential that keeps `DeleteItem`.
 7. **Account deletion destroys the org's audit partition.**
 8. **The activity feed and the audit log stay separate**, with a stated boundary
-   between them.
+   between them. (Superseded by
+   [`2026-10-activity-feed-reads-audit-log.md`](./2026-10-activity-feed-reads-audit-log.md).)
 
 ## What the index cannot reach
 
@@ -394,6 +395,8 @@ a vendor call and its local write is the most operationally interesting row the 
 can hold, and collapsing each pair into one line would hide it.
 
 ## 8. The activity feed stays what it is
+
+> Superseded by [`2026-10-activity-feed-reads-audit-log.md`](./2026-10-activity-feed-reads-audit-log.md): the feed now reads the audit log.
 
 `GET /api/activity` remains a synthesized convenience feed for the dashboard,
 readable by every role and assembled from live state. Its bucket entries come from

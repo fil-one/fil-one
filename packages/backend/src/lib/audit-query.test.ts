@@ -10,7 +10,12 @@ vi.mock('sst', () => sstResourceMock());
 
 const ddbMock = mockClient(DynamoDBClient);
 
-import { queryAllAuditEvents, queryAuditEvents, resolveWindow } from './audit-query.ts';
+import {
+  queryRecentAuditEvents,
+  queryAllAuditEvents,
+  queryAuditEvents,
+  resolveWindow,
+} from './audit-query.ts';
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const OTHER_ORG = '99999999-8888-7777-6666-555555555555';
@@ -403,5 +408,246 @@ describe('queryAllAuditEvents', () => {
     const result = await queryAllAuditEvents({ orgId: ORG_ID, filters: WINDOW, maxRows: 2 });
 
     expect(result.truncated).toBe(true);
+  });
+});
+
+describe('queryRecentAuditEvents', () => {
+  const RECENT_WINDOW = { from: '2026-08-01T00:00:00.000Z', to: NOW };
+  // Any two types: the read treats every type alike.
+  const TYPES = ['bucket.created', 'key.created'] as const;
+  const MORE = { LastEvaluatedKey: marshall({ gsi1sk: 'any' }) };
+
+  /** The event type a Query reads, from the index partition it names. */
+  function typeOf(input: { ExpressionAttributeValues?: Record<string, unknown> }): string {
+    const pk = unmarshall(input.ExpressionAttributeValues as never)[':pk'] as string;
+    return pk.split('#TYPE#')[1];
+  }
+
+  /** Answers each type's reads, in order, from its own list of pages. */
+  function pagesByType(pages: Record<string, { Items: unknown[]; LastEvaluatedKey?: unknown }[]>) {
+    ddbMock.on(QueryCommand).callsFake((input) => pages[typeOf(input)]?.shift() ?? { Items: [] });
+  }
+
+  /** A page whose last examined row is `sortKey`, with older rows left unread. */
+  function stoppedAt(sortKey: string) {
+    return { LastEvaluatedKey: marshall({ gsi1sk: sortKey }) };
+  }
+
+  /** A stored two-phase row, a succeeded completion unless `phase` says otherwise. */
+  function twoPhaseRow(
+    createdAt: string,
+    eventId: string,
+    type: string,
+    phase: Record<string, string> = {
+      phase: 'completion',
+      correlationId: 'any-correlation',
+      outcome: 'succeeded',
+    },
+  ) {
+    return { ...storedEvent(createdAt, eventId, type), ...marshall(phase) };
+  }
+
+  function readsOf(type: string) {
+    return ddbMock.commandCalls(QueryCommand).filter((call) => typeOf(call.args[0].input) === type);
+  }
+
+  function queryRecent(options: Partial<Parameters<typeof queryRecentAuditEvents>[0]> = {}) {
+    return queryRecentAuditEvents({
+      orgId: ORG_ID,
+      types: [...TYPES],
+      ...RECENT_WINDOW,
+      limit: 5,
+      ...options,
+    });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+    ddbMock.reset();
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('reads each type it is given on the type index, newest first, over the window it is given', async () => {
+    await queryRecent();
+
+    expect(
+      ddbMock.commandCalls(QueryCommand).map((call) => typeOf(call.args[0].input)),
+    ).toStrictEqual([...TYPES]);
+    expect(queryInput()).toMatchObject({
+      IndexName: 'byType',
+      KeyConditionExpression: 'gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to',
+      Limit: 100,
+      ScanIndexForward: false,
+    });
+    expect(unmarshall(queryInput().ExpressionAttributeValues!)).toMatchObject({
+      ':pk': `ORG#${ORG_ID}#TYPE#bucket.created`,
+      ':from': RECENT_WINDOW.from,
+      ':to': RECENT_WINDOW.to,
+    });
+  });
+
+  it('filters out expired rows and nothing else, leaving the rest to the caller', async () => {
+    await queryRecent();
+
+    expect(
+      ddbMock.commandCalls(QueryCommand).map((call) => call.args[0].input.FilterExpression),
+    ).toStrictEqual(['#ttl > :now', '#ttl > :now']);
+  });
+
+  it('merges the types newest first and returns every event, not only the limit', async () => {
+    pagesByType({
+      'bucket.created': [
+        {
+          Items: [
+            twoPhaseRow('2026-08-11T00:00:00.000Z', 'evt-mid', 'bucket.created'),
+            twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-old', 'bucket.created'),
+          ],
+        },
+      ],
+      'key.created': [
+        { Items: [twoPhaseRow('2026-08-12T00:00:00.000Z', 'evt-new', 'key.created')] },
+      ],
+    });
+
+    const result = await queryRecent({ limit: 2 });
+
+    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-new', 'evt-mid', 'evt-old']);
+  });
+
+  it('returns events in every phase and outcome', async () => {
+    pagesByType({
+      'bucket.created': [
+        {
+          Items: [
+            twoPhaseRow('2026-08-10T00:00:01.000Z', 'evt-failed', 'bucket.created', {
+              phase: 'completion',
+              correlationId: 'any-correlation',
+              outcome: 'failed',
+            }),
+            twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-intent', 'bucket.created', {
+              phase: 'intent',
+              correlationId: 'any-correlation',
+            }),
+          ],
+        },
+      ],
+    });
+
+    const result = await queryRecent();
+
+    expect(result).toMatchObject({
+      events: [
+        { eventId: 'evt-failed', phase: 'completion', outcome: 'failed' },
+        { eventId: 'evt-intent', phase: 'intent' },
+      ],
+    });
+  });
+
+  it('keeps reading a type past a page that held nothing', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [], ...MORE },
+        { Items: [twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-1', 'bucket.created')] },
+      ],
+    });
+
+    const result = await queryRecent({ limit: 1 });
+
+    expect(result.events.map((e) => e.eventId)).toStrictEqual(['evt-1']);
+    expect(readsOf('bucket.created')).toHaveLength(2);
+  });
+
+  it('stops reading a type once the limit is matched', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-1', 'bucket.created')], ...MORE },
+      ],
+    });
+
+    await queryRecent({ limit: 1 });
+
+    expect(readsOf('bucket.created')).toHaveLength(1);
+  });
+
+  it('keeps reading a type past events the caller does not count', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-1', 'bucket.created')], ...MORE },
+        { Items: [twoPhaseRow('2026-08-09T00:00:00.000Z', 'evt-2', 'bucket.created')] },
+      ],
+    });
+
+    await queryRecent({ limit: 1, isMatch: (event) => event.eventId === 'evt-2' });
+
+    expect(readsOf('bucket.created')).toHaveLength(2);
+  });
+
+  it('stops reading a type after three pages however much history is left', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [], ...MORE });
+
+    const result = await queryRecent();
+
+    expect(readsOf('bucket.created')).toHaveLength(3);
+    expect(result.cost).toStrictEqual({ pages: 6, rows: 0 });
+  });
+
+  it('returns events older than where a read stopped early, and the time it stopped at', async () => {
+    // `key.created` stopped on 08-11 with older rows unread; the 08-10 event
+    // still comes back, and the caller decides whether to cut it.
+    pagesByType({
+      'bucket.created': [
+        { Items: [twoPhaseRow('2026-08-10T00:00:00.000Z', 'evt-older', 'bucket.created')] },
+      ],
+      'key.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        { Items: [], ...stoppedAt('2026-08-11T00:00:00.000Z#any-event') },
+      ],
+    });
+
+    const result = await queryRecent();
+
+    expect(result).toMatchObject({
+      events: [{ eventId: 'evt-older' }],
+      completeSince: '2026-08-11T00:00:00.000Z',
+    });
+  });
+
+  it('reports the newest time any read stopped at', async () => {
+    pagesByType({
+      'bucket.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        { Items: [], ...stoppedAt('2026-08-09T00:00:00.000Z#any-event') },
+      ],
+      'key.created': [
+        { Items: [], ...MORE },
+        { Items: [], ...MORE },
+        { Items: [], ...stoppedAt('2026-08-11T00:00:00.000Z#any-event') },
+      ],
+    });
+
+    const result = await queryRecent();
+
+    expect(result).toMatchObject({ completeSince: '2026-08-11T00:00:00.000Z' });
+  });
+
+  it('reports no such time when every read reached the start of the window', async () => {
+    const result = await queryRecent();
+
+    expect(result).toStrictEqual({ events: [], cost: { pages: 2, rows: 0 } });
+  });
+
+  it('cancels every read with the signal it is given', async () => {
+    const signal = new AbortController().signal;
+
+    await queryRecent({ signal });
+
+    // aws-sdk-client-mock types `args` as the one-element `[command]` tuple,
+    // but the recorded call carries every argument `send` received.
+    const options = ddbMock.commandCalls(QueryCommand).map((call) => (call.args as unknown[])[1]);
+    expect(options).toStrictEqual(Array(2).fill({ abortSignal: signal }));
   });
 });

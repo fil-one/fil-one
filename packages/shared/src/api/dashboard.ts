@@ -60,7 +60,14 @@ interface BaseActivity {
 
 export interface BucketActivity extends BaseActivity {
   resourceType: 'bucket';
-  action: 'bucket.created' | 'bucket.deleted';
+  /** Derived from the audit union, as on {@link KeyActivity}: the feed reads the audit log. */
+  action: Extract<AuditEventType, 'bucket.created' | 'bucket.deleted'>;
+  /**
+   * True on a creation the audit log has no record of, found in the bucket
+   * listing instead: the bucket was made outside the console, such as with the
+   * S3 API, so nobody is named as having made it. Absent on rows from the log.
+   */
+  createdOutsideConsole?: boolean;
 }
 
 export interface ObjectActivity extends BaseActivity {
@@ -76,7 +83,7 @@ export interface KeyActivity extends BaseActivity {
    * calling the same thing two names: the dashboard renders "deleted", so the
    * event type is `key.deleted` and both read from one list.
    */
-  action: Extract<AuditEventType, 'key.created' | 'key.deleted'>;
+  action: Extract<AuditEventType, 'key.created' | 'key.rotated' | 'key.deleted'>;
 }
 
 export type RecentActivity = BucketActivity | ObjectActivity | KeyActivity;
@@ -91,6 +98,7 @@ export const ACTIVITY_ACTION_LABELS: Record<RecentActivity['action'], string> = 
   'object.uploaded': 'Uploaded',
   'object.deleted': 'Deleted',
   'key.created': 'Created',
+  'key.rotated': 'Rotated',
   'key.deleted': 'Deleted',
 };
 

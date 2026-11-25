@@ -3,7 +3,7 @@ import type { AttributeValue } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { Resource } from 'sst';
 import { AUDIT_RETENTION_DAYS } from '@filone/shared';
-import type { AuditEvent, AuditQueryFilters, AuditWindow } from '@filone/shared';
+import type { AuditEvent, AuditEventType, AuditQueryFilters, AuditWindow } from '@filone/shared';
 import { AuditKeys } from './audit.ts';
 import { getDynamoClient } from './ddb-client.ts';
 import type { DynamoCursor } from './ddb-paging.ts';
@@ -200,6 +200,200 @@ export async function queryAllAuditEvents({
   const page = await queryAuditEvents({ orgId, filters, limit: maxRows + 1 });
   const truncated = page.events.length > maxRows;
   return { ...page, truncated };
+}
+
+/**
+ * Rows one recent-events read examines per round trip. A two-phase action
+ * writes an intent and a completion, so a page holds at least 50 actions even
+ * when every other row is an intent.
+ */
+const RECENT_ROWS_PER_PAGE = 100;
+
+/**
+ * Round trips one event type may take before a recent-events read stops
+ * reading it. With {@link RECENT_ROWS_PER_PAGE} this caps the rows a read
+ * examines, whatever the size of the org's history.
+ */
+const RECENT_MAX_PAGES_PER_TYPE = 3;
+
+/** An event a read returned, beside the index sort key that orders it. */
+interface SortedAuditEvent {
+  sortKey: string;
+  event: AuditEvent;
+}
+
+/** What one event type's read returned, and where it stopped if it stopped early. */
+interface AuditEventTypeRead {
+  events: SortedAuditEvent[];
+  cost: AuditQueryCost;
+  /**
+   * The sort key of the last row examined, when rows older than it were left
+   * unread. Absent when the read reached the start of the window.
+   */
+  unreadBelow?: string;
+}
+
+/** What a recent-events read returned, what it cost, and how far back it is complete. */
+export interface RecentAuditEventsRead {
+  /**
+   * Every unexpired event the reads returned, in every phase and outcome,
+   * newest first. Includes events older than {@link completeSince}.
+   */
+  events: AuditEvent[];
+  cost: AuditQueryCost;
+  /**
+   * When a read stopped early, the time before which events of its type may be
+   * missing. Absent when every read reached the start of the window. A caller
+   * that shows events of several types in one list cuts the list here, so a
+   * missing event cannot belong between two it shows.
+   */
+  completeSince?: string;
+}
+
+/**
+ * The newest events of each of `types`, read with a bounded cost, for a
+ * caller that shows recent history on every page load, such as the
+ * dashboard's activity feed.
+ *
+ * Each type is read on the `byType` index, in parallel, newest first, until
+ * `limit` of its events satisfy `isMatch`, the window ends, or the type has
+ * used {@link RECENT_MAX_PAGES_PER_TYPE} round trips. Reading the org
+ * partition instead would examine every other type's rows too, and for a
+ * caller that wants little, the whole window. Events written before the index
+ * existed are absent from it, the gap the module comment describes.
+ *
+ * `isMatch` only decides when a type's read has enough. Every event the reads
+ * returned comes back, whether it matched or not, so the caller filters, and
+ * can use events it does not show, such as the intent that tells it an action
+ * started but never finished. There is no cursor: the read has no next page.
+ */
+export async function queryRecentAuditEvents({
+  orgId,
+  types,
+  from,
+  to,
+  limit,
+  isMatch = () => true,
+  signal,
+}: {
+  orgId: string;
+  types: AuditEventType[];
+  from: string;
+  to: string;
+  limit: number;
+  isMatch?: (event: AuditEvent) => boolean;
+  /** Cancels the reads in flight, so none outlives the request. */
+  signal?: AbortSignal;
+}): Promise<RecentAuditEventsRead> {
+  const reads = await Promise.all(
+    types.map((type) => readAuditEventType({ orgId, type, from, to, limit, isMatch, signal })),
+  );
+
+  const cost: AuditQueryCost = { pages: 0, rows: 0 };
+  for (const read of reads) {
+    cost.pages += read.cost.pages;
+    cost.rows += read.cost.rows;
+  }
+
+  // Sort keys are `{createdAt}#{eventId}`, so comparing them as strings orders
+  // events by time.
+  const events = reads
+    .flatMap((read) => read.events)
+    .sort((a, b) => (a.sortKey < b.sortKey ? 1 : -1))
+    .map(({ event }) => event);
+  const cutoff = reads
+    .map((read) => read.unreadBelow)
+    .filter((sortKey) => sortKey !== undefined)
+    .reduce<string | undefined>(
+      (max, sortKey) => (max && max > sortKey ? max : sortKey),
+      undefined,
+    );
+
+  if (cutoff === undefined) return { events, cost };
+  // The time is the part of the sort key before `#`.
+  return { events, cost, completeSince: cutoff.split('#')[0] };
+}
+
+/**
+ * One event type's newest events, read until `limit` of them satisfy
+ * `isMatch`, the window ends, or the page budget runs out.
+ */
+async function readAuditEventType({
+  orgId,
+  type,
+  from,
+  to,
+  limit,
+  isMatch,
+  signal,
+}: {
+  orgId: string;
+  type: AuditEventType;
+  from: string;
+  to: string;
+  limit: number;
+  isMatch: (event: AuditEvent) => boolean;
+  signal: AbortSignal | undefined;
+}): Promise<AuditEventTypeRead> {
+  const cost: AuditQueryCost = { pages: 0, rows: 0 };
+  const events: SortedAuditEvent[] = [];
+  let matched = 0;
+  let startKey: DynamoCursor;
+
+  do {
+    const page = await getDynamoClient().send(
+      new QueryCommand(buildRecentQueryInput({ orgId, type, from, to, startKey })),
+      { abortSignal: signal },
+    );
+    cost.pages += 1;
+    cost.rows += page.Items?.length ?? 0;
+    // Every row and `LastEvaluatedKey` read from the index carries its string
+    // sort key: DynamoDB indexes only items that have the index's key attributes.
+    for (const item of page.Items ?? []) {
+      const event = unmarshallAuditEvent(item);
+      events.push({ sortKey: item.gsi1sk!.S!, event });
+      if (isMatch(event)) matched += 1;
+    }
+    startKey = page.LastEvaluatedKey;
+  } while (startKey && matched < limit && cost.pages < RECENT_MAX_PAGES_PER_TYPE);
+
+  if (!startKey) return { events, cost };
+  return { events, cost, unreadBelow: startKey.gsi1sk!.S! };
+}
+
+function buildRecentQueryInput({
+  orgId,
+  type,
+  from,
+  to,
+  startKey,
+}: {
+  orgId: string;
+  type: AuditEventType;
+  from: string;
+  to: string;
+  startKey: DynamoCursor;
+}) {
+  return {
+    TableName: auditTableName(),
+    IndexName: EVENT_TYPE_INDEX,
+    KeyConditionExpression: 'gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to',
+    // The TTL clause is the one `queryInput` explains: DynamoDB serves expired
+    // rows until it gets round to deleting them.
+    FilterExpression: '#ttl > :now',
+    ExpressionAttributeNames: { '#ttl': 'ttl' },
+    ExpressionAttributeValues: marshall({
+      ':pk': AuditKeys.typePk(orgId, type),
+      ':from': from,
+      // Exclusive, as `queryInput` explains for the same bound.
+      ':to': to,
+      ':now': Math.floor(Date.now() / 1000),
+    }),
+    Limit: RECENT_ROWS_PER_PAGE,
+    // Newest first.
+    ScanIndexForward: false,
+    ...(startKey ? { ExclusiveStartKey: startKey } : {}),
+  };
 }
 
 /** The Query for whichever path the filters select. */
