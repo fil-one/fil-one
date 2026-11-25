@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MeResponse } from '@filone/shared';
 import { Route as rootRoute } from './__root';
 import { AppShell } from '../components/AppShell';
+import { AppShellSkeleton } from '../components/AppShellSkeleton.js';
 import { BillingRequiredGate } from '../components/BillingRequiredGate.js';
 import { Button } from '../components/Button';
 import { getMe, logout } from '../lib/api.js';
@@ -61,6 +62,14 @@ export const Route = createRoute({
     if (naming) throw redirect({ to: naming });
   },
   component: AppWithOrgGuard,
+  // `beforeLoad` holds every console page until `/me` answers, and without a
+  // pending view the screen stayed blank for that whole wait. The router shows
+  // this only while the layout has never loaded (a cold load), not when it
+  // re-runs `beforeLoad` on a later navigation. Under 300ms it never appears,
+  // so a fast load does not flash it; once shown it stays for the router's
+  // default 500ms minimum, so a load just past the threshold does not blink.
+  pendingComponent: AppShellSkeleton,
+  pendingMs: 300,
 });
 
 /**
