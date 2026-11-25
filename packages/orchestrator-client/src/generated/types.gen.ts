@@ -674,8 +674,15 @@ export type PostTenantsByTenantIdAccessKeysErrors = {
    */
   404: Error;
   /**
-   * An access key with this `name` already exists for the tenant
-   * (service key) or for the principal (principal-bound key).
+   * The key was not created. The error `code` tells the two causes
+   * apart:
+   *
+   * * `AccessKeyNameConflict`: an access key with this `name`
+   * already exists for the tenant (service key) or for the
+   * principal (principal-bound key).
+   * * `ConcurrentChange`: another write to the tenant's keys got
+   * in the way. Nothing was written, and the caller may send
+   * the same request again.
    *
    */
   409: Error;

@@ -8,6 +8,7 @@ import {
   S3Region,
   SubscriptionStatus,
   buildStatement,
+  type ListObjectsResponse,
 } from '@filone/shared';
 
 import { seedPermissions } from '../lib/test-permissions.js';
@@ -45,11 +46,12 @@ const mockGetMe = vi.fn(() => new Promise(() => {}));
 
 // One object by default, so the table renders a row with its per-row controls
 // and the header actions the empty bucket would otherwise hide from everybody.
-const ONE_OBJECT_LISTING = {
+const ONE_OBJECT_LISTING: ListObjectsResponse = {
   objects: [{ key: OBJECT_KEY, sizeBytes: 12, lastModified: '2026-01-01T00:00:00Z' }],
+  commonPrefixes: [],
   isTruncated: false,
 };
-const mockParseListObjects = vi.fn(() => ONE_OBJECT_LISTING);
+const mockParseListObjects = vi.fn<() => ListObjectsResponse>(() => ONE_OBJECT_LISTING);
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
@@ -90,7 +92,7 @@ vi.mock('../lib/use-presign.js', () => ({
 vi.mock('../lib/aurora-s3.js', () => ({
   executePresignedUrl: () =>
     Promise.resolve({ text: () => Promise.resolve('<ListBucketResult/>') }),
-  parseListObjectVersionsResponse: () => ({ versions: [], isTruncated: false }),
+  parseListObjectVersionsResponse: () => ({ versions: [], commonPrefixes: [], isTruncated: false }),
   parseListObjectsResponse: () => mockParseListObjects(),
 }));
 
@@ -299,7 +301,7 @@ describe('BucketDetailPage — loading', () => {
     expect(screen.getByTestId('bucket-objects-tab')).toHaveTextContent(/^Objects$/);
     // The placeholder mirrors the real table: column labels are known before any
     // row is, so they are shown rather than pulsed.
-    for (const label of ['Name', 'Size', 'Last Modified']) {
+    for (const label of ['Name', 'Size', 'Last modified']) {
       expect(screen.getByRole('columnheader', { name: label })).toBeInTheDocument();
     }
   });
@@ -320,7 +322,9 @@ describe('BucketDetailPage — the object controls', () => {
 
     expect(await screen.findByTestId('object-row')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Upload object' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: `Delete ${OBJECT_KEY}` })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: `Actions for ${OBJECT_KEY}` }));
+    expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     // The server-side job, which empties the whole bucket rather than a selection.
     expect(screen.getByRole('button', { name: 'Empty bucket' })).toBeInTheDocument();
 
@@ -345,7 +349,9 @@ describe('BucketDetailPage — the object controls', () => {
     renderPage(OrgRole.ReadOnly);
 
     expect(await screen.findByTestId('object-row')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: `Delete ${OBJECT_KEY}` })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: `Actions for ${OBJECT_KEY}` }));
+    expect(await screen.findByRole('menuitem', { name: 'Share link' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Delete' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Empty bucket' })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
@@ -354,7 +360,9 @@ describe('BucketDetailPage — the object controls', () => {
 // A bucket the create form just made opens here, so the empty state carries the
 // API key step the form no longer asks about.
 describe('BucketDetailPage — an empty bucket', () => {
-  beforeEach(() => mockParseListObjects.mockReturnValue({ objects: [], isTruncated: false }));
+  beforeEach(() =>
+    mockParseListObjects.mockReturnValue({ objects: [], commonPrefixes: [], isTruncated: false }),
+  );
 
   it('opens the Add key modal from the empty state when no key reaches the bucket', async () => {
     mockBucketKeys.mockReturnValue([]);
@@ -453,20 +461,24 @@ describe('BucketDetailPage — sharing from a row', () => {
   it('opens the share dialog for the row it was clicked on', async () => {
     renderPage(OrgRole.Member);
 
-    fireEvent.click(await screen.findByRole('button', { name: `Share ${OBJECT_KEY}` }));
+    fireEvent.click(await screen.findByRole('button', { name: `Actions for ${OBJECT_KEY}` }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Share link' }));
 
     expect(await screen.findByTestId('share-object-modal')).toBeInTheDocument();
   });
 
-  it('keeps Share visible but disabled while the plan is a trial', async () => {
+  it('keeps Share visible but disabled, saying why, while the plan is a trial', async () => {
     mockGetBilling.mockResolvedValueOnce({
       subscription: { planId: PlanId.FreeTrial, status: SubscriptionStatus.Trialing },
     });
     renderPage(OrgRole.Owner);
-
-    const share = await screen.findByRole('button', { name: `Share ${OBJECT_KEY}` });
     await waitFor(() => expect(mockGetBilling).toHaveBeenCalled());
-    expect(share).toBeDisabled();
+
+    fireEvent.click(await screen.findByRole('button', { name: `Actions for ${OBJECT_KEY}` }));
+
+    expect(
+      await screen.findByRole('menuitem', { name: 'Share link (paid plans)' }),
+    ).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('enables Share once the plan is paid', async () => {
@@ -475,7 +487,30 @@ describe('BucketDetailPage — sharing from a row', () => {
     });
     renderPage(OrgRole.Owner);
 
-    const share = await screen.findByRole('button', { name: `Share ${OBJECT_KEY}` });
-    await waitFor(() => expect(share).toBeEnabled());
+    await waitFor(() => expect(mockGetBilling).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByRole('button', { name: `Actions for ${OBJECT_KEY}` }));
+
+    expect(await screen.findByRole('menuitem', { name: 'Share link' })).not.toHaveAttribute(
+      'aria-disabled',
+    );
+  });
+});
+
+describe('BucketDetailPage: a folder that spans pages', () => {
+  it('moves to the next page of the folder from the pager', async () => {
+    mockParseListObjects
+      .mockReturnValueOnce({ ...ONE_OBJECT_LISTING, nextToken: 'any-token', isTruncated: true })
+      .mockReturnValue({
+        objects: [{ key: 'any-later-object', sizeBytes: 1, lastModified: '2026-01-01T00:00:00Z' }],
+        commonPrefixes: [],
+        isTruncated: false,
+      });
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('any-later-object')).toBeInTheDocument();
+    expect(screen.getByTestId('listing-pager-range')).toHaveTextContent('Showing 2–2');
   });
 });

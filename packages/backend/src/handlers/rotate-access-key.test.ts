@@ -51,7 +51,11 @@ vi.mock('../middleware/csrf.js', () => ({
 
 import { ApiErrorCode, OrgRole } from '@filone/shared';
 import { baseHandler } from './rotate-access-key.ts';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
+import {
+  AccessKeyAlreadyExistsError,
+  AccessKeyConcurrentChangeError,
+  AccessKeyValidationError,
+} from '../lib/errors.ts';
 import { RevocationNotRecordedError } from '../lib/key-revocation.ts';
 import { buildEvent, membershipFor, stubMembershipRead } from '../test/lambda-test-utilities.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
@@ -710,6 +714,29 @@ describe('rotate-access-key baseHandler', () => {
 
     expect(result.statusCode).toBe(409);
     expect(mockDeleteAccessKey).not.toHaveBeenCalled();
+  });
+
+  describe('when the vendor kept reporting a concurrent change', () => {
+    beforeEach(() => {
+      stubStoredKey();
+      stubWrites();
+      mockIssueAccessKey.mockRejectedValue(new AccessKeyConcurrentChangeError());
+    });
+
+    it('answers 409 asking the caller to try again', async () => {
+      const result = await baseHandler(eventFor());
+
+      expect({ statusCode: result.statusCode, body: body(result) }).toStrictEqual({
+        statusCode: 409,
+        body: { message: 'Another change to this organization’s keys was in progress. Try again.' },
+      });
+    });
+
+    it('closes the correlation as failed', async () => {
+      await baseHandler(eventFor());
+
+      expect(standaloneEvents().at(-1)).toMatchObject({ phase: 'completion', outcome: 'failed' });
+    });
   });
 
   it('takes the replacement back when its row does not land', async () => {

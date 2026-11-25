@@ -41,7 +41,7 @@
     "@pulumi/aws": "^7.53.0",
     "@pulumi/command": "^1.2.1",
     "@types/node": "^24.12.0",
-    "aws-cdk-lib": "^2.245.0",
+    "aws-cdk-lib": "^2.260.0",
     "constructs": "^10.6.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",

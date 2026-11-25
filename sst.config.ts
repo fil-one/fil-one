@@ -1289,7 +1289,14 @@ export default $config({
       // scoped to the RAG query endpoint (distinct from S3 access keys), and
       // their handlers touch nothing but UserInfoTable, which allResources
       // already links.
+      // A list filtered by bucket reads that bucket's policy to decide which
+      // principal-bound keys reach it: an S3 operation signed with the tenant's
+      // console S3 key, as in `get-bucket-policy` above.
       'list-access-keys': {
+        extraEnv: orchestratorEnv,
+        permissions: [
+          { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
+        ],
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
       'create-access-key': accessKeyMintRoute,

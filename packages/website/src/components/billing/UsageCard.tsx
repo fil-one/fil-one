@@ -11,6 +11,7 @@ import {
   daysLeftLabel,
   estimateDiscountNote,
   formatCents,
+  getAppliedDiscounts,
   usageLimits,
 } from '../../lib/billing-view.js';
 
@@ -30,8 +31,6 @@ interface Stat {
   valueTestId?: string;
   /** A few words beside the figure, qualifying it. */
   aside?: string | null;
-  /** A line under the figure, for the exception that needs explaining. */
-  caption?: string;
   emphasis: StatEmphasis;
   /** The allowance this figure is drawn against, when it has one. */
   limit?: number | null;
@@ -109,11 +108,7 @@ export function UsageCard({ subscription, storageBytesUsed, egressBytesUsed }: U
       value: formatCents(cost.cents),
       valueTestId: 'estimated-cost',
       emphasis: 'lead',
-      aside: estimateDiscountNote(subscription.discounts),
-      // A discounted minimum is still the minimum, but beside the discount note
-      // it was a second qualifier on one figure. The discount is the one the
-      // customer is looking for, so it is the one said.
-      caption: cost.minimumApplied && !cost.discounted ? 'Your monthly minimum' : undefined,
+      aside: estimateDiscountNote(getAppliedDiscounts(subscription)),
     });
   }
 
@@ -183,8 +178,7 @@ export function UsageCard({ subscription, storageBytesUsed, egressBytesUsed }: U
  * allowance to fill, and takes the tile's full width under the number.
  */
 function StatFigure({ stat }: { stat: Stat }) {
-  const { label, note, value, valueTestId, aside, caption, emphasis, limit, used, meterLabel } =
-    stat;
+  const { label, note, value, valueTestId, aside, emphasis, limit, used, meterLabel } = stat;
   const limited = typeof limit === 'number' && limit > 0;
   const pct = limited && typeof used === 'number' ? Math.min(100, (used / limit) * 100) : 0;
 
@@ -219,7 +213,6 @@ function StatFigure({ stat }: { stat: Stat }) {
         )}
       </div>
 
-      {caption && <span className="text-xs text-zinc-500">{caption}</span>}
       {limited && meterLabel && (
         <div className="mt-1">
           <ProgressBar value={pct} size="md" label={meterLabel} />

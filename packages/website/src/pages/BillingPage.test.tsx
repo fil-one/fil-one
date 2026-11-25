@@ -204,20 +204,21 @@ describe('BillingPage — inactive subscription', () => {
     expect(screen.queryByText('No card on file')).not.toBeInTheDocument();
   });
 
-  it('reads the plan card status as Active, not Trial, while trialing', async () => {
+  it('shows no status pill on the plan card while trialing, a trial being in good standing', async () => {
     mockGetBilling.mockResolvedValue(trialingBilling());
     renderPage();
 
-    await screen.findByText('Free trial');
-    expect(screen.getByText('Active')).toBeInTheDocument();
-    expect(screen.queryByText('Trial')).not.toBeInTheDocument();
+    const status = await screen.findByTestId('subscription-status');
+    expect(status).toHaveAttribute('data-status', SubscriptionStatus.Trialing);
+    expect(status).toBeEmptyDOMElement();
   });
 
   it('states the trial deadline with no rate and no "Trial" subject', async () => {
     mockGetBilling.mockResolvedValue(trialingBilling());
     renderPage();
 
-    expect(await screen.findByTestId('plan-meta')).toHaveTextContent(/^Ends in \d+ days?$/);
+    expect(await screen.findByTestId('plan-timeline')).toHaveTextContent(/^Ends in \d+ days?$/);
+    expect(screen.queryByTestId('plan-price')).not.toBeInTheDocument();
   });
 });
 
@@ -266,8 +267,9 @@ describe('BillingPage — an organization on a negotiated price', () => {
 
     await screen.findByText('Business');
     // No per-TB figure, because this price has no single one, and no minimum
-    // standing in for one either. The renewal shares the line.
-    expect(screen.getByTestId('plan-meta')).toHaveTextContent(/^Custom pricing · Renews /);
+    // standing in for one either. The renewal follows on its own line.
+    expect(screen.getByTestId('plan-price')).toHaveTextContent(/^Custom pricing$/);
+    expect(screen.getByTestId('plan-timeline')).toHaveTextContent(/^Renews /);
     expect(screen.queryByText(/\/TB per month/)).not.toBeInTheDocument();
     expect(screen.queryByText(/minimum/)).not.toBeInTheDocument();
   });
@@ -386,7 +388,7 @@ describe('BillingPage — an organization billed manually', () => {
     renderPage();
 
     expect(await screen.findByTestId('plan-name')).toHaveTextContent('Custom plan');
-    expect(screen.getByTestId('plan-meta')).toHaveTextContent(/^Billed manually$/);
+    expect(screen.getByTestId('plan-price')).toHaveTextContent(/^Billed manually$/);
   });
 
   it('offers no plan controls, since the plan is changed through the account team', async () => {
@@ -521,5 +523,39 @@ describe('BillingPage — a canceled account', () => {
     await screen.findByText(CANCELED);
     expect(screen.queryByRole('button', { name: 'Reactivate' })).not.toBeInTheDocument();
     expect(container.querySelector('#billing-plan-cta-button')).toBeNull();
+  });
+});
+
+describe('BillingPage — the plan and card a paying customer sees', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUsage.mockResolvedValue(USAGE);
+    mockGetInvoices.mockResolvedValue({ invoices: [] });
+  });
+
+  it('shows the discounted rate with the discount beside it for a recurring percentage off', async () => {
+    const billing = payAsYouGoBilling();
+    billing.subscription.discounts = [{ duration: 'forever', percentOff: 20 }];
+    mockGetBilling.mockResolvedValue(billing);
+    renderPage();
+
+    // 20% off $4.99, with the list rate not repeated beside it.
+    expect(await screen.findByTestId('plan-price')).toHaveTextContent(/^\$3\.99\/TB per month$/);
+    expect(screen.getByTestId('plan-discount')).toHaveTextContent(/^20% off every invoice$/);
+  });
+
+  it('names the card by its network and last four', async () => {
+    mockGetBilling.mockResolvedValue({
+      ...payAsYouGoBilling(),
+      paymentMethod: { id: 'any-card', brand: 'amex', last4: '0005', expMonth: 4, expYear: 2031 },
+    });
+    renderPage();
+
+    // The last four sit in a span of their own, so match the whole line.
+    const cardLine = await screen.findByText(
+      (_, element) =>
+        element?.tagName === 'P' && element.textContent === 'American Express •••• 0005',
+    );
+    expect(cardLine).toBeInTheDocument();
   });
 });
