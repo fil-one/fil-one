@@ -14,12 +14,15 @@ import { ObjectSearchBar, PrefixBreadcrumb } from './ObjectBrowserToolbar';
 import { Table } from './Table/Table';
 import { FolderRow, ObjectEntryRows, SECONDARY_COLUMN } from './ObjectBrowserRows';
 import { BulkActionsBar } from './BulkActionsBar';
+import { DeleteFoldersDialog } from './DeleteFoldersDialog';
+import { useFolderDelete } from './use-folder-delete';
 import type { DeleteRequest, RowActions, RowSelection } from './ObjectBrowserRows';
 import type { ObjectDeleteTarget } from '../lib/use-object-actions.js';
 import type { BrowseEntry } from '../lib/object-grouping.js';
 import { getEntriesAtPrefix, groupVersionsByKey } from '../lib/object-grouping.js';
 import type { ObjectSelection } from '../lib/object-selection.js';
-import { selectionId, useObjectSelection } from '../lib/object-selection.js';
+import type { FolderDeleteJobs } from '../lib/use-folder-delete-jobs.js';
+import { folderSelectionId, selectionId, useObjectSelection } from '../lib/object-selection.js';
 import { useCanShareObjects } from '../lib/use-can-share-objects.js';
 import { useListingPageScroll } from '../lib/use-listing-page-scroll.js';
 
@@ -261,7 +264,7 @@ function ObjectTable({
               onChange={() => selection.setMany(idsOnPage, !allSelected)}
               // A folder spread over pages is selected a page at a time, and
               // the label says so rather than implying the whole folder.
-              label={isPaged ? 'Select all objects on this page' : 'Select all objects'}
+              label={isPaged ? 'Select all items on this page' : 'Select all items'}
             />
           )}
           <Table.Head>Name</Table.Head>
@@ -279,7 +282,7 @@ function ObjectTable({
                 name={entry.name}
                 prefix={entry.prefix}
                 onPrefixChange={onPrefixChange}
-                selectable={rowSelection.selectable}
+                selection={rowSelection}
               />
             );
           }
@@ -342,6 +345,17 @@ export type ObjectBrowserProps = {
   listingError?: ListingError;
   /** Absent where the browser offers no search, which leaves out the box. */
   onSearchChange?: (search: string) => void;
+  /**
+   * The folder deletions started from this browser. The caller holds them, so
+   * they are still watched, and refresh the listing when they finish, after
+   * the user opens another folder and this browser is replaced.
+   */
+  folderDeleteJobs: FolderDeleteJobs;
+  /**
+   * Called when a folder deletion dialog closes after its jobs started, so the
+   * caller can list what is left.
+   */
+  onFoldersDeleted?: () => void;
 };
 
 /**
@@ -413,6 +427,8 @@ export function ObjectBrowser({
   listedSearch = search,
   listingError,
   onSearchChange,
+  folderDeleteJobs,
+  onFoldersDeleted,
 }: ObjectBrowserProps) {
   const navigate = useNavigate();
   // The request outlives the dialog's open state, so the copy holds while the
@@ -422,9 +438,15 @@ export function ObjectBrowser({
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const share = useRowShare();
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
-  const selection = useObjectSelection(versions);
+  const selection = useObjectSelection(versions, folders);
   const pageScroll = useListingPageScroll(paging);
   const selectedCount = selection.selected.size;
+  const folderDelete = useFolderDelete({
+    jobs: folderDeleteJobs,
+    selection,
+    onBulkDelete,
+    onFoldersDeleted,
+  });
 
   function toggleExpand(key: string) {
     setExpandedKeys((prev) => {
@@ -465,8 +487,10 @@ export function ObjectBrowser({
 
   const groups = groupVersionsByKey(versions);
   const entries = getEntriesAtPrefix(groups, folders, currentPrefix);
-  const idsOnPage = entries.flatMap((entry) =>
-    entry.kind === 'object' ? [selectionId(entry.group.key, entry.group.latest.versionId)] : [],
+  const idsOnPage = entries.map((entry) =>
+    entry.kind === 'object'
+      ? selectionId(entry.group.key, entry.group.latest.versionId)
+      : folderSelectionId(entry.prefix),
   );
   const isPaged = paging !== undefined && (paging.hasPrevious || paging.hasNext);
   const place = currentPrefix ? 'folder' : 'bucket';
@@ -510,7 +534,11 @@ export function ObjectBrowser({
         <BulkActionsBar
           count={selectedCount}
           onClear={selection.clear}
-          onDelete={() => setConfirmBulkDelete(true)}
+          // A selection holding a folder deletes on the server, in a dialog
+          // that tracks the job; objects alone keep the quick confirmation.
+          onDelete={() => {
+            if (!folderDelete.request()) setConfirmBulkDelete(true);
+          }}
           deleteButtonId="object-browser-bulk-delete-button"
         />
       )}
@@ -564,12 +592,14 @@ export function ObjectBrowser({
         open={confirmBulkDelete}
         onClose={() => setConfirmBulkDelete(false)}
         onConfirm={async () => {
-          await onBulkDelete?.(selection.targets());
+          await onBulkDelete?.(selection.targets().objects);
           selection.clear();
         }}
         {...describeBulkDelete(selectedCount)}
         confirmLabel="Delete"
       />
+
+      <DeleteFoldersDialog {...folderDelete.dialogProps} />
     </div>
   );
 }

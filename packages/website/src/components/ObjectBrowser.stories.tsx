@@ -12,6 +12,7 @@ import {
 import { S3Region, SubscriptionStatus, type S3ObjectVersion } from '@filone/shared';
 
 import { ObjectBrowser, type ObjectBrowserProps } from './ObjectBrowser';
+import { useFolderDeleteJobs } from '../lib/use-folder-delete-jobs.js';
 
 const sampleVersions: S3ObjectVersion[] = [
   {
@@ -135,18 +136,21 @@ function listFolder(bucket: S3ObjectVersion[], prefix: string) {
 function ObjectBrowserHarness(
   initial: Omit<
     ObjectBrowserProps,
-    'onPrefixChange' | 'onDelete' | 'versioningEnabled' | 'region' | 'folders'
+    'onPrefixChange' | 'onDelete' | 'versioningEnabled' | 'region' | 'folders' | 'folderDeleteJobs'
   > & {
     versioningEnabled?: boolean;
     region?: S3Region;
   },
 ) {
   const [prefix, setPrefix] = useState(initial.currentPrefix);
+  const region = initial.region ?? S3Region.EuWest1;
+  const folderDeleteJobs = useFolderDeleteJobs({ bucketName: initial.bucketName, region });
   return (
     <ObjectBrowser
       {...initial}
       {...listFolder(initial.versions, prefix)}
-      region={initial.region ?? S3Region.EuWest1}
+      region={region}
+      folderDeleteJobs={folderDeleteJobs}
       versioningEnabled={initial.versioningEnabled ?? true}
       currentPrefix={prefix}
       onPrefixChange={setPrefix}

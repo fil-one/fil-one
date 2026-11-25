@@ -166,12 +166,18 @@ function TableSelectHead({ checked, onChange, label, className }: SelectionProps
 }
 
 /**
- * Row cell holding a selection checkbox. Clicks stop here so ticking a row in a
- * table whose rows are themselves clickable does not also trigger the row.
+ * Row cell holding a selection checkbox. Clicks and key presses stop here so
+ * ticking a row in a table whose rows are themselves clickable does not also
+ * trigger the row. The checkbox toggles on Space's key-up, so its key-down
+ * would otherwise reach a row that opens on Space.
  */
 function TableSelectCell({ checked, onChange, label, className }: SelectionProps) {
   return (
-    <TableCell className={clsx('w-0 pr-0', className)} onClick={(e) => e.stopPropagation()}>
+    <TableCell
+      className={clsx('w-0 pr-0', className)}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
       <Checkbox checked={checked} onChange={onChange} aria-label={label} />
     </TableCell>
   );

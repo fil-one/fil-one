@@ -1,0 +1,246 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, act, screen } from '@testing-library/react';
+
+import { BulkDeleteJobStatus, BulkDeleteScope, S3Region, type BulkDeleteJob } from '@filone/shared';
+
+import { ToastProvider } from '../components/Toast/index.js';
+import { JOB_REQUEST_CONCURRENCY, useFolderDeleteJobs } from './use-folder-delete-jobs.js';
+
+vi.mock('./api.js', () => ({ apiRequest: vi.fn() }));
+
+import { apiRequest } from './api.js';
+const mockApiRequest = vi.mocked(apiRequest);
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  return <ToastProvider>{children}</ToastProvider>;
+}
+
+/** A running job for `prefix`; each test overrides only what it is about. */
+function job(prefix: string, overrides: Partial<BulkDeleteJob> = {}): BulkDeleteJob {
+  return {
+    jobId: `job-for-${prefix}`,
+    bucketName: 'any-bucket',
+    region: S3Region.EuWest1,
+    prefix,
+    scope: BulkDeleteScope.AllVersions,
+    status: BulkDeleteJobStatus.Running,
+    deletedCount: 0,
+    failedCount: 0,
+    failures: [],
+    startedAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+/** Answers each create with a running job for the prefix it was sent. */
+function createRunningJobs() {
+  mockApiRequest.mockImplementation((_path, init) => {
+    const { prefix } = JSON.parse(init!.body as string) as { prefix: string };
+    return Promise.resolve({ job: job(prefix) });
+  });
+}
+
+/** Answers each progress read with `status` for the job it names. */
+function reportJobs(statusFor: (jobId: string) => BulkDeleteJob) {
+  mockApiRequest.mockImplementation((path) => {
+    const jobId = decodeURIComponent(path.split('/').at(-1)!);
+    return Promise.resolve({ job: statusFor(jobId) });
+  });
+}
+
+function renderJobs(onFinished?: (jobs: BulkDeleteJob[]) => void) {
+  return renderHook(
+    () => useFolderDeleteJobs({ bucketName: 'any-bucket', region: S3Region.EuWest1, onFinished }),
+    { wrapper },
+  );
+}
+
+async function advancePoll() {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubGlobal('crypto', { randomUUID: () => '3f1a6b2c-8d4e-4f0a-9b3c-1d2e3f4a5b6c' });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+describe('useFolderDeleteJobs: starting', () => {
+  it('starts one all-versions job per folder prefix', async () => {
+    createRunningJobs();
+    const { result } = renderJobs();
+
+    await act(() => result.current.start(['any-folder/', 'other-folder/']));
+
+    const bodies = mockApiRequest.mock.calls.map(([path, init]) => [
+      path,
+      JSON.parse(init!.body as string),
+    ]);
+    expect(bodies).toMatchObject([
+      [
+        '/buckets/any-bucket/bulk-delete?region=eu-west-1',
+        { prefix: 'any-folder/', scope: BulkDeleteScope.AllVersions },
+      ],
+      [
+        '/buckets/any-bucket/bulk-delete?region=eu-west-1',
+        { prefix: 'other-folder/', scope: BulkDeleteScope.AllVersions },
+      ],
+    ]);
+    expect(result.current.isRunning).toBe(true);
+  });
+
+  it('keeps the jobs that started, and says how many folders did not, when some fail', async () => {
+    mockApiRequest
+      .mockResolvedValueOnce({ job: job('any-folder/') })
+      .mockRejectedValueOnce(new Error('any refusal'));
+    const { result } = renderJobs();
+
+    await act(() => result.current.start(['any-folder/', 'other-folder/']));
+
+    expect(result.current.jobs.map((j) => j.prefix)).toStrictEqual(['any-folder/']);
+    expect(await screen.findByText("Couldn't start deleting 1 of 2 folders")).toBeInTheDocument();
+  });
+
+  it('keeps the folders whose deletion did not start', async () => {
+    mockApiRequest
+      .mockResolvedValueOnce({ job: job('any-folder/') })
+      .mockRejectedValueOnce(new Error('any refusal'));
+    const { result } = renderJobs();
+
+    const outcome = await act(() => result.current.start(['any-folder/', 'other-folder/']));
+
+    expect(outcome).toMatchObject({
+      started: [{ prefix: 'any-folder/' }],
+      unstartedPrefixes: ['other-folder/'],
+    });
+    expect(result.current.unstartedPrefixes).toStrictEqual(['other-folder/']);
+  });
+
+  it(`starts no more than ${JOB_REQUEST_CONCURRENCY} jobs at once`, async () => {
+    let inFlight = 0;
+    let mostInFlight = 0;
+    mockApiRequest.mockImplementation(async (_path, init) => {
+      inFlight += 1;
+      mostInFlight = Math.max(mostInFlight, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      const { prefix } = JSON.parse(init!.body as string) as { prefix: string };
+      return { job: job(prefix) };
+    });
+    const { result } = renderJobs();
+    const prefixes = Array.from({ length: 10 }, (_, i) => `folder-${i}/`);
+
+    await act(() => result.current.start(prefixes));
+
+    expect(mostInFlight).toBe(JOB_REQUEST_CONCURRENCY);
+    expect(result.current.jobs).toHaveLength(10);
+  });
+
+  it("shows the API's reason when a single folder's deletion cannot start", async () => {
+    mockApiRequest.mockRejectedValue(new Error('any refusal'));
+    const { result } = renderJobs();
+
+    await act(() => result.current.start(['any-folder/']));
+
+    expect(result.current.jobs).toStrictEqual([]);
+    expect(await screen.findByText('any refusal')).toBeInTheDocument();
+  });
+});
+
+describe('useFolderDeleteJobs: watching', () => {
+  it('keeps running while any job runs, and does not report finished', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onFinished = vi.fn();
+    createRunningJobs();
+    const { result } = renderJobs(onFinished);
+    await act(() => result.current.start(['any-folder/', 'other-folder/']));
+
+    reportJobs((jobId) =>
+      jobId === 'job-for-any-folder/'
+        ? job('any-folder/', { status: BulkDeleteJobStatus.Completed })
+        : job('other-folder/'),
+    );
+    await advancePoll();
+
+    expect(result.current.isRunning).toBe(true);
+    expect(onFinished).not.toHaveBeenCalled();
+  });
+
+  it('reports finished once, with every job, when the last one finishes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const onFinished = vi.fn();
+    createRunningJobs();
+    const { result } = renderJobs(onFinished);
+    await act(() => result.current.start(['any-folder/', 'other-folder/']));
+
+    reportJobs((jobId) =>
+      job(jobId.replace('job-for-', ''), {
+        status: BulkDeleteJobStatus.Completed,
+        deletedCount: 2,
+      }),
+    );
+    await advancePoll();
+    await advancePoll();
+
+    expect(result.current.isRunning).toBe(false);
+    expect(onFinished.mock.calls).toMatchObject([
+      [
+        [
+          { prefix: 'any-folder/', deletedCount: 2 },
+          { prefix: 'other-folder/', deletedCount: 2 },
+        ],
+      ],
+    ]);
+  });
+
+  /** A deletion of `any-folder/` still running when one of `other-folder/` starts. */
+  async function startSecondDeletionWhileFirstRuns(onFinished?: (jobs: BulkDeleteJob[]) => void) {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    createRunningJobs();
+    const hook = renderJobs(onFinished);
+    await act(() => hook.result.current.start(['any-folder/']));
+    act(() => hook.result.current.reset());
+    await act(() => hook.result.current.start(['other-folder/']));
+    return hook;
+  }
+
+  it("shows only the latest deletion's jobs", async () => {
+    const { result } = await startSecondDeletionWhileFirstRuns();
+
+    expect(result.current.jobs).toMatchObject([{ prefix: 'other-folder/' }]);
+  });
+
+  it("reports finished with the earlier deletion's jobs too, once they finish after a new one starts", async () => {
+    const onFinished = vi.fn();
+    await startSecondDeletionWhileFirstRuns(onFinished);
+
+    reportJobs((jobId) =>
+      job(jobId.replace('job-for-', ''), { status: BulkDeleteJobStatus.Completed }),
+    );
+    await advancePoll();
+    await advancePoll();
+
+    expect(onFinished.mock.calls).toMatchObject([
+      [[{ prefix: 'any-folder/' }, { prefix: 'other-folder/' }]],
+    ]);
+  });
+
+  it('keeps watching after a progress read fails', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    createRunningJobs();
+    const { result } = renderJobs();
+    await act(() => result.current.start(['any-folder/']));
+
+    mockApiRequest.mockRejectedValue(new Error('any network failure'));
+    await advancePoll();
+
+    expect(result.current.isRunning).toBe(true);
+  });
+});

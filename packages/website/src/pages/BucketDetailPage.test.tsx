@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -549,6 +549,219 @@ describe('BucketDetailPage: searching a folder', () => {
     fireEvent.click(within(emptyState).getByRole('button', { name: 'Clear search' }));
 
     expect(await screen.findByTestId('object-row')).toBeInTheDocument();
+  });
+});
+
+describe('BucketDetailPage: deleting a folder', () => {
+  const FOLDER_LISTING: ListObjectsResponse = {
+    ...ONE_OBJECT_LISTING,
+    commonPrefixes: ['any-folder/'],
+  };
+
+  beforeEach(() => {
+    mockParseListObjects.mockReturnValue(FOLDER_LISTING);
+    vi.stubGlobal('crypto', { randomUUID: () => '3f1a6b2c-8d4e-4f0a-9b3c-1d2e3f4a5b6c' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Answers the job's start with a job already finished, as a small folder's is. */
+  function answerBulkDeleteWithCompletedJob() {
+    mockApiRequest.mockImplementation((path: string) =>
+      path.includes('/bulk-delete')
+        ? Promise.resolve({
+            job: {
+              jobId: 'any-job',
+              bucketName: BUCKET,
+              region: REGION,
+              prefix: 'any-folder/',
+              scope: 'allVersions',
+              status: 'completed',
+              deletedCount: 2,
+              failedCount: 0,
+              failures: [],
+              startedAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+            },
+          })
+        : respond(path),
+    );
+  }
+
+  /** Ticks the folder, then confirms the delete from the selection bar. */
+  async function deleteSelectedFolder() {
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Select folder any-folder' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByTestId('delete-folders-dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    return dialog;
+  }
+
+  /** Answers the start with a running job, and every progress read with it finished. */
+  function answerBulkDeleteWithJobThatFinishesOnFirstPoll() {
+    const job = {
+      jobId: 'any-job',
+      bucketName: BUCKET,
+      region: REGION,
+      prefix: 'any-folder/',
+      scope: 'allVersions',
+      deletedCount: 2,
+      failedCount: 0,
+      failures: [],
+      startedAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    };
+    mockApiRequest.mockImplementation((path: string) => {
+      if (path.includes('/bulk-delete-jobs/')) {
+        return Promise.resolve({ job: { ...job, status: 'completed' } });
+      }
+      if (path.includes('/bulk-delete'))
+        return Promise.resolve({ job: { ...job, status: 'running' } });
+      return respond(path);
+    });
+  }
+
+  it('offers no folder checkbox to a role without objects.delete', async () => {
+    renderPage(OrgRole.ReadOnly);
+
+    expect(await screen.findByTestId('folder-row')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('checkbox', { name: 'Select folder any-folder' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('confirms by naming the folder and saying everything in it goes', async () => {
+    renderPage(OrgRole.Owner);
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Select folder any-folder' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    expect(await screen.findByTestId('delete-folders-dialog')).toHaveTextContent(
+      'Everything in any-folder/ will be permanently deleted',
+    );
+  });
+
+  it('starts a server-side deletion of the folder by its prefix', async () => {
+    mockApiRequest.mockImplementation((path: string) =>
+      path.includes('/bulk-delete')
+        ? new Promise(() => {}) // the job's start is what this test reads
+        : respond(path),
+    );
+    renderPage(OrgRole.Owner);
+
+    await deleteSelectedFolder();
+
+    await waitFor(() =>
+      expect(
+        mockApiRequest.mock.calls.filter(([path]) => String(path).includes('/bulk-delete')),
+      ).toMatchObject([
+        [
+          `/buckets/${BUCKET}/bulk-delete?region=${REGION}`,
+          { method: 'POST', body: expect.stringContaining('"prefix":"any-folder/"') },
+        ],
+      ]),
+    );
+  });
+
+  it('lists the bucket and its analytics again once the deletion finishes', async () => {
+    answerBulkDeleteWithCompletedJob();
+    const { client } = renderPage(OrgRole.Owner);
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    const dialog = await deleteSelectedFolder();
+
+    expect(await within(dialog).findByText('Folder deleted')).toBeInTheDocument();
+    expect(invalidate.mock.calls).toEqual(
+      expect.arrayContaining([
+        [{ queryKey: queryKeys.objects(BUCKET, REGION) }],
+        [{ queryKey: queryKeys.bucketAnalytics(BUCKET, REGION) }],
+      ]),
+    );
+  });
+
+  // The listing read as the job finishes can still hold the folder, so the
+  // dialog's Close lists the bucket again rather than leaving it until a reload.
+  it('drops a deleted folder from the list when the finished dialog is closed', async () => {
+    answerBulkDeleteWithCompletedJob();
+    renderPage(OrgRole.Owner);
+    const dialog = await deleteSelectedFolder();
+    await within(dialog).findByText('Folder deleted');
+    // Every listing from here on is the bucket without the folder.
+    mockParseListObjects.mockReturnValue(ONE_OBJECT_LISTING);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => expect(screen.queryByTestId('folder-row')).not.toBeInTheDocument());
+  });
+  // The browser is replaced by a skeleton while another folder loads, so the
+  // page, not the browser, watches the jobs.
+  it('lists the bucket again when a deletion finishes after the user opens another folder', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerBulkDeleteWithJobThatFinishesOnFirstPoll();
+    const { client, rerender } = renderPage(OrgRole.Owner);
+    const dialog = await deleteSelectedFolder();
+    await within(dialog).findByText('Deleting 1 folder');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    // The other folder's listing never answers, so its skeleton stays up.
+    mockExecutePresignedUrl.mockImplementation(() => new Promise(() => {}));
+    rerender(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <BucketDetailPage bucketName={BUCKET} region={REGION} prefix="other-folder/" />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByLabelText('Loading objects')).toBeInTheDocument();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(invalidate.mock.calls).toEqual(
+      expect.arrayContaining([[{ queryKey: queryKeys.objects(BUCKET, REGION) }]]),
+    );
+    vi.useRealTimers();
+  });
+
+  it('keeps a folder selected when its deletion could not start', async () => {
+    mockParseListObjects.mockReturnValue({
+      ...ONE_OBJECT_LISTING,
+      commonPrefixes: ['any-folder/', 'other-folder/'],
+    });
+    mockApiRequest.mockImplementation((path: string, init?: { body?: string }) => {
+      if (!path.includes('/bulk-delete')) return respond(path);
+      // other-folder/ is refused; any-folder/ starts and finishes at once.
+      if (init?.body?.includes('other-folder/')) return Promise.reject(new Error('any refusal'));
+      return Promise.resolve({
+        job: {
+          jobId: 'any-job',
+          bucketName: BUCKET,
+          region: REGION,
+          prefix: 'any-folder/',
+          scope: 'allVersions',
+          status: 'completed',
+          deletedCount: 2,
+          failedCount: 0,
+          failures: [],
+          startedAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      });
+    });
+    renderPage(OrgRole.Owner);
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Select folder any-folder' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select folder other-folder' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByTestId('delete-folders-dialog');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    expect(await within(dialog).findByText('Some folders remain')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select folder other-folder' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Select folder any-folder' })).not.toBeChecked();
   });
 });
 

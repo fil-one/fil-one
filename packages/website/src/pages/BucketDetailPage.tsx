@@ -36,6 +36,7 @@ import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import type { ObjectListingPage } from '../lib/object-listing.js';
 import { removeVersionFromPage } from '../lib/object-listing.js';
+import { useFolderDeleteJobs } from '../lib/use-folder-delete-jobs.js';
 import { useFolderSearch } from '../lib/use-folder-search.js';
 import { useObjectListing } from '../lib/use-object-listing.js';
 
@@ -321,6 +322,34 @@ function describeListing(objects: ReturnType<typeof useObjectListing>, currentPr
   };
 }
 
+/**
+ * Lists the bucket again after a server-side deletion (emptying it, or deleting
+ * folders), along with the analytics that count its objects.
+ */
+function useRefreshAfterBulkDelete(bucketName: string, region: S3Region) {
+  const queryClient = useQueryClient();
+  return useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
+  }, [queryClient, bucketName, region]);
+}
+
+/**
+ * What follows a server-side deletion on this page: the refresh, and the
+ * folder deletions it watches. The watching lives here rather than in the
+ * object browser, which is replaced while another folder loads, so a deletion
+ * still refreshes the listing when it finishes.
+ */
+function useBulkDeleteFollowUp(bucketName: string, region: S3Region) {
+  const refreshAfterBulkDelete = useRefreshAfterBulkDelete(bucketName, region);
+  const folderDeleteJobs = useFolderDeleteJobs({
+    bucketName,
+    region,
+    onFinished: refreshAfterBulkDelete,
+  });
+  return { refreshAfterBulkDelete, folderDeleteJobs };
+}
+
 export type BucketDetailPageProps = {
   bucketName: string;
   prefix?: string;
@@ -388,10 +417,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
       : displayObjectCount(analyticsData, page, listing.coversBucket);
   const keyCount = accessKeysLoading ? undefined : accessKeys.length;
 
-  const refreshAfterBulkDelete = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.objects(bucketName, region) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.bucketAnalytics(bucketName, region) });
-  }, [queryClient, bucketName, region]);
+  const { refreshAfterBulkDelete, folderDeleteJobs } = useBulkDeleteFollowUp(bucketName, region);
 
   const invalidateObjectsCache = useCallback(
     (key: string, versionId?: string) => {
@@ -512,6 +538,8 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               search={folderSearch.text}
               listedSearch={objects.listedSearch}
               onSearchChange={folderSearch.setText}
+              folderDeleteJobs={folderDeleteJobs}
+              onFoldersDeleted={refreshAfterBulkDelete}
             />
           </TabPanel>
 

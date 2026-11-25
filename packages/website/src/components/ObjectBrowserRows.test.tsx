@@ -6,6 +6,7 @@ import type { S3ObjectVersion } from '@filone/shared';
 
 import { FolderRow, ObjectEntryRows, type RowActions } from './ObjectBrowserRows';
 import { groupVersionsByKey } from '../lib/object-grouping.js';
+import { folderSelectionId } from '../lib/object-selection.js';
 
 function version(overrides: Partial<S3ObjectVersion>): S3ObjectVersion {
   return {
@@ -91,12 +92,44 @@ describe('FolderRow', () => {
         name="any-folder"
         prefix="any-folder/"
         onPrefixChange={onPrefixChange}
-        selectable={false}
+        selection={{ selectable: false, isSelected: () => false, onToggle: () => {} }}
       />,
     );
 
     fireEvent.keyDown(screen.getByRole('button', { name: 'Open folder any-folder' }), { key });
 
     expect(onPrefixChange).toHaveBeenCalledWith('any-folder/');
+  });
+
+  /** A folder row a role that may delete can tick, with spies on both outcomes. */
+  function renderSelectableFolder() {
+    const onPrefixChange = vi.fn();
+    const onToggle = vi.fn();
+    inTable(
+      <FolderRow
+        name="any-folder"
+        prefix="any-folder/"
+        onPrefixChange={onPrefixChange}
+        selection={{ selectable: true, isSelected: () => false, onToggle }}
+      />,
+    );
+    return { onPrefixChange, onToggle, checkbox: screen.getByRole('checkbox') };
+  }
+
+  it('stays in the folder list when Space is pressed on the checkbox', () => {
+    const { onPrefixChange, checkbox } = renderSelectableFolder();
+
+    fireEvent.keyDown(checkbox, { key: ' ' });
+
+    expect(onPrefixChange).not.toHaveBeenCalled();
+  });
+
+  it('selects the folder when Space is pressed and released on the checkbox', () => {
+    const { onToggle, checkbox } = renderSelectableFolder();
+
+    fireEvent.keyDown(checkbox, { key: ' ' });
+    fireEvent.keyUp(checkbox, { key: ' ' });
+
+    expect(onToggle).toHaveBeenCalledWith(folderSelectionId('any-folder/'));
   });
 });
