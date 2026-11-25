@@ -14,6 +14,12 @@ import { Table } from '../Table/Table';
 import { formatDate } from '../../lib/time.js';
 import { formatCents } from '../../lib/billing-view.js';
 
+/**
+ * The status column, dropped below `sm`. Four columns overflow a phone and push
+ * the download button past the card's edge, so the status moves under the date.
+ */
+const SECONDARY_COLUMN = 'hidden sm:table-cell';
+
 export type InvoicesCardProps = {
   invoices?: Invoice[];
   loading: boolean;
@@ -94,7 +100,7 @@ export function InvoicesCard({ invoices, loading, errorMessage, onViewAll }: Inv
         <Table.Header>
           <Table.Row>
             <Table.Head>Date</Table.Head>
-            <Table.Head>Status</Table.Head>
+            <Table.Head className={SECONDARY_COLUMN}>Status</Table.Head>
             <Table.Head className="text-right">Amount</Table.Head>
             <Table.Head>
               <span className="sr-only">Download</span>
@@ -106,11 +112,13 @@ export function InvoicesCard({ invoices, loading, errorMessage, onViewAll }: Inv
             <Table.Row key={invoice.id} data-testid="invoice-row" data-invoice-id={invoice.id}>
               <Table.Cell className="text-xs font-medium whitespace-nowrap text-zinc-900">
                 {formatDate(invoice.createdAt)}
+                {/* Status rides under the date below `sm`, where its column is hidden. */}
+                <div className="mt-1 sm:hidden">
+                  <InvoiceStatusBadge status={invoice.status} />
+                </div>
               </Table.Cell>
-              <Table.Cell>
-                <Badge color={statusTone(invoice.status)} size="sm" weight="medium">
-                  {statusLabel(invoice.status)}
-                </Badge>
+              <Table.Cell className={SECONDARY_COLUMN}>
+                <InvoiceStatusBadge status={invoice.status} />
               </Table.Cell>
               <Table.Cell className="text-right text-xs tabular-nums whitespace-nowrap">
                 {/* A voided invoice was cancelled, so it is owed nothing rather
@@ -186,4 +194,12 @@ function statusTone(status: Invoice['status']): BadgeColor {
     default:
       return 'grey';
   }
+}
+
+function InvoiceStatusBadge({ status }: { status: Invoice['status'] }) {
+  return (
+    <Badge color={statusTone(status)} size="sm" weight="medium">
+      {statusLabel(status)}
+    </Badge>
+  );
 }

@@ -206,14 +206,18 @@ function BucketRow({
       {/* py-4 rather than the cell default: this is the only two-line cell, so it
           sets the row height, and 12px reads tight around a stacked pair. The
           other cells stay vertically centred against it. */}
-      <Table.Cell className="py-4">
+      {/* Below `sm`, `w-full max-w-0` lets the cell take the row's spare width
+          and no more, so a long name truncates instead of widening the table and
+          pushing the action menu past the card's edge. */}
+      <Table.Cell className="w-full max-w-0 py-4 sm:w-auto sm:max-w-none">
         <div className="flex items-center gap-1.5 leading-tight">
           <Link
             to="/buckets/$bucketName"
             params={{ bucketName: bucket.bucketName }}
             search={{ region: bucket.region as S3Region }}
             data-testid="bucket-link"
-            className="font-medium text-zinc-900 hover:text-brand-600"
+            title={bucket.bucketName}
+            className="min-w-0 truncate font-medium text-zinc-900 hover:text-brand-600"
           >
             {bucket.bucketName}
           </Link>
@@ -231,7 +235,7 @@ function BucketRow({
                 size={15}
                 role="img"
                 aria-label="Private bucket"
-                className="text-zinc-500"
+                className="shrink-0 text-zinc-500"
               />
             </Tooltip>
           )}
