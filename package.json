@@ -46,9 +46,9 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
     "oxfmt": "^0.45.0",
-    "oxlint": "^1.93.0",
+    "oxlint": "^1.94.0",
     "oxlint-plugin-complexity": "^4.1.0",
-    "oxlint-tsgolint": "^7.0.2007",
+    "oxlint-tsgolint": "^7.0.2008",
     "p-retry": "^8.0.0",
     "sst": "^4.17.2"
   },
