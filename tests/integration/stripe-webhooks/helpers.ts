@@ -355,6 +355,12 @@ export async function createPastDueSubscription({
   return subscriptionId;
 }
 
+/**
+ * Vitest timeout for a test that advances a test clock: the advance alone can
+ * take pollTestClockReady's 270 s, and the webhooks it triggers follow.
+ */
+export const CLOCK_TIMEOUT_MS = 420_000;
+
 /** A test clock anchored at now, so meter events Stripe receives fall in the first period. */
 export async function createTestClock(name: string): Promise<string> {
   const clock = await getStripeClient().testHelpers.testClocks.create({
