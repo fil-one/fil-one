@@ -671,10 +671,9 @@ describe('grace-period-enforcer', () => {
       },
     );
 
-    it('cancels a trialing subscription whose trial ends by the grace deadline', async () => {
-      // The trial runs through the grace period that follows the row's own
-      // trial, and Stripe ends it at the deadline; the enforcer can get there
-      // first.
+    it('leaves the cancel of a trial whose trial ends by the grace deadline to Stripe', async () => {
+      // Stripe cancels a trial without a card at its trial end. A cancel from
+      // here could land after a card added at the deadline ended the trial.
       mockSubscriptionsRetrieve.mockResolvedValue({
         id: 'sub_any',
         status: 'trialing',
@@ -683,7 +682,8 @@ describe('grace-period-enforcer', () => {
 
       await handler();
 
-      expect(order).toStrictEqual(['disable', 'cancel:sub_any', 'write']);
+      expect(order).toStrictEqual(['disable', 'write']);
+      expect(mockSubscriptionsCancel).not.toHaveBeenCalled();
     });
 
     it.each(['canceled', 'incomplete_expired'])(

@@ -25,9 +25,12 @@ interface Candidate {
   action: Action;
 }
 
-/** Statuses of a subscription that is not billing yet that Stripe has not ended. */
+/**
+ * Statuses of a subscription that is not billing yet that Stripe has not ended.
+ * A trial is left out: Stripe cancels it at its trial end when it has no card,
+ * and a cancel from here could land after a card added at the deadline.
+ */
 const CANCELABLE_STATUSES: ReadonlySet<Stripe.Subscription.Status> = new Set([
-  'trialing',
   'paused',
   'past_due',
   'unpaid',
@@ -177,8 +180,8 @@ async function cancelSubscriptionAndDisableTenant(
     await syncTenantStatusInProvisionedNetworks(candidate.orgId, 'disabled'),
   );
 
-  // Nothing is billed at a cancel that ends a grace period: a trial owes
-  // nothing, and an unpaid subscription's open invoices stay open.
+  // Nothing is billed at a cancel that ends a grace period: an unpaid
+  // subscription's open invoices stay open.
   if (subscription && CANCELABLE_STATUSES.has(subscription.status)) {
     // Looked up again: a reactivation can land while the tenant is disabled,
     // and may have re-enabled it before this run's disable reached it.
