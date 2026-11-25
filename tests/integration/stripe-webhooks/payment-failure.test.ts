@@ -15,6 +15,7 @@ import {
   testOrgId,
   waitForEventHandled,
   waitForWebhookMark,
+  CLOCK_TIMEOUT_MS,
 } from './helpers.js';
 
 describe('Payment Failure (customer.subscription.updated to past_due)', () => {
@@ -38,35 +39,43 @@ describe('Payment Failure (customer.subscription.updated to past_due)', () => {
     await deleteBillingRecord(userId);
   });
 
-  it('sets past_due when Stripe fails to charge a renewal', async () => {
-    const subId = await createPastDueSubscription({
-      userId,
-      customerId: cusId,
-      clockId,
-      paymentMethodId,
-    });
-    await pollForBillingStatusChange({ userId, expectedStatus: 'past_due', fromStatus: 'active' });
+  it(
+    'sets past_due when Stripe fails to charge a renewal',
+    async () => {
+      const subId = await createPastDueSubscription({
+        userId,
+        customerId: cusId,
+        clockId,
+        paymentMethodId,
+      });
+      await pollForBillingStatusChange({
+        userId,
+        expectedStatus: 'past_due',
+        fromStatus: 'active',
+      });
 
-    const row = await getBillingRecord(userId);
-    expect(row).toStrictEqual({
-      pk: { S: `ORG#${testOrgId(userId)}` },
-      sk: { S: 'SUBSCRIPTION' },
-      orgId: { S: testOrgId(userId) },
-      userId: { S: userId },
-      stripeCustomerId: { S: cusId },
-      subscriptionId: { S: subId },
-      subscriptionStatus: { S: 'past_due' },
-      currentPeriodStart: { S: expect.any(String) },
-      currentPeriodEnd: { S: expect.any(String) },
-      updatedAt: { S: expect.any(String) },
-      paymentMethodBrand: { S: 'visa' },
-      paymentMethodId: { S: paymentMethodId },
-      paymentMethodLast4: { S: '0341' }, // last4 numbers for declined after attach test card
-      paymentMethodExpYear: { N: expect.any(String) },
-      paymentMethodExpMonth: { N: expect.any(String) },
-      ...getHubspotSyncFields(row),
-    });
-  }, 420_000);
+      const row = await getBillingRecord(userId);
+      expect(row).toStrictEqual({
+        pk: { S: `ORG#${testOrgId(userId)}` },
+        sk: { S: 'SUBSCRIPTION' },
+        orgId: { S: testOrgId(userId) },
+        userId: { S: userId },
+        stripeCustomerId: { S: cusId },
+        subscriptionId: { S: subId },
+        subscriptionStatus: { S: 'past_due' },
+        currentPeriodStart: { S: expect.any(String) },
+        currentPeriodEnd: { S: expect.any(String) },
+        updatedAt: { S: expect.any(String) },
+        paymentMethodBrand: { S: 'visa' },
+        paymentMethodId: { S: paymentMethodId },
+        paymentMethodLast4: { S: '0341' }, // last4 numbers for declined after attach test card
+        paymentMethodExpYear: { N: expect.any(String) },
+        paymentMethodExpMonth: { N: expect.any(String) },
+        ...getHubspotSyncFields(row),
+      });
+    },
+    CLOCK_TIMEOUT_MS,
+  );
 
   it('marks a received event so a later duplicate is dropped', async () => {
     const invoiceId = await createAndFailInvoice(cusId);

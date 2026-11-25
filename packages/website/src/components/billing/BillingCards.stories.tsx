@@ -147,9 +147,9 @@ const WITH_PROMO_CODE = subscription({
 });
 
 /**
- * A promo code on the plan: named under the rate it changes, and taken off the
- * estimate, whose caption says so. Usage is under the minimum here so the
- * caption shows both reasons the total differs from usage times the rate.
+ * A promo code on the plan: its terms under the rate they change, and taken off the
+ * estimate, whose note says so. Usage is under the minimum here, so the total
+ * is the discounted minimum rather than usage times the rate.
  */
 export const WithPromoCode: StoryObj = {
   render: () => (
@@ -459,5 +459,38 @@ export const PaymentPostures: StoryObj = {
         />
       ))}
     </Stack>
+  ),
+};
+
+/**
+ * Every brand Stripe reports, in Stripe's spelling. The first four have marks
+ * of their own; the rest fall back to the grey card tile.
+ */
+const CARD_BRANDS = [
+  'visa',
+  'mastercard',
+  'amex',
+  'discover',
+  'jcb',
+  'diners',
+  'unionpay',
+  'eftpos_au',
+  'link',
+  'unknown',
+];
+
+export const CardBrands: StoryObj = {
+  render: () => (
+    <div className="grid max-w-4xl gap-4 lg:grid-cols-2">
+      {CARD_BRANDS.map((brand) => (
+        <PaymentMethodCard
+          key={brand}
+          billing={{ subscription: SELF_SERVE, paymentMethod: { ...CARD, brand } }}
+          mayManage
+          onManage={noop}
+          onAddCard={noop}
+        />
+      ))}
+    </div>
   ),
 };

@@ -24,8 +24,13 @@ import {
   getAccessKeyRegions,
 } from '../lib/dynamo-records.ts';
 import type { AccessKeyRecord } from '../lib/dynamo-records.ts';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
 import {
+  AccessKeyAlreadyExistsError,
+  AccessKeyConcurrentChangeError,
+  AccessKeyValidationError,
+} from '../lib/errors.ts';
+import {
+  concurrentKeyChangeResponse,
   discardRecordedKey,
   discardUnrecordedKey,
   exceedsRoleResponse,
@@ -620,6 +625,10 @@ async function handleMintRefusal(
       .status(409)
       .body<ErrorResponse>({ message: 'The replacement key could not be named — try again.' })
       .build();
+  }
+  if (err instanceof AccessKeyConcurrentChangeError) {
+    await mint.complete({ outcome: 'failed' });
+    return concurrentKeyChangeResponse();
   }
   if (err instanceof AccessKeyValidationError) {
     await mint.complete({ outcome: 'failed' });

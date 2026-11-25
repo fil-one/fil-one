@@ -77,7 +77,11 @@ vi.mock('../middleware/subscription-guard.ts', () => ({
 }));
 
 import { baseHandler } from './create-access-key.ts';
-import { AccessKeyAlreadyExistsError, AccessKeyValidationError } from '../lib/errors.ts';
+import {
+  AccessKeyAlreadyExistsError,
+  AccessKeyConcurrentChangeError,
+  AccessKeyValidationError,
+} from '../lib/errors.ts';
 import type { IssuedAccessKey } from '../lib/service-orchestrator.ts';
 import {
   buildEvent,
@@ -638,6 +642,40 @@ describe('create-access-key baseHandler', () => {
     // record that it was ever asked for, which is why it is written first.
     expect(intentEvents()).toHaveLength(1);
     expect(intentEvents()[0].phase).toBe('intent');
+  });
+
+  describe('when the vendor kept reporting a concurrent change', () => {
+    beforeEach(() => {
+      stubWrites();
+      mockIssueAccessKey.mockRejectedValue(new AccessKeyConcurrentChangeError());
+    });
+
+    async function createKey() {
+      return baseHandler(
+        buildEvent({ body: validBody({ keyName: 'My Key' }), userInfo: USER_INFO }),
+      );
+    }
+
+    it('answers 409 asking the caller to try again', async () => {
+      const result = await createKey();
+
+      expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+        statusCode: 409,
+        body: { message: 'Another change to this organization’s keys was in progress. Try again.' },
+      });
+    });
+
+    it('does not look for a key to recover at the vendor', async () => {
+      await createKey();
+
+      expect(mockFindAccessKeyByName).not.toHaveBeenCalled();
+    });
+
+    it('closes the correlation as failed', async () => {
+      await createKey();
+
+      expect(standaloneEvents()[1]).toMatchObject({ phase: 'completion', outcome: 'failed' });
+    });
   });
 
   it('returns 409 and recovers DynamoDB record on partial failure', async () => {

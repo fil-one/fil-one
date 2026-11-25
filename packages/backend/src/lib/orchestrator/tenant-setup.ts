@@ -19,13 +19,13 @@ import { getDynamoClient } from '../ddb-client.ts';
 import { MAX_MEMBERS, listMembers } from '../org-membership.ts';
 import { OrgDeletingError } from '../org-profile.ts';
 import { syncPrincipal } from './members.ts';
+import { createAccessKeyWithRetry } from './access-key-writes.ts';
 import { resolveRefusedTenantWrite } from '../tenant-setup-fence.ts';
 import type { OrchestratorRequestOptions } from '../service-orchestrator.ts';
 import {
   deleteTenantsByTenantId,
   deleteTenantsByTenantIdAccessKeysByAccessKeyId,
   getTenantsByTenantIdAccessKeys,
-  postTenantsByTenantIdAccessKeys,
   putTenantsByTenantId,
   type Client,
   type CreateAccessKeyRequest,
@@ -268,11 +268,12 @@ async function createConsoleAccessKey(
     expiresAt: null,
   };
 
-  const created = await postTenantsByTenantIdAccessKeys({
+  // A ConcurrentChange that outlasts the retries throws from here, so the
+  // 409 below is always a key already holding the name.
+  const created = await createAccessKeyWithRetry({
     client,
     path: { tenantId: orgId },
     body: createArgs,
-    throwOnError: false,
     ...requestOptions,
   });
   if (!created.error && created.data) {
@@ -330,11 +331,10 @@ async function createConsoleAccessKey(
     });
   }
 
-  const recreated = await postTenantsByTenantIdAccessKeys({
+  const recreated = await createAccessKeyWithRetry({
     client,
     path: { tenantId: orgId },
     body: createArgs,
-    throwOnError: false,
     ...requestOptions,
   });
   if (recreated.error || !recreated.data) {

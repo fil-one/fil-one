@@ -307,6 +307,19 @@ export function mintConflictResponse(): APIGatewayProxyStructuredResultV2 {
     .build();
 }
 
+/**
+ * The storage system rolled the mint back on every attempt because another
+ * write to the organization's keys got in the way. Nothing was created.
+ */
+export function concurrentKeyChangeResponse(): APIGatewayProxyStructuredResultV2 {
+  return new ResponseBuilder()
+    .status(409)
+    .body<ErrorResponse>({
+      message: 'Another change to this organization’s keys was in progress. Try again.',
+    })
+    .build();
+}
+
 /** The answer when the minter's role moved: try again under the one they hold now. */
 export function roleChangedResponse(): APIGatewayProxyStructuredResultV2 {
   return new ResponseBuilder()

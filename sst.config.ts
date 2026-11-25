@@ -1289,7 +1289,14 @@ export default $config({
       // scoped to the RAG query endpoint (distinct from S3 access keys), and
       // their handlers touch nothing but UserInfoTable, which allResources
       // already links.
+      // A list filtered by bucket reads that bucket's policy to decide which
+      // principal-bound keys reach it: an S3 operation signed with the tenant's
+      // console S3 key, as in `get-bucket-policy` above.
       'list-access-keys': {
+        extraEnv: orchestratorEnv,
+        permissions: [
+          { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
+        ],
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
       'create-access-key': accessKeyMintRoute,
@@ -1657,7 +1664,8 @@ export default $config({
     // ── Grace period enforcement ────────────────────────────────────
     const gracePeriodEnforcer = createFn('GracePeriodEnforcer', {
       handler: 'packages/backend/src/jobs/grace-period-enforcer.handler',
-      link: [billingTable, userInfoTable, ...managementApiTokens],
+      // Stripe: the subscription behind an expired grace period is canceled there.
+      link: [billingTable, userInfoTable, stripeSecretKey, stripePriceId, ...managementApiTokens],
       environment: orchestratorEnv,
       timeout: '300 seconds',
       memory: '256 MB',

@@ -115,10 +115,27 @@ const multiVersionVersions: S3ObjectVersion[] = [
   },
 ];
 
+/**
+ * What a delimited S3 listing of `prefix` returns for a bucket holding `bucket`:
+ * the keys directly under it, and the sub-folders the deeper keys group into.
+ * Lets each story describe a whole bucket and still be browsed folder by folder.
+ */
+function listFolder(bucket: S3ObjectVersion[], prefix: string) {
+  const folders = new Set<string>();
+  const versions: S3ObjectVersion[] = [];
+  for (const version of bucket) {
+    if (!version.key.startsWith(prefix)) continue;
+    const slash = version.key.indexOf('/', prefix.length);
+    if (slash === -1) versions.push(version);
+    else folders.add(version.key.slice(0, slash + 1));
+  }
+  return { versions, folders: [...folders] };
+}
+
 function ObjectBrowserHarness(
   initial: Omit<
     ObjectBrowserProps,
-    'onPrefixChange' | 'onDelete' | 'versioningEnabled' | 'region'
+    'onPrefixChange' | 'onDelete' | 'versioningEnabled' | 'region' | 'folders'
   > & {
     versioningEnabled?: boolean;
     region?: S3Region;
@@ -128,6 +145,7 @@ function ObjectBrowserHarness(
   return (
     <ObjectBrowser
       {...initial}
+      {...listFolder(initial.versions, prefix)}
       region={initial.region ?? S3Region.EuWest1}
       versioningEnabled={initial.versioningEnabled ?? true}
       currentPrefix={prefix}
@@ -356,10 +374,10 @@ export const Selectable: Story = {
 };
 
 /**
- * A bucket larger than one listing page. Selection can only cover what loaded,
- * so the browser says so instead of letting "select all" imply the whole bucket.
+ * A folder that spans pages. Previous and next replace page numbers, since S3
+ * never says how many pages there are, and "select all" covers this page only.
  */
-export const TruncatedListing: Story = {
+export const Paged: Story = {
   render: () => (
     <ObjectBrowserHarness
       bucketName="my-bucket"
@@ -369,8 +387,37 @@ export const TruncatedListing: Story = {
       onDownload={() => {}}
       downloading={null}
       onBulkDelete={() => Promise.resolve()}
-      listingTruncated
-      totalObjectCount={20_000}
+      paging={{
+        rangeStart: 201,
+        rangeEnd: 206,
+        hasPrevious: true,
+        hasNext: true,
+        onPrevious: () => {},
+        onNext: () => {},
+      }}
+    />
+  ),
+};
+
+/** The next page is on its way: the current one stays put and both controls hold. */
+export const ChangingPage: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={sampleVersions}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      paging={{
+        rangeStart: 1,
+        rangeEnd: 6,
+        hasPrevious: false,
+        hasNext: true,
+        onPrevious: () => {},
+        onNext: () => {},
+        changing: true,
+      }}
     />
   ),
 };
