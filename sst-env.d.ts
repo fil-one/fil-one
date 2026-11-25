@@ -82,6 +82,10 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Function"
     }
+    "BilledUsageDriftChecker": {
+      "name": string
+      "type": "sst.aws.Function"
+    }
     "BillingTable": {
       "name": string
       "type": "sst.aws.Dynamo"
