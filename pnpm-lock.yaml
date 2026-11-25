@@ -358,8 +358,8 @@ importers:
         specifier: ^7.9.2
         version: 7.9.2
       disposable-domains:
-        specifier: ^2.0.7
-        version: 2.0.7
+        specifier: ^2.0.9
+        version: 2.0.9
       jose:
         specifier: ^6.2.15
         version: 6.2.15
@@ -3844,8 +3844,8 @@ packages:
     resolution: {integrity: sha512-vtcDfH3TOjP8UekytvnHH1o1P4FcUdt4eQ1Y+Abap1tk/OB2MWQvcwS2ClCd1zuIhc3JKOx6p3kod8Vfys3E+A==}
     engines: {node: '>=0.3.1'}
 
-  disposable-domains@2.0.7:
-    resolution: {integrity: sha512-kWAEB/UbnAR+kXcF34zXYWp70opLZbZdtpY63N68Cc4tLPPJonosx85x/DMenn/0E2DF66GjmxVSWjd/O5IfnA==}
+  disposable-domains@2.0.9:
+    resolution: {integrity: sha512-wEpFPaNe5nU11BS/DgdAlsL6RdswENsPdEk7ijE+6Ll5qY+jO7yF9fA2PEgYHC79HVEJJ85YrRmEuAUb9laXxQ==}
 
   doctrine@3.0.0:
     resolution: {integrity: sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==}
@@ -8511,7 +8511,7 @@ snapshots:
 
   diff@5.2.2: {}
 
-  disposable-domains@2.0.7:
+  disposable-domains@2.0.9:
     dependencies:
       lodash: 4.18.1
       top-level-domains: 1.0.11
