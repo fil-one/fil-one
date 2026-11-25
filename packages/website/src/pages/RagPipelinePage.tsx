@@ -30,14 +30,69 @@ import { RagApiKeysTab } from './RagPipelineKeysTab.js';
 // RagPipelineView
 // ---------------------------------------------------------------------------
 
-/** Placeholder while a counter's data is still in flight. */
-function StatSkeleton() {
+/**
+ * Placeholder while a counter's data is still in flight. A span rather than the
+ * shared `Skeleton` (a div) because it sits inside the counter's paragraph, and
+ * its height matches the line it stands in for so nothing moves when the value
+ * lands: `value` for the 24px figure, `sub` for the 16px line under it.
+ */
+function StatSkeleton({ size = 'value' }: { size?: 'value' | 'sub' }) {
   return (
     <span
       data-testid="rag-pipeline-stat-loading"
       aria-hidden="true"
-      className="block h-6 w-14 animate-pulse rounded-md bg-zinc-200"
+      className={`block max-w-full animate-pulse rounded-md bg-zinc-200 ${size === 'value' ? 'h-6 w-14' : 'h-4 w-24'}`}
     />
+  );
+}
+
+interface Stat {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+}
+
+/** The page heading and spacing every state of the page shares, its error included. */
+export function RagPipelineFrame({
+  testId,
+  children,
+}: {
+  testId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div data-testid={testId} className="px-10 py-12 pb-20">
+      <div className="space-y-8">
+        <Heading tag="h1" description="Turn any bucket into a queryable knowledge base.">
+          Bucket Intelligence
+        </Heading>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One panel split by hairlines rather than separate cards: the numbers do not
+ * need borders of their own competing with the tabs below, and a single
+ * container keeps the values on a shared baseline. Labels are sentence case
+ * (uppercase tracking-widest reads as legacy dashboard), and figures use
+ * tabular-nums so digits line up as they change.
+ */
+function StatsPanel({ stats }: { stats: Stat[] }) {
+  return (
+    <div
+      data-testid="rag-pipeline-stats"
+      className={`grid ${stats.length === 3 ? 'grid-cols-3' : 'grid-cols-2'} divide-x divide-zinc-200 rounded-xl border border-zinc-200 bg-white`}
+    >
+      {stats.map((s) => (
+        <div key={s.label} data-testid="rag-pipeline-stat" className="px-5 py-4">
+          <p className="text-xs font-medium text-zinc-500">{s.label}</p>
+          <p className="mt-1.5 text-2xl font-medium tabular-nums text-zinc-950">{s.value}</p>
+          {s.sub && <p className="mt-1 text-xs text-zinc-500">{s.sub}</p>}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -97,7 +152,7 @@ function RagPipelineView({
   // per-bucket rows below carry the enablement state. While the bucket data is
   // still arriving, though, 0 would be a claim rather than a fact, so the
   // counters show a skeleton instead.
-  const stats = [
+  const stats: Stat[] = [
     {
       label: 'Files indexed',
       value: statValue({
@@ -106,7 +161,14 @@ function RagPipelineView({
         value: totalFiles.toLocaleString(),
       }),
       // The card label already says "indexed", so repeating it here is noise.
-      sub: indexedBuckets === 1 ? 'across 1 bucket' : `across ${indexedBuckets} buckets`,
+      // While the buckets load, a count here would be a claim, like the figure.
+      sub: isLoading ? (
+        <StatSkeleton size="sub" />
+      ) : indexedBuckets === 1 ? (
+        'across 1 bucket'
+      ) : (
+        `across ${indexedBuckets} buckets`
+      ),
     },
     {
       label: 'Index size',
@@ -135,53 +197,71 @@ function RagPipelineView({
   ];
 
   return (
-    <div data-testid="rag-pipeline-page" className="px-10 py-12 pb-20">
-      <div className="space-y-8">
-        <Heading tag="h1" description="Turn any bucket into a queryable knowledge base.">
-          Bucket Intelligence
-        </Heading>
+    <RagPipelineFrame testId="rag-pipeline-page">
+      <StatsPanel stats={stats} />
 
-        {/* One panel split by hairlines rather than three separate cards: three
-            numbers do not need three borders competing with the tabs below, and a
-            single container keeps the values on a shared baseline. Labels are
-            sentence case (uppercase tracking-widest reads as legacy dashboard),
-            and figures use tabular-nums so digits line up as they change. */}
-        <div
-          data-testid="rag-pipeline-stats"
-          className={`grid ${showApiKeyCount ? 'grid-cols-3' : 'grid-cols-2'} divide-x divide-zinc-200 rounded-xl border border-zinc-200 bg-white`}
-        >
-          {stats.map((s) => (
-            <div key={s.label} data-testid="rag-pipeline-stat" className="px-5 py-4">
-              <p className="text-xs font-medium text-zinc-500">{s.label}</p>
-              <p className="mt-1.5 text-2xl font-medium tabular-nums text-zinc-950">{s.value}</p>
-              {s.sub && <p className="mt-1 text-xs text-zinc-500">{s.sub}</p>}
-            </div>
-          ))}
-        </div>
+      <Tabs>
+        <TabList>
+          <Tab>Buckets</Tab>
+          <Tab>API Keys</Tab>
+        </TabList>
+        <TabPanels>
+          <TabPanel>
+            <BucketsTab
+              buckets={buckets}
+              isLoading={isLoading}
+              isError={isError}
+              errorMessage={errorMessage}
+              togglingBucket={togglingBucket}
+              onConfirmToggle={onConfirmToggle}
+            />
+          </TabPanel>
+          <TabPanel>
+            <RagApiKeysTab buckets={buckets} />
+          </TabPanel>
+        </TabPanels>
+      </Tabs>
+    </RagPipelineFrame>
+  );
+}
 
-        <Tabs>
-          <TabList>
-            <Tab>Buckets</Tab>
-            <Tab>API Keys</Tab>
-          </TabList>
-          <TabPanels>
-            <TabPanel>
-              <BucketsTab
-                buckets={buckets}
-                isLoading={isLoading}
-                isError={isError}
-                errorMessage={errorMessage}
-                togglingBucket={togglingBucket}
-                onConfirmToggle={onConfirmToggle}
-              />
-            </TabPanel>
-            <TabPanel>
-              <RagApiKeysTab buckets={buckets} />
-            </TabPanel>
-          </TabPanels>
-        </Tabs>
-      </div>
-    </div>
+/**
+ * The page as it stands before `/me` has said whether the caller may use the
+ * feature: the heading, the counters as placeholders and the Buckets tab in its
+ * loading state. It mounts nothing that makes a request, so a caller who turns
+ * out to be off the allowlist sends none. The API Keys tab is disabled rather
+ * than left to open, because its panel decides what to show from permissions
+ * that come from the same pending `/me`.
+ */
+export function RagPipelineSkeleton() {
+  return (
+    <RagPipelineFrame testId="rag-pipeline-loading">
+      <StatsPanel
+        stats={[
+          { label: 'Files indexed', value: <StatSkeleton />, sub: <StatSkeleton size="sub" /> },
+          { label: 'Index size', value: <StatSkeleton />, sub: 'total size of indexed files' },
+          { label: 'API keys', value: <StatSkeleton />, sub: 'for the Query API' },
+        ]}
+      />
+      <Tabs>
+        <TabList>
+          <Tab>Buckets</Tab>
+          <Tab disabled>API Keys</Tab>
+        </TabList>
+        <TabPanels>
+          <TabPanel>
+            <BucketsTab
+              buckets={[]}
+              isLoading
+              isError={false}
+              errorMessage={undefined}
+              togglingBucket={null}
+              onConfirmToggle={() => {}}
+            />
+          </TabPanel>
+        </TabPanels>
+      </Tabs>
+    </RagPipelineFrame>
   );
 }
 

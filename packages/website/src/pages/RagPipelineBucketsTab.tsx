@@ -10,7 +10,7 @@ import { BucketStatus } from '../components/BucketStatus.js';
 import { Button } from '../components/Button.js';
 import { Card } from '../components/Card.js';
 import { Heading } from '../components/Heading/Heading.js';
-import { Spinner } from '../components/Spinner.js';
+import { Skeleton } from '../components/Skeleton.js';
 import { ToggleConfirmModal } from '../components/ToggleConfirmModal.js';
 import {
   bucketDisplayState,
@@ -172,6 +172,42 @@ function BucketRow({
 }
 
 // ---------------------------------------------------------------------------
+// BucketsListSkeleton
+// ---------------------------------------------------------------------------
+
+/** How many placeholder rows stand in for a list whose length is not known yet. */
+const SKELETON_ROW_COUNT = 3;
+
+/**
+ * Placeholder rows shaped like `BucketRow`: the same card, padding and two-line
+ * rhythm (a 20px name line over a 16px status line), with a small button at the
+ * trailing edge. The list then fills in place rather than jumping from a centred
+ * spinner to a stack of cards.
+ */
+function BucketsListSkeleton() {
+  return (
+    <div
+      data-testid="buckets-loading"
+      role="status"
+      aria-label="Loading buckets"
+      className="space-y-3"
+    >
+      {Array.from({ length: SKELETON_ROW_COUNT }, (_, i) => (
+        <Card key={i} padding="none" className="overflow-hidden">
+          <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="min-w-0 flex-1">
+              <Skeleton className="h-5 w-40 max-w-full" />
+              <Skeleton className="mt-0.5 h-4 w-56 max-w-full" />
+            </div>
+            <Skeleton className="h-(--control-height-sm) w-16 flex-shrink-0" />
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // BucketsListState
 // ---------------------------------------------------------------------------
 
@@ -200,13 +236,7 @@ function BucketsListState({
       </div>
     );
   }
-  if (isLoading) {
-    return (
-      <div data-testid="buckets-loading" className="flex items-center justify-center py-12">
-        <Spinner ariaLabel="Loading buckets" size={28} />
-      </div>
-    );
-  }
+  if (isLoading) return <BucketsListSkeleton />;
   if (buckets.length === 0) {
     return (
       <div data-testid="buckets-empty">
