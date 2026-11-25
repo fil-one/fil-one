@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient, ScanCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  ScanCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { marshall } from '@aws-sdk/util-dynamodb';
 import { SubscriptionStatus } from '@filone/shared';
 
@@ -110,6 +115,10 @@ describe('grace-period-enforcer', () => {
   beforeEach(() => {
     ddbMock.reset();
     ddbMock.on(UpdateItemCommand).resolves({});
+    // The row the enforcer reads back after a lock, still in grace.
+    ddbMock
+      .on(GetItemCommand)
+      .resolves({ Item: buildBillingItem({ subscriptionStatus: SubscriptionStatus.GracePeriod }) });
     vi.clearAllMocks();
     aurora = fakeOrchestrator('aurora');
     mockIsOrgDeletedOrDeleting.mockResolvedValue(false);
@@ -856,6 +865,46 @@ describe('grace-period-enforcer', () => {
 
       expect(ddbMock.commandCalls(UpdateItemCommand)).toStrictEqual([]);
       expect(aurora.updateTenantStatus).not.toHaveBeenCalled();
+    });
+
+    it('unlocks the tenant again when activation moved the row on during the lock', async () => {
+      // Activation saved the row and unlocked the tenant between this run's
+      // row write and its lock, so the lock landed last.
+      aurora = fakeOrchestrator('aurora', { status: 'active' });
+      aurora.getTenantStatus
+        .mockResolvedValueOnce({ kind: 'ok', status: 'active' })
+        .mockResolvedValueOnce({ kind: 'ok', status: 'write-locked' });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+      ddbMock.on(ScanCommand).resolves({
+        Items: [buildBillingItem({ subscriptionStatus: SubscriptionStatus.Trialing, trialEndsAt })],
+      });
+      ddbMock
+        .on(GetItemCommand)
+        .resolves({ Item: buildBillingItem({ subscriptionStatus: SubscriptionStatus.Active }) });
+
+      await handler();
+
+      expect(aurora.updateTenantStatus.mock.calls).toStrictEqual([
+        [tenantFor('aurora'), 'write-locked'],
+        [tenantFor('aurora'), 'active'],
+      ]);
+    });
+
+    it('keeps the lock when the row is still in grace after it', async () => {
+      aurora = fakeOrchestrator('aurora', { status: 'active' });
+      aurora.getTenantStatus
+        .mockResolvedValueOnce({ kind: 'ok', status: 'active' })
+        .mockResolvedValueOnce({ kind: 'ok', status: 'write-locked' });
+      mockGetAvailableOrchestrators.mockReturnValue([aurora]);
+      ddbMock.on(ScanCommand).resolves({
+        Items: [buildBillingItem({ subscriptionStatus: SubscriptionStatus.Trialing, trialEndsAt })],
+      });
+
+      await handler();
+
+      expect(aurora.updateTenantStatus.mock.calls).toStrictEqual([
+        [tenantFor('aurora'), 'write-locked'],
+      ]);
     });
 
     it('does not lock the tenant when the row moved on before the write', async () => {

@@ -8,6 +8,7 @@ import {
 } from '../lib/region-helpers.ts';
 import { getStripeClient, isStripeResourceMissing } from '../lib/stripe-client.ts';
 import {
+  getSubscription,
   isConditionalCheckFailure,
   scanSubscriptions,
   updateSubscriptionByUser,
@@ -298,5 +299,19 @@ async function ensureTenantWriteLocked(candidate: Candidate): Promise<CandidateO
   // candidate is counted as failed and retried on the next run.
   assertTenantSyncSucceeded(outcomes);
 
-  return updated.length > 0 ? 'write_locked' : 'skipped';
+  if (updated.length === 0) return 'skipped';
+
+  // Activation saves the row before it unlocks the tenant, so a lock that
+  // landed after its unlock shows here as a row no longer in grace.
+  const row = await getSubscription(candidate.orgId, {
+    consistentRead: true,
+    projectionExpression: 'subscriptionStatus',
+  });
+  if (row?.subscriptionStatus === SubscriptionStatus.Active) {
+    assertTenantSyncSucceeded(
+      await syncTenantStatusInProvisionedNetworks(candidate.orgId, 'active'),
+    );
+    return 'skipped';
+  }
+  return 'write_locked';
 }
