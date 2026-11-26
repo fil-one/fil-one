@@ -203,13 +203,8 @@ function VersionSubRow({
       selected={isSelected}
       // Sub-rows sit on a tint of their own to read as nested. Applied only when
       // unselected so it never competes with the selected background.
-      className={`cursor-pointer ${isSelected ? '' : 'bg-zinc-50/50 hover:bg-zinc-100/50'}`}
-      role="button"
-      tabIndex={0}
-      onClick={() => actions.onNavigate(groupKey, version.versionId)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') actions.onNavigate(groupKey, version.versionId);
-      }}
+      className={isSelected ? undefined : 'bg-zinc-50/50 hover:bg-zinc-100/50'}
+      onActivate={() => actions.onNavigate(groupKey, version.versionId)}
     >
       {selection.selectable && (
         <Table.SelectCell
@@ -223,7 +218,13 @@ function VersionSubRow({
             what tells one from another; it is the only place the id appears. */}
         <div className="flex items-center gap-2 text-zinc-500" title={version.versionId}>
           <FileIcon size={14} className="shrink-0 text-zinc-300" aria-hidden="true" />
-          <span className="truncate font-mono text-xs">{version.versionId}</span>
+          <Table.RowButton
+            className="font-mono text-xs"
+            aria-label={`Open version ${version.versionId} of ${displayName}`}
+            onClick={() => actions.onNavigate(groupKey, version.versionId)}
+          >
+            {version.versionId}
+          </Table.RowButton>
           {version.isDeleteMarker && <DeletedBadge />}
         </div>
         <MobileFacts version={version} />
@@ -271,24 +272,26 @@ function NameCell({
   hasMultipleVersions,
   isExpanded,
   onToggleExpand,
+  onOpen,
 }: {
   name: string;
   group: VersionGroup;
   hasMultipleVersions: boolean;
   isExpanded: boolean;
   onToggleExpand: (key: string) => void;
+  onOpen: () => void;
 }) {
   return (
     <div className="flex items-center gap-2 font-medium text-zinc-900" title={group.key}>
       {hasMultipleVersions ? (
         <button
           type="button"
-          className="shrink-0 text-zinc-400 hover:text-zinc-700"
-          aria-label={isExpanded ? 'Collapse versions' : 'Expand versions'}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleExpand(group.key);
-          }}
+          className="shrink-0 rounded-md text-zinc-400 hover:text-zinc-700 focus-visible:brand-outline"
+          // Named for its object: every row has one, and a name shared by all
+          // of them would not say whose versions it opens.
+          aria-label={`Older versions of ${name}`}
+          aria-expanded={isExpanded}
+          onClick={() => onToggleExpand(group.key)}
         >
           {isExpanded ? (
             <CaretDownIcon size={14} aria-hidden="true" />
@@ -299,7 +302,7 @@ function NameCell({
       ) : (
         <FileIcon size={16} className="shrink-0 text-zinc-400" aria-hidden="true" />
       )}
-      <span className="truncate">{name}</span>
+      <Table.RowButton onClick={onOpen}>{name}</Table.RowButton>
       {/* Status is shown only when it is the exception: every row is an
           object's latest version, so "Latest" on each would say nothing. */}
       {group.latest.isDeleteMarker && <DeletedBadge />}
@@ -340,14 +343,7 @@ function LatestVersionRow({
       data-testid="object-row"
       data-object-key={group.key}
       selected={isSelected}
-      className="cursor-pointer"
-      role="button"
-      tabIndex={0}
-      onClick={() => actions.onNavigate(group.key, group.latest.versionId)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ')
-          actions.onNavigate(group.key, group.latest.versionId);
-      }}
+      onActivate={() => actions.onNavigate(group.key, group.latest.versionId)}
     >
       {selection.selectable && (
         <Table.SelectCell
@@ -363,6 +359,7 @@ function LatestVersionRow({
           hasMultipleVersions={hasMultipleVersions}
           isExpanded={isExpanded}
           onToggleExpand={onToggleExpand}
+          onOpen={() => actions.onNavigate(group.key, group.latest.versionId)}
         />
         <MobileFacts version={group.latest} />
       </Table.Cell>
@@ -453,18 +450,9 @@ export function FolderRow({
     <Table.Row
       data-testid="folder-row"
       data-folder-prefix={prefix}
-      className="group cursor-pointer"
-      // Opens like an object row does, by mouse or keyboard alike.
-      role="button"
-      tabIndex={0}
-      aria-label={`Open folder ${name}`}
-      onClick={() => onPrefixChange(prefix)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onPrefixChange(prefix);
-        }
-      }}
+      className="group"
+      // Opens like an object row does: a click anywhere, or its name's button.
+      onActivate={() => onPrefixChange(prefix)}
     >
       {/* A folder is listed one page at a time, so the browser never holds
           everything inside it and cannot offer to select it. The empty cell
@@ -473,7 +461,12 @@ export function FolderRow({
       <Table.Cell className={NAME_CELL}>
         <div className="flex items-center gap-2 font-medium text-zinc-900" title={name}>
           <FolderIcon size={16} className="shrink-0 text-zinc-400" aria-hidden="true" />
-          <span className="truncate">{name}</span>
+          <Table.RowButton
+            aria-label={`Open folder ${name}`}
+            onClick={() => onPrefixChange(prefix)}
+          >
+            {name}
+          </Table.RowButton>
         </div>
       </Table.Cell>
       {/* Blank rather than a dash: size and date are not unknown for a

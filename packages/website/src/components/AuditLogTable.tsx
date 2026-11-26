@@ -113,7 +113,11 @@ export function AuditLogTable({
             {COLUMNS.map((column) => (
               <Table.Head key={column.label}>{column.label}</Table.Head>
             ))}
-            <Table.Head className="w-8" />
+            {/* The caret's column. It says whether a row is open; the event's
+                name is the control, so this header names what the caret shows. */}
+            <Table.Head className="w-8">
+              <span className="sr-only">Details</span>
+            </Table.Head>
           </Table.Row>
         </Table.Header>
         <Table.Body>
@@ -185,6 +189,11 @@ interface RowProps {
 /**
  * One event, and its payload behind a caret.
  *
+ * The event's name is the button that opens the payload, so each row's toggle
+ * is announced by what happened ("Role changed, collapsed") rather than as one
+ * of many identical "Show details" buttons. A click anywhere else in the row
+ * does the same for a mouse, and the caret only shows which rows are open.
+ *
  * Both halves of a two-phase key event render as their own rows. Collapsing a
  * pair into one line would hide the dangling intent a crash between a vendor
  * call and its local write leaves behind, which is the most operationally
@@ -196,13 +205,15 @@ function AuditRow({ event, expanded, onToggleExpand, onFilterActor }: RowProps) 
 
   return (
     <>
-      <Table.Row
-        className="cursor-pointer"
-        onClick={onToggleExpand}
-        data-testid={`audit-row-${event.eventId}`}
-      >
+      <Table.Row onActivate={onToggleExpand} data-testid={`audit-row-${event.eventId}`}>
         <Table.Cell className="font-medium text-zinc-900">
-          {getAuditEventTypeLabel(event.type)}
+          <Table.RowButton
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            onClick={onToggleExpand}
+          >
+            {getAuditEventTypeLabel(event.type)}
+          </Table.RowButton>
           {event.phase && <PhaseNote event={event} />}
         </Table.Cell>
         <Table.Cell className="text-ui">
@@ -210,10 +221,10 @@ function AuditRow({ event, expanded, onToggleExpand, onFilterActor }: RowProps) 
             <button
               type="button"
               className="rounded-md text-left text-zinc-600 underline decoration-zinc-300 underline-offset-2 transition-colors hover:text-zinc-900 focus-visible:brand-outline"
-              onClick={(clicked) => {
-                clicked.stopPropagation();
-                onFilterActor(event.actor.id);
-              }}
+              // Says what pressing it does: the visible address alone reads as
+              // a link to the member, not as a filter.
+              aria-label={`Show only events by ${event.actor.email ?? event.actor.id}`}
+              onClick={() => onFilterActor(event.actor.id)}
             >
               {event.actor.email ?? event.actor.id}
             </button>
@@ -226,19 +237,9 @@ function AuditRow({ event, expanded, onToggleExpand, onFilterActor }: RowProps) 
           <p className="text-meta text-zinc-500">{formatTime(event.createdAt)}</p>
         </Table.Cell>
         <Table.Cell className="pl-0 text-right text-zinc-400">
-          <button
-            type="button"
-            aria-label={expanded ? 'Hide details' : 'Show details'}
-            aria-expanded={expanded}
-            aria-controls={detailsId}
-            className="rounded-md p-0.5 focus-visible:brand-outline"
-            onClick={(clicked) => {
-              clicked.stopPropagation();
-              onToggleExpand();
-            }}
-          >
-            <Caret size={12} weight="bold" />
-          </button>
+          <span className="inline-flex p-0.5">
+            <Caret size={12} weight="bold" aria-hidden="true" />
+          </span>
         </Table.Cell>
       </Table.Row>
 
@@ -274,30 +275,33 @@ function AuditDetails({ event }: { event: AuditEvent }) {
   const fields = Object.entries(event.details as Record<string, unknown>);
 
   return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-      <div className="contents">
-        <dt className="text-zinc-500">Subject</dt>
-        {/* An id (`kind:id`), set like the correlation id below it. */}
-        <dd className="font-mono text-zinc-900">{event.subject}</dd>
-      </div>
-      {fields.map(([field, value]) => (
-        <div key={field} className="contents">
-          <dt className="text-zinc-500">{humanizeField(field)}</dt>
-          <dd className="text-zinc-900">{formatDetailValue(value)}</dd>
-        </div>
-      ))}
-      {event.correlationId && (
+    <>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
         <div className="contents">
-          <dt className="text-zinc-500">Correlation</dt>
-          <dd className="font-mono text-zinc-900">{event.correlationId}</dd>
+          <dt className="text-zinc-500">Subject</dt>
+          {/* An id (`kind:id`), set like the correlation id below it. */}
+          <dd className="font-mono text-zinc-900">{event.subject}</dd>
         </div>
-      )}
-      {/* Across both columns: in the first alone, the sentence would set that
-          column's width and push every value far from its label. */}
+        {fields.map(([field, value]) => (
+          <div key={field} className="contents">
+            <dt className="text-zinc-500">{humanizeField(field)}</dt>
+            <dd className="text-zinc-900">{formatDetailValue(value)}</dd>
+          </div>
+        ))}
+        {event.correlationId && (
+          <div className="contents">
+            <dt className="text-zinc-500">Correlation</dt>
+            <dd className="font-mono text-zinc-900">{event.correlationId}</dd>
+          </div>
+        )}
+      </dl>
+      {/* After the list rather than in it: a description list may hold only
+          terms and their values, and other content breaks it for assistive
+          technology. */}
       {fields.length === 0 && !event.correlationId && (
-        <div className="col-span-2 text-zinc-500">This event carries no further detail.</div>
+        <p className="mt-1 text-xs text-zinc-500">This event carries no further detail.</p>
       )}
-    </dl>
+    </>
   );
 }
 

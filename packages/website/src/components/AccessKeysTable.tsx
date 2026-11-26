@@ -134,15 +134,14 @@ function KeyNameCell({ accessKey: key, onOpen }: { accessKey: AccessKey; onOpen:
         {/* Held to the text's 16px line, so the taller badge centres on it
             instead of making a personal key's row taller than its neighbours. */}
         <div className="flex h-4 items-center gap-1.5">
-          <button
-            type="button"
+          <Table.RowButton
             onClick={onOpen}
             title={key.keyName}
             data-key-name-for={key.id}
-            className="min-w-0 cursor-pointer truncate rounded-md text-left text-xs font-medium text-zinc-900 hover:underline focus-visible:brand-outline"
+            className="text-xs font-medium text-zinc-900"
           >
             {key.keyName}
-          </button>
+          </Table.RowButton>
           {/* Only the exception is labelled: a service key is the default (the
               only kind outside an `iam` region), so a badge on every row would
               say nothing. The drawer names the type of every key. */}
@@ -214,17 +213,6 @@ function KeysTableHeader({
         )}
       </Table.Row>
     </Table.Header>
-  );
-}
-
-/**
- * Whether a click on a row landed on one of its own controls (the checkbox, the
- * copy button, the action menu), which must do their own job rather than open
- * the drawer as well.
- */
-function isFromRowControl(target: EventTarget): boolean {
-  return (
-    target instanceof Element && target.closest('button, a, input, [role="checkbox"]') !== null
   );
 }
 
@@ -389,10 +377,7 @@ export function AccessKeysTable({
                 data-testid="access-key-row"
                 data-access-key-id={key.accessKeyId}
                 selected={isSelected}
-                className="cursor-pointer"
-                onClick={(event) => {
-                  if (!isFromRowControl(event.target)) setDetailKeyId(key.id);
-                }}
+                onActivate={() => setDetailKeyId(key.id)}
               >
                 {selectable && (
                   <Table.Cell className="w-0 !pr-0">

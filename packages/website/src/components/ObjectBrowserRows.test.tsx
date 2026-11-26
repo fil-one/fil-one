@@ -84,8 +84,7 @@ describe('ObjectEntryRows: a delete marker', () => {
 });
 
 describe('FolderRow', () => {
-  it.each(['Enter', ' '])('opens the folder when %j is pressed on the row', (key) => {
-    const onPrefixChange = vi.fn();
+  function renderFolder(onPrefixChange = vi.fn()) {
     inTable(
       <FolderRow
         name="any-folder"
@@ -94,9 +93,66 @@ describe('FolderRow', () => {
         selectable={false}
       />,
     );
+    return onPrefixChange;
+  }
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Open folder any-folder' }), { key });
+  it('opens the folder from the button on its name', () => {
+    const onPrefixChange = renderFolder();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open folder any-folder' }));
 
     expect(onPrefixChange).toHaveBeenCalledWith('any-folder/');
+  });
+
+  // A row that is a button hides its cells from table navigation.
+  it('keeps the row a row rather than a control', () => {
+    renderFolder();
+
+    expect(screen.getByTestId('folder-row')).toMatchObject({ tabIndex: -1 });
+    expect(screen.getByTestId('folder-row')).not.toHaveAttribute('role');
+  });
+});
+
+describe('ObjectEntryRows: controls in a row', () => {
+  it('opens the object from the button on its name', () => {
+    const actions = rowActions();
+    renderObject(version({ key: 'any-object', versionId: 'any-version' }), actions);
+
+    fireEvent.click(screen.getByRole('button', { name: 'any-object' }));
+
+    expect(actions.onNavigate).toHaveBeenCalledWith('any-object', 'any-version');
+  });
+
+  it('downloads without also opening the object', () => {
+    const actions = rowActions();
+    renderObject(version({ key: 'any-object' }), actions);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download any-object' }));
+
+    expect(actions.onDownload).toHaveBeenCalledOnce();
+    expect(actions.onNavigate).not.toHaveBeenCalled();
+  });
+
+  it('names the versions toggle for its object and says whether it is open', () => {
+    const [group] = groupVersionsByKey([
+      version({ key: 'any-object', versionId: 'v2', isLatest: true }),
+      version({ key: 'any-object', versionId: 'v1', isLatest: false }),
+    ]);
+    inTable(
+      <ObjectEntryRows
+        name="any-object"
+        group={group!}
+        isExpanded={false}
+        versioningEnabled
+        onToggleExpand={vi.fn()}
+        actions={rowActions()}
+        selection={{ selectable: false, isSelected: () => false, onToggle: vi.fn() }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Older versions of any-object' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
   });
 });

@@ -75,6 +75,9 @@ const EVENTS: AuditEvent[] = [
 const meta: Meta<typeof AuditLogTable> = {
   title: 'Components/AuditLogTable',
   component: AuditLogTable,
+  // Fails the story tests on any axe violation, so a row control nested in
+  // another or a column without a header cannot come back unnoticed.
+  parameters: { a11y: { test: 'error' } },
   args: {
     events: EVENTS,
     isPending: false,

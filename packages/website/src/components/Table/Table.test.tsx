@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { createPortal } from 'react-dom';
 import { Table } from '.';
 
 describe('Table', () => {
@@ -72,6 +73,60 @@ describe('Table', () => {
       renderHead({ onSort });
       fireEvent.click(screen.getByRole('button', { name: 'Name' }));
       expect(onSort).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('rows with onActivate', () => {
+    function renderRow(onActivate: () => void) {
+      render(
+        <Table>
+          <Table.Body>
+            <Table.Row onActivate={onActivate} data-testid="any-row">
+              <Table.Cell>any text</Table.Cell>
+              <Table.Cell>
+                <Table.RowButton>any name</Table.RowButton>
+                <input type="checkbox" aria-label="any checkbox" />
+                <a href="#any">any link</a>
+                {/* A menu or dialog opened from the row renders outside it. */}
+                {createPortal(<p>any portaled text</p>, document.body)}
+              </Table.Cell>
+            </Table.Row>
+          </Table.Body>
+        </Table>,
+      );
+    }
+
+    it('runs onActivate for a click on the row outside its controls', () => {
+      const onActivate = vi.fn();
+      renderRow(onActivate);
+
+      fireEvent.click(screen.getByText('any text'));
+
+      expect(onActivate).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      ['a button', () => screen.getByRole('button', { name: 'any name' })],
+      ['a checkbox', () => screen.getByRole('checkbox', { name: 'any checkbox' })],
+      ['a link', () => screen.getByRole('link', { name: 'any link' })],
+      ['content portaled out of the row', () => screen.getByText('any portaled text')],
+    ])('leaves onActivate alone for a click on %s', (_case, target) => {
+      const onActivate = vi.fn();
+      renderRow(onActivate);
+
+      fireEvent.click(target());
+
+      expect(onActivate).not.toHaveBeenCalled();
+    });
+
+    // A row that is a button hides its cells from table navigation and nests
+    // its own controls inside a control.
+    it('keeps the row a row: no role and no tab stop', () => {
+      renderRow(vi.fn());
+
+      const row = screen.getByTestId('any-row');
+      expect(row).not.toHaveAttribute('role');
+      expect(row).not.toHaveAttribute('tabindex');
     });
   });
 });

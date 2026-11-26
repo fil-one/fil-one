@@ -326,7 +326,11 @@ function RagKeysTable({
           <Table.Head>Last used</Table.Head>
           {/* Same predicate as the cells below: a column of empty cells is
               whitespace with a screen-reader label attached to nothing. */}
-          {showActions && <Table.Head aria-label="Actions" />}
+          {showActions && (
+            <Table.Head>
+              <span className="sr-only">Actions</span>
+            </Table.Head>
+          )}
         </Table.Row>
       </Table.Header>
       <Table.Body>
