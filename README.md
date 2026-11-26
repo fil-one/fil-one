@@ -364,9 +364,12 @@ Smelt needs to run with `INGOT_REGION=eu-central-3`, the region the console expe
 
 The partner key replaces the hosted Forge token on the stage. To go back to the hosted network, set `ForgeManagementApiToken` again and deploy without `SMELT`.
 
-A stage that already has accounts on the hosted network keeps their tenant ids, which smelt does not know. Reset the region before the first deploy with `SMELT=true`, and again when going back:
+A stage that already has accounts on the hosted network keeps their tenant ids, which smelt does not know. Reset the region before the first deploy with `SMELT=true`, and again when going back. Run the reset from a shell pointed at floci; with `LOCAL=true` it needs no `AWS_PROFILE`:
 
 ```bash
+eval "$(floci env)"
+unset AWS_PROFILE
+export LOCAL=true
 node bin/reset-region-provisioning.ts --stage local --region eu-central-3
 ```
 

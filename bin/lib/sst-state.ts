@@ -50,13 +50,14 @@ function resolveRegion(stage: string, tableArn: string | undefined): string {
 }
 
 /**
- * Stop before any AWS call when no profile is active.
+ * Stop before any AWS call when no profile is active, unless the shell targets
+ * floci.
  *
  * Without it the SDK fails late with a `CredentialsProviderError` that says
  * nothing about which login is missing.
  */
 export function requireAwsProfile(): void {
-  if (process.env.AWS_PROFILE) return;
+  if (process.env.AWS_PROFILE || isFlociShell(process.env)) return;
 
   console.error(
     'AWS_PROFILE is not set. Log in and activate the profile first (see README.md):\n' +
@@ -64,4 +65,13 @@ export function requireAwsProfile(): void {
       '  export AWS_PROFILE=filone',
   );
   process.exit(1);
+}
+
+/**
+ * Whether the shell is set up for a local stage the way bin/deploy-local.sh sets
+ * it up: `eval "$(floci env)"`, `unset AWS_PROFILE` and `LOCAL=true`. floci
+ * takes the static credentials `floci env` exports, so no profile is needed.
+ */
+export function isFlociShell(env: Record<string, string | undefined>): boolean {
+  return env.LOCAL === 'true' && Boolean(env.AWS_ENDPOINT_URL);
 }
