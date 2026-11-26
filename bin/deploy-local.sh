@@ -11,7 +11,7 @@ set -euo pipefail
 # Login needs Auth0ClientId/Secret for the shared dev tenant, with
 # https://localhost:5173 registered there (docs/Auth0OneTimeSetup.md). Billing needs
 # a sandbox StripeSecretKey/StripePublishableKey/StripePriceId and the Stripe CLI.
-# SMELT=true runs the Forge dev region (us-east-9) against a local smelt network
+# SMELT=true runs the Forge region (eu-central-3) against a local smelt network
 # instead of the hosted one; SMELT_HOST overrides the host.docker.internal default.
 
 cd "$(dirname "$0")/.."
@@ -52,7 +52,7 @@ if [ -s "$placeholders" ]; then
 fi
 
 # With smelt, its Hilt partner key replaces the hosted network's token. Going back
-# to the hosted network means setting ForgeDevManagementApiToken again.
+# to the hosted network means setting ForgeManagementApiToken again.
 if [ "${SMELT:-}" = true ]; then
   smelt_key=$(docker inspect smelt-hilt-1 --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
     sed -n 's/^HILT_AUTH_PARTNER_KEY=//p' | cut -d, -f1 || true)
@@ -60,7 +60,7 @@ if [ "${SMELT:-}" = true ]; then
     echo "SMELT=true but smelt's hilt container is not running" >&2
     exit 1
   fi
-  sst secret set ForgeDevManagementApiToken "$smelt_key" >/dev/null
+  sst secret set ForgeManagementApiToken "$smelt_key" >/dev/null
 fi
 
 pnpm run build

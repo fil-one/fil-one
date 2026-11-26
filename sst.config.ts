@@ -822,21 +822,22 @@ export default $config({
     // Forge (Management-API) — non-prod only. One endpoint per Forge network,
     // serving every region in it; the region is sent per-tenant in the PUT
     // /tenants body.
-    // SMELT=true points a local deploy's dev sandbox slot (us-east-9) at a smelt
-    // network on this machine. Lambdas reach it through host.docker.internal.
-    // Presigned URLs use localhost instead, which https pages may fetch over http.
+    // SMELT=true points a local deploy's Forge region (eu-central-3) at a smelt
+    // network on this machine instead of the hosted one. Lambdas reach it
+    // through host.docker.internal. Presigned URLs use localhost instead, which
+    // https pages may fetch over http.
     const useSmelt = isLocal && process.env.SMELT === 'true';
     const smeltHost = process.env.SMELT_HOST ?? 'host.docker.internal';
     const forgeEnv = {
-      FORGE_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.staging.fil-forge.com',
-      FORGE_DEV_MANAGEMENT_API_URL: isProduction
+      FORGE_MANAGEMENT_API_URL: isProduction
         ? ''
         : useSmelt
           ? `http://${smeltHost}:15110`
-          : 'https://auth.latest.dev.fil-forge.com',
+          : 'https://auth.staging.fil-forge.com',
+      FORGE_DEV_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.latest.dev.fil-forge.com',
       ...(useSmelt && {
-        FORGE_DEV_S3_ENDPOINT_URL: `http://${smeltHost}:15130`,
-        FORGE_DEV_S3_PRESIGN_ENDPOINT_URL: 'http://localhost:15130',
+        FORGE_S3_ENDPOINT_URL: `http://${smeltHost}:15130`,
+        FORGE_S3_PRESIGN_ENDPOINT_URL: 'http://localhost:15130',
       }),
     };
 

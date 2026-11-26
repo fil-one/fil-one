@@ -1,5 +1,5 @@
 # The engine and a CPU embedding server, for local testing against a smelt
-# Forge network (fil-forge/smelt: `INGOT_REGION=us-east-9 make up`, then
+# Forge network (fil-forge/smelt: `INGOT_REGION=eu-central-3 make up`, then
 # `make s3-key`). Ingot serves plain HTTP on the host at :15130; the engine
 # reaches it through host.docker.internal.
 #

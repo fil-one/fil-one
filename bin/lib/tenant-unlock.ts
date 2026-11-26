@@ -22,8 +22,8 @@ export const ORCHESTRATOR_ENV_NAMES = [
   'FTH_MANAGEMENT_API_URL',
   'FORGE_MANAGEMENT_API_URL',
   'FORGE_DEV_MANAGEMENT_API_URL',
-  'FORGE_DEV_S3_ENDPOINT_URL',
-  'FORGE_DEV_S3_PRESIGN_ENDPOINT_URL',
+  'FORGE_S3_ENDPOINT_URL',
+  'FORGE_S3_PRESIGN_ENDPOINT_URL',
 ] as const;
 
 // Each orchestrator's API URL variable, and the SST secret holding its token.

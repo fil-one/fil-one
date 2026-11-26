@@ -165,8 +165,8 @@ the host may not resolve. Set the Lambda's variable in your shell to override
 it:
 
 ```bash
-FORGE_DEV_MANAGEMENT_API_URL=http://localhost:15110 \
-  node bin/reset-forge-network.ts --network dev --stage $USER --dry-run
+FORGE_MANAGEMENT_API_URL=http://localhost:15110 \
+  node bin/reset-forge-network.ts --network staging --stage local --dry-run
 ```
 
 Each account's tenant is disabled and deleted first, with retries; a tenant

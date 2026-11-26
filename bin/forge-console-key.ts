@@ -54,11 +54,11 @@
 // A tenant whose SSM parameter is missing or names a key the API does not have
 // keeps every key, is reported, and makes the command exit non-zero.
 //
-// Each region's Management API URL, and the dev network's S3 endpoint override
-// for a local smelt gateway, are read from the deployed AccountDeletionWorker's
+// Each region's Management API URL, and the S3 endpoint override for a local
+// smelt gateway, are read from the deployed AccountDeletionWorker's
 // environment. A variable of the same name in your shell overrides it; a
-// SMELT=true stage needs FORGE_DEV_MANAGEMENT_API_URL=http://localhost:15110
-// and FORGE_DEV_S3_ENDPOINT_URL=http://localhost:15130, since the Lambda holds
+// SMELT=true stage needs FORGE_MANAGEMENT_API_URL=http://localhost:15110
+// and FORGE_S3_ENDPOINT_URL=http://localhost:15130, since the Lambda holds
 // host.docker.internal URLs. The tokens come from the stage's
 // ForgeManagementApiToken and ForgeDevManagementApiToken secrets, or the app's
 // fallbacks, via `sst secret list`; they are never printed. Only the regions
