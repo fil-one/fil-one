@@ -38,7 +38,7 @@ interface CannedResponse {
 function createS3ClientAnswering(captured: CapturedRequest[], answers: CannedResponse[]): S3Client {
   return new S3Client({
     endpoint: 'https://s3.example.test',
-    region: 'us-east-9',
+    region: 'eu-central-3',
     credentials: { accessKeyId: 'AKIA0000TESTKEY0', secretAccessKey: 'secret' },
     forcePathStyle: true,
     requestChecksumCalculation: 'WHEN_REQUIRED',

@@ -663,9 +663,11 @@ describe('listBuckets', () => {
   // A bucket is served by one region, and the gateway says which. Taking the
   // network's own first region instead would misfile every bucket outside it.
   it('labels each bucket with the region the gateway reports for it', async () => {
+    // No network serves two regions today. The orchestrator serves whatever
+    // regions it is built with, so eu-west-1 stands in for a second one.
     const network = new FilOneOrchestrator({
       id: 'forge',
-      regions: [S3Region.EuCentral3, S3Region.UsEast9],
+      regions: [S3Region.EuCentral3, S3Region.EuWest1],
       stage: 'test',
       api: { baseUrl: 'https://api.example.com', accessToken: 'partner-key' },
     });
@@ -673,14 +675,14 @@ describe('listBuckets', () => {
     s3Mock.on(ListBucketsCommand).resolves({
       Buckets: [
         {
-          Name: 'eu-bucket',
+          Name: 'central-bucket',
           CreationDate: new Date('2026-01-01T00:00:00Z'),
           BucketRegion: 'eu-central-3',
         },
         {
-          Name: 'us-bucket',
+          Name: 'west-bucket',
           CreationDate: new Date('2026-01-02T00:00:00Z'),
-          BucketRegion: 'us-east-9',
+          BucketRegion: 'eu-west-1',
         },
       ],
     });
@@ -688,8 +690,8 @@ describe('listBuckets', () => {
     const result = await network.listBuckets(tenantId);
 
     expect(result.map((b) => [b.bucketName, b.region])).toStrictEqual([
-      ['eu-bucket', S3Region.EuCentral3],
-      ['us-bucket', S3Region.UsEast9],
+      ['central-bucket', S3Region.EuCentral3],
+      ['west-bucket', S3Region.EuWest1],
     ]);
   });
 

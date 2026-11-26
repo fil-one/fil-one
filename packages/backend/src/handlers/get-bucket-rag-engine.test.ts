@@ -62,7 +62,7 @@ const USER_INFO = {
 
 const BUCKET = {
   bucketName: 'my-bucket',
-  region: S3Region.UsEast9,
+  region: S3Region.EuCentral3,
   createdAt: '2026-01-15T10:00:00Z',
   isPublic: false,
   versioning: false,
@@ -83,19 +83,19 @@ describe('get-bucket-rag-engine baseHandler', () => {
     vi.clearAllMocks();
     engine = fakeRagEngine();
     engineConfigured = true;
-    orch = fakeOrchestrator('forgeDev', { bucket: BUCKET, region: S3Region.UsEast9 });
+    orch = fakeOrchestrator('forge', { bucket: BUCKET, region: S3Region.EuCentral3 });
     mockGetOrchestratorForRegion.mockReturnValue(orch);
   });
 
   it('answers the engine status and the version history', async () => {
-    const result = await baseHandler(event(S3Region.UsEast9));
+    const result = await baseHandler(event(S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(200);
     expect(JSON.parse(result.body!)).toStrictEqual({
       status: engineStatus(),
       versions: engineVersions().versions,
     });
-    const target = expectedTarget('forgeDev', S3Region.UsEast9, 'my-bucket');
+    const target = expectedTarget('forge', S3Region.EuCentral3, 'my-bucket');
     expect(engine.status).toHaveBeenCalledWith(target);
     expect(engine.versions).toHaveBeenCalledWith(target);
   });
@@ -110,7 +110,7 @@ describe('get-bucket-rag-engine baseHandler', () => {
   it('answers 404 for a bucket the tenant does not own', async () => {
     orch.getBucket.mockResolvedValue(null);
 
-    const result = await baseHandler(event(S3Region.UsEast9));
+    const result = await baseHandler(event(S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(404);
     expect(engine.status).not.toHaveBeenCalled();
@@ -119,7 +119,7 @@ describe('get-bucket-rag-engine baseHandler', () => {
   it('answers 503 when the tenant is not ready', async () => {
     orch.isTenantReady.mockReturnValue(null);
 
-    const result = await baseHandler(event(S3Region.UsEast9));
+    const result = await baseHandler(event(S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(503);
   });
@@ -127,7 +127,7 @@ describe('get-bucket-rag-engine baseHandler', () => {
   it('answers 503 when the stage has no engine', async () => {
     engineConfigured = false;
 
-    const result = await baseHandler(event(S3Region.UsEast9));
+    const result = await baseHandler(event(S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(503);
   });
@@ -137,7 +137,7 @@ describe('get-bucket-rag-engine baseHandler', () => {
       new RagEngineRequestError('no dataset', 409, { code: 'NOT_INDEXED' }),
     );
 
-    const result = await baseHandler(event(S3Region.UsEast9));
+    const result = await baseHandler(event(S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(409);
     expect(JSON.parse(result.body!).code).toBe(ApiErrorCode.BUCKET_NOT_INDEXED);
@@ -147,7 +147,7 @@ describe('get-bucket-rag-engine baseHandler', () => {
     engine.status.mockResolvedValue(engineStatus({ syncState: 'syncing' }));
     engine.versions.mockRejectedValue(new RagEngineRequestError('boom', 500));
 
-    const result = await baseHandler(event(S3Region.UsEast9));
+    const result = await baseHandler(event(S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(200);
     expect(JSON.parse(result.body!)).toStrictEqual({
@@ -162,7 +162,7 @@ describe('get-bucket-rag-engine baseHandler', () => {
       engineStatus({ syncState: 'error', lastSyncError: 'PUT http://ingot:9000/x failed' }),
     );
 
-    const result = await baseHandler(event(S3Region.UsEast9));
+    const result = await baseHandler(event(S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(200);
     expect(JSON.parse(result.body!).status.lastSyncError).toBe(
@@ -175,7 +175,7 @@ describe('get-bucket-rag-engine baseHandler', () => {
   it('answers 502 when status fails, even if versions succeeds', async () => {
     engine.status.mockRejectedValue(new RagEngineRequestError('boom', 500));
 
-    const result = await baseHandler(event(S3Region.UsEast9));
+    const result = await baseHandler(event(S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(502);
   });

@@ -38,19 +38,19 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 describe('companionBucketName', () => {
   it('is the reserved prefix plus 40 hex chars of sha256(org#region#bucket)', () => {
-    const name = companionBucketName('org-1', 'us-east-9', 'docs');
+    const name = companionBucketName('org-1', 'eu-central-3', 'docs');
     expect(name).toMatch(/^filone-rag-[0-9a-f]{40}$/);
     expect(name).toHaveLength(51);
-    // sha256("org-1#us-east-9#docs"), first 40 hex chars.
-    expect(name).toBe('filone-rag-2bed71ec4554dfb9cb21004f6a0960cf908823cf');
-    expect(name).not.toBe(companionBucketName('org-1', 'eu-central-3', 'docs'));
+    // sha256("org-1#eu-central-3#docs"), first 40 hex chars.
+    expect(name).toBe('filone-rag-a101760a175efe2935706f050442bc1780530994');
+    expect(name).not.toBe(companionBucketName('org-1', 'eu-west-1', 'docs'));
   });
 });
 
 describe('lanceStorageOptions', () => {
   it('uses path-style, blocks env session tokens, and allows http only for http endpoints', () => {
     const base = {
-      region: 'us-east-9',
+      region: 'eu-central-3',
       accessKeyId: 'AK',
       secretAccessKey: 'SK',
     };
@@ -60,7 +60,7 @@ describe('lanceStorageOptions', () => {
     });
     expect(http).toEqual({
       aws_endpoint: 'http://127.0.0.1:15130',
-      aws_region: 'us-east-9',
+      aws_region: 'eu-central-3',
       aws_access_key_id: 'AK',
       aws_secret_access_key: 'SK',
       aws_session_token: '',
@@ -266,10 +266,10 @@ describe('endpoint overrides', () => {
     expect(storageFor(target('eu-central-3'), overrides).endpointUrl).toBe(
       'http://127.0.0.1:15200',
     );
-    expect(storageFor(target('us-east-9'), overrides).endpointUrl).toBe(
-      'https://s3.us-east-9.example',
+    expect(storageFor(target('eu-west-1'), overrides).endpointUrl).toBe(
+      'https://s3.eu-west-1.example',
     );
-    expect(storageFor(target('us-east-9')).endpointUrl).toBe('https://s3.us-east-9.example');
+    expect(storageFor(target('eu-west-1')).endpointUrl).toBe('https://s3.eu-west-1.example');
   });
 
   it('accepts several regions and a wildcard, and refuses a bare URL', () => {
@@ -278,7 +278,7 @@ describe('endpoint overrides', () => {
       b: 'https://y',
     });
     const all = parseEndpointOverrides('*=http://ingot:15130');
-    expect(storageFor(target('us-east-9'), all).endpointUrl).toBe('http://ingot:15130');
+    expect(storageFor(target('eu-west-1'), all).endpointUrl).toBe('http://ingot:15130');
     expect(() => parseEndpointOverrides('http://127.0.0.1:15200')).toThrow(/region=/);
     expect(() => parseEndpointOverrides('a=ftp://x')).toThrow(/region=/);
     expect(parseEndpointOverrides(undefined)).toEqual({});

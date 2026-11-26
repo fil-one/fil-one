@@ -71,7 +71,7 @@ function renderTab() {
   const view = render(
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <BucketPolicyTab bucketName="photos" region={S3Region.UsEast9} />
+        <BucketPolicyTab bucketName="photos" region={S3Region.EuCentral3} />
       </ToastProvider>
     </QueryClientProvider>,
   );
@@ -118,7 +118,9 @@ async function saveAndLoseToAnotherWriter() {
 async function refetchNewerPolicy(client: QueryClient) {
   mockGetBucketPolicy.mockResolvedValue({ policy: grantReadAndListToBen, etag: '"v2"' });
   await act(async () => {
-    await client.refetchQueries({ queryKey: queryKeys.bucketPolicy('photos', S3Region.UsEast9) });
+    await client.refetchQueries({
+      queryKey: queryKeys.bucketPolicy('photos', S3Region.EuCentral3),
+    });
   });
   await screen.findByText('This policy changed elsewhere');
 }
@@ -218,7 +220,7 @@ describe('BucketPolicyTab', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save policy' }));
 
     expect(await screen.findByText('Policy removed')).toBeInTheDocument();
-    expect(mockDeleteBucketPolicy).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"');
+    expect(mockDeleteBucketPolicy).toHaveBeenCalledWith('photos', S3Region.EuCentral3, '"v1"');
     expect(mockPutBucketPolicy).not.toHaveBeenCalled();
   });
 
@@ -273,7 +275,7 @@ describe('BucketPolicyTab', () => {
     expect(mockPutBucketPolicy.mock.calls).toStrictEqual([
       [
         'photos',
-        S3Region.UsEast9,
+        S3Region.EuCentral3,
         {
           policy: {
             Version: POLICY_VERSION,
@@ -357,7 +359,7 @@ describe('BucketPolicyTab conflicts and removal', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove policy' }));
 
     await waitFor(() =>
-      expect(mockDeleteBucketPolicy).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"'),
+      expect(mockDeleteBucketPolicy).toHaveBeenCalledWith('photos', S3Region.EuCentral3, '"v1"'),
     );
   });
 
@@ -367,7 +369,7 @@ describe('BucketPolicyTab conflicts and removal', () => {
     await confirmRemovePolicy();
 
     await waitFor(() =>
-      expect(mockDeleteBucketPolicy).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"'),
+      expect(mockDeleteBucketPolicy).toHaveBeenCalledWith('photos', S3Region.EuCentral3, '"v1"'),
     );
   });
 

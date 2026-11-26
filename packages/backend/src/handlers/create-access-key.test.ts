@@ -40,8 +40,8 @@ const mockOrchestrator = {
 // to the caller's principal through the in-memory fake.
 const iamFake = new FakeIamOrchestrator();
 const iamOrchestrator = {
-  id: 'forgeDev',
-  regions: [S3Region.UsEast9],
+  id: 'forge',
+  regions: [S3Region.EuCentral3],
   ...delegateIamMethods(iamFake),
   ensureTenantReady: (...args: unknown[]) => mockEnsureTenantReady(...args),
   issueAccessKey: (...args: unknown[]) => mockIssueAccessKey(...args),
@@ -56,7 +56,7 @@ const fthOrchestrator = { ...mockOrchestrator, id: 'fth', regions: [S3Region.UsE
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => {
     mockGetOrchestratorForRegion(region);
-    if (region === S3Region.UsEast9) return iamOrchestrator;
+    if (region === S3Region.EuCentral3) return iamOrchestrator;
     return region === S3Region.UsEast1 ? fthOrchestrator : mockOrchestrator;
   },
 }));
@@ -1375,7 +1375,7 @@ describe('create-access-key baseHandler', () => {
 
   describe('on a region serving the iam access model', () => {
     const buildPrincipalKeyBody = (overrides: Record<string, unknown> = {}) =>
-      JSON.stringify({ keyName: 'laptop', region: S3Region.UsEast9, ...overrides });
+      JSON.stringify({ keyName: 'laptop', region: S3Region.EuCentral3, ...overrides });
 
     const buildServiceKeyBody = (overrides: Record<string, unknown> = {}) =>
       buildPrincipalKeyBody({
@@ -1448,7 +1448,7 @@ describe('create-access-key baseHandler', () => {
         accessKeyId: 'AKIA1234567890',
         createdAt: '2026-03-10T13:36:07.752371Z',
         status: 'active',
-        orchestratorId: 'forgeDev',
+        orchestratorId: 'forge',
         principalId: USER_1,
         createdBy: USER_1,
         policyVersion: 'pre-member-scope',
@@ -1461,8 +1461,8 @@ describe('create-access-key baseHandler', () => {
       expect(intentEvents()[0].details).toStrictEqual({
         keyKind: 's3',
         keyName: 'laptop',
-        region: S3Region.UsEast9,
-        orchestratorId: 'forgeDev',
+        region: S3Region.EuCentral3,
+        orchestratorId: 'forge',
         isPrincipalKey: true,
       });
     });
@@ -1561,7 +1561,7 @@ describe('create-access-key baseHandler', () => {
           accessKeyId: 'AKIA1234567890',
           createdAt: '2026-03-10T00:00:00Z',
           status: 'active',
-          orchestratorId: 'forgeDev',
+          orchestratorId: 'forge',
           createdBy: USER_1,
           policyVersion: 'pre-member-scope',
           principalId: USER_1,
@@ -1612,7 +1612,7 @@ describe('create-access-key baseHandler', () => {
           accessKeyId: 'AKIA1234567890',
           createdAt: '2026-03-10T13:36:07.752371Z',
           status: 'active',
-          orchestratorId: 'forgeDev',
+          orchestratorId: 'forge',
           permissions: ['read', 'list'],
           bucketScope: 'specific',
           buckets: ['photos'],
@@ -1703,7 +1703,7 @@ describe('create-access-key baseHandler', () => {
             pk: { S: 'ORG#org-1' },
             sk: { S: 'ACCESSKEY#existing' },
             keyName: { S: 'laptop' },
-            region: { S: S3Region.UsEast9 },
+            region: { S: S3Region.EuCentral3 },
             createdAt: { S: '2026-01-01T00:00:00Z' },
           },
         ],

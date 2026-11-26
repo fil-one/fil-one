@@ -19,9 +19,9 @@ vi.mock('sst', () => ({
 
 // One region serves the `iam` access model, through the in-memory fake; a
 // bucket-filtered listing there asks the bucket's policy about principal keys.
-const IAM_REGION = S3Region.UsEast9;
+const IAM_REGION = S3Region.EuCentral3;
 const iamFake = new FakeIamOrchestrator();
-const iamOrchestrator = fakeOrchestrator('forgeDev', { region: IAM_REGION, iam: iamFake });
+const iamOrchestrator = fakeOrchestrator('forge', { region: IAM_REGION, iam: iamFake });
 const legacyOrchestrator = fakeOrchestrator('aurora');
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) =>
@@ -143,7 +143,7 @@ describe('list-access-keys baseHandler', () => {
           keyName: 'laptop',
           accessKeyId: 'did:key:z9',
           createdAt: '2026-09-16T00:00:00Z',
-          region: 'us-east-9',
+          region: 'eu-central-3',
           createdBy: 'user-1',
           principalId: 'user-1',
         }),
@@ -160,7 +160,7 @@ describe('list-access-keys baseHandler', () => {
       accessKeyId: 'did:key:z9',
       createdAt: '2026-09-16T00:00:00Z',
       status: 'active',
-      regions: ['us-east-9'],
+      regions: ['eu-central-3'],
       expiresAt: null,
       createdBy: 'user-1',
       principalId: 'user-1',
@@ -652,7 +652,7 @@ describe('who sees which keys', () => {
   });
 
   describe('a bucket filter on a region serving the iam access model', () => {
-    const TENANT_ID = tenantFor('forgeDev', USER_INFO.orgId);
+    const TENANT_ID = tenantFor('forge', USER_INFO.orgId);
     const BUCKET = 'photos';
 
     function buildPrincipalKeyRow(id: string, principalId: string) {

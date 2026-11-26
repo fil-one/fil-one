@@ -42,9 +42,9 @@ const policy = policyOf(statement('photos', 'Allow', [ALICE], ['s3:GetObject']))
 
 const orchestrator = new FilOneOrchestrator({
   id: 'forge',
-  regions: [S3Region.UsEast9],
+  regions: [S3Region.EuCentral3],
   stage: 'test',
-  s3Endpoints: { [S3Region.UsEast9]: { endpointUrl: 'https://s3.example.test' } },
+  s3Endpoints: { [S3Region.EuCentral3]: { endpointUrl: 'https://s3.example.test' } },
   api: { baseUrl: 'https://api.example.test', accessToken: 'partner-key' },
 });
 
@@ -57,7 +57,7 @@ beforeEach(() => {
 // No s3EndpointUrl: one endpoint cannot stand for several regions.
 const twoRegionOrchestrator = new FilOneOrchestrator({
   id: 'forge',
-  regions: [S3Region.UsEast9, S3Region.EuWest1],
+  regions: [S3Region.EuCentral3, S3Region.EuWest1],
   stage: 'test',
   api: { baseUrl: 'https://api.example.test', accessToken: 'partner-key' },
 });
@@ -81,7 +81,7 @@ describe('getBucketPolicy', () => {
     mockGetPolicy.mockResolvedValue({ policy, etag: '"abc"' });
 
     await expect(
-      orchestrator.getBucketPolicy(tenantId, { region: S3Region.UsEast9, bucketName: 'photos' }),
+      orchestrator.getBucketPolicy(tenantId, { region: S3Region.EuCentral3, bucketName: 'photos' }),
     ).resolves.toStrictEqual({
       policy,
       etag: '"abc"',
@@ -92,7 +92,7 @@ describe('getBucketPolicy', () => {
   it('returns null when the bucket has no policy', async () => {
     mockGetPolicy.mockResolvedValue(null);
     await expect(
-      orchestrator.getBucketPolicy(tenantId, { region: S3Region.UsEast9, bucketName: 'photos' }),
+      orchestrator.getBucketPolicy(tenantId, { region: S3Region.EuCentral3, bucketName: 'photos' }),
     ).resolves.toBeNull();
   });
 });
@@ -104,7 +104,7 @@ describe('putBucketPolicy', () => {
     await expect(
       orchestrator.putBucketPolicy(
         tenantId,
-        { region: S3Region.UsEast9, bucketName: 'photos' },
+        { region: S3Region.EuCentral3, bucketName: 'photos' },
         policy,
         { ifMatch: '"v1"' },
       ),
@@ -120,7 +120,7 @@ describe('putBucketPolicy', () => {
     await expect(
       orchestrator.putBucketPolicy(
         tenantId,
-        { region: S3Region.UsEast9, bucketName: 'photos' },
+        { region: S3Region.EuCentral3, bucketName: 'photos' },
         policy,
         { ifNoneMatch: '*' },
       ),
@@ -142,7 +142,7 @@ describe('putBucketPolicy', () => {
     await expect(
       orchestrator.putBucketPolicy(
         tenantId,
-        { region: S3Region.UsEast9, bucketName: 'photos' },
+        { region: S3Region.EuCentral3, bucketName: 'photos' },
         policy,
         { ifMatch: '"old"' },
       ),
@@ -158,7 +158,7 @@ describe('putBucketPolicy', () => {
     await expect(
       orchestrator.putBucketPolicy(
         tenantId,
-        { region: S3Region.UsEast9, bucketName: 'photos' },
+        { region: S3Region.EuCentral3, bucketName: 'photos' },
         policy,
         { ifMatch: '"v1"' },
       ),
@@ -172,7 +172,7 @@ describe('putBucketPolicy', () => {
     await expect(
       orchestrator.putBucketPolicy(
         tenantId,
-        { region: S3Region.UsEast9, bucketName: 'photos' },
+        { region: S3Region.EuCentral3, bucketName: 'photos' },
         policy,
         { ifMatch: '"v1"' },
       ),
@@ -186,7 +186,7 @@ describe('putBucketPolicy', () => {
     await expect(
       orchestrator.putBucketPolicy(
         tenantId,
-        { region: S3Region.UsEast9, bucketName: 'photos' },
+        { region: S3Region.EuCentral3, bucketName: 'photos' },
         policy,
         { ifMatch: '"v1"' },
       ),
@@ -202,7 +202,7 @@ describe('putBucketPolicy', () => {
     await expect(
       orchestrator.putBucketPolicy(
         tenantId,
-        { region: S3Region.UsEast9, bucketName: 'photos' },
+        { region: S3Region.EuCentral3, bucketName: 'photos' },
         policy,
         { ifMatch: '"v1"' },
       ),
@@ -217,7 +217,7 @@ describe('deleteBucketPolicy', () => {
     await expect(
       orchestrator.deleteBucketPolicy(
         tenantId,
-        { region: S3Region.UsEast9, bucketName: 'photos' },
+        { region: S3Region.EuCentral3, bucketName: 'photos' },
         { ifMatch: '"v1"' },
       ),
     ).resolves.toBeUndefined();

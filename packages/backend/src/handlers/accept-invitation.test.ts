@@ -1033,7 +1033,7 @@ describe('POST /api/invitations/accept handler', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     ddbMock.on(TransactWriteItemsCommand).resolves({});
     mockRegisterMemberPrincipal.mockRejectedValue(
-      new IamRegionRefusedError('register', [S3Region.UsEast9]),
+      new IamRegionRefusedError('register', [S3Region.EuCentral3]),
     );
 
     const result = await handler(acceptEvent(), buildContext());

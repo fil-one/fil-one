@@ -49,9 +49,9 @@ const fail = (status: number, body: unknown = { message: 'error' }) =>
 
 const orchestrator = new FilOneOrchestrator({
   id: 'forge',
-  regions: [S3Region.UsEast9],
+  regions: [S3Region.EuCentral3],
   stage: 'test',
-  s3Endpoints: { [S3Region.UsEast9]: { endpointUrl: 'https://s3.example.test' } },
+  s3Endpoints: { [S3Region.EuCentral3]: { endpointUrl: 'https://s3.example.test' } },
   api: { baseUrl: 'https://api.example.test', accessToken: 'partner-key' },
 });
 

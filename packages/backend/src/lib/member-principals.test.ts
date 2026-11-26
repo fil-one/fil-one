@@ -10,9 +10,9 @@ vi.mock('sst', () => sstResourceMock());
 
 const ORG_ID = '11111111-2222-3333-4444-555555555555';
 const iam = new FakeIamOrchestrator();
-const iamRegion = fakeOrchestrator('forgeDev', { region: S3Region.UsEast9, iam });
+const iamRegion = fakeOrchestrator('forge', { region: S3Region.EuCentral3, iam });
 const scopedRegion = fakeOrchestrator('aurora', { region: S3Region.EuWest1 });
-const TENANT = tenantFor('forgeDev', ORG_ID);
+const TENANT = tenantFor('forge', ORG_ID);
 
 const regions: unknown[] = [];
 vi.mock('./service-orchestrator-registry.ts', () => ({
@@ -59,7 +59,7 @@ describe('removeMemberPrincipal', () => {
     await expect(removeMemberPrincipal({ orgProfile, userId: ANY_USER })).rejects.toMatchObject({
       name: 'IamRegionRefusedError',
       action: 'remove',
-      regions: [S3Region.UsEast9],
+      regions: [S3Region.EuCentral3],
       succeeded: [],
     });
   });
@@ -92,7 +92,7 @@ describe('registerMemberPrincipal', () => {
     ).rejects.toMatchObject({
       name: 'IamRegionRefusedError',
       action: 'register',
-      regions: [S3Region.UsEast9],
+      regions: [S3Region.EuCentral3],
       succeeded: [],
     });
   });

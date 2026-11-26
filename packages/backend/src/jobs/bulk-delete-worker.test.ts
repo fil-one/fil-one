@@ -35,7 +35,7 @@ vi.mock('../lib/org-membership.ts', () => ({
 }));
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: vi.fn((region: string) => ({
-    id: region === 'us-east-9' ? 'forgeDev' : 'aurora',
+    id: region === 'eu-central-3' ? 'forge' : 'aurora',
     regions: [region],
     isTenantReady: () => 'tenant-1',
     resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args),
@@ -270,7 +270,7 @@ describe('bulk-delete worker', () => {
   // made after the job was queued applies to its next run.
   describe('a job a member started, on an iam region', () => {
     const memberJob = (overrides: Partial<BulkDeleteJobRecord> = {}) =>
-      job({ region: S3Region.UsEast9, startedBy: 'any-member', ...overrides });
+      job({ region: S3Region.EuCentral3, startedBy: 'any-member', ...overrides });
     const allVersionsActions = [
       's3:ListBucketVersions',
       's3:DeleteObject',

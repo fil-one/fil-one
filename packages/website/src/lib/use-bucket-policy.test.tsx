@@ -17,7 +17,7 @@ vi.mock('./bucket-policy-api.js', async () => ({
   deleteBucketPolicy: (...args: unknown[]) => mockDelete(...args),
 }));
 vi.mock('./access-model.js', () => ({
-  supportsIamMethods: (region: string) => region === 'us-east-9',
+  supportsIamMethods: (region: string) => region === 'eu-central-3',
 }));
 vi.mock('./api.js', async () => ({
   ...(await vi.importActual<typeof import('./api.js')>('./api.js')),
@@ -35,7 +35,10 @@ const policy: BucketPolicy = {
   ],
 };
 
-function renderUseBucketPolicy(region: S3Region = S3Region.UsEast9, role: OrgRole = OrgRole.Owner) {
+function renderUseBucketPolicy(
+  region: S3Region = S3Region.EuCentral3,
+  role: OrgRole = OrgRole.Owner,
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   seedPermissions(client, role);
   const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -77,7 +80,7 @@ describe('useBucketPolicy', () => {
       hasLoadFailed: false,
       snapshot: { policy, etag: '"v1"' },
     });
-    expect(mockGet).toHaveBeenCalledWith('photos', S3Region.UsEast9);
+    expect(mockGet).toHaveBeenCalledWith('photos', S3Region.EuCentral3);
   });
 
   it('does not fetch the policy on a service-keys region', () => {
@@ -92,7 +95,7 @@ describe('useBucketPolicy', () => {
   });
 
   it('does not fetch the policy for a Member', () => {
-    const { result } = renderUseBucketPolicy(S3Region.UsEast9, OrgRole.Member);
+    const { result } = renderUseBucketPolicy(S3Region.EuCentral3, OrgRole.Member);
 
     expect(result.current).toMatchObject({
       isAvailable: false,
@@ -128,7 +131,7 @@ describe('useBucketPolicy', () => {
 
     await act(() => result.current.save.mutateAsync({ policy, etag: '"v1"' }));
 
-    expect(mockPut).toHaveBeenCalledWith('photos', S3Region.UsEast9, { policy, etag: '"v1"' });
+    expect(mockPut).toHaveBeenCalledWith('photos', S3Region.EuCentral3, { policy, etag: '"v1"' });
   });
 
   it('caches the saved policy with the ETag the PUT returned', async () => {
@@ -148,7 +151,7 @@ describe('useBucketPolicy', () => {
     await act(() => result.current.save.mutateAsync({ policy, etag: '"v1"' }));
 
     expect(invalidate).toHaveBeenCalledWith({
-      queryKey: queryKeys.bucketAccessKeys('photos', S3Region.UsEast9),
+      queryKey: queryKeys.bucketAccessKeys('photos', S3Region.EuCentral3),
     });
   });
 
@@ -179,7 +182,7 @@ describe('useBucketPolicy', () => {
 
     await act(() => result.current.remove.mutateAsync({ etag: '"v1"' }));
 
-    expect(mockDelete).toHaveBeenCalledWith('photos', S3Region.UsEast9, '"v1"');
+    expect(mockDelete).toHaveBeenCalledWith('photos', S3Region.EuCentral3, '"v1"');
     await waitFor(() => expect(result.current.snapshot).toBeNull());
   });
 });

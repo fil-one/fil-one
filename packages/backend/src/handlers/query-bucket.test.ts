@@ -811,17 +811,12 @@ describe('query-bucket on a Forge region (Bucket Intelligence engine)', () => {
   });
 
   it('defaults to vector search on the latest version', async () => {
-    mockGetEnablement.mockResolvedValue({
-      ...FORGE_ENABLEMENT,
-      pk: 'BUCKET#org-1#us-east-9#my-bucket',
-    });
-
-    await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.UsEast9 }));
+    await baseHandler(queryEvent({ query: 'sky' }, { region: S3Region.EuCentral3 }));
 
     const request = engine.query.mock.calls[0][0];
     expect(request.searchMode).toBe('vector');
     expect(request).not.toHaveProperty('version');
-    expect(request.target.region).toBe(S3Region.UsEast9);
+    expect(request.target.region).toBe(S3Region.EuCentral3);
   });
 
   it('never touches Bedrock or S3 Vectors', async () => {

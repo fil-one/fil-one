@@ -58,7 +58,7 @@ describe('sync', () => {
     expect(status.indexedBytes).toBe(
       Object.values(DOCS).reduce((sum, body) => sum + Buffer.byteLength(body), 0),
     );
-    const companion = companionBucketName('org-1', 'us-east-9', 'docs');
+    const companion = companionBucketName('org-1', 'eu-central-3', 'docs');
     expect(status.dataset).toMatchObject({
       uri: `s3://${companion}/lance/chunks.lance`,
       companionBucket: companion,
@@ -129,7 +129,7 @@ describe('sync', () => {
     seed(t);
     await t.call('/v1/sync', { target: t.target });
     await t.syncs.idle();
-    const companion = companionBucketName('org-1', 'us-east-9', 'docs');
+    const companion = companionBucketName('org-1', 'eu-central-3', 'docs');
     expect(fs.existsSync(path.join(t.root, companion, 'lance', 'chunks.lance', 'data'))).toBe(true);
 
     t.s3.options.rejectConditionalWrites = false;
@@ -161,7 +161,7 @@ describe('sync', () => {
     const t = await harness();
     seed(t);
     await t.syncAndWait();
-    const companion = companionBucketName('org-1', 'us-east-9', 'docs');
+    const companion = companionBucketName('org-1', 'eu-central-3', 'docs');
     const db = await connectDataset(storageFor(t.target), companion);
     const table = await db.openTable(TABLE_NAME);
     await table.dropIndex('text_idx');
@@ -180,7 +180,7 @@ describe('sync', () => {
     const t = await harness();
     seed(t);
     await t.syncAndWait();
-    const companion = companionBucketName('org-1', 'us-east-9', 'docs');
+    const companion = companionBucketName('org-1', 'eu-central-3', 'docs');
     const db = await connectDataset(storageFor(t.target), companion);
     const table = await db.openTable(TABLE_NAME);
     // The index an earlier engine built.
@@ -282,7 +282,7 @@ describe('sync', () => {
     const t = await harness();
     seed(t);
     await t.syncAndWait();
-    const companion = companionBucketName('org-1', 'us-east-9', 'docs');
+    const companion = companionBucketName('org-1', 'eu-central-3', 'docs');
     const stateFile = path.join(t.root, companion, STATE_KEY);
     // The first sync committed and finished the dataset but never wrote its state.
     fs.rmSync(stateFile);
@@ -297,7 +297,7 @@ describe('sync', () => {
     const t = await harness();
     seed(t);
     await t.syncAndWait();
-    const companion = companionBucketName('org-1', 'us-east-9', 'docs');
+    const companion = companionBucketName('org-1', 'eu-central-3', 'docs');
     const db = await connectDataset(storageFor(t.target), companion);
     const table = await db.openTable(TABLE_NAME);
     // A commit from a sync that failed before it finalized: same object and
