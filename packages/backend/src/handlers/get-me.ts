@@ -33,7 +33,7 @@ async function resolveBillingActive(orgId: string): Promise<boolean> {
   );
 }
 
-async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
+export async function baseHandler(event: AuthenticatedEvent): Promise<APIGatewayProxyResultV2> {
   const { orgId, userId, email, emailVerified, sub, name, picture, membership } =
     getUserInfo(event);
 
