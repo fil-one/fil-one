@@ -10,8 +10,6 @@ import {
 import { Link } from '@tanstack/react-router';
 import {
   ArrowsOutSimpleIcon,
-  CaretDownIcon,
-  CaretUpIcon,
   DownloadSimpleIcon,
   ExportIcon,
   FileDashedIcon,
@@ -29,6 +27,12 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { IconButton } from './IconButton';
 import { EmptyStateCard } from './EmptyStateCard';
 import { ObjectFacts } from './ObjectDetailsCard';
+import {
+  handleStepKey,
+  SiblingSteps,
+  trackSteps,
+  type ObjectDrawerSiblings,
+} from './ObjectDrawerSteps';
 import { ObjectPreview, ObjectPreviewCard } from './ObjectPreview';
 import { ShareObjectModal } from './ShareObjectModal';
 import { useToast } from './Toast/index.js';
@@ -49,14 +53,7 @@ import { SHARE_UNAVAILABLE_TOOLTIP, useCanShareObjects } from '../lib/use-can-sh
 import { useHasPermission } from '../lib/use-permissions.js';
 import { usePermittedDialog } from '../lib/use-permitted-dialog.js';
 
-/** The objects before and after this one in the list, for stepping without closing. */
-export type ObjectDrawerSiblings = {
-  /** 1-based, as the header shows it. */
-  position: number;
-  total: number;
-  onPrevious?: () => void;
-  onNext?: () => void;
-};
+export type { ObjectDrawerSiblings };
 
 export type ObjectDetailsDrawerProps = {
   bucketName: string;
@@ -90,6 +87,10 @@ export function ObjectDetailsDrawer(props: ObjectDetailsDrawerProps) {
   // Focus starts on the panel itself, not its first button: those buttons show a
   // tooltip on focus, which would pop up on every open. Tab reaches them next.
   const panelRef = useRef<HTMLDivElement>(null);
+  // The object on screen is announced only once the user has stepped: opening
+  // the panel already reads its title.
+  const [hasStepped, setHasStepped] = useState(false);
+  const siblings = props.siblings && trackSteps(props.siblings, () => setHasStepped(true));
 
   return (
     <Transition show={open} appear as={Fragment} afterLeave={props.onClose}>
@@ -98,6 +99,7 @@ export function ObjectDetailsDrawer(props: ObjectDetailsDrawerProps) {
         className="relative z-40"
         initialFocus={panelRef}
         onClose={close}
+        onKeyDown={(e) => handleStepKey(e, panelRef.current, siblings)}
       >
         <TransitionChild
           as={Fragment}
@@ -125,7 +127,12 @@ export function ObjectDetailsDrawer(props: ObjectDetailsDrawerProps) {
               data-testid="object-details-drawer-panel"
               className="flex w-full flex-col bg-white shadow-xl outline-none"
             >
-              <DrawerContent {...props} onClose={close} />
+              <DrawerContent
+                {...props}
+                siblings={siblings}
+                announceObject={hasStepped}
+                onClose={close}
+              />
             </DialogPanel>
           </TransitionChild>
         </div>
@@ -157,9 +164,13 @@ function DrawerContent({
   objectLockEnabled,
   siblings,
   onDownload,
+  announceObject,
   onDelete,
   onClose,
-}: ObjectDetailsDrawerProps) {
+}: ObjectDetailsDrawerProps & {
+  /** Read the object out when it changes, for a screen reader user stepping. */
+  announceObject: boolean;
+}) {
   // A delete marker has no content, so S3 is not asked for any: it would answer
   // with an error, and with a different one in each region
   const isDeleteMarker = listed?.isDeleteMarker ?? false;
@@ -191,6 +202,7 @@ function DrawerContent({
         isOlderVersion={Boolean(versionId)}
         pageSearch={pageSearch}
         siblings={siblings}
+        announceObject={announceObject}
         onClose={onClose}
       />
       <div className="flex-1 overflow-y-auto">
@@ -311,6 +323,7 @@ function DrawerHeader({
   isOlderVersion,
   pageSearch,
   siblings,
+  announceObject,
   onClose,
 }: {
   bucketName: string;
@@ -318,6 +331,7 @@ function DrawerHeader({
   isOlderVersion: boolean;
   pageSearch: { key: string; region: S3Region; versionId?: string };
   siblings?: ObjectDrawerSiblings;
+  announceObject: boolean;
   onClose: () => void;
 }) {
   const fileName = getObjectFileName(objectKey);
@@ -351,7 +365,14 @@ function DrawerHeader({
       {/* The 30px buttons centre on the title's 24px first line, 3px over it
           each side, so they set neither the header's height nor its top edge */}
       <div className="-my-0.75 flex shrink-0 items-center gap-1">
-        {siblings && <SiblingSteps siblings={siblings} />}
+        {siblings && (
+          <SiblingSteps
+            siblings={siblings}
+            announcement={
+              announceObject ? `${fileName}, ${siblings.position} of ${siblings.total}` : ''
+            }
+          />
+        )}
         <Tooltip content="Open full page" side="bottom">
           <Link
             to="/buckets/$bucketName/objects"
@@ -372,40 +393,6 @@ function DrawerHeader({
           onClick={onClose}
         />
       </div>
-    </div>
-  );
-}
-
-function SiblingSteps({ siblings }: { siblings: ObjectDrawerSiblings }) {
-  return (
-    <div className="mr-1 flex items-center gap-1 border-r border-zinc-100 pr-2">
-      {/* Where this object sits in the folder, as Linear's issue view counts its list */}
-      <span
-        data-testid="object-details-drawer-position"
-        className="mr-1 hidden text-xs text-zinc-500 tabular-nums sm:inline"
-      >
-        {siblings.position} / {siblings.total}
-      </span>
-      <IconButton
-        icon={CaretUpIcon}
-        data-testid="object-details-drawer-previous"
-        aria-label="Previous object"
-        tooltip="Previous object"
-        tooltipSide="bottom"
-        className="focus-visible:brand-outline"
-        disabled={!siblings.onPrevious}
-        onClick={siblings.onPrevious}
-      />
-      <IconButton
-        icon={CaretDownIcon}
-        data-testid="object-details-drawer-next"
-        aria-label="Next object"
-        tooltip="Next object"
-        tooltipSide="bottom"
-        className="focus-visible:brand-outline"
-        disabled={!siblings.onNext}
-        onClick={siblings.onNext}
-      />
     </div>
   );
 }
