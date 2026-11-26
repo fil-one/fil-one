@@ -6,11 +6,10 @@ import { mcpEnabledMiddleware } from '../lib/mcp/mcp-resource.ts';
 import { SUPPORTED_PROTOCOL_VERSIONS, dispatchMcpRequest } from '../lib/mcp/mcp-server.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
 import type { AuthenticatedEvent } from '../lib/user-context.ts';
-import { getUserInfo } from '../lib/user-context.ts';
 import { authMiddleware } from '../middleware/auth.ts';
 import { requireOrgMembershipMiddleware } from '../middleware/authorize.ts';
 import { errorHandlerMiddleware } from '../middleware/error-handler.ts';
-import { getRequestDeadline, requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
+import { requestDeadlineMiddleware } from '../middleware/request-deadline.ts';
 import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscription-guard.ts';
 
 /**
@@ -50,10 +49,7 @@ export async function baseHandler(
   // A notification or a client's response to us expects no reply.
   if (message.id === undefined) return new ResponseBuilder().status(202).emptyBody().build();
 
-  const outcome = await dispatchMcpRequest(message, {
-    caller: getUserInfo(event),
-    signal: getRequestDeadline(event),
-  });
+  const outcome = await dispatchMcpRequest(message, { event });
   return buildJsonRpcResponse(message.id, outcome);
 }
 

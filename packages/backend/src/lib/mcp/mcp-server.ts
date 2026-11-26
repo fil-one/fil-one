@@ -1,8 +1,10 @@
-import { listBucketsUnavailableMessage, roleHasPermission, S3Region } from '@filone/shared';
+import { S3Region } from '@filone/shared';
+import { baseHandler as listBuckets } from '../../handlers/list-buckets.ts';
+import { AccessLevel } from '../../middleware/subscription-guard.ts';
 import type { JsonRpcOutcome, JsonRpcRequest } from './json-rpc.ts';
 import { isRecord } from './json-rpc.ts';
-import { listOrgBuckets } from './list-org-buckets.ts';
-import type { UserInfo } from '../user-context.ts';
+import { callConsoleRoute } from './mcp-console-route.ts';
+import type { AuthenticatedEvent } from '../user-context.ts';
 
 /** Newest first; the first is offered when the client asks for one we do not speak. */
 export const SUPPORTED_PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26'];
@@ -29,10 +31,9 @@ const TOOLS = [
   },
 ];
 
-/** Who is asking, and when the request must give up. */
+/** The MCP request, which carries who is asking and when it must give up. */
 export interface McpRequestContext {
-  caller: UserInfo;
-  signal: AbortSignal;
+  event: AuthenticatedEvent;
 }
 
 function buildToolResult(payload: unknown, isError = false) {
@@ -59,33 +60,27 @@ function parseListBucketsArguments(args: unknown): { region?: string } | { probl
   return { region };
 }
 
-async function callListBuckets({ caller, signal }: McpRequestContext, args: unknown = {}) {
-  if (!caller.membership || !roleHasPermission(caller.membership.role, 'buckets.read')) {
-    return buildToolResult(
-      { message: 'Your role in this organization does not permit list_buckets.' },
-      true,
-    );
-  }
+/** Runs the console's bucket list route as the caller, so the tool answers as GET /api/buckets would. */
+async function callListBuckets({ event }: McpRequestContext, args: unknown = {}) {
   const parsed = parseListBucketsArguments(args);
   // A tool error rather than Invalid params, so the model can correct the call.
   if ('problem' in parsed) {
     return buildToolResult({ message: `Invalid arguments: ${parsed.problem}` }, true);
   }
 
-  const { region } = parsed;
-  const { buckets, unavailableRegions, allFailed } = await listOrgBuckets(caller, {
-    region,
-    signal,
+  const { statusCode, body } = await callConsoleRoute(event, {
+    handler: 'list-buckets',
+    baseHandler: listBuckets,
+    accessLevel: AccessLevel.Read,
+    ...(parsed.region && { queryStringParameters: { region: parsed.region } }),
   });
-  // A tool error rather than a JSON-RPC error, so the model reads the outage
-  // instead of the client reporting a broken server.
-  if (allFailed) {
-    return buildToolResult({ message: listBucketsUnavailableMessage(unavailableRegions) }, true);
+  // A tool error rather than a JSON-RPC error, so the model reads a refusal or
+  // an outage instead of the client reporting a broken server.
+  if (statusCode >= 300) {
+    const message = isRecord(body) && typeof body.message === 'string' ? body.message : undefined;
+    return buildToolResult({ message: message ?? `Fil One answered ${statusCode}.` }, true);
   }
-  return buildToolResult({
-    buckets,
-    ...(unavailableRegions.length > 0 && { unavailableRegions }),
-  });
+  return buildToolResult(body);
 }
 
 /** Answer one MCP request. Notifications expect no reply and never reach here. */

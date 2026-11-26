@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { OrgRole, S3Region } from '@filone/shared';
+import { S3Region } from '@filone/shared';
 import type { OrgMembership } from '../lib/org-membership.ts';
 
 vi.mock('sst', () => ({ Resource: {} }));
 
-const listOrgBuckets = vi.fn();
-vi.mock('../lib/list-org-buckets.ts', () => ({
-  listOrgBuckets: (...args: unknown[]) => listOrgBuckets(...args),
+const callConsoleRoute = vi.fn();
+vi.mock('../lib/mcp/mcp-console-route.ts', () => ({
+  callConsoleRoute: (...args: unknown[]) => callConsoleRoute(...args),
 }));
 
 import type { Context } from 'aws-lambda';
@@ -14,7 +14,8 @@ import { baseHandler, handler as mcpHandler } from './mcp.ts';
 import { handler as mcpGetHandler } from './mcp-get.ts';
 import { handler as mcpResourceMetadataHandler } from './mcp-resource-metadata.ts';
 import { SUPPORTED_PROTOCOL_VERSIONS } from '../lib/mcp/mcp-server.ts';
-import { buildEvent, membershipFor } from '../test/lambda-test-utilities.ts';
+import { AccessLevel } from '../middleware/subscription-guard.ts';
+import { buildEvent } from '../test/lambda-test-utilities.ts';
 
 const USER_INFO = { userId: 'any-user', orgId: 'any-org' };
 
@@ -45,7 +46,7 @@ function callTool(name: string, args?: unknown) {
 describe('mcp baseHandler', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    listOrgBuckets.mockResolvedValue({ buckets: [], unavailableRegions: [], allFailed: false });
+    callConsoleRoute.mockResolvedValue({ statusCode: 200, body: { buckets: [] } });
   });
 
   it.each([
@@ -91,41 +92,33 @@ describe('mcp baseHandler', () => {
     ]);
   });
 
-  it('returns the caller’s buckets from list_buckets, narrowed to the region asked for', async () => {
-    listOrgBuckets.mockResolvedValue({
-      buckets: [anyBucket],
-      unavailableRegions: [],
-      allFailed: false,
+  it('lists buckets by running GET /api/buckets as the caller, narrowed to the region asked for', async () => {
+    callConsoleRoute.mockResolvedValue({
+      statusCode: 200,
+      body: { buckets: [anyBucket], unavailableRegions: [S3Region.UsEast1] },
     });
 
     const response = await callTool('list_buckets', { region: S3Region.EuWest1 });
 
-    expect(listOrgBuckets).toHaveBeenCalledWith(
-      expect.objectContaining(USER_INFO),
-      expect.objectContaining({ region: S3Region.EuWest1 }),
+    expect(callConsoleRoute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestContext: expect.objectContaining({ userInfo: expect.objectContaining(USER_INFO) }),
+      }),
+      {
+        handler: 'list-buckets',
+        baseHandler: expect.any(Function),
+        accessLevel: AccessLevel.Read,
+        queryStringParameters: { region: S3Region.EuWest1 },
+      },
     );
+    const answer = { buckets: [anyBucket], unavailableRegions: [S3Region.UsEast1] };
     expect(response.body).toStrictEqual({
       jsonrpc: '2.0',
       id: 7,
       result: {
-        content: [{ type: 'text', text: JSON.stringify({ buckets: [anyBucket] }) }],
-        structuredContent: { buckets: [anyBucket] },
+        content: [{ type: 'text', text: JSON.stringify(answer) }],
+        structuredContent: answer,
       },
-    });
-  });
-
-  it('names the unavailable regions alongside the buckets that did answer', async () => {
-    listOrgBuckets.mockResolvedValue({
-      buckets: [anyBucket],
-      unavailableRegions: [S3Region.UsEast1],
-      allFailed: false,
-    });
-
-    const response = await callTool('list_buckets');
-
-    expect(response.body.result.structuredContent).toStrictEqual({
-      buckets: [anyBucket],
-      unavailableRegions: [S3Region.UsEast1],
     });
   });
 
@@ -141,52 +134,31 @@ describe('mcp baseHandler', () => {
   ])('returns a tool error and lists nothing for %s', async (_case, args, problem) => {
     const response = await callTool('list_buckets', args);
 
-    expect(listOrgBuckets).not.toHaveBeenCalled();
+    expect(callConsoleRoute).not.toHaveBeenCalled();
     expect(response.body.result).toStrictEqual({
       content: [{ type: 'text', text: expect.stringContaining(`Invalid arguments: ${problem}`) }],
       isError: true,
     });
   });
 
-  it('returns a tool error and lists nothing for a role without buckets.read', async () => {
-    const response = await send(
-      { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'list_buckets' } },
-      // Not a console role, so it holds no permission.
-      membershipFor(USER_INFO.orgId, USER_INFO.userId, 'any-unknown-role' as OrgRole),
-    );
-
-    expect(listOrgBuckets).not.toHaveBeenCalled();
-    expect(response.body.result).toStrictEqual({
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            message: 'Your role in this organization does not permit list_buckets.',
-          }),
-        },
-      ],
-      isError: true,
-    });
-  });
-
-  it('returns a tool error naming the regions when every network fails', async () => {
-    listOrgBuckets.mockResolvedValue({
-      buckets: [],
-      unavailableRegions: [S3Region.EuWest1],
-      allFailed: true,
-    });
+  it.each([
+    [
+      'a role without buckets.read',
+      403,
+      'Your role in this organization does not permit this action.',
+    ],
+    [
+      'every network failing',
+      503,
+      'Cannot list buckets in the eu-west-1 region. Please try again later.',
+    ],
+  ])('returns the route’s refusal as a tool error for %s', async (_case, statusCode, message) => {
+    callConsoleRoute.mockResolvedValue({ statusCode, body: { message } });
 
     const response = await callTool('list_buckets');
 
     expect(response.body.result).toStrictEqual({
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            message: 'Cannot list buckets in the eu-west-1 region. Please try again later.',
-          }),
-        },
-      ],
+      content: [{ type: 'text', text: JSON.stringify({ message }) }],
       isError: true,
     });
   });
@@ -237,7 +209,7 @@ describe('mcp baseHandler', () => {
 
     const result = await baseHandler(event);
 
-    expect(listOrgBuckets).not.toHaveBeenCalled();
+    expect(callConsoleRoute).not.toHaveBeenCalled();
     expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
       statusCode: 400,
       body: {
