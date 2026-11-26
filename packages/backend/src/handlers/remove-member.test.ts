@@ -1268,21 +1268,21 @@ describe('the principal on iam regions', () => {
     ddbMock.on(GetItemCommand, { TableName: 'UserInfoTable', Key: profileKey }).resolves({});
     ddbMock
       .on(GetItemCommand, { TableName: 'UserInfoTable', Key: profileKey, ConsistentRead: true })
-      .resolves({ Item: { ...profileKey, forgeDevTenantId: { S: 'tenant-fresh' } } });
+      .resolves({ Item: { ...profileKey, forgeTenantId: { S: 'tenant-fresh' } } });
     ddbMock.on(TransactWriteItemsCommand).resolves({});
 
     await handler(removeEvent(), buildContext());
 
     expect(mockRemoveMemberPrincipal).toHaveBeenCalledWith(
       expect.objectContaining({
-        orgProfile: expect.objectContaining({ forgeDevTenantId: { S: 'tenant-fresh' } }),
+        orgProfile: expect.objectContaining({ forgeTenantId: { S: 'tenant-fresh' } }),
       }),
     );
   });
 
   it('leaves the member in the org when a region refuses to remove the principal', async () => {
     mockRemoveMemberPrincipal.mockRejectedValue(
-      new IamRegionRefusedError('remove', [S3Region.UsEast9]),
+      new IamRegionRefusedError('remove', [S3Region.EuCentral3]),
     );
     ddbMock.on(TransactWriteItemsCommand).resolves({});
 

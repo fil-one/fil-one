@@ -73,14 +73,22 @@ const DETAILS: { [T in AuditEventType]: AuditEventDetails[T] } = {
     rowCount: 12,
   },
   'bucket_policy.created': {
-    region: 'us-east-9',
+    region: 'eu-central-3',
     bucketName: 'photos',
     trigger: 'bucket_created',
     statements: 2,
     principals: 3,
   },
-  'bucket_policy.updated': { region: 'us-east-9', bucketName: 'photos', trigger: 'policy_edited' },
-  'bucket_policy.deleted': { region: 'us-east-9', bucketName: 'photos', trigger: 'policy_edited' },
+  'bucket_policy.updated': {
+    region: 'eu-central-3',
+    bucketName: 'photos',
+    trigger: 'policy_edited',
+  },
+  'bucket_policy.deleted': {
+    region: 'eu-central-3',
+    bucketName: 'photos',
+    trigger: 'policy_edited',
+  },
 };
 
 function renamed(): AuditEventRecord<'org.renamed'> {
@@ -592,7 +600,7 @@ describe('commitAudited', () => {
       type: 'bucket_policy.updated',
       actor: ACTOR,
       orgId: ORG_ID,
-      subject: AuditSubjects.bucket('us-east-9', 'photos'),
+      subject: AuditSubjects.bucket('eu-central-3', 'photos'),
       details: DETAILS['bucket_policy.updated'],
     });
 

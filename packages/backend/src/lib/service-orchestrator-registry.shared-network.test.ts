@@ -5,34 +5,52 @@ import { S3Region, Stage } from '@filone/shared';
 vi.hoisted(() => {
   process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
   process.env.FORGE_MANAGEMENT_API_URL = 'https://forge.test';
-  process.env.FORGE_DEV_MANAGEMENT_API_URL = 'https://forge-dev.test';
 });
 
 vi.mock('sst', () => ({
   Resource: {
     FthManagementApiToken: { value: 'kid.secret' },
     ForgeManagementApiToken: { value: 'fkid.fsecret' },
-    ForgeDevManagementApiToken: { value: 'dkid.dsecret' },
   },
 }));
 
 // No two regions share a network today, so the case this file exists for has
-// to be arranged: both Forge regions are pointed at one id, and the region
-// lookup the registry builds the network from agrees with that.
+// to be arranged. The registry sends eu-west-1 and us-east-1 to Aurora and FTH
+// by name, so no other real region can join the Forge network: a made-up one
+// does. The cast is the fact the compiler cannot know, that this test adds a
+// member to the region list. vi.hoisted makes the values exist before the
+// vi.mock factories below, which run ahead of every other top-level statement.
+// The region names are literals because S3Region is not imported yet there.
+const { SECOND_FORGE_REGION, STAGE_REGIONS } = vi.hoisted(() => {
+  const second = 'eu-central-4' as S3Region;
+  return {
+    SECOND_FORGE_REGION: second,
+    STAGE_REGIONS: ['eu-west-1', 'us-east-1', 'eu-central-3', second] as S3Region[],
+  };
+});
+
+// The stage serves exactly the regions above, the made-up one included, so the
+// registry accepts it and lists it with the rest.
+vi.mock('@filone/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@filone/shared')>()),
+  getAvailableRegions: () => STAGE_REGIONS,
+  isSupportedRegion: (region: string) => STAGE_REGIONS.includes(region as S3Region),
+}));
+
+// Both Forge regions are pointed at one id, and the region lookup the registry
+// builds the network from agrees with that.
 vi.mock('./service-orchestrator-ids.ts', async (importOriginal) => {
   const original = await importOriginal<typeof import('./service-orchestrator-ids.ts')>();
-  const map = {
+  const map: Record<string, string> = {
     [S3Region.EuWest1]: 'aurora',
     [S3Region.UsEast1]: 'fth',
     [S3Region.EuCentral3]: 'forge',
-    [S3Region.UsEast9]: 'forge',
+    [SECOND_FORGE_REGION]: 'forge',
   };
-  const { getAvailableRegions } = await import('@filone/shared');
   return {
     ...original,
     ORCHESTRATOR_ID_BY_REGION: map,
-    getRegionsForOrchestrator: (id: string, stage: string) =>
-      getAvailableRegions(stage).filter((region) => map[region] === id),
+    getRegionsForOrchestrator: (id: string) => STAGE_REGIONS.filter((region) => map[region] === id),
   };
 });
 
@@ -50,7 +68,7 @@ describe('a network serving several regions', () => {
   it('is one orchestrator, whichever of its regions is asked for', () => {
     process.env.FILONE_STAGE = Stage.Staging;
 
-    expect(getOrchestratorForRegion(S3Region.UsEast9)).toBe(
+    expect(getOrchestratorForRegion(SECOND_FORGE_REGION)).toBe(
       getOrchestratorForRegion(S3Region.EuCentral3),
     );
   });
@@ -60,7 +78,7 @@ describe('a network serving several regions', () => {
 
     const orchestrator = getOrchestratorForRegion(S3Region.EuCentral3);
 
-    expect(orchestrator.regions).toStrictEqual([S3Region.EuCentral3, S3Region.UsEast9]);
+    expect(orchestrator.regions).toStrictEqual([S3Region.EuCentral3, SECOND_FORGE_REGION]);
   });
 
   it('appears once in the available orchestrators', () => {
@@ -76,7 +94,7 @@ describe('a network serving several regions', () => {
 
     expect(findOrchestratorById('forge')?.regions).toStrictEqual([
       S3Region.EuCentral3,
-      S3Region.UsEast9,
+      SECOND_FORGE_REGION,
     ]);
   });
 });

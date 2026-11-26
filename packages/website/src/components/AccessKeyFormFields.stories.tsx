@@ -91,14 +91,14 @@ export const WithoutRegionSelector: Story = {
 };
 
 export const PersonalKeyOnIamRegion: Story = {
-  render: () => <AccessKeyFormFieldsWrapper initialRegion={S3Region.UsEast9} />,
+  render: () => <AccessKeyFormFieldsWrapper initialRegion={S3Region.EuCentral3} />,
   play: async ({ canvasElement }) => {
     await expect(await within(canvasElement).findByText('What kind of key?')).toBeVisible();
   },
 };
 
 export const ServiceKeyOnIamRegion: Story = {
-  render: () => <AccessKeyFormFieldsWrapper initialRegion={S3Region.UsEast9} />,
+  render: () => <AccessKeyFormFieldsWrapper initialRegion={S3Region.EuCentral3} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByLabelText(/Service key/));
@@ -108,7 +108,7 @@ export const ServiceKeyOnIamRegion: Story = {
 
 export const MemberOnIamRegion: Story = {
   parameters: { role: OrgRole.Member },
-  render: () => <AccessKeyFormFieldsWrapper initialRegion={S3Region.UsEast9} />,
+  render: () => <AccessKeyFormFieldsWrapper initialRegion={S3Region.EuCentral3} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await canvas.findByText('Key name');

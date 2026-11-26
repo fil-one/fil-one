@@ -163,11 +163,11 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
 
   const target: RagEngineTarget = {
     orgId: 'org-1',
-    region: 'us-east-9',
+    region: 'eu-central-3',
     bucketName: SOURCE_BUCKET,
     s3: {
       endpointUrl: s3.url,
-      region: 'us-east-9',
+      region: 'eu-central-3',
       accessKeyId: 'AKTEST',
       secretAccessKey: 'SK',
     },

@@ -171,6 +171,9 @@ describe('errorHandlerMiddleware', () => {
     });
   });
 
+  // The message names the regions it is given and checks nothing about them,
+  // so any region other than the refusing one stands in for one that applied
+  // the change.
   it.each([
     {
       action: 'remove' as const,
@@ -179,8 +182,8 @@ describe('errorHandlerMiddleware', () => {
     },
     {
       action: 'remove' as const,
-      succeeded: [S3Region.EuCentral3],
-      message: `The member was removed from ${S3Region.EuCentral3} but could not be removed from ${S3Region.UsEast9}. They are still in this organization, please try again.`,
+      succeeded: [S3Region.EuWest1],
+      message: `The member was removed from ${S3Region.EuWest1} but could not be removed from ${S3Region.EuCentral3}. They are still in this organization, please try again.`,
     },
     {
       action: 'register' as const,
@@ -190,8 +193,8 @@ describe('errorHandlerMiddleware', () => {
     },
     {
       action: 'register' as const,
-      succeeded: [S3Region.EuCentral3],
-      message: `The member joined, and was registered on ${S3Region.EuCentral3} but not on ${S3Region.UsEast9}. Please try again.`,
+      succeeded: [S3Region.EuWest1],
+      message: `The member joined, and was registered on ${S3Region.EuWest1} but not on ${S3Region.EuCentral3}. Please try again.`,
     },
   ])(
     'maps IamRegionRefusedError on $action to 502 that says which regions applied it',
@@ -199,7 +202,7 @@ describe('errorHandlerMiddleware', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const { onError } = errorHandlerMiddleware();
       const request = buildErrorRequest(
-        new IamRegionRefusedError(action, [S3Region.UsEast9], succeeded),
+        new IamRegionRefusedError(action, [S3Region.EuCentral3], succeeded),
       );
 
       try {

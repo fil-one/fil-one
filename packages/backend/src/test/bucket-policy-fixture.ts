@@ -12,7 +12,7 @@ import { fakeOrchestrator, tenantFor } from './fake-orchestrator.ts';
 export const ORG_ID = '11111111-2222-3333-4444-555555555555';
 export const USER_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 /** The one region these tests treat as `iam`; no production region serves iam yet. */
-export const IAM_REGION = S3Region.UsEast9;
+export const IAM_REGION = S3Region.EuCentral3;
 export const SERVICE_KEYS_REGION = S3Region.EuWest1;
 export const BUCKET_NAME = 'photos';
 
@@ -29,10 +29,10 @@ export const grantGetObjectToUser: BucketPolicy = {
 };
 
 export const iam = new FakeIamOrchestrator();
-export const orchestrator = fakeOrchestrator('forgeDev', { region: IAM_REGION, iam });
+export const orchestrator = fakeOrchestrator('forge', { region: IAM_REGION, iam });
 export const legacyOrchestrator = fakeOrchestrator('aurora', { region: SERVICE_KEYS_REGION });
 /** The tenant the fake resolves for the test org. */
-export const TENANT_ID = tenantFor('forgeDev', ORG_ID);
+export const TENANT_ID = tenantFor('forge', ORG_ID);
 export const ensureTenantReady = vi.fn(async () => TENANT_ID);
 export const isOrgDeleting = vi.fn(async () => false);
 

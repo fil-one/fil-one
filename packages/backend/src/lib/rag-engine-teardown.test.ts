@@ -37,7 +37,7 @@ import { expectedTarget, fakeRagEngine, type FakeRagEngine } from '../test/fake-
 import { RagEngineRequestError } from './rag-engine-client.ts';
 
 const ORG = 'org-1';
-const TENANTS = { forge: 'forge:org-1', forgeDev: 'forgeDev:org-1', aurora: 'aurora:org-1' };
+const TENANTS = { forge: 'forge:org-1', aurora: 'aurora:org-1' };
 
 function rows(...pks: string[]) {
   ddbMock.on(ScanCommand).resolves({ Items: pks.map((pk) => marshall({ pk })) });
@@ -51,7 +51,6 @@ describe('dropRagEngineDatasets', () => {
     engineConfigured = true;
     const orchestrators = {
       [S3Region.EuCentral3]: fakeOrchestrator('forge', { region: S3Region.EuCentral3 }),
-      [S3Region.UsEast9]: fakeOrchestrator('forgeDev', { region: S3Region.UsEast9 }),
       [S3Region.EuWest1]: fakeOrchestrator('aurora', { region: S3Region.EuWest1 }),
     };
     mockGetOrchestratorForRegion.mockImplementation(
@@ -62,7 +61,7 @@ describe('dropRagEngineDatasets', () => {
   it('drops each Forge-region dataset with the tenant target, and nothing else', async () => {
     rows(
       `BUCKET#${ORG}#${S3Region.EuCentral3}#docs`,
-      `BUCKET#${ORG}#${S3Region.UsEast9}#notes`,
+      `BUCKET#${ORG}#${S3Region.EuCentral3}#notes`,
       `BUCKET#${ORG}#${S3Region.EuWest1}#legacy`,
     );
 
@@ -70,7 +69,7 @@ describe('dropRagEngineDatasets', () => {
 
     expect(engine.drop.mock.calls.map(([target]) => target)).toStrictEqual([
       expectedTarget('forge', S3Region.EuCentral3, 'docs'),
-      expectedTarget('forgeDev', S3Region.UsEast9, 'notes'),
+      expectedTarget('forge', S3Region.EuCentral3, 'notes'),
     ]);
   });
 

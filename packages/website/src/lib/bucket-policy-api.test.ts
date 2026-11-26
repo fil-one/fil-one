@@ -30,7 +30,7 @@ const createPolicyResponse = (status: number, etag?: string, body?: object) =>
     status,
     headers: etag ? { ETag: etag } : {},
   });
-const POLICY_PATH = '/buckets/photos/policy?region=us-east-9';
+const POLICY_PATH = '/buckets/photos/policy?region=eu-central-3';
 
 describe('bucket policy client', () => {
   beforeEach(() => {
@@ -40,7 +40,7 @@ describe('bucket policy client', () => {
   it('returns the policy and the ETag header from GET /buckets/:name/policy', async () => {
     mockSendApiRequest.mockResolvedValue(createPolicyResponse(200, '"v1"', { policy }));
 
-    await expect(getBucketPolicy('photos', S3Region.UsEast9)).resolves.toStrictEqual({
+    await expect(getBucketPolicy('photos', S3Region.EuCentral3)).resolves.toStrictEqual({
       policy,
       etag: '"v1"',
     });
@@ -50,23 +50,23 @@ describe('bucket policy client', () => {
   it('URL-encodes the bucket name in the path', async () => {
     mockSendApiRequest.mockResolvedValue(createPolicyResponse(200, '"v1"', { policy }));
 
-    await getBucketPolicy('my photos/2026', S3Region.UsEast9);
+    await getBucketPolicy('my photos/2026', S3Region.EuCentral3);
 
     expect(mockSendApiRequest).toHaveBeenCalledWith(
-      '/buckets/my%20photos%2F2026/policy?region=us-east-9',
+      '/buckets/my%20photos%2F2026/policy?region=eu-central-3',
     );
   });
 
   it('returns null when the API answers POLICY_NOT_FOUND', async () => {
     mockSendApiRequest.mockRejectedValue(createApiError(404, ApiErrorCode.POLICY_NOT_FOUND));
 
-    await expect(getBucketPolicy('photos', S3Region.UsEast9)).resolves.toBeNull();
+    await expect(getBucketPolicy('photos', S3Region.EuCentral3)).resolves.toBeNull();
   });
 
   it('rethrows a 404 without POLICY_NOT_FOUND', async () => {
     mockSendApiRequest.mockRejectedValue(createApiError(404));
 
-    await expect(getBucketPolicy('photos', S3Region.UsEast9)).rejects.toMatchObject({
+    await expect(getBucketPolicy('photos', S3Region.EuCentral3)).rejects.toMatchObject({
       status: 404,
     });
   });
@@ -74,13 +74,13 @@ describe('bucket policy client', () => {
   it('throws when the GET response has no ETag header', async () => {
     mockSendApiRequest.mockResolvedValue(createPolicyResponse(200, undefined, { policy }));
 
-    await expect(getBucketPolicy('photos', S3Region.UsEast9)).rejects.toThrow(/no ETag/);
+    await expect(getBucketPolicy('photos', S3Region.EuCentral3)).rejects.toThrow(/no ETag/);
   });
 
   it('sends If-Match with the ETag it read', async () => {
     mockSendApiRequest.mockResolvedValue(createPolicyResponse(204, '"v2"'));
 
-    await putBucketPolicy('photos', S3Region.UsEast9, { policy, etag: '"v1"' });
+    await putBucketPolicy('photos', S3Region.EuCentral3, { policy, etag: '"v1"' });
 
     expect(mockSendApiRequest).toHaveBeenCalledWith(POLICY_PATH, {
       method: 'PUT',
@@ -92,7 +92,7 @@ describe('bucket policy client', () => {
   it('sends If-None-Match: * when no ETag is given', async () => {
     mockSendApiRequest.mockResolvedValue(createPolicyResponse(204, '"v1"'));
 
-    await putBucketPolicy('photos', S3Region.UsEast9, { policy });
+    await putBucketPolicy('photos', S3Region.EuCentral3, { policy });
 
     expect(mockSendApiRequest).toHaveBeenCalledWith(POLICY_PATH, {
       method: 'PUT',
@@ -105,14 +105,14 @@ describe('bucket policy client', () => {
     mockSendApiRequest.mockResolvedValue(createPolicyResponse(204, '"v2"'));
 
     await expect(
-      putBucketPolicy('photos', S3Region.UsEast9, { policy, etag: '"v1"' }),
+      putBucketPolicy('photos', S3Region.EuCentral3, { policy, etag: '"v1"' }),
     ).resolves.toStrictEqual({ etag: '"v2"' });
   });
 
   it('throws when the PUT response has no ETag header', async () => {
     mockSendApiRequest.mockResolvedValue(createPolicyResponse(204));
 
-    await expect(putBucketPolicy('photos', S3Region.UsEast9, { policy })).rejects.toThrow(
+    await expect(putBucketPolicy('photos', S3Region.EuCentral3, { policy })).rejects.toThrow(
       /no ETag/,
     );
   });
@@ -120,7 +120,7 @@ describe('bucket policy client', () => {
   it('sends DELETE with If-Match set to the given ETag', async () => {
     mockSendApiRequest.mockResolvedValue(createPolicyResponse(204));
 
-    await deleteBucketPolicy('photos', S3Region.UsEast9, '"v1"');
+    await deleteBucketPolicy('photos', S3Region.EuCentral3, '"v1"');
 
     expect(mockSendApiRequest).toHaveBeenCalledWith(POLICY_PATH, {
       method: 'DELETE',

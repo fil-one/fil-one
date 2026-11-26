@@ -98,8 +98,10 @@ describe('rag-bucket-api', () => {
   });
 
   it('getBucketRagEngine GETs the engine route with the region', async () => {
-    await getBucketRagEngine('my-bucket', S3Region.UsEast9);
-    expect(mockApiRequest).toHaveBeenCalledWith('/buckets/my-bucket/rag/engine?region=us-east-9');
+    await getBucketRagEngine('my-bucket', S3Region.EuCentral3);
+    expect(mockApiRequest).toHaveBeenCalledWith(
+      '/buckets/my-bucket/rag/engine?region=eu-central-3',
+    );
   });
 });
 
