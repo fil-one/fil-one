@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { Navigate } from '@tanstack/react-router';
 
-import { Spinner } from '../components/Spinner.js';
+import { Alert } from '../components/Alert.js';
+import { Button } from '../components/Button.js';
 import { getMe } from '../lib/api.js';
 import { ME_STALE_TIME, queryKeys } from '../lib/query-client.js';
-import { RagPipelinePage } from './RagPipelinePage.js';
+import { RagPipelineFrame, RagPipelinePage, RagPipelineSkeleton } from './RagPipelinePage.js';
 
 /**
  * Bucket Intelligence entry point.
@@ -15,25 +16,42 @@ import { RagPipelinePage } from './RagPipelinePage.js';
  * button skips this page. Reads the same cached `/me` query as `useRagAccess`,
  * but also waits on its loading state so an allowlisted user is never sent away
  * before `/me` resolves.
+ *
+ * `/me` is usually cached by the time this renders (the app layout reads it
+ * first), but an organization switch clears the cache and a failed read lets the
+ * layout through without it. While it loads the page shows its own layout; if it
+ * fails the page says so and offers a retry, instead of waiting forever.
  */
 export function BucketIntelligencePage() {
   const {
     data: me,
-    isPending,
     isError,
+    isFetching,
+    refetch,
   } = useQuery({
     queryKey: queryKeys.me,
     queryFn: () => getMe(),
     staleTime: ME_STALE_TIME,
   });
 
-  if (isPending || isError) {
-    return (
-      <div className="flex items-center justify-center p-16">
-        <Spinner ariaLabel="Loading" size={32} />
-      </div>
-    );
-  }
+  // Data first: a background refetch that fails keeps the `/me` already held,
+  // and that answer still decides access.
+  if (me) return me.ragAccess ? <RagPipelinePage /> : <Navigate to="/dashboard" replace />;
 
-  return me?.ragAccess ? <RagPipelinePage /> : <Navigate to="/dashboard" replace />;
+  if (!isError) return <RagPipelineSkeleton />;
+
+  return (
+    <RagPipelineFrame testId="bucket-intelligence-error">
+      <Alert
+        variant="red"
+        title="This page did not load"
+        description="We could not load your account details."
+        action={
+          <Button variant="tertiary" size="sm" disabled={isFetching} onClick={() => void refetch()}>
+            Try again
+          </Button>
+        }
+      />
+    </RagPipelineFrame>
+  );
 }

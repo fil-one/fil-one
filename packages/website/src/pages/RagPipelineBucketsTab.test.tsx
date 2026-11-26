@@ -33,7 +33,11 @@ function bucket(over: Partial<RagBucket> = {}): RagBucket {
   };
 }
 
-function renderTab(buckets: RagBucket[], role: OrgRole = OrgRole.Owner) {
+function renderTab(
+  buckets: RagBucket[],
+  role: OrgRole = OrgRole.Owner,
+  { isLoading = false }: { isLoading?: boolean } = {},
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // Index / Stop-indexing are gated on the bucket permissions, so the caller's
   // role has to be in the cache before the rows render.
@@ -48,7 +52,7 @@ function renderTab(buckets: RagBucket[], role: OrgRole = OrgRole.Owner) {
         <ToastProvider>
           <BucketsTab
             buckets={buckets}
-            isLoading={false}
+            isLoading={isLoading}
             isError={false}
             errorMessage={undefined}
             togglingBucket={null}
@@ -59,6 +63,20 @@ function renderTab(buckets: RagBucket[], role: OrgRole = OrgRole.Owner) {
     ),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Tests: loading
+// ---------------------------------------------------------------------------
+
+describe('BucketsTab: loading', () => {
+  it('keeps the tab heading and shows placeholder rows while the buckets load', () => {
+    renderTab([], OrgRole.Owner, { isLoading: true });
+
+    expect(screen.getByRole('heading', { name: 'Buckets' })).toBeVisible();
+    const list = screen.getByRole('status', { name: 'Loading buckets' });
+    expect(list.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(9);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Tests — sync telemetry display (FIL-556)
