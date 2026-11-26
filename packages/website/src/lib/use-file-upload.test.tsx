@@ -273,13 +273,16 @@ describe('useFileUpload — upload flow', () => {
     expect(onSuccess).toHaveBeenCalledOnce();
   });
 
-  it('invalidates the bucket object and analytics queries after a successful upload', async () => {
+  it('invalidates the bucket object, history and analytics queries after a successful upload', async () => {
     const { result, client } = renderUpload();
     const invalidate = vi.spyOn(client, 'invalidateQueries');
     act(() => result.current.addFiles([makeFile('file.txt')], ''));
     await act(() => result.current.handleUpload());
     await waitFor(() => expect(result.current.uploadStep).toBe('done'));
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.objects(bucketName, region) });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.objectVersions(bucketName, region),
+    });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: queryKeys.bucketAnalytics(bucketName, region),
     });

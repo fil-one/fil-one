@@ -131,6 +131,14 @@ export const queryKeys = {
   }) => ['objects', bucketName, region, prefix, cursor] as const,
   objectMetadata: (bucketName: string, objectKey: string, versionId?: string) =>
     ['object-metadata', bucketName, objectKey, ...(versionId ? [versionId] : [])] as const,
+  // Kept out of the ['objects', bucket, region] prefix: everything under it is a
+  // listing page, which the bucket page updates in place and reads by position.
+  // Without a key it is the prefix of every history in the bucket, so whatever
+  // invalidates the listing invalidates that too.
+  objectVersions: (bucketName: string, region: S3Region, objectKey?: string) =>
+    ['object-versions', bucketName, region, ...(objectKey ? [objectKey] : [])] as const,
+  objectPreviewUrl: (bucketName: string, region: S3Region, objectKey: string, versionId?: string) =>
+    ['object-preview', bucketName, region, objectKey, ...(versionId ? [versionId] : [])] as const,
   // ['access-keys'] is the prefix — invalidateQueries on this key also invalidates
   // all bucket-scoped access key queries (prefix match).
   accessKeys: ['access-keys'] as const,
