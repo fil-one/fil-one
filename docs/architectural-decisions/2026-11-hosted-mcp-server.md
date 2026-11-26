@@ -29,7 +29,7 @@ The hosted container would be a second production system that duplicates what th
 
 ### 1. Hosted MCP is a route in the console backend
 
-Add `POST /api/mcp` on the existing API Gateway, handled by a Lambda built with the project's `createFunction` helper. The handler is stateless [JSON-RPC](https://www.jsonrpc.org/specification) over [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports): one JSON response per JSON-RPC request, `202` with no body for a notification, no sessions and no server-sent events. A `GET /api/mcp` route answers 405, and a request whose `MCP-Protocol-Version` the server doesn't support gets 400. State lives in the console's existing DynamoDB tables; there is no PostgreSQL. The first tool, `list_buckets`, calls `listOrgBuckets`, the same code the console's bucket list uses. The MCP routes answer 404 until `MCP_ENABLED` is on, which production leaves off until launch.
+Add `POST /api/mcp` on the existing API Gateway, handled by a Lambda built with the project's `createFunction` helper. The handler is stateless [JSON-RPC](https://www.jsonrpc.org/specification) over [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports): one JSON response per JSON-RPC request, `202` with no body for a notification, no sessions and no server-sent events. A `GET /api/mcp` route answers 405, and a request whose `MCP-Protocol-Version` the server doesn't support gets 400. State lives in the console's existing DynamoDB tables; there is no PostgreSQL. The first tool, `list_buckets`, runs the console's bucket list route. The MCP routes answer 404 until `MCP_ENABLED` is on, which production leaves off until launch.
 
 ### 2. Auth0 is the authorization server
 
@@ -39,7 +39,7 @@ Stack setup configures each Auth0 tenant behind the MCP URL: Client ID Metadata 
 
 ### 3. Tools act as the user, with the console's permissions
 
-An MCP token carries the user's identity, not scopes of its own. Each tool calls the backend services a console handler would, under the same role checks and bucket policies, so the MCP can never do more than the user can in the console. Each tool checks its own permission, the way the matching console route does. The route itself requires no single permission, because one permission such as `buckets.read` would fit only read tools.
+An MCP token carries the user's identity, not scopes of its own. Each tool runs the console route that does the same job, as the caller: the permission the route manifest names, the subscription guard at the route's access level, then the route's own handler, given an event built from the MCP request. The tool refuses, answers and audits exactly as that route does, so the MCP can never do more than the user can in the console. A tool with no matching route, such as listing objects, which the console does through a presigned URL, runs the checks of the route closest to it. The route itself requires no single permission, because one permission such as `buckets.read` would fit only read tools.
 
 ### 4. Fil One never reads object contents
 
