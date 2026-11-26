@@ -8,6 +8,12 @@ name: Docs impact
 # Drafts and PRs opened by bots (Dependabot) skip the job. GitHub reports a job
 # skipped by its `if` as successful, so this never blocks them, even as a
 # required check.
+#
+# The description and labels come from the API when the job runs, not from the
+# event payload. The payload is a snapshot taken when the event fired: a run
+# started by a push sees the description as it was at push time, and re-running
+# that run reuses the same snapshot, so it keeps failing after the description
+# is fixed. Reading the API lets a re-run see the current description.
 
 on:
   pull_request:
@@ -15,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   docs-impact:
@@ -30,17 +37,18 @@ jobs:
       - name: Require a docs decision for user-facing changes
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_BODY: ${{ github.event.pull_request.body }}
-          GATED: ${{ contains(github.event.pull_request.labels.*.name, 'docs:gated') }}
-          SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'docs:skip') }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           paths=(); while IFS= read -r p; do [ -n "$p" ] && paths+=("$p"); done < .github/docs-impact-paths.txt
+          pr=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body,labels)
+          labels=$(jq -r '.labels[].name' <<<"$pr")
           # Template placeholders (<!-- ... -->) don't count as a reason.
-          body=$(printf '%s' "$PR_BODY" | perl -0pe 's/<!--.*?-->//gs')
+          body=$(jq -r '.body // ""' <<<"$pr" | perl -0pe 's/<!--.*?-->//gs')
           changed=$(git diff --name-only "$BASE_SHA"...HEAD -- "${paths[@]}")
           if [ -z "$changed" ]; then echo "No user-facing paths changed."; exit 0; fi
           echo "User-facing paths changed:"; echo "$changed" | sed 's/^/  /' | head -30
-          if [ "$GATED" = true ] || [ "$SKIP" = true ]; then echo "Labelled docs:gated / docs:skip."; exit 0; fi
+          if grep -qxE 'docs:(gated|skip)' <<<"$labels"; then echo "Labelled docs:gated / docs:skip."; exit 0; fi
           if grep -qE 'github\.com/FilecoinFoundationWeb/filone-docs/pull/[0-9]+|FilecoinFoundationWeb/filone-docs#[0-9]+' <<<"$body"; then
             echo "Links a filone-docs PR."; exit 0
           fi
