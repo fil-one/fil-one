@@ -422,6 +422,62 @@ export const ChangingPage: Story = {
   ),
 };
 
+/**
+ * A search that matched nothing. The line under it says how search matches, since
+ * a miss at the top level often means the object sits inside a folder.
+ */
+export const SearchNoMatch: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={[]}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      search="report"
+      onSearchChange={() => {}}
+    />
+  ),
+};
+
+/**
+ * A search whose listing failed. The error stands where the table would, and the
+ * search box stays above it, so the search can be cleared or retried.
+ */
+export const SearchFailed: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={[]}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      search="report"
+      onSearchChange={() => {}}
+      listingError={{ message: 'Failed to fetch', onRetry: () => {} }}
+    />
+  ),
+};
+
+/** The search box above a folder's listing. */
+export const WithSearch: Story = {
+  render: () => (
+    <ObjectBrowserHarness
+      bucketName="my-bucket"
+      region={S3Region.EuWest1}
+      versions={sampleVersions}
+      currentPrefix=""
+      onDownload={() => {}}
+      downloading={null}
+      onBulkDelete={() => Promise.resolve()}
+      search=""
+      onSearchChange={() => {}}
+    />
+  ),
+};
+
 export const DeleteMarker: Story = {
   render: () => (
     <ObjectBrowserHarness

@@ -36,6 +36,7 @@ import { useKeyActionScope } from '../lib/use-key-scope.js';
 import { LIST_GC_TIME, LIST_STALE_TIME, queryKeys } from '../lib/query-client.js';
 import type { ObjectListingPage } from '../lib/object-listing.js';
 import { removeVersionFromPage } from '../lib/object-listing.js';
+import { useFolderSearch } from '../lib/use-folder-search.js';
 import { useObjectListing } from '../lib/use-object-listing.js';
 
 function formatStorage(bytesUsed: number | undefined): string {
@@ -119,11 +120,13 @@ function useBucketQueries({
   bucketName,
   region,
   prefix,
+  search,
   mayListKeys,
 }: {
   bucketName: string;
   region: S3Region;
   prefix: string;
+  search: string;
   mayListKeys: boolean;
 }) {
   // Cached the way the list pages are (FIL-1078): stepping into a bucket, back
@@ -148,6 +151,7 @@ function useBucketQueries({
     region,
     versioning: bucket?.versioning ?? false,
     prefix,
+    search,
     enabled: bucketQuery.data !== undefined,
   });
 
@@ -283,14 +287,25 @@ const EMPTY_PAGE: ObjectListingPage = { versions: [], folders: [] };
 function describeListing(objects: ReturnType<typeof useObjectListing>, currentPrefix: string) {
   const page = objects.page ?? EMPTY_PAGE;
   const { query } = objects;
-  const isRoot = currentPrefix === '';
+  // The search the rows answered, not the one being typed or still loading,
+  // since the rows are what this describes.
+  const isWholeRoot = currentPrefix === '' && objects.listedSearch === '';
   return {
     page,
-    // Inside a folder or past the first page the bucket has objects by definition.
+    // Inside a folder, past the first page, or mid-search, the bucket has
+    // objects by definition: a search box only shows over objects. Rows held
+    // while another listing loads, or a listing that failed, say nothing
+    // about whether it is empty, so the header keeps its actions.
     hasObjects:
-      !isRoot || !objects.isFirstPage || page.versions.length > 0 || page.folders.length > 0,
-    // The root, on one page, with no folders: the listing is the whole bucket.
-    coversBucket: isRoot && objects.isFirstPage && !objects.hasNext && page.folders.length === 0,
+      !isWholeRoot ||
+      !objects.isFirstPage ||
+      objects.isChangingPage ||
+      query.isError ||
+      page.versions.length > 0 ||
+      page.folders.length > 0,
+    // The root, unsearched, on one page, with no folders: the listing is the whole bucket.
+    coversBucket:
+      isWholeRoot && objects.isFirstPage && !objects.hasNext && page.folders.length === 0,
     listingError: query.isError
       ? { message: query.error.message, onRetry: () => void query.refetch() }
       : undefined,
@@ -317,6 +332,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const currentPrefix = prefix ?? '';
+  const folderSearch = useFolderSearch(currentPrefix);
   const mayUpload = useHasPermission('objects.write');
   const mayDelete = useHasPermission('objects.delete');
   const { mayList: mayListKeys } = useKeyActionScope();
@@ -352,6 +368,7 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
     bucketName,
     region,
     prefix: currentPrefix,
+    search: folderSearch.settledText,
     mayListKeys,
   });
   const objectsQuery = objects.query;
@@ -363,10 +380,12 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
   const [addKeyOpen, setAddKeyOpen] = usePermittedDialog(false, mayCreateKeys);
   // Controlled so the empty bucket's View API keys button can switch tabs.
   const tabs = useBucketTabs({ hasKeysTab: mayListKeys, hasPolicyTab: isPolicyTabVisible });
-  // Each tab's count, undefined until its list has answered
-  const objectCount = objectsQuery.isPending
-    ? undefined
-    : displayObjectCount(analyticsData, page, listing.coversBucket);
+  // Each tab's count, undefined until its list has answered with rows: still
+  // loading, or failed before any arrived.
+  const objectCount =
+    objectsQuery.data === undefined
+      ? undefined
+      : displayObjectCount(analyticsData, page, listing.coversBucket);
   const keyCount = accessKeysLoading ? undefined : accessKeys.length;
 
   const refreshAfterBulkDelete = useCallback(() => {
@@ -409,18 +428,6 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
         bucketName={bucketName}
         error={bucketQuery.error}
         fallback="Failed to load bucket"
-      />
-    );
-  }
-
-  // A later page that fails keeps the page around it, so the reader can step
-  // back or retry; only a folder that cannot be listed at all replaces the page.
-  if (objectsQuery.isError && objects.isFirstPage) {
-    return (
-      <BucketErrorState
-        bucketName={bucketName}
-        error={objectsQuery.error}
-        fallback="Failed to load objects"
       />
     );
   }
@@ -502,6 +509,9 @@ export function BucketDetailPage({ bucketName, prefix, region }: BucketDetailPag
               onAddKeyOpenChange={setAddKeyOpen}
               onShowKeys={tabs.showKeysTab}
               paging={listing.paging}
+              search={folderSearch.text}
+              listedSearch={objects.listedSearch}
+              onSearchChange={folderSearch.setText}
             />
           </TabPanel>
 

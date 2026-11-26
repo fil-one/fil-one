@@ -23,6 +23,7 @@ const FIRST_PAGE: VisitedPage[] = [{ offset: 0 }];
  */
 interface PagingState {
   prefix: string;
+  search: string;
   pages: VisitedPage[];
   leftOffset: number;
 }
@@ -33,18 +34,31 @@ interface ObjectListingOptions {
   versioning: boolean;
   /** The folder being browsed, ending in '/', or '' for the bucket's root. */
   prefix: string;
+  /**
+   * The start of a name to narrow the folder to. S3 matches it as part of the
+   * listed prefix, so the search covers every page of the folder, not only the
+   * one on screen, and is case-sensitive like the keys themselves.
+   */
+  search: string;
   enabled: boolean;
 }
 
 function getPageQueryOptions(
-  { bucketName, region, versioning, prefix }: Omit<ObjectListingOptions, 'enabled'>,
+  { bucketName, region, versioning, prefix, search }: Omit<ObjectListingOptions, 'enabled'>,
   cursor: ListingCursor | undefined,
 ) {
   return queryOptions({
-    queryKey: queryKeys.objectsPage({ bucketName, region, prefix, cursor: cursor ?? null }),
+    queryKey: queryKeys.objectsPage({ bucketName, region, prefix, search, cursor: cursor ?? null }),
     staleTime: LIST_STALE_TIME,
     gcTime: LIST_GC_TIME,
-    queryFn: () => fetchObjectListingPage({ region, bucketName, versioning, prefix, cursor }),
+    queryFn: () =>
+      fetchObjectListingPage({
+        region,
+        bucketName,
+        versioning,
+        prefix: `${prefix}${search}`,
+        cursor,
+      }),
   });
 }
 
@@ -58,7 +72,8 @@ function countRows(page: ObjectListingPage, prefix: string): number {
  *
  * S3 hands out a token for the next page only and never a total, so the pages
  * the reader has passed through are kept as a stack: Previous pops it, Next
- * pushes the page's cursor. Opening another folder starts from its first page.
+ * pushes the page's cursor. Opening another folder, or searching, starts from
+ * the first page of what is now listed.
  *
  * Each page is its own cached query, so going back repaints at once, and the
  * page after the current one is fetched ahead so Next does not wait either.
@@ -68,24 +83,42 @@ export function useObjectListing({
   region,
   versioning,
   prefix,
+  search,
   enabled,
 }: ObjectListingOptions) {
   const queryClient = useQueryClient();
-  const [paging, setPaging] = useState<PagingState>({ prefix, pages: FIRST_PAGE, leftOffset: 0 });
-  // Derived rather than reset in an effect, so a new folder never renders one
-  // frame of the previous folder's page position.
-  const pages = paging.prefix === prefix ? paging.pages : FIRST_PAGE;
+  const listing = { bucketName, region, versioning, prefix, search };
+  const [paging, setPaging] = useState<PagingState>({
+    prefix,
+    search,
+    pages: FIRST_PAGE,
+    leftOffset: 0,
+  });
+  // Derived rather than reset in an effect, so a new folder or search never
+  // renders one frame of the previous listing's page position.
+  const pages = paging.prefix === prefix && paging.search === search ? paging.pages : FIRST_PAGE;
   const current = pages[pages.length - 1];
 
   const query = useQuery({
-    ...getPageQueryOptions({ bucketName, region, versioning, prefix }, current.cursor),
+    ...getPageQueryOptions(listing, current.cursor),
     enabled,
     // Holds the page on screen while the next one loads, so the table keeps
-    // its place instead of dropping to a skeleton. Only within one folder:
-    // another folder's rows under this folder's breadcrumb would be wrong.
+    // its place instead of dropping to a skeleton, through page changes and
+    // each keystroke of a search. Only within one folder: another folder's rows
+    // under this folder's breadcrumb would be wrong.
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[3] === prefix ? previous : undefined,
   });
+
+  // The search the rows on screen answered. It trails `search` while a held
+  // page stands in for the new search's, so an empty state can describe the
+  // rows it sits over rather than a listing that has not arrived. Updated
+  // during render, React's pattern for state derived from a previous render,
+  // so it never lags the rows by a frame.
+  const [listedSearch, setListedSearch] = useState(search);
+  if (query.data && !query.isPlaceholderData && listedSearch !== search) {
+    setListedSearch(search);
+  }
 
   const page = query.data;
   const nextCursor = query.isPlaceholderData ? undefined : page?.nextCursor;
@@ -93,9 +126,9 @@ export function useObjectListing({
   useEffect(() => {
     if (!enabled || !nextCursor) return;
     void queryClient.prefetchQuery(
-      getPageQueryOptions({ bucketName, region, versioning, prefix }, nextCursor),
+      getPageQueryOptions({ bucketName, region, versioning, prefix, search }, nextCursor),
     );
-  }, [queryClient, enabled, nextCursor, bucketName, region, versioning, prefix]);
+  }, [queryClient, enabled, nextCursor, bucketName, region, versioning, prefix, search]);
 
   const rowCount = page ? countRows(page, prefix) : 0;
   // While the next page loads the table still shows the page the reader left,
@@ -105,6 +138,8 @@ export function useObjectListing({
   return {
     query,
     page,
+    /** The search the page's rows answered, which trails `search` until its listing arrives. */
+    listedSearch,
     /** One-based position of the page's first row, for the range label. */
     rangeStart: shownOffset + 1,
     rangeEnd: shownOffset + rowCount,
@@ -117,13 +152,14 @@ export function useObjectListing({
       if (!nextCursor) return;
       setPaging({
         prefix,
+        search,
         pages: [...pages, { cursor: nextCursor, offset: current.offset + rowCount }],
         leftOffset: current.offset,
       });
     },
     goToPreviousPage: () => {
       if (pages.length > 1) {
-        setPaging({ prefix, pages: pages.slice(0, -1), leftOffset: current.offset });
+        setPaging({ prefix, search, pages: pages.slice(0, -1), leftOffset: current.offset });
       }
     },
   };
