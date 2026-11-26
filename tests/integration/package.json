@@ -7,8 +7,8 @@
     "test": "pnpm exec sst shell -- pnpm exec vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1163.0",
-    "@aws-sdk/client-lambda": "^3.1163.0",
+    "@aws-sdk/client-dynamodb": "^3.1175.0",
+    "@aws-sdk/client-lambda": "^3.1175.0",
     "@aws-sdk/util-dynamodb": "^3.996.9",
     "@filone/backend": "workspace:*",
     "@filone/shared": "workspace:*",
