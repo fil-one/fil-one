@@ -119,7 +119,9 @@ interface FiltersProps {
  */
 function AuditFilters({ filters, members, onChange, onClear }: FiltersProps) {
   return (
-    <div className="flex flex-wrap items-end gap-2">
+    // Two columns below `sm`: in a wrapping row the four fields each took their
+    // own width and landed ragged, one or two to a line.
+    <div className="grid grid-cols-2 items-end gap-2 sm:flex sm:flex-wrap">
       <DateField
         label="From"
         value={filters.from}
@@ -173,7 +175,7 @@ function AuditFilters({ filters, members, onChange, onClear }: FiltersProps) {
         </Button>
       )}
 
-      <div className="ml-auto">
+      <div className="col-start-2 justify-self-end sm:ml-auto">
         <RequirePermission permission="audit.export">
           <DownloadCsvButton filters={filters} />
         </RequirePermission>
@@ -206,7 +208,7 @@ function DateField({ label, value, min, max, onChange }: DateFieldProps) {
         min={min}
         max={max}
         onChange={(event) => onChange(event.target.value)}
-        className="h-8 rounded-md border border-(--input-border-color) bg-white px-2.5 text-ui text-(--color-text-base) transition-colors focus-visible:brand-outline"
+        className="h-8 w-full rounded-md border border-(--input-border-color) bg-white px-2.5 text-ui text-(--color-text-base) transition-colors focus-visible:brand-outline"
       />
     </label>
   );

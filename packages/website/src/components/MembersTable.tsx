@@ -8,6 +8,7 @@ import { RowActionsMenu, type RowAction } from './RowActionsMenu';
 import { Table } from './Table/Table';
 import type { SkeletonColumn } from './Table/TableSkeleton';
 import { formatDate } from '../lib/time.js';
+import { BELOW_SM_QUERY, useMediaQuery } from '../lib/use-media-query.js';
 import {
   canTransferTo,
   memberName,
@@ -36,7 +37,8 @@ const SOURCE_LABELS: Record<string, string> = {
  */
 export const MEMBER_COLUMNS: SkeletonColumn[] = [
   { label: 'Member' },
-  { label: 'Role' },
+  // Below `sm` the role sits under the member's name instead (see `MembersTable`).
+  { label: 'Role', className: 'hidden sm:table-cell' },
   { label: 'Joined', className: 'hidden md:table-cell' },
 ];
 
@@ -83,6 +85,10 @@ export function MembersTable({
   onTransfer,
   pendingUserIds = NONE_PENDING,
 }: MembersTableProps) {
+  // Picks the one place the role control renders: its own column, or under the
+  // member's name below `sm`, where that column is hidden.
+  const isPhone = useMediaQuery(BELOW_SM_QUERY);
+
   // The roles this caller could move this member into, current role included —
   // exactly the set the server would accept for them. One entry means the role
   // is fixed for this caller, and a select of one is not a choice.
@@ -144,6 +150,33 @@ export function MembersTable({
           const name = memberName(member);
           const roles = rolesFor(member);
           const pending = pendingUserIds.has(member.userId);
+          const roleControl =
+            onChangeRole && roles.length > 1 ? (
+              // Left enabled while its own change is in flight, and the
+              // change ignored instead. Disabling the control somebody just
+              // used drops focus to the document body, and nothing puts it
+              // back, so a keyboard caller loses their place on the row
+              // they are working. `aria-busy` on the row says what the
+              // disabled attribute used to.
+              // Sized to the longest label ("Read only") rather than
+              // filling the column: a picker of four short words reads as a
+              // mistake when it is wider than every value it can hold. The
+              // width goes on a wrapper because `Select` is `w-full`, which
+              // Tailwind orders after `w-32` and would win.
+              <div className="w-32">
+                <RoleSelect
+                  value={member.role}
+                  roles={roles}
+                  size="sm"
+                  aria-label={`Role for ${name}`}
+                  onChange={(role) => {
+                    if (!pending) onChangeRole(member, role);
+                  }}
+                />
+              </div>
+            ) : (
+              <RoleBadge role={member.role} />
+            );
 
           return (
             <Table.Row
@@ -153,46 +186,28 @@ export function MembersTable({
               data-member-role={member.role}
               aria-busy={pending || undefined}
             >
-              <Table.Cell>
+              {/* Below `sm`, `w-full max-w-0` lets the cell take the row's spare
+                  width and no more, so a long name truncates instead of pushing
+                  the actions past the card's edge. */}
+              <Table.Cell className="w-full max-w-0 sm:w-auto sm:max-w-none">
                 <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium text-zinc-900">{name}</p>
+                  <p className="min-w-0 truncate text-sm font-medium text-zinc-900" title={name}>
+                    {name}
+                  </p>
                   {member.userId === currentUserId && (
-                    <Badge color="grey" size="sm" weight="regular">
-                      You
-                    </Badge>
+                    <span className="shrink-0">
+                      <Badge color="grey" size="sm" weight="regular">
+                        You
+                      </Badge>
+                    </span>
                   )}
                 </div>
-                <p className="font-mono text-xs text-zinc-500">{member.userId}</p>
+                <p className="truncate font-mono text-xs text-zinc-500">{member.userId}</p>
+                {/* The role column is hidden below `sm`, so the role rides here. */}
+                {isPhone && <div className="mt-2">{roleControl}</div>}
               </Table.Cell>
 
-              <Table.Cell>
-                {onChangeRole && roles.length > 1 ? (
-                  // Left enabled while its own change is in flight, and the
-                  // change ignored instead. Disabling the control somebody just
-                  // used drops focus to the document body, and nothing puts it
-                  // back — so a keyboard caller loses their place on the row
-                  // they are working. `aria-busy` on the row says what the
-                  // disabled attribute used to.
-                  // Sized to the longest label ("Read only") rather than
-                  // filling the column: a picker of four short words reads as a
-                  // mistake when it is wider than every value it can hold. The
-                  // width goes on a wrapper because `Select` is `w-full`, which
-                  // Tailwind orders after `w-32` and would win.
-                  <div className="w-32">
-                    <RoleSelect
-                      value={member.role}
-                      roles={roles}
-                      size="sm"
-                      aria-label={`Role for ${name}`}
-                      onChange={(role) => {
-                        if (!pending) onChangeRole(member, role);
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <RoleBadge role={member.role} />
-                )}
-              </Table.Cell>
+              <Table.Cell className="hidden sm:table-cell">{!isPhone && roleControl}</Table.Cell>
 
               {/* The date is the value and the source is its caption, so they
                   take the same two-tone split as the member cell beside them —

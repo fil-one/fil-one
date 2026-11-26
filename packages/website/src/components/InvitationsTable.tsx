@@ -6,6 +6,7 @@ import { Button } from './Button';
 import { Table } from './Table/Table';
 import type { SkeletonColumn } from './Table/TableSkeleton';
 import { formatDate } from '../lib/time.js';
+import { BELOW_SM_QUERY, useMediaQuery } from '../lib/use-media-query.js';
 import { ROLE_LABELS } from '../lib/use-member-scope.js';
 
 /**
@@ -45,8 +46,9 @@ function InvitationStatus({ invitation }: { invitation: InvitationSummary }) {
  */
 export const INVITATION_COLUMNS: SkeletonColumn[] = [
   { label: 'Email' },
-  { label: 'Role' },
-  { label: 'Status' },
+  // Below `sm` the role and status sit under the email instead (see `InvitationsTable`).
+  { label: 'Role', className: 'hidden sm:table-cell' },
+  { label: 'Status', className: 'hidden sm:table-cell' },
   { label: 'Expires', className: 'hidden md:table-cell' },
 ];
 
@@ -91,6 +93,9 @@ export function InvitationsTable({
   const canResend = (invitation: InvitationSummary) =>
     Boolean(onResend) && Boolean(invitation.lastSendFailed) && mayManageTarget(invitation.role);
   const showActions = invitations.some((i) => canRevoke(i) || canResend(i));
+  // Picks the one place the role and status render: their own columns, or under
+  // the email below `sm`, where those columns are hidden.
+  const isPhone = useMediaQuery(BELOW_SM_QUERY);
 
   return (
     <Table>
@@ -116,19 +121,28 @@ export function InvitationsTable({
             data-invite-id={invitation.inviteId}
             aria-busy={pendingInviteIds.has(invitation.inviteId) || undefined}
           >
-            <Table.Cell>
-              <p className="text-xs font-medium text-zinc-900">{invitation.email}</p>
+            {/* Below `sm`, `w-full max-w-0` lets the cell take the row's spare
+                width and no more, so a long email truncates instead of pushing
+                the actions past the card's edge. */}
+            <Table.Cell className="w-full max-w-0 sm:w-auto sm:max-w-none">
+              <p className="truncate text-xs font-medium text-zinc-900" title={invitation.email}>
+                {invitation.email}
+              </p>
               <p className="text-xs text-zinc-500">Invited {formatDate(invitation.createdAt)}</p>
+              {isPhone && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <InvitationRoleBadge role={invitation.role} />
+                  <InvitationStatus invitation={invitation} />
+                </div>
+              )}
             </Table.Cell>
 
-            <Table.Cell>
-              <Badge color={invitation.role === OrgRole.Owner ? 'blue' : 'grey'} size="sm">
-                {ROLE_LABELS[invitation.role] ?? invitation.role}
-              </Badge>
+            <Table.Cell className="hidden sm:table-cell">
+              {!isPhone && <InvitationRoleBadge role={invitation.role} />}
             </Table.Cell>
 
-            <Table.Cell>
-              <InvitationStatus invitation={invitation} />
+            <Table.Cell className="hidden sm:table-cell">
+              {!isPhone && <InvitationStatus invitation={invitation} />}
             </Table.Cell>
 
             <Table.Cell className="hidden md:table-cell text-xs text-zinc-500">
@@ -170,5 +184,13 @@ export function InvitationsTable({
         ))}
       </Table.Body>
     </Table>
+  );
+}
+
+function InvitationRoleBadge({ role }: { role: OrgRole }) {
+  return (
+    <Badge color={role === OrgRole.Owner ? 'blue' : 'grey'} size="sm">
+      {ROLE_LABELS[role] ?? role}
+    </Badge>
   );
 }
