@@ -16,7 +16,6 @@ const PRODUCTION_LIKE_ENV = {
   AURORA_PARTNER_ID: 'any-partner',
   FTH_MANAGEMENT_API_URL: 'https://fth.example',
   FORGE_MANAGEMENT_API_URL: '',
-  FORGE_DEV_MANAGEMENT_API_URL: undefined,
 };
 
 describe('orchestratorSecrets', () => {
@@ -29,12 +28,8 @@ describe('orchestratorSecrets', () => {
 
   it('asks for a Forge token where the stage runs that Forge network', () => {
     expect(
-      orchestratorSecrets({ ...PRODUCTION_LIKE_ENV, FORGE_DEV_MANAGEMENT_API_URL: 'https://f' }),
-    ).toStrictEqual([
-      'AuroraBackofficeToken',
-      'FthManagementApiToken',
-      'ForgeDevManagementApiToken',
-    ]);
+      orchestratorSecrets({ ...PRODUCTION_LIKE_ENV, FORGE_MANAGEMENT_API_URL: 'https://f' }),
+    ).toStrictEqual(['AuroraBackofficeToken', 'FthManagementApiToken', 'ForgeManagementApiToken']);
   });
 });
 

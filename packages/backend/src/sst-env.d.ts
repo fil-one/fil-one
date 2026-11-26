@@ -48,10 +48,6 @@ declare module "sst" {
       value: string;
       type: "sst.Secret";
     };
-    ForgeDevManagementApiToken: {
-      value: string;
-      type: "sst.Secret";
-    };
     RagEngineUrl: {
       value: string;
       type: "sst.Secret";

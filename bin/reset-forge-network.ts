@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Usage: node bin/reset-forge-network.ts --network <staging|dev> --stage <stage>
+// Usage: node bin/reset-forge-network.ts --network staging --stage <stage>
 //                [--dry-run] [--yes] [--backup <path>]
 //
 // Deletes every Forge tenant one stage owns on one Forge network, and resets
@@ -14,8 +14,8 @@
 // FilOne provisioned for this stage are touched. Accounts whose deletion is in
 // progress are included.
 //
-// Each Forge network serves one FilOne region today: `staging` is eu-central-3,
-// `dev` is us-east-9 (bin/lib/forge-network.ts). For each account the run first
+// Each Forge network serves one FilOne region today, and `staging`, the only
+// one, is eu-central-3 (bin/lib/forge-network.ts). For each account the run first
 // disables and deletes its Forge tenant, retrying with backoff; a tenant that
 // is already gone counts as deleted. Then it resets the account's FilOne state
 // exactly as bin/reset-region-provisioning.ts does; that script's header
@@ -29,12 +29,11 @@
 // Credentials: table and function names come from `sst state export`, and
 // every AWS call uses your ambient credentials, so confirm they target the
 // right account first. The Management API URL is read from the deployed
-// AccountDeletionWorker's environment; a variable of the same name in your
-// shell (FORGE_MANAGEMENT_API_URL, FORGE_DEV_MANAGEMENT_API_URL) overrides it,
-// which a SMELT=true stage needs to reach smelt on localhost. The token comes
-// from the stage's SST secret (ForgeManagementApiToken or
-// ForgeDevManagementApiToken), or the app's fallback for it. The token is
-// never printed or written to the backup. Besides what
+// AccountDeletionWorker's environment; FORGE_MANAGEMENT_API_URL in your shell
+// overrides it, which a SMELT=true stage needs to reach smelt on localhost.
+// The token comes from the stage's ForgeManagementApiToken secret, or the
+// app's fallback for it. The token is never printed or written to the
+// backup. Besides what
 // reset-region-provisioning.ts needs, the role must call
 // lambda:GetFunctionConfiguration and read the stage's SST secrets.
 //
@@ -45,7 +44,7 @@
 // and a run carrying both stays a dry run. The backup cannot bring a deleted
 // Forge tenant back.
 //
-//   node bin/reset-forge-network.ts --network dev --stage $USER --dry-run
+//   node bin/reset-forge-network.ts --network staging --stage $USER --dry-run
 //   node bin/reset-forge-network.ts --network staging --stage staging
 
 import { parseArgs } from 'node:util';

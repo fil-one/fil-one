@@ -18,7 +18,7 @@ import { S3Region, type S3RegionLike } from '../constants.ts';
  */
 
 /** Regions whose Bucket Intelligence runs on the Forge engine (non-production only). */
-export const RAG_ENGINE_REGIONS: readonly S3Region[] = [S3Region.EuCentral3, S3Region.UsEast9];
+export const RAG_ENGINE_REGIONS: readonly S3Region[] = [S3Region.EuCentral3];
 
 /** Whether Bucket Intelligence for buckets in `region` runs on the Forge engine. */
 export function usesRagEngine(region: S3RegionLike): boolean {

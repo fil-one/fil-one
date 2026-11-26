@@ -50,12 +50,6 @@ const FORGE_NETWORKS: Record<
       };
     },
   },
-  forgeDev: {
-    api: () => ({
-      baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
-      accessToken: Resource.ForgeDevManagementApiToken.value,
-    }),
-  },
 };
 
 function getForgeOrchestrator(id: string, stage: string): ServiceOrchestrator {

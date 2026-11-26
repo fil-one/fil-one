@@ -1,6 +1,6 @@
 # @filone/rag-engine
 
-Bucket Intelligence for Forge regions (`eu-central-3`, `us-east-9`). The engine
+Bucket Intelligence for the Forge region `eu-central-3`. The engine
 runs as a container on the Forge appliance. It keeps each bucket's index as a
 Lance dataset in a companion bucket on the tenant's own Forge storage, embeds
 text with an OpenAI-compatible embeddings server running next to it, and writes
@@ -106,7 +106,7 @@ With no answer provider, queries return citations and an empty `answer`.
 regions only, for example `eu-central-3=http://127.0.0.1:15200` on the
 appliance that runs that region's Ingot. Other regions use the endpoint the
 console sends. `*=url` overrides every region and suits a local engine talking
-to one Ingot. A bare URL is refused, because on a stage with both Forge regions
+to one Ingot. A bare URL is refused, because on a stage with several Forge regions
 it would send one region's requests to the other region's gateway.
 
 ## Running locally against smelt

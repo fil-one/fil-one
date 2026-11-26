@@ -78,17 +78,14 @@ export default $config({
     const stripeMeterEventName = 'gb_month_meter';
     const auroraBackofficeToken = new sst.Secret('AuroraBackofficeToken');
     const fthManagementApiToken = new sst.Secret('FthManagementApiToken');
-    // Forge tokens are linked on non-production stages only. Each Forge network
-    // has its own Hilt, so each one we talk to carries its own token.
+    // The Forge token is linked on non-production stages only. Each Forge
+    // network has its own Hilt, so each one we talk to carries its own token.
     const forgeManagementApiToken =
       isStaging || isEphemeralStage ? new sst.Secret('ForgeManagementApiToken') : undefined;
-    const forgeDevManagementApiToken =
-      isStaging || isEphemeralStage ? new sst.Secret('ForgeDevManagementApiToken') : undefined;
     const managementApiTokens = [
       auroraBackofficeToken,
       fthManagementApiToken,
       ...(forgeManagementApiToken ? [forgeManagementApiToken] : []),
-      ...(forgeDevManagementApiToken ? [forgeDevManagementApiToken] : []),
     ];
     // Bucket Intelligence in Forge regions runs on an engine on the Forge
     // appliance (FIL-1709). Like the Forge tokens, these exist only off
@@ -834,7 +831,6 @@ export default $config({
         : useSmelt
           ? `http://${smeltHost}:15110`
           : 'https://auth.staging.fil-forge.com',
-      FORGE_DEV_MANAGEMENT_API_URL: isProduction ? '' : 'https://auth.latest.dev.fil-forge.com',
       ...(useSmelt && {
         FORGE_S3_ENDPOINT_URL: `http://${smeltHost}:15130`,
         FORGE_S3_PRESIGN_ENDPOINT_URL: 'http://localhost:15130',
@@ -853,13 +849,7 @@ export default $config({
     const auroraS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/aurora-s3/*`;
     const fthS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/fth-s3/*`;
     const forgeS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forge-s3/*`;
-    const forgeDevS3KeySsmArn = $interpolate`arn:aws:ssm:*:*:parameter/filone/${$app.stage}/forgeDev-s3/*`;
-    const orchestratorS3KeySsmArns = [
-      auroraS3KeySsmArn,
-      fthS3KeySsmArn,
-      forgeS3KeySsmArn,
-      forgeDevS3KeySsmArn,
-    ];
+    const orchestratorS3KeySsmArns = [auroraS3KeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn];
     // Per-tenant console S3 access keys (getConsoleS3Credentials), needed by
     // handlers that talk to the S3 data plane directly (presign, indexing, …).
     const s3DataPlanePermissions: sst.aws.FunctionPermissionArgs[] = [
@@ -874,7 +864,7 @@ export default $config({
     const bucketReadPermissions: sst.aws.FunctionPermissionArgs[] = [
       {
         actions: ['ssm:GetParameter'],
-        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn, forgeDevS3KeySsmArn],
+        resources: [auroraApiKeySsmArn, fthS3KeySsmArn, forgeS3KeySsmArn],
       },
     ];
 
@@ -1084,7 +1074,7 @@ export default $config({
       permissions: [
         ...ragPermissions,
         // The tenant's Forge S3 key, which the engine needs to drop a dataset.
-        { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
+        { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn] },
         { actions: ['sqs:SendMessage'], resources: [accountDeletionDlq.arn] },
         // The one credential in the system that may remove an audit entry. The
         // auditLog link above deliberately withholds this from every route, and
@@ -1211,7 +1201,7 @@ export default $config({
       permissions: [
         {
           actions: ['ssm:GetParameter', 'ssm:PutParameter'],
-          resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn],
+          resources: [forgeS3KeySsmArn],
         },
       ],
       timeout: '30 seconds',
@@ -1278,9 +1268,7 @@ export default $config({
       // Dark until a region declares the `iam` access model.
       'get-bucket-policy': {
         extraEnv: orchestratorEnv,
-        permissions: [
-          { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
-        ],
+        permissions: [{ actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn] }],
       },
       'put-bucket-policy': bucketPolicyWriteRoute,
       'delete-bucket-policy': bucketPolicyWriteRoute,
@@ -1295,9 +1283,7 @@ export default $config({
       // console S3 key, as in `get-bucket-policy` above.
       'list-access-keys': {
         extraEnv: orchestratorEnv,
-        permissions: [
-          { actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn, forgeDevS3KeySsmArn] },
-        ],
+        permissions: [{ actions: ['ssm:GetParameter'], resources: [forgeS3KeySsmArn] }],
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
       },
       'create-access-key': accessKeyMintRoute,

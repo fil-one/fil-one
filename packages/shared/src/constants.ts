@@ -29,11 +29,6 @@ export const S3Region = {
   UsEast1: 'us-east-1',
   /** Forge-backed. Not yet GA — non-production stages only (see getAvailableRegions). */
   EuCentral3: 'eu-central-3',
-  /**
-   * The Forge dev sandbox: a virtual S3 region label for the dev FilOne
-   * Appliance. Non-production stages only (see getAvailableRegions).
-   */
-  UsEast9: 'us-east-9',
 } as const;
 export type S3Region = (typeof S3Region)[keyof typeof S3Region];
 
@@ -48,7 +43,6 @@ export const REGION_LABELS: Record<S3Region, string> = {
   [S3Region.EuWest1]: 'Europe (France)',
   [S3Region.UsEast1]: 'US East (Michigan)',
   [S3Region.EuCentral3]: 'Europe (Amsterdam)',
-  [S3Region.UsEast9]: 'Forge dev sandbox (US East)',
 };
 
 /** Format a region as `"Europe (France) eu-west-1"`. */
@@ -82,8 +76,8 @@ export function isFoundationEmail(email: string | undefined): boolean {
 
 /**
  * Regions available to users. `eu-west-1` and `us-east-1` are generally
- * available in every stage; the Forge regions `eu-central-3` and `us-east-9`
- * are not yet GA and are only offered on non-production stages. Pass the
+ * available in every stage; the Forge region `eu-central-3` is not yet GA and
+ * is only offered on non-production stages. Pass the
  * deployment `stage`; only `production` returns the GA-only set.
  * The per-region S3 endpoints still vary by stage — see {@link getS3Endpoint}.
  *
@@ -93,7 +87,7 @@ export function isFoundationEmail(email: string | undefined): boolean {
  */
 export function getAvailableRegions(stage: StageLike): S3Region[] {
   if (stage !== Stage.Production) {
-    return [S3Region.EuWest1, S3Region.EuCentral3, S3Region.UsEast1, S3Region.UsEast9];
+    return [S3Region.EuWest1, S3Region.EuCentral3, S3Region.UsEast1];
   }
   return [S3Region.EuWest1, S3Region.UsEast1];
 }
@@ -107,7 +101,6 @@ export const NETWORK_ID_BY_REGION: Record<S3Region, string> = {
   [S3Region.EuWest1]: 'aurora',
   [S3Region.UsEast1]: 'fth',
   [S3Region.EuCentral3]: 'forge',
-  [S3Region.UsEast9]: 'forgeDev',
 };
 
 /** The network behind a region, or undefined for a region the product does not know. */
@@ -152,7 +145,7 @@ export function getAvailableNetworks(stage: StageLike): StorageNetwork[] {
  * Checks if the region is one Fil One supports for the given stage. Provides
  * type-narrowing information to TypeScript, changing `region` from `string` to
  * `S3Region` when the function returns `true`. Pass `stage` so non-GA regions
- * (e.g. `eu-central-3`, `us-east-9`) validate on non-production stages.
+ * (e.g. `eu-central-3`) validate on non-production stages.
  *
  * Note to developers: do not remove stage argument from this function, even if
  * unused. It causes considerable churn and it is likely in the future that we
@@ -194,7 +187,7 @@ export type AccessModel = 'service-keys' | 'iam';
  * without one in hand.
  */
 export function getRegionAccessModel(region: S3Region): AccessModel {
-  return region === S3Region.EuCentral3 || region === S3Region.UsEast9 ? 'iam' : 'service-keys';
+  return region === S3Region.EuCentral3 ? 'iam' : 'service-keys';
 }
 
 /**
@@ -230,8 +223,6 @@ export function getS3Endpoint(region: S3Region, stage: StageLike): string {
         return 'https://s3.us-east-1.staging.filonecontent.com';
       case S3Region.EuCentral3:
         return 'https://s3.eu-central-3.staging.filonecontent.com';
-      case S3Region.UsEast9:
-        return 'https://s3.us-east-9.latest.dev.filonecontent.com';
     }
   }
 
