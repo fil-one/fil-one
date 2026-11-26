@@ -3,6 +3,7 @@ import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { CreateBucketResponse, ErrorResponse, S3Region } from '@filone/shared';
 import {
+  ApiErrorCode,
   CreateBucketSchema,
   getCreatorBucketPolicy,
   isSupportedRegion,
@@ -91,14 +92,17 @@ export async function baseHandler(
     });
   } catch (err) {
     // The bucket was created but couldn't be fully configured. Surface the
-    // actionable message so the caller can finish setup via the S3 API instead
-    // of getting the generic 500 from errorHandlerMiddleware. The orchestrator
+    // error's own message, which tells the caller how to recover, instead of
+    // the generic 500 from errorHandlerMiddleware. The orchestrator
     // writes the policy before the configuration calls, so that write succeeded.
     if (err instanceof BucketConfigurationError) {
       await policyAudit?.complete({ outcome: 'succeeded', details: completionDetails });
       return new ResponseBuilder()
         .status(500)
-        .body<ErrorResponse>({ message: err.message })
+        .body<ErrorResponse>({
+          message: err.message,
+          code: ApiErrorCode.BUCKET_CONFIGURATION_FAILED,
+        })
         .build();
     }
     await policyAudit?.complete({ outcome: 'failed' });

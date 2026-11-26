@@ -24,15 +24,15 @@ export class BucketNotEmptyError extends Error {
 // step (versioning / object-lock / default retention) fails. These steps are
 // non-atomic with the create, so on this error the bucket already exists and a
 // naive retry will hit BucketAlreadyExistsError (409). The message is user-facing
-// guidance (surfaced to the API caller): it tells them the bucket exists and how to
-// finish configuring it via the S3 API, so a partial failure isn't a dead end.
+// (the console shows it as is), so it names only steps a user can take: no access
+// key can be granted the S3 configuration actions, so it cannot point at the S3 API.
 export class BucketConfigurationError extends Error {
   readonly bucketName: string;
   constructor(bucketName: string, options?: ErrorOptions) {
     super(
-      `Bucket "${bucketName}" was created, but applying its versioning/object-lock settings failed. ` +
-        `The bucket already exists; apply the remaining settings manually with the S3 API ` +
-        `(PutBucketVersioning for versioning, PutObjectLockConfiguration for object lock and default retention).`,
+      `Bucket "${bucketName}" was created, but its versioning or object lock settings could not be applied. ` +
+        `Delete the bucket on the Buckets page and create it again. ` +
+        `If this keeps happening, contact support@filone.com.`,
       options,
     );
     this.name = 'BucketConfigurationError';
