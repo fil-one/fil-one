@@ -124,6 +124,23 @@ export const NOT_BILLED_MANUALLY = {
   values: { ':manual': { S: SubscriptionStatus.Manual } },
 } as const;
 
+/**
+ * The scan filter for the subscriptions whose storage is metered to Stripe.
+ * `attribute_not_exists(deletedAt)` is redundant against the status a scrub
+ * writes, and deliberately so: either alone keeps a torn-down org out. An org
+ * billed manually is invoiced by hand, so Stripe gets none of its usage.
+ */
+export const METERED_SUBSCRIPTIONS = {
+  filterExpression:
+    'sk = :sk AND subscriptionStatus <> :canceled AND subscriptionStatus <> :manual ' +
+    'AND attribute_exists(subscriptionId) AND attribute_not_exists(deletedAt)',
+  expressionAttributeValues: {
+    ':sk': { S: 'SUBSCRIPTION' },
+    ':canceled': { S: SubscriptionStatus.Canceled },
+    ':manual': { S: SubscriptionStatus.Manual },
+  },
+} as const;
+
 /** The attributes every row carries about who it belongs to. */
 export function ownerAttributes({
   orgId,
