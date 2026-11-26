@@ -33,7 +33,7 @@ export interface ForgeNetwork {
   /** The SST secret holding the stage's Management API token. */
   tokenSecret: string;
   /** The Lambda env var that overrides the region's S3 endpoint (a local smelt network). */
-  s3EndpointEnv?: string;
+  s3EndpointOverrideEnv?: string;
 }
 
 // Matches the Forge entries of getOrchestratorForRegion
@@ -43,7 +43,7 @@ export const FORGE_NETWORKS: Record<ForgeNetworkName, ForgeNetwork> = {
     region: S3Region.EuCentral3,
     apiUrlEnv: 'FORGE_MANAGEMENT_API_URL',
     tokenSecret: 'ForgeManagementApiToken',
-    s3EndpointEnv: 'FORGE_S3_ENDPOINT_URL',
+    s3EndpointOverrideEnv: 'FORGE_S3_ENDPOINT_URL',
   },
   dev: {
     region: S3Region.UsEast9,
@@ -103,7 +103,10 @@ export async function resolveForgeApi(
     process.exit(1);
   }
 
-  const names = [network.apiUrlEnv, ...(network.s3EndpointEnv ? [network.s3EndpointEnv] : [])];
+  const names = [
+    network.apiUrlEnv,
+    ...(network.s3EndpointOverrideEnv ? [network.s3EndpointOverrideEnv] : []),
+  ];
   const env = applyShellOverrides(await readLambdaEnv(lambda, functionName, names), process.env);
   const baseUrl = env[network.apiUrlEnv];
   if (!baseUrl) {
@@ -117,8 +120,8 @@ export async function resolveForgeApi(
   return {
     baseUrl,
     token: readStageSecret(stage, network.tokenSecret),
-    ...(network.s3EndpointEnv &&
-      env[network.s3EndpointEnv] && { s3EndpointUrl: env[network.s3EndpointEnv] }),
+    ...(network.s3EndpointOverrideEnv &&
+      env[network.s3EndpointOverrideEnv] && { s3EndpointUrl: env[network.s3EndpointOverrideEnv] }),
   };
 }
 
