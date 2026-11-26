@@ -44,9 +44,10 @@ const listed: S3ObjectVersion = {
 function renderDrawer(
   props: Partial<ObjectDetailsDrawerProps> = {},
   details?: Partial<ObjectMetadataResponse>,
+  role: OrgRole = OrgRole.Owner,
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  seedPermissions(client, OrgRole.Owner);
+  seedPermissions(client, role);
   if (details) {
     const metadataKey = queryKeys.objectMetadata(BUCKET, KEY, props.versionId);
     client.setQueryDefaults(metadataKey, { staleTime: Infinity });
@@ -232,7 +233,128 @@ describe('ObjectDetailsDrawer', () => {
   it('disables Next on the last object in the folder', async () => {
     renderDrawer({ siblings: { ...siblings(), onNext: undefined } });
 
-    expect(await screen.findByTestId('object-details-drawer-next')).toBeDisabled();
+    expect(await screen.findByTestId('object-details-drawer-next')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+  });
+
+  describe('stepping from the keyboard', () => {
+    it.each([
+      ['onNext', 'j'],
+      ['onNext', 'ArrowDown'],
+      ['onPrevious', 'k'],
+      ['onPrevious', 'ArrowUp'],
+    ] as const)('calls %s on %s, pressed straight after opening', async (handler, key) => {
+      const steps = siblings();
+      renderDrawer({ siblings: steps });
+      const panel = await screen.findByTestId('object-details-drawer-panel');
+      await waitFor(() => expect(panel).toHaveFocus());
+
+      fireEvent.keyDown(panel, { key });
+
+      expect(steps[handler]).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      ['Shift', { shiftKey: true }],
+      ['Cmd', { metaKey: true }],
+      ['Ctrl', { ctrlKey: true }],
+      ['Alt', { altKey: true }],
+    ])('does not step on a key held with %s, which belongs to the browser', async (_, modifier) => {
+      const steps = siblings();
+      renderDrawer({ siblings: steps });
+
+      fireEvent.keyDown(await screen.findByTestId('object-details-drawer-panel'), {
+        key: 'ArrowDown',
+        ...modifier,
+      });
+
+      expect(steps.onNext).not.toHaveBeenCalled();
+    });
+
+    // The tags the panel's field, text preview and players render as
+    it.each(['input', 'textarea', 'select', 'pre', 'video', 'audio'])(
+      'leaves the keys to a focused %s inside the panel',
+      async (tag) => {
+        const steps = siblings();
+        renderDrawer({ siblings: steps });
+        const panel = await screen.findByTestId('object-details-drawer-panel');
+        const element = document.createElement(tag);
+        panel.append(element);
+
+        fireEvent.keyDown(element, { key: 'ArrowDown' });
+
+        expect(steps.onNext).not.toHaveBeenCalled();
+      },
+    );
+
+    it('keeps the object on screen when a key is pressed in the Delete confirmation', async () => {
+      const steps = siblings();
+      renderDrawer({ siblings: steps });
+      fireEvent.click(await screen.findByRole('button', { name: 'Delete object' }));
+
+      fireEvent.keyDown(await screen.findByTestId('confirm-dialog'), { key: 'j' });
+
+      expect(steps.onNext).not.toHaveBeenCalled();
+    });
+
+    it('keeps the object on screen when a key is pressed in the Share modal', async () => {
+      const steps = siblings();
+      // A Member cannot read billing, so Share is offered without a plan to check
+      renderDrawer({ siblings: steps }, undefined, OrgRole.Member);
+      fireEvent.click(await screen.findByRole('button', { name: 'Share' }));
+
+      fireEvent.keyDown(await screen.findByTestId('share-object-modal'), { key: 'j' });
+
+      expect(steps.onNext).not.toHaveBeenCalled();
+    });
+
+    it('keeps focus on Next, and the keys working, once Next reaches the last object', async () => {
+      const steps = { ...siblings(), onNext: undefined };
+      renderDrawer({ siblings: steps });
+      const next = await screen.findByTestId('object-details-drawer-next');
+      next.focus();
+
+      fireEvent.click(next);
+      fireEvent.keyDown(next, { key: 'k' });
+
+      expect(next).toHaveFocus();
+      expect(steps.onPrevious).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      ['Previous object', 'Up arrow or K', 'ArrowUp K'],
+      ['Next object', 'Down arrow or J', 'ArrowDown J'],
+    ])('names the keys for %s to screen readers', async (name, spoken, shortcuts) => {
+      renderDrawer({ siblings: siblings() });
+
+      const button = await screen.findByRole('button', { name });
+
+      expect(button).toHaveAccessibleDescription(`Shortcut: ${spoken}`);
+      expect(button).toHaveAttribute('aria-keyshortcuts', shortcuts);
+    });
+
+    it.each([
+      ['Previous object', '↑ or K'],
+      ['Next object', '↓ or J'],
+    ])('names the keys for %s in its tooltip', async (name, shown) => {
+      renderDrawer({ siblings: siblings() });
+
+      fireEvent.mouseEnter(await screen.findByRole('button', { name }));
+
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(`${name}${shown}`);
+    });
+
+    it('announces the object on screen after a step, and not on open', async () => {
+      renderDrawer({ siblings: siblings() });
+      const announcement = await screen.findByTestId('object-details-drawer-announcement');
+      expect(announcement).toBeEmptyDOMElement();
+
+      fireEvent.keyDown(screen.getByTestId('object-details-drawer-panel'), { key: 'j' });
+
+      expect(announcement).toHaveTextContent('any-file.bin, 2 of 3');
+    });
   });
 
   it('expands to the object page for the version on screen', async () => {
