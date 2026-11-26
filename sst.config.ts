@@ -1606,6 +1606,9 @@ export default $config({
       'list-buckets',
       'get-me',
       'list-access-keys',
+      'get-bucket',
+      'create-bucket',
+      'delete-bucket',
     ] as const satisfies RouteHandler[];
     const mcpToolInfra = mcpToolRoutes.map((handler) => ROUTE_INFRA_CONFIGS[handler] ?? {});
     ROUTE_INFRA_CONFIGS.mcp = {
@@ -1617,6 +1620,8 @@ export default $config({
       }),
       permissions: mcpToolInfra.flatMap((infra) => infra.permissions ?? []),
       extraLink: [...new Set(mcpToolInfra.flatMap((infra) => infra.extraLink ?? []))],
+      // The longest any of those routes may take: create-bucket's.
+      timeout: '30 seconds',
     };
 
     for (const route of ROUTE_MANIFEST) {

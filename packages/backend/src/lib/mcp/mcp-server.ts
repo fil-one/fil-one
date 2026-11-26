@@ -38,7 +38,7 @@ async function callConsoleTool(tool: ConsoleTool, { event }: McpRequestContext, 
     const message = isRecord(body) && typeof body.message === 'string' ? body.message : undefined;
     return buildToolResult({ message: message ?? `Fil One answered ${statusCode}.` }, true);
   }
-  return buildToolResult(tool.toResult ? tool.toResult(body) : body);
+  return buildToolResult(tool.toResult ? tool.toResult(body, parsed.args) : body);
 }
 
 /** Answer one MCP request. Notifications expect no reply and never reach here. */

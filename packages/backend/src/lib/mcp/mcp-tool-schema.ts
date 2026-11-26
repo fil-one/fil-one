@@ -10,7 +10,7 @@ export interface ToolInputProperty {
 export interface ToolInputSchema {
   type: 'object';
   properties: Record<string, ToolInputProperty>;
-  required?: string[];
+  required?: readonly string[];
   additionalProperties: false;
 }
 
