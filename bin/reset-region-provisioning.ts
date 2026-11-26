@@ -5,7 +5,7 @@
 //
 // Un-provisions one region for every customer account in a stage, so the next
 // console request re-runs tenant setup from scratch. Use it after the upstream
-// orchestrator behind a region has been wiped or re-deployed (a Forge dev
+// orchestrator behind a region has been wiped or re-deployed (a Forge
 // network reset), which leaves every account holding a dangling pointer to a
 // tenant that no longer exists.
 //

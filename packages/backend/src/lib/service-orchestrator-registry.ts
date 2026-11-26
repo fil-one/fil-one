@@ -39,20 +39,14 @@ const FORGE_NETWORKS: Record<
       baseUrl: process.env.FORGE_MANAGEMENT_API_URL!,
       accessToken: Resource.ForgeManagementApiToken.value,
     }),
-  },
-  forgeDev: {
-    api: () => ({
-      baseUrl: process.env.FORGE_DEV_MANAGEMENT_API_URL!,
-      accessToken: Resource.ForgeDevManagementApiToken.value,
-    }),
-    // The dev stack's gateway is a local port, which no region name produces,
-    // so the override is keyed by the region it serves.
+    // A local smelt gateway is a port on this machine, which no region name
+    // produces, so the override is keyed by the region it serves.
     get s3Endpoints() {
-      const endpointUrl = process.env.FORGE_DEV_S3_ENDPOINT_URL;
+      const endpointUrl = process.env.FORGE_S3_ENDPOINT_URL;
       if (!endpointUrl) return undefined;
-      const presignEndpointUrl = process.env.FORGE_DEV_S3_PRESIGN_ENDPOINT_URL;
+      const presignEndpointUrl = process.env.FORGE_S3_PRESIGN_ENDPOINT_URL;
       return {
-        [S3Region.UsEast9]: { endpointUrl, ...(presignEndpointUrl && { presignEndpointUrl }) },
+        [S3Region.EuCentral3]: { endpointUrl, ...(presignEndpointUrl && { presignEndpointUrl }) },
       };
     },
   },

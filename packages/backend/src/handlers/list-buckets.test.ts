@@ -31,10 +31,14 @@ const fth: MockOrchestrator = {
   listBuckets: vi.fn(),
 };
 
-/** One network serving two regions, which is what a shared Forge network is. */
+/**
+ * One network serving two regions, which is what a shared Forge network is. No
+ * network serves two regions today; the handler reads only the regions an
+ * orchestrator lists, so us-east-1 stands in for the second one.
+ */
 const sharedForge: MockOrchestrator = {
   id: 'forge',
-  regions: [S3Region.EuCentral3, S3Region.UsEast9],
+  regions: [S3Region.EuCentral3, S3Region.UsEast1],
   isTenantReady: vi.fn(),
   listBuckets: vi.fn(),
 };
@@ -659,9 +663,10 @@ describe('list-buckets baseHandler (request deadline)', () => {
 });
 
 describe('list-buckets baseHandler (a network serving several regions)', () => {
+  // us-east-1 stands in for a second region of the network, as in sharedForge.
   const forge: MockOrchestrator = {
     id: 'forge',
-    regions: [S3Region.EuCentral3, S3Region.UsEast9],
+    regions: [S3Region.EuCentral3, S3Region.UsEast1],
     isTenantReady: vi.fn(),
     listBuckets: vi.fn(),
   };
@@ -672,7 +677,7 @@ describe('list-buckets baseHandler (a network serving several regions)', () => {
   };
   const us = {
     bucketName: 'us-bucket',
-    region: S3Region.UsEast9,
+    region: S3Region.UsEast1,
     createdAt: '2026-01-02T00:00:00.000Z',
   };
 
@@ -695,7 +700,7 @@ describe('list-buckets baseHandler (a network serving several regions)', () => {
   it('narrows a region filter to that region while still calling the network', async () => {
     const event = buildEvent({
       userInfo: USER_INFO,
-      queryStringParameters: { region: S3Region.UsEast9 },
+      queryStringParameters: { region: S3Region.UsEast1 },
     });
     const result = await baseHandler(event);
 
@@ -710,12 +715,12 @@ describe('list-buckets baseHandler (a network serving several regions)', () => {
 
     const event = buildEvent({
       userInfo: USER_INFO,
-      queryStringParameters: { region: S3Region.UsEast9 },
+      queryStringParameters: { region: S3Region.UsEast1 },
     });
     const result = await baseHandler(event);
 
     expect(result.statusCode).toBe(503);
-    expect(JSON.parse(result.body as string).message).toBe(unavailableMessage(S3Region.UsEast9));
+    expect(JSON.parse(result.body as string).message).toBe(unavailableMessage(S3Region.UsEast1));
   });
 
   it('names every region of the network as unavailable when it fails unfiltered', async () => {
@@ -726,7 +731,7 @@ describe('list-buckets baseHandler (a network serving several regions)', () => {
 
     expect(result.statusCode).toBe(503);
     expect(JSON.parse(result.body as string).message).toBe(
-      unavailableMessage(S3Region.EuCentral3, S3Region.UsEast9),
+      unavailableMessage(S3Region.EuCentral3, S3Region.UsEast1),
     );
   });
 });

@@ -266,7 +266,7 @@ describe('canRetainAccessKey', () => {
   // access model only a role holding `keys.create_service` keeps one.
   const iamServiceKey: ServiceKeyGrant = {
     permissions: ['read', 'write'],
-    regions: [S3Region.UsEast9],
+    regions: [S3Region.EuCentral3],
   };
 
   it('takes a service key on an iam region from a Member, who lacks keys.create_service', () => {

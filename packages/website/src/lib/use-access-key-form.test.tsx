@@ -191,13 +191,15 @@ describe('useAccessKeyForm — region change', () => {
     expect(result.current.permissions).toEqual(['read']);
   });
 
-  it('keeps the bucket-configuration write when switching between Forge regions', () => {
+  it('keeps the bucket-configuration write when switching between iam regions', () => {
+    // The mock makes every region serve iam, so us-east-1 stands in for a
+    // second iam region.
     mockSupportsIamMethods.mockReturnValue(true);
     try {
       const { result, rerender } = renderWithRegion(S3Region.EuCentral3);
       act(() => result.current.setPermissions(['read', 'PutBucketCORS']));
 
-      rerender({ region: S3Region.UsEast9 });
+      rerender({ region: S3Region.UsEast1 });
       expect(result.current.permissions).toEqual(['read', 'PutBucketCORS']);
     } finally {
       mockSupportsIamMethods.mockReturnValue(false);

@@ -1,6 +1,6 @@
 # @filone/rag-engine
 
-Bucket Intelligence for Forge regions (`eu-central-3`, `us-east-9`). The engine
+Bucket Intelligence for the Forge region `eu-central-3`. The engine
 runs as a container on the Forge appliance. It keeps each bucket's index as a
 Lance dataset in a companion bucket on the tenant's own Forge storage, embeds
 text with an OpenAI-compatible embeddings server running next to it, and writes
@@ -106,14 +106,14 @@ With no answer provider, queries return citations and an empty `answer`.
 regions only, for example `eu-central-3=http://127.0.0.1:15200` on the
 appliance that runs that region's Ingot. Other regions use the endpoint the
 console sends. `*=url` overrides every region and suits a local engine talking
-to one Ingot. A bare URL is refused, because on a stage with both Forge regions
+to one Ingot. A bare URL is refused, because on a stage with several Forge regions
 it would send one region's requests to the other region's gateway.
 
 ## Running locally against smelt
 
 ```sh
 # Forge network (fil-forge/smelt)
-INGOT_REGION=us-east-9 make up && make s3-key
+INGOT_REGION=eu-central-3 make up && make s3-key
 
 # Engine + embedding server (on Apple silicon add
 # TEI_IMAGE=ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9)
@@ -129,7 +129,7 @@ The same dataset opens from Python with the tenant's key:
 ```python
 import lancedb
 db = lancedb.connect("s3://filone-rag-<hash>/lance", storage_options={
-    "aws_endpoint": "http://127.0.0.1:15130", "aws_region": "us-east-9",
+    "aws_endpoint": "http://127.0.0.1:15130", "aws_region": "eu-central-3",
     "aws_access_key_id": "<key>", "aws_secret_access_key": "<secret>",
     "aws_virtual_hosted_style_request": "false", "allow_http": "true"})
 db.open_table("chunks").search("forge", query_type="fts").limit(3).to_pandas()

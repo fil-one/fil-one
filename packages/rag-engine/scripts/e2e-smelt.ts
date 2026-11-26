@@ -1,7 +1,7 @@
 // End-to-end check of a running engine against a local smelt Forge network.
 // Opt-in: does nothing unless RAG_ENGINE_E2E=1.
 //
-//   cd fil-forge/smelt && INGOT_REGION=us-east-9 make up && make s3-key
+//   cd fil-forge/smelt && INGOT_REGION=eu-central-3 make up && make s3-key
 //   TEI_IMAGE=... docker compose -f packages/rag-engine/docker-compose.local.yml up -d --build
 //   RAG_ENGINE_E2E=1 node packages/rag-engine/scripts/e2e-smelt.ts
 //
@@ -9,7 +9,7 @@
 //   ENGINE_URL            default http://127.0.0.1:18080
 //   ENGINE_TOKEN          default local-dev-token
 //   SMELT_S3_ENDPOINT     default http://127.0.0.1:15130 (sent as target.s3.endpointUrl)
-//   SMELT_REGION          default us-east-9
+//   SMELT_REGION          default eu-central-3
 //   SMELT_ACCESS_KEY_ID / SMELT_SECRET_ACCESS_KEY
 //                         default: read from the AWS CLI profile `smelt` (`make s3-key`)
 
@@ -37,7 +37,7 @@ if (process.env.RAG_ENGINE_E2E !== '1') {
 const engineUrl = process.env.ENGINE_URL ?? 'http://127.0.0.1:18080';
 const token = process.env.ENGINE_TOKEN ?? 'local-dev-token';
 const endpoint = process.env.SMELT_S3_ENDPOINT ?? 'http://127.0.0.1:15130';
-const region = process.env.SMELT_REGION ?? 'us-east-9';
+const region = process.env.SMELT_REGION ?? 'eu-central-3';
 
 function awsProfileValue(name: string): string {
   return execFileSync('aws', ['configure', 'get', '--profile', 'smelt', name], {

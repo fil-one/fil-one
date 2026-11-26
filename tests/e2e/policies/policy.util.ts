@@ -32,14 +32,13 @@ import type {
   PolicyStatement,
 } from '@filone/shared';
 
-// Shared by the bucket policy specs. They run against any stage whose Forge
-// region serves the `iam` access model: locally that is `us-east-9` from a
-// smelt network, on a remote stage `eu-central-3` (tests/e2e/policies/README.md).
+// Shared by the bucket policy specs. They run against the Forge region
+// `eu-central-3`, which serves the `iam` access model: locally from a smelt
+// network, on a remote stage from the hosted one (tests/e2e/policies/README.md).
 
 const STAGE = process.env.SST_STAGE ?? (process.env.LOCAL ? 'local' : 'staging');
 export const REGION =
-  (process.env.E2E_POLICY_REGION as S3Region | undefined) ??
-  (STAGE === 'local' ? S3Region.UsEast9 : S3Region.EuCentral3);
+  (process.env.E2E_POLICY_REGION as S3Region | undefined) ?? S3Region.EuCentral3;
 export const S3_ENDPOINT =
   process.env.E2E_POLICY_S3_ENDPOINT ??
   (STAGE === 'local' ? 'http://localhost:15130' : getS3Endpoint(REGION, STAGE));

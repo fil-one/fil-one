@@ -3,9 +3,11 @@ import { S3Region, type NonEmptyArray } from '@filone/shared';
 import { resolveBucketRegion } from './bucket-region.ts';
 
 const oneRegion = { id: 'fth', regions: [S3Region.UsEast1] as NonEmptyArray<S3Region> };
+// No network serves two regions today. The resolver reads only the regions it
+// is handed, so us-east-1 stands in for a second one.
 const twoRegions = {
   id: 'forge',
-  regions: [S3Region.EuCentral3, S3Region.UsEast9] as NonEmptyArray<S3Region>,
+  regions: [S3Region.EuCentral3, S3Region.UsEast1] as NonEmptyArray<S3Region>,
 };
 
 afterEach(() => {
@@ -14,8 +16,8 @@ afterEach(() => {
 
 describe('resolveBucketRegion', () => {
   it('takes the label the gateway put on the bucket', () => {
-    expect(resolveBucketRegion(twoRegions, { name: 'b', region: 'us-east-9' })).toBe(
-      S3Region.UsEast9,
+    expect(resolveBucketRegion(twoRegions, { name: 'b', region: 'us-east-1' })).toBe(
+      S3Region.UsEast1,
     );
   });
 

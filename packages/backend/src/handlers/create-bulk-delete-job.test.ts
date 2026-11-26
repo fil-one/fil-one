@@ -39,7 +39,7 @@ const mockIsTenantReady = vi.fn<() => string | undefined>(() => 'tenant-1');
 const mockResolveMemberAccess = vi.fn();
 vi.mock('../lib/service-orchestrator-registry.ts', () => ({
   getOrchestratorForRegion: (region: string) => ({
-    id: region === 'us-east-9' ? 'forgeDev' : 'aurora',
+    id: region === 'eu-central-3' ? 'forge' : 'aurora',
     regions: [region],
     isTenantReady: () => mockIsTenantReady(),
     resolveMemberAccess: (...args: unknown[]) => mockResolveMemberAccess(...args),
@@ -213,7 +213,7 @@ describe('create-bulk-delete-job', () => {
   // storage system never evaluates a policy for, so a scoped member's bucket
   // policies are only enforced if this route checks them, as presign does.
   describe('member scope on an iam region', () => {
-    const iamRegion = S3Region.UsEast9;
+    const iamRegion = S3Region.EuCentral3;
     const grantActionsOnBucket = (bucketName: string, actions: string[]) => [
       { bucketName, actions },
     ];
@@ -420,7 +420,7 @@ describe('create-bulk-delete-job', () => {
       return (await handler(built, buildContext())) as APIGatewayProxyStructuredResultV2;
     }
 
-    it.each([S3Region.EuWest1, S3Region.UsEast9])(
+    it.each([S3Region.EuWest1, S3Region.EuCentral3])(
       'is refused for its role on %s',
       async (region) => {
         const result = await invokeAsReadOnly(region);
@@ -432,7 +432,7 @@ describe('create-bulk-delete-job', () => {
       },
     );
 
-    it.each([S3Region.EuWest1, S3Region.UsEast9])(
+    it.each([S3Region.EuWest1, S3Region.EuCentral3])(
       'creates and queues no job on %s',
       async (region) => {
         await invokeAsReadOnly(region);
@@ -456,7 +456,7 @@ describe('create-bulk-delete-job', () => {
         },
       ]);
 
-      const result = await invokeAsReadOnly(S3Region.UsEast9);
+      const result = await invokeAsReadOnly(S3Region.EuCentral3);
 
       expect(result.statusCode).toBe(403);
       expect(mockCreate).not.toHaveBeenCalled();

@@ -367,7 +367,7 @@ describe('get-bucket-rag-enablement on a Forge region (Bucket Intelligence engin
   it('still answers 200 with a failed sync when the engine is down', async () => {
     engine.status.mockRejectedValue(new RagEngineRequestError('down'));
 
-    const result = await baseHandler(event({ region: S3Region.UsEast9 }));
+    const result = await baseHandler(event({ region: S3Region.EuCentral3 }));
 
     expect(result.statusCode).toBe(200);
     expect(JSON.parse(result.body!)).toMatchObject({

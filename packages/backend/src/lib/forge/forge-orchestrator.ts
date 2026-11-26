@@ -2,8 +2,8 @@
 // the generic Service Orchestrator Management API (FilOneOrchestrator).
 // Forge runs as independent networks, each with its own Hilt serving every
 // region in that network; the region is sent per-tenant in the PUT /tenants
-// body. Non-production talks to two of them, staging and the dev sandbox;
-// production will have a single one. The Management API endpoint and bearer
+// body. Non-production talks to the staging network; production will have a
+// single one of its own. The Management API endpoint and bearer
 // token therefore belong to the network, which is why both are passed in rather
 // than read here.
 //

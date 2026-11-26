@@ -108,19 +108,16 @@ describe('readLambdaEnv', () => {
 });
 
 describe('FORGE_NETWORKS', () => {
-  it.each([
-    { network: 'staging', region: S3Region.EuCentral3 },
-    { network: 'dev', region: S3Region.UsEast9 },
-  ] as const)('maps region $region to network $network', ({ network, region }) => {
-    expect(getNetworkForRegion(region)).toBe(network);
+  it('maps region eu-central-3 to network staging', () => {
+    expect(getNetworkForRegion(S3Region.EuCentral3)).toBe('staging');
   });
 
   it('returns no network for a region outside Forge', () => {
     expect(getNetworkForRegion(S3Region.EuWest1)).toBeUndefined();
   });
 
-  it.each(['staging', 'dev'])('accepts %s as a network name', (name) => {
-    expect(isForgeNetworkName(name)).toBe(true);
+  it('accepts staging as a network name', () => {
+    expect(isForgeNetworkName('staging')).toBe(true);
   });
 
   it.each([

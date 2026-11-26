@@ -30,7 +30,7 @@ const legacyOrchestrator = {
 // create carries can be asserted; no production region serves iam yet.
 const iamOrchestrator = {
   ...legacyOrchestrator,
-  id: 'forgeDev',
+  id: 'forge',
   region: IAM_REGION,
   ...delegateIamMethods(new FakeIamOrchestrator()),
 };

@@ -623,18 +623,18 @@ describe('rag-indexer-worker on Forge regions (Bucket Intelligence engine)', () 
   it('keeps eu-west-1 and us-east-1 buckets on the S3 Vectors indexer in the same run', async () => {
     const aurora = makeOrchestrator('aurora', S3Region.EuWest1);
     const fth = makeOrchestrator('fth', S3Region.UsEast1);
-    const forgeDev = makeOrchestrator('forgeDev', S3Region.UsEast9);
+    const forge = makeOrchestrator('forge', S3Region.EuCentral3);
     useRegions([
       provisioned(aurora, 'tenant-aurora'),
       provisioned(fth, 'tenant-fth'),
-      provisioned(forgeDev, 'tenant-forge-dev'),
+      provisioned(forge, 'tenant-forge'),
     ]);
 
     await handler(
       payload([
         { region: S3Region.EuWest1, bucketName: 'eu' },
         { region: S3Region.UsEast1, bucketName: 'us' },
-        { region: S3Region.UsEast9, bucketName: 'forge' },
+        { region: S3Region.EuCentral3, bucketName: 'forge' },
       ]),
       AMPLE_CONTEXT,
     );
@@ -647,7 +647,7 @@ describe('rag-indexer-worker on Forge regions (Bucket Intelligence engine)', () 
     expect(mockIndexBucket.mock.calls[0][0].vectorStore).toBeInstanceOf(mockS3VectorsStore);
     expect(mockEngineSync).toHaveBeenCalledTimes(1);
     expect(mockEngineSync.mock.calls[0][0]).toMatchObject({
-      region: S3Region.UsEast9,
+      region: S3Region.EuCentral3,
       bucketName: 'forge',
     });
   });

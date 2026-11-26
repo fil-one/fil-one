@@ -33,7 +33,7 @@ const SIZES: Record<InputSize, { control: string; caret: { inset: string; size: 
   },
 };
 
-/** The regions one network serves, read as a list: "eu-central-3, us-east-9". */
+/** The regions one network serves, read as a list: "eu-central-3, eu-central-4". */
 function networkRegions(regions: readonly S3Region[]): string {
   return regions.join(', ');
 }

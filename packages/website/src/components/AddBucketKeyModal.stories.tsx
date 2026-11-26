@@ -67,7 +67,7 @@ export const Default: Story = {
 };
 
 export const OnIamRegion: Story = {
-  render: () => <AddBucketKeyModalStory region={S3Region.UsEast9} />,
+  render: () => <AddBucketKeyModalStory region={S3Region.EuCentral3} />,
   // The modal renders in a portal outside the story's canvas.
   play: async () => {
     await expect(await screen.findByText('Follows the bucket policies')).toBeVisible();

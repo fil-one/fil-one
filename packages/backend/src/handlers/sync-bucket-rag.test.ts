@@ -192,7 +192,7 @@ describe('sync-bucket-rag baseHandler', () => {
   it('answers 503 when the stage has no engine', async () => {
     engineConfigured = false;
 
-    const result = await baseHandler(event(S3Region.UsEast9));
+    const result = await baseHandler(event(S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(503);
   });

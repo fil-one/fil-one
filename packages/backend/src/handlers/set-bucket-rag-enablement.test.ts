@@ -334,7 +334,7 @@ describe('set-bucket-rag-enablement member scope on an iam region', () => {
     const orchestrator = fakeOrchestrator('forge', {
       bucket: BUCKET,
       iam,
-      region: S3Region.UsEast9,
+      region: S3Region.EuCentral3,
     });
     stubMemberScopedGetBucket(orchestrator, iam, BUCKET);
     return orchestrator;
@@ -443,7 +443,7 @@ describe('set-bucket-rag-enablement on a Forge region (Bucket Intelligence engin
   it('returns 503 without writing the row when the stage has no engine', async () => {
     engineConfigured = false;
 
-    const result = await baseHandler(forgeEvent({ enabled: true }, S3Region.UsEast9));
+    const result = await baseHandler(forgeEvent({ enabled: true }, S3Region.EuCentral3));
 
     expect(result.statusCode).toBe(503);
     expect(mockSetEnablement).not.toHaveBeenCalled();

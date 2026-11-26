@@ -9,7 +9,7 @@ import { BucketPolicyTab, LoadedPolicyView } from './BucketPolicyTab';
 import type { LoadedPolicyEditor } from './BucketPolicyTab';
 
 const BUCKET = 'photos';
-const REGION = S3Region.UsEast9;
+const REGION = S3Region.EuCentral3;
 
 const teamReads: PolicyStatement = buildStatement({
   bucketName: BUCKET,

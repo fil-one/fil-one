@@ -31,7 +31,7 @@ describe('useKeyRotation', () => {
       accessKeyId: 'did:key:z1',
       createdAt: '2026-09-16T00:00:00Z',
       status: 'active',
-      regions: [S3Region.UsEast9],
+      regions: [S3Region.EuCentral3],
       createdBy: USER_1,
       principalId: USER_1,
     };

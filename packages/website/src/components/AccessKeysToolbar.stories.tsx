@@ -51,14 +51,14 @@ const KEYS: AccessKey[] = [
   {
     id: '4',
     type: 'service',
-    keyName: 'test-key-forge-us-east',
+    keyName: 'test-key-forge-eu-central',
     accessKeyId: 'z6MkfD2e6PQLZGVzi7FQAYfSCQYwnB97AD8PdWuEDTXZnwEd',
     createdAt: '2026-09-18T10:00:00Z',
     status: 'active',
     permissions: ['read', 'write', 'list'],
     bucketScope: 'specific',
-    buckets: ['test-bucket-forge-us-east'],
-    regions: [S3Region.UsEast9],
+    buckets: ['test-bucket-forge-eu-central'],
+    regions: [S3Region.EuCentral3],
   },
   {
     id: '5',

@@ -91,9 +91,9 @@ export default defineConfig({
       },
       dependencies: ['multi-org-setup'],
     })),
-    // Bucket policies, against a stage whose Forge region serves the `iam`
-    // access model: us-east-9 from smelt locally, eu-central-3 on a remote stage
-    // (tests/e2e/policies/README.md). Only offered when the policy users are
+    // Bucket policies, against the Forge region eu-central-3, which serves the
+    // `iam` access model: from smelt locally, from the hosted network on a remote
+    // stage (tests/e2e/policies/README.md). Only offered when the policy users are
     // registered: the specs read their credentials at load.
     ...(process.env.E2E_POLICY_OWNER_EMAIL
       ? [
