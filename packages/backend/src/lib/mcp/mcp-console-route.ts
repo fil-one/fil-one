@@ -74,7 +74,8 @@ async function checkWriteAccess(event: AuthenticatedEvent, call: ConsoleRouteCal
   return (await subscriptionGuardMiddleware(AccessLevel.Write).before(request)) ?? undefined;
 }
 
-function toConsoleRouteResult(result: APIGatewayProxyResultV2): ConsoleRouteResult {
+/** A route handler's answer, with its JSON body parsed. */
+export function toConsoleRouteResult(result: APIGatewayProxyResultV2): ConsoleRouteResult {
   // Console handlers answer with a structured result; a bare string is API Gateway's 200 shorthand.
   if (typeof result === 'string') return { statusCode: 200, body: JSON.parse(result) };
   const { statusCode = 200, body } = result;

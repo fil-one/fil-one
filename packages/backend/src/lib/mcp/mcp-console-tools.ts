@@ -5,19 +5,32 @@ import { baseHandler as getBucket } from '../../handlers/get-bucket.ts';
 import { baseHandler as getMe } from '../../handlers/get-me.ts';
 import { baseHandler as listAccessKeys } from '../../handlers/list-access-keys.ts';
 import { baseHandler as listBuckets } from '../../handlers/list-buckets.ts';
+import { baseHandler as presign } from '../../handlers/presign.ts';
 import { AccessLevel } from '../../middleware/subscription-guard.ts';
 import { isRecord } from './json-rpc.ts';
-import type { ConsoleRouteCall } from './mcp-console-route.ts';
+import type { ConsoleRouteCall, ConsoleRouteResult } from './mcp-console-route.ts';
+import { listBucketObjects } from './mcp-list-objects.ts';
 import type { ToolDefinition } from './mcp-tool-schema.ts';
+import type { AuthenticatedEvent } from '../user-context.ts';
 
-/** An MCP tool that runs a console route, so it answers as the console would. */
-export interface ConsoleTool {
+interface ConsoleToolBase {
   definition: ToolDefinition;
-  /** The route to run for checked arguments. */
-  toRouteCall(args: Record<string, unknown>): ConsoleRouteCall;
-  /** The part of the route's answer the agent gets; the whole answer when absent. */
+  /** The part of the answer the agent gets; the whole answer when absent. */
   toResult?(body: unknown, args: Record<string, unknown>): unknown;
 }
+
+/** A tool that runs a console route, so it answers as the console would. */
+interface RouteTool extends ConsoleToolBase {
+  /** The route to run for checked arguments. */
+  toRouteCall(args: Record<string, unknown>): ConsoleRouteCall;
+}
+
+/** A tool the console has no route for, answering in a route's shape. */
+interface DirectTool extends ConsoleToolBase {
+  run(event: AuthenticatedEvent, args: Record<string, unknown>): Promise<ConsoleRouteResult>;
+}
+
+export type ConsoleTool = RouteTool | DirectTool;
 
 const REGION = {
   type: 'string',
@@ -40,6 +53,46 @@ function toBucketAddress(args: Record<string, unknown>) {
     pathParameters: { name: String(args.bucketName) },
     queryStringParameters: { region: String(args.region) },
   };
+}
+
+const OBJECT_IN_BUCKET = {
+  type: 'object',
+  properties: {
+    ...BUCKET_IN_REGION.properties,
+    key: { type: 'string', description: 'The object key.' },
+  },
+  required: ['bucketName', 'region', 'key'],
+  additionalProperties: false,
+} as const;
+
+const VERSION_ID = {
+  type: 'string',
+  description: 'A specific version of the object; the current one when left out.',
+} as const;
+
+/** One presign operation through the console's presign route, which checks the caller's role and bucket policies. */
+function toPresignCall(
+  op: Record<string, unknown>,
+  args: Record<string, unknown>,
+): ConsoleRouteCall {
+  return {
+    handler: 'presign',
+    baseHandler: presign,
+    // The route guards at read level and refuses write operations in a grace period itself.
+    accessLevel: AccessLevel.Read,
+    queryStringParameters: { region: String(args.region) },
+    body: [{ bucket: args.bucketName, key: args.key, ...op }],
+  };
+}
+
+/** The one signed URL the presign route answered with. */
+function toSignedUrl(body: unknown) {
+  return isRecord(body) && Array.isArray(body.items) ? body.items[0] : undefined;
+}
+
+/** What an upload's PUT must send: the content type the URL was signed with. */
+function toUploadContentType(args: Record<string, unknown>): string {
+  return typeof args.contentType === 'string' ? args.contentType : 'application/octet-stream';
 }
 
 /** create_bucket's flat arguments as the console's create request, with retention as its object. */
@@ -203,5 +256,101 @@ export const CONSOLE_TOOLS: ConsoleTool[] = [
       ...toBucketAddress(args),
     }),
     toResult: (_body, args) => ({ deleted: args.bucketName }),
+  },
+  {
+    definition: {
+      name: 'list_objects',
+      title: 'List objects',
+      description:
+        'List one page of the objects in a bucket: key, size, last modified and ETag. ' +
+        'Pass nextToken back as continuationToken for the next page.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ...BUCKET_IN_REGION.properties,
+          prefix: { type: 'string', description: 'Only keys that start with this.' },
+          maxKeys: { type: 'integer', description: 'At most this many objects (up to 1000).' },
+          continuationToken: { type: 'string', description: 'nextToken from the page before.' },
+        },
+        required: ['bucketName', 'region'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true },
+    },
+    run: listBucketObjects,
+  },
+  {
+    definition: {
+      name: 'get_download_url',
+      title: 'Get download URL',
+      description:
+        'A URL that downloads one object with a plain GET for the next 5 minutes. ' +
+        'Fil One never reads the object; fetch the URL yourself.',
+      inputSchema: {
+        ...OBJECT_IN_BUCKET,
+        properties: { ...OBJECT_IN_BUCKET.properties, versionId: VERSION_ID },
+      },
+      annotations: { readOnlyHint: true },
+    },
+    toRouteCall: (args) =>
+      toPresignCall(
+        { op: 'getObject', ...(args.versionId !== undefined && { versionId: args.versionId }) },
+        args,
+      ),
+    toResult: toSignedUrl,
+  },
+  {
+    definition: {
+      name: 'get_upload_url',
+      title: 'Get upload URL',
+      description:
+        'A URL that uploads one object with a PUT for the next 5 minutes, replacing any object ' +
+        'at that key in an unversioned bucket. Send the headers returned with it.',
+      inputSchema: {
+        ...OBJECT_IN_BUCKET,
+        properties: {
+          ...OBJECT_IN_BUCKET.properties,
+          contentType: {
+            type: 'string',
+            description: "The object's media type; application/octet-stream when left out.",
+          },
+        },
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+    },
+    toRouteCall: (args) =>
+      toPresignCall(
+        {
+          op: 'putObject',
+          contentType: toUploadContentType(args),
+          // The console records the uploaded file's name; an agent's is the key's last segment.
+          fileName: String(args.key).split('/').at(-1),
+        },
+        args,
+      ),
+    toResult: (body, args) => ({
+      ...toSignedUrl(body),
+      headers: { 'Content-Type': toUploadContentType(args) },
+    }),
+  },
+  {
+    definition: {
+      name: 'delete_object',
+      title: 'Delete object',
+      description:
+        'A URL that deletes one object, or one version of it, with a DELETE for the next ' +
+        '5 minutes. Nothing is deleted until you send it.',
+      inputSchema: {
+        ...OBJECT_IN_BUCKET,
+        properties: { ...OBJECT_IN_BUCKET.properties, versionId: VERSION_ID },
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+    },
+    toRouteCall: (args) =>
+      toPresignCall(
+        { op: 'deleteObject', ...(args.versionId !== undefined && { versionId: args.versionId }) },
+        args,
+      ),
+    toResult: toSignedUrl,
   },
 ];
