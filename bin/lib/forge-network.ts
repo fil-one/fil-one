@@ -24,7 +24,7 @@ import {
 import { S3Region } from '@filone/shared';
 import { findResourceName, type StateResource } from './stage.ts';
 
-export type ForgeNetworkName = 'staging' | 'dev';
+export type ForgeNetworkName = 'staging';
 
 export interface ForgeNetwork {
   region: S3Region;
@@ -44,11 +44,6 @@ export const FORGE_NETWORKS: Record<ForgeNetworkName, ForgeNetwork> = {
     apiUrlEnv: 'FORGE_MANAGEMENT_API_URL',
     tokenSecret: 'ForgeManagementApiToken',
     s3EndpointOverrideEnv: 'FORGE_S3_ENDPOINT_URL',
-  },
-  dev: {
-    region: S3Region.UsEast9,
-    apiUrlEnv: 'FORGE_DEV_MANAGEMENT_API_URL',
-    tokenSecret: 'ForgeDevManagementApiToken',
   },
 };
 

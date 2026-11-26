@@ -8,14 +8,12 @@ import { S3Region, Stage } from '@filone/shared';
 vi.hoisted(() => {
   process.env.FTH_MANAGEMENT_API_URL = 'https://api.fortilyx.test';
   process.env.FORGE_MANAGEMENT_API_URL = 'https://forge.test';
-  process.env.FORGE_DEV_MANAGEMENT_API_URL = 'https://forge-dev.test';
 });
 
 vi.mock('sst', () => ({
   Resource: {
     FthManagementApiToken: { value: 'kid.secret' },
     ForgeManagementApiToken: { value: 'fkid.fsecret' },
-    ForgeDevManagementApiToken: { value: 'dkid.dsecret' },
   },
 }));
 import {
@@ -54,13 +52,6 @@ describe('service-orchestrator registry', () => {
     expect(orchestrator.regions).toStrictEqual([S3Region.EuCentral3]);
   });
 
-  it('routes us-east-9 to the Forge dev sandbox orchestrator', () => {
-    process.env.FILONE_STAGE = Stage.Staging;
-    const orchestrator = getOrchestratorForRegion(S3Region.UsEast9);
-    expect(orchestrator.id).toBe('forgeDev');
-    expect(orchestrator.regions).toStrictEqual([S3Region.UsEast9]);
-  });
-
   // The ids map is the answer for code that cannot build an orchestrator, so
   // it must agree with the orchestrators the registry does build.
   for (const [region, id] of Object.entries(ORCHESTRATOR_ID_BY_REGION)) {
@@ -72,18 +63,18 @@ describe('service-orchestrator registry', () => {
 });
 
 describe('getAvailableOrchestrators', () => {
-  it('excludes the Forge orchestrators in production', () => {
+  it('excludes the Forge orchestrator in production', () => {
     process.env.FILONE_STAGE = Stage.Production;
     const orchestrators = getAvailableOrchestrators();
     expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'fth']);
   });
 
-  it('includes both Forge orchestrators on non-production stages', () => {
+  it('includes the Forge orchestrator on non-production stages', () => {
     process.env.FILONE_STAGE = Stage.Staging;
     const orchestrators = getAvailableOrchestrators();
     // Order follows `getAvailableRegions`, which groups by continent
-    // (eu-west-1, eu-central-3, us-east-1, us-east-9) rather than by service.
-    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'forge', 'fth', 'forgeDev']);
+    // (eu-west-1, eu-central-3, us-east-1) rather than by service.
+    expect(orchestrators.map((o) => o.id)).toStrictEqual(['aurora', 'forge', 'fth']);
   });
 });
 
@@ -91,7 +82,7 @@ describe('findOrchestratorById', () => {
   it('finds an available orchestrator by the id a key row records', () => {
     process.env.FILONE_STAGE = Stage.Staging;
     expect(findOrchestratorById('fth')?.id).toBe('fth');
-    expect(findOrchestratorById('forgeDev')?.regions).toStrictEqual([S3Region.UsEast9]);
+    expect(findOrchestratorById('forge')?.regions).toStrictEqual([S3Region.EuCentral3]);
   });
 
   it('answers undefined for a network the stage does not offer', () => {
@@ -106,7 +97,6 @@ describe('getRegionsForOrchestrator', () => {
     [Stage.Production, 'aurora', [S3Region.EuWest1]],
     [Stage.Production, 'fth', [S3Region.UsEast1]],
     [Stage.Staging, 'forge', [S3Region.EuCentral3]],
-    [Stage.Staging, 'forgeDev', [S3Region.UsEast9]],
   ])('lists what %s serves for %s', (stage, id, expected) => {
     expect(getRegionsForOrchestrator(id, stage)).toStrictEqual(expected);
   });
@@ -114,7 +104,6 @@ describe('getRegionsForOrchestrator', () => {
   it.each([
     // Forge is non-production only, so in production its id serves nothing.
     [Stage.Production, 'forge'],
-    [Stage.Production, 'forgeDev'],
     [Stage.Staging, 'nope'],
   ])('lists nothing for %s / %s', (stage, id) => {
     expect(getRegionsForOrchestrator(id, stage)).toStrictEqual([]);

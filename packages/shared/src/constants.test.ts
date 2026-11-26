@@ -94,12 +94,6 @@ describe('getS3Endpoint', () => {
     );
   });
 
-  it('returns the us-east-9 dev sandbox gateway', () => {
-    expect(getS3Endpoint(S3Region.UsEast9, Stage.Staging)).toBe(
-      'https://s3.us-east-9.latest.dev.filonecontent.com',
-    );
-  });
-
   // Hard-coded the expected region endpoints so that this test suite
   // reliably detects any accidental regressions in the code building
   // the S3 endpoint URLs.
@@ -261,23 +255,20 @@ describe('getAvailableRegions', () => {
       S3Region.EuWest1,
       S3Region.EuCentral3,
       S3Region.UsEast1,
-      S3Region.UsEast9,
     ]);
   });
 
-  it('excludes the non-GA Forge regions in production', () => {
+  it('excludes the non-GA Forge region in production', () => {
     expect(getAvailableRegions(Stage.Production)).toEqual([S3Region.EuWest1, S3Region.UsEast1]);
   });
 
-  it('includes the Forge regions on non-production stages', () => {
+  it('includes the Forge region on non-production stages', () => {
     expect(getAvailableRegions(Stage.Staging)).toEqual([
       S3Region.EuWest1,
       S3Region.EuCentral3,
       S3Region.UsEast1,
-      S3Region.UsEast9,
     ]);
     expect(getAvailableRegions('dev-pr-123')).toContain(S3Region.EuCentral3);
-    expect(getAvailableRegions('dev-pr-123')).toContain(S3Region.UsEast9);
   });
 });
 
@@ -293,12 +284,6 @@ describe('isSupportedRegion', () => {
     expect(isSupportedRegion('eu-central-3', 'unknown')).toBe(true);
   });
 
-  it('gates us-east-9 to non-production stages', () => {
-    expect(isSupportedRegion('us-east-9', Stage.Production)).toBe(false);
-    expect(isSupportedRegion('us-east-9', Stage.Staging)).toBe(true);
-    expect(isSupportedRegion('us-east-9', 'unknown')).toBe(true);
-  });
-
   it('rejects unknown regions', () => {
     expect(isSupportedRegion('mars-1', Stage.Staging)).toBe(false);
   });
@@ -307,10 +292,6 @@ describe('isSupportedRegion', () => {
 describe('REGION_LABELS', () => {
   it('has a label for every region including eu-central-3', () => {
     expect(REGION_LABELS[S3Region.EuCentral3]).toBe('Europe (Amsterdam)');
-  });
-
-  it('names us-east-9 as the Forge dev sandbox', () => {
-    expect(REGION_LABELS[S3Region.UsEast9]).toBe('Forge dev sandbox (US East)');
   });
 });
 
@@ -325,7 +306,7 @@ describe('supportsBucketManagement', () => {
 });
 
 describe('getRegionAccessModel', () => {
-  it('answers iam for the Forge regions and service-keys for Aurora and FTH', () => {
+  it('answers iam for the Forge region and service-keys for Aurora and FTH', () => {
     const models = Object.fromEntries(
       Object.values(S3Region).map((region) => [region, getRegionAccessModel(region)]),
     );
@@ -334,7 +315,6 @@ describe('getRegionAccessModel', () => {
       [S3Region.EuWest1]: 'service-keys',
       [S3Region.UsEast1]: 'service-keys',
       [S3Region.EuCentral3]: 'iam',
-      [S3Region.UsEast9]: 'iam',
     });
     for (const region of Object.values(S3Region)) {
       expect(supportsIamMethods(region), `${region} supports IAM`).toBe(models[region] === 'iam');

@@ -21,7 +21,6 @@ export const ORCHESTRATOR_ENV_NAMES = [
   'AURORA_REGION_ID',
   'FTH_MANAGEMENT_API_URL',
   'FORGE_MANAGEMENT_API_URL',
-  'FORGE_DEV_MANAGEMENT_API_URL',
   'FORGE_S3_ENDPOINT_URL',
   'FORGE_S3_PRESIGN_ENDPOINT_URL',
 ] as const;
@@ -32,7 +31,6 @@ const TOKEN_BY_URL: ReadonlyArray<[string, string]> = [
   ['AURORA_BACKOFFICE_URL', 'AuroraBackofficeToken'],
   ['FTH_MANAGEMENT_API_URL', 'FthManagementApiToken'],
   ['FORGE_MANAGEMENT_API_URL', 'ForgeManagementApiToken'],
-  ['FORGE_DEV_MANAGEMENT_API_URL', 'ForgeDevManagementApiToken'],
 ];
 
 type LambdaEnv = Record<string, string | undefined>;

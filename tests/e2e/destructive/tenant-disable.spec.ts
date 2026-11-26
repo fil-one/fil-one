@@ -32,9 +32,9 @@ const OBJECT_KEY = 'presigned-revocation-check.txt';
 /** The upload probe has a key of its own, so a PUT the provider accepts by mistake leaves OBJECT_KEY intact. */
 const UPLOAD_PROBE_KEY = 'presigned-write-lock-check.txt';
 
-/** Upload, presign and redeem in four regions, plus one Lambda call. */
+/** Upload, presign and redeem in every region, plus one Lambda call. */
 const SETUP_TIMEOUT_MS = ACCOUNT_STATE_TIMEOUT_MS + 120_000;
-/** Presign and redeem a PUT in four regions, plus one Lambda call. */
+/** Presign and redeem a PUT in every region, plus one Lambda call. */
 const WRITE_LOCK_SETUP_TIMEOUT_MS = ACCOUNT_STATE_TIMEOUT_MS + 60_000;
 /** How long a provider may take to start refusing the URL after the status change. */
 const REJECTION_POLL_TIMEOUT_MS = 60_000;
@@ -135,7 +135,7 @@ test.describe('account with tenants changed after presigning', () => {
       test(`rejects a presigned PUT minted before the tenant was write-locked (${region})`, async () => {
         // https://linear.app/filecoin-foundation/issue/FIL-1613
         test.skip(
-          region === 'eu-central-3' || region === 'us-east-9',
+          region === 'eu-central-3',
           `Forge (${region}) does not implement this mechanism yet`,
         );
 
@@ -216,7 +216,7 @@ test.describe('account with tenants changed after presigning', () => {
       test(`rejects a presigned GET minted before the tenant was disabled (${region})`, async () => {
         // https://linear.app/filecoin-foundation/issue/FIL-1613
         test.skip(
-          region === 'eu-central-3' || region === 'us-east-9',
+          region === 'eu-central-3',
           `Forge (${region}) does not implement this mechanism yet`,
         );
 

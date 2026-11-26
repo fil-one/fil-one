@@ -144,14 +144,13 @@ network, then resets the stage's state for the network's region the same way
 `reset-region-provisioning.ts` does. Use it to start a stage over on a network.
 
 ```bash
-node bin/reset-forge-network.ts --network dev --stage $USER --dry-run
+node bin/reset-forge-network.ts --network staging --stage $USER --dry-run
 node bin/reset-forge-network.ts --network staging --stage staging
 ```
 
-| Network   | Region         | Token secret                 |
-| --------- | -------------- | ---------------------------- |
-| `staging` | `eu-central-3` | `ForgeManagementApiToken`    |
-| `dev`     | `us-east-9`    | `ForgeDevManagementApiToken` |
+| Network   | Region         | Token secret              |
+| --------- | -------------- | ------------------------- |
+| `staging` | `eu-central-3` | `ForgeManagementApiToken` |
 
 Forge cannot list tenants, and other stages share the network, so the tenants
 are the `{orchestratorId}TenantId` values in the stage's UserInfoTable. The

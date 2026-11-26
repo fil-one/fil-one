@@ -59,9 +59,9 @@
 // environment. A variable of the same name in your shell overrides it; a
 // SMELT=true stage needs FORGE_MANAGEMENT_API_URL=http://localhost:15110
 // and FORGE_S3_ENDPOINT_URL=http://localhost:15130, since the Lambda holds
-// host.docker.internal URLs. The tokens come from the stage's
-// ForgeManagementApiToken and ForgeDevManagementApiToken secrets, or the app's
-// fallbacks, via `sst secret list`; they are never printed. Only the regions
+// host.docker.internal URLs. The token comes from the stage's
+// ForgeManagementApiToken secret, or the app's fallback, via
+// `sst secret list`; it is never printed. Only the regions
 // the run covers are looked up.
 //
 // Talks to AWS directly using your ambient AWS credentials (no `sst shell`).
