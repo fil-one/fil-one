@@ -337,30 +337,6 @@ function UploadActions({
   );
 }
 
-type UploadDoneCardProps = {
-  bucketName: string;
-  doneCount: number;
-  onBack: () => void;
-};
-
-function UploadDoneCard({ bucketName, doneCount, onBack }: UploadDoneCardProps) {
-  return (
-    <Card>
-      <div className="flex flex-col items-center gap-3 py-6">
-        <Icon component={CheckCircleIcon} size={40} color="success" />
-        <p className="text-sm font-medium text-zinc-900">Upload complete.</p>
-        <p className="text-xs text-zinc-500">
-          {doneCount} file{doneCount > 1 ? 's' : ''} uploaded to{' '}
-          <span className="font-medium text-zinc-700">{bucketName}</span>.
-        </p>
-        <Button variant="primary" onClick={onBack}>
-          Back to bucket
-        </Button>
-      </div>
-    </Card>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -435,15 +411,6 @@ export function UploadObjectPage({ bucketName, region }: UploadObjectPageProps) 
     { label: bucketName, href: `/buckets/${bucketName}?region=${region}` },
     { label: 'Upload' },
   ];
-
-  if (upload.uploadStep === 'done') {
-    return (
-      <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">
-        <Breadcrumb items={breadcrumb} />
-        <UploadDoneCard bucketName={bucketName} doneCount={upload.doneCount} onBack={goToBucket} />
-      </div>
-    );
-  }
 
   return (
     <div className="mx-auto max-w-2xl px-5 pt-6 sm:px-8 lg:px-10 lg:pt-10">

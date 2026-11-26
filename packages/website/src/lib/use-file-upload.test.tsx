@@ -273,6 +273,15 @@ describe('useFileUpload — upload flow', () => {
     expect(onSuccess).toHaveBeenCalledOnce();
   });
 
+  it('announces the uploaded file in a toast after a successful upload', async () => {
+    const { result } = renderUpload();
+    act(() => result.current.addFiles([makeFile('file.txt')], ''));
+
+    await act(() => result.current.handleUpload());
+
+    expect(await screen.findByText('file.txt uploaded successfully')).toBeInTheDocument();
+  });
+
   it('invalidates the bucket object and analytics queries after a successful upload', async () => {
     const { result, client } = renderUpload();
     const invalidate = vi.spyOn(client, 'invalidateQueries');

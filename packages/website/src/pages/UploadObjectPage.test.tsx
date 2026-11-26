@@ -39,7 +39,6 @@ vi.mock('../lib/use-file-upload.js', () => ({
       handleUpload: vi.fn(),
       handleRetry: vi.fn(),
       reset: vi.fn(),
-      doneCount: 0,
       failedCount: 0,
       pendingCount: 0,
       canUpload: false,

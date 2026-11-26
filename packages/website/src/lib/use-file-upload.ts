@@ -408,7 +408,6 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
     await runUpload(toRetry, 'All files uploaded successfully');
   }, [files, runUpload, updateEntry]);
 
-  const doneCount = files.filter((e) => e.status === 'done').length;
   const failedCount = files.filter((e) => e.status === 'error').length;
   const pendingCount = files.filter((e) => e.status === 'pending').length;
   const canUpload = files.some((e) => e.status === 'pending' || e.status === 'error');
@@ -430,7 +429,6 @@ export function useFileUpload({ bucketName, region, onSuccess }: UseFileUploadOp
     handleUpload,
     handleRetry,
     reset,
-    doneCount,
     failedCount,
     pendingCount,
     canUpload,
