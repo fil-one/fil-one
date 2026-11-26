@@ -11,8 +11,8 @@
 // pulumi may store a function's environment as a secret. A variable of the same
 // name in the operator's shell wins. Under SMELT=true the Lambda holds
 // host.docker.internal URLs, which only floci's containers are sure to resolve;
-// a script on the host then needs FORGE_DEV_MANAGEMENT_API_URL and
-// FORGE_DEV_S3_ENDPOINT_URL pointing at localhost.
+// a script on the host then needs FORGE_MANAGEMENT_API_URL and
+// FORGE_S3_ENDPOINT_URL pointing at localhost.
 // The token comes from the stage's SST secret, or the app's fallback for it,
 // and is held in memory only.
 
@@ -43,12 +43,12 @@ export const FORGE_NETWORKS: Record<ForgeNetworkName, ForgeNetwork> = {
     region: S3Region.EuCentral3,
     apiUrlEnv: 'FORGE_MANAGEMENT_API_URL',
     tokenSecret: 'ForgeManagementApiToken',
+    s3EndpointEnv: 'FORGE_S3_ENDPOINT_URL',
   },
   dev: {
     region: S3Region.UsEast9,
     apiUrlEnv: 'FORGE_DEV_MANAGEMENT_API_URL',
     tokenSecret: 'ForgeDevManagementApiToken',
-    s3EndpointEnv: 'FORGE_DEV_S3_ENDPOINT_URL',
   },
 };
 

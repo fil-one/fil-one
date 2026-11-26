@@ -355,14 +355,20 @@ mkdir -p packages/website/.cert && cd packages/website/.cert && mkcert localhost
 
 #### Running against smelt
 
-`SMELT=true pnpm deploy:local` points the Forge dev region (`us-east-9`) at a [smelt](https://github.com/fil-forge/smelt) network running on the same machine, so the console provisions tenants, keys and buckets in your local Hilt and Ingot. The other regions stay on their hosted services.
+`SMELT=true pnpm deploy:local` points the Forge region (`eu-central-3`) at a [smelt](https://github.com/fil-forge/smelt) network running on the same machine, so the console provisions tenants, keys and buckets in your local Hilt and Ingot. The stage then has no hosted Forge network. The other regions stay on their hosted services.
 
-Smelt needs to run with `INGOT_REGION=us-east-9`, the region the console expects. The deploy then:
+Smelt needs to run with `INGOT_REGION=eu-central-3`, the region the console expects. The deploy then:
 
 - sets the Hilt URL to `http://host.docker.internal:15110` and the S3 endpoint to `http://host.docker.internal:15130` (`SMELT_HOST` overrides the host name), with presigned URLs on `http://localhost:15130`;
-- copies smelt's Hilt partner key into the stage's `ForgeDevManagementApiToken`.
+- copies smelt's Hilt partner key into the stage's `ForgeManagementApiToken`.
 
-The partner key replaces any hosted Forge dev token on the stage. To go back to the hosted network, set `ForgeDevManagementApiToken` again and deploy without `SMELT`.
+The partner key replaces the hosted Forge token on the stage. To go back to the hosted network, set `ForgeManagementApiToken` again and deploy without `SMELT`.
+
+A stage that already has accounts on the hosted network keeps their tenant ids, which smelt does not know. Reset the region before the first deploy with `SMELT=true`, and again when going back:
+
+```bash
+node bin/reset-region-provisioning.ts --stage local --region eu-central-3
+```
 
 floci's Lambda containers reach smelt through `host.docker.internal`. Presigned URLs, which the browser fetches directly, use `http://localhost:15130` instead: an `https://` page may fetch `http://localhost` but not other plain-HTTP hosts.
 

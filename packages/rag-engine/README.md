@@ -113,7 +113,7 @@ it would send one region's requests to the other region's gateway.
 
 ```sh
 # Forge network (fil-forge/smelt)
-INGOT_REGION=us-east-9 make up && make s3-key
+INGOT_REGION=eu-central-3 make up && make s3-key
 
 # Engine + embedding server (on Apple silicon add
 # TEI_IMAGE=ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9)
@@ -129,7 +129,7 @@ The same dataset opens from Python with the tenant's key:
 ```python
 import lancedb
 db = lancedb.connect("s3://filone-rag-<hash>/lance", storage_options={
-    "aws_endpoint": "http://127.0.0.1:15130", "aws_region": "us-east-9",
+    "aws_endpoint": "http://127.0.0.1:15130", "aws_region": "eu-central-3",
     "aws_access_key_id": "<key>", "aws_secret_access_key": "<secret>",
     "aws_virtual_hosted_style_request": "false", "allow_http": "true"})
 db.open_table("chunks").search("forge", query_type="fts").limit(3).to_pandas()
