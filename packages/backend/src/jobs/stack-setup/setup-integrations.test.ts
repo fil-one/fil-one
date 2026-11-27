@@ -44,6 +44,13 @@ const mockFetch =
   vi.fn<(url: string, init?: Omit<RequestInit, 'body'> & { body?: string }) => Promise<Response>>();
 vi.stubGlobal('fetch', mockFetch);
 
+// Its Auth0 calls are covered in setup-mcp-authorization.test.ts.
+const mockSetupMcpAuthorization = vi.fn(async (_domain: string, _siteUrl: string) => {});
+vi.mock('./setup-mcp-authorization.ts', () => ({
+  setupAuth0McpAuthorization: (domain: string, siteUrl: string) =>
+    mockSetupMcpAuthorization(domain, siteUrl),
+}));
+
 import { handler } from './setup-integrations.ts';
 
 // ---------------------------------------------------------------------------
@@ -1105,6 +1112,30 @@ describe('setup-integrations', () => {
   });
 
   // ── Auth0 MFA Action ───────────────────────────────────────────────
+
+  describe('Auth0 MCP authorization', () => {
+    it('configures MCP sign-in for the stage’s site on Create for staging', async () => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({ id: 'we_1', secret: 'whsec_1' });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://staging.fil.one/',
+            Stage: 'staging',
+          },
+        }),
+      );
+
+      expect(mockSetupMcpAuthorization.mock.calls).toStrictEqual([
+        [expect.any(String), 'https://staging.fil.one'],
+      ]);
+    });
+  });
 
   describe('Auth0 MFA Action', () => {
     it('creates MFA action, deploys it, and binds to post-login trigger on Create for staging', async () => {
