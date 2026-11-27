@@ -10,7 +10,8 @@ import {
 } from '@filone/shared';
 
 import { useToast } from '../components/Toast/index.js';
-import { apiRequest } from './api.js';
+import { apiRequest, StepUpRequiredError } from './api.js';
+import { redirectToStepUp } from './step-up.js';
 
 /** How often to ask the API for job progress while it runs. */
 const POLL_INTERVAL_MS = 2000;
@@ -62,6 +63,16 @@ export function useBulkDeleteJob({ bucketName, region, onFinished }: UseBulkDele
         setJob(response.job);
         return response.job;
       } catch (err) {
+        // Bulk delete is step-up gated on the backend, and the gate also fires
+        // on a session older than the freshness window, not only on a missing
+        // second factor. Toasting that would strand the caller: the message
+        // names no action they can take, and clicking again reproduces it.
+        // Redirecting is the path that satisfies the gate; it navigates the
+        // page away, so nothing after this runs.
+        if (err instanceof StepUpRequiredError) {
+          redirectToStepUp('bulk-delete');
+          return undefined;
+        }
         console.error('Failed to start bulk delete:', err);
         toast.error(err instanceof Error ? err.message : 'Failed to start deletion');
         return undefined;
