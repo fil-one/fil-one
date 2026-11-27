@@ -86,6 +86,13 @@ export interface RouteManifestEntry {
    * otherwise.
    */
   ragAllowlisted?: boolean;
+  /**
+   * Set on the `authenticated` routes whose `authMiddleware` reads an Auth0
+   * access token from `Authorization: Bearer` instead of the session cookies.
+   * No credential reaches them that a browser attaches on its own, so they
+   * carry no CSRF check.
+   */
+  bearerToken?: boolean;
 }
 
 const MANIFEST = [

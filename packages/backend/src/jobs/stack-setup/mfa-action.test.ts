@@ -6,6 +6,9 @@ import { onExecutePostLogin } from './mfa-action.ts';
 import type { PostLoginApi, PostLoginEvent } from './mfa-action.ts';
 
 interface CapturedApi extends PostLoginApi {
+  accessToken: {
+    setCustomClaim: Mock<PostLoginApi['accessToken']['setCustomClaim']>;
+  };
   authentication: {
     enrollWithAny: Mock<PostLoginApi['authentication']['enrollWithAny']>;
     challengeWithAny: Mock<PostLoginApi['authentication']['challengeWithAny']>;
@@ -17,6 +20,9 @@ interface CapturedApi extends PostLoginApi {
 
 function buildApi(): CapturedApi {
   return {
+    accessToken: {
+      setCustomClaim: vi.fn(),
+    },
     authentication: {
       enrollWithAny: vi.fn(),
       challengeWithAny: vi.fn(),
@@ -232,6 +238,33 @@ describe('onExecutePostLogin', () => {
     expect(api.user.setAppMetadata).toHaveBeenCalledWith('mfa_enrolling', false);
     expect(api.authentication.enrollWithAny).toHaveBeenCalledWith(ENROLLABLE_FACTORS);
     expect(api.authentication.challengeWithAny).not.toHaveBeenCalled();
+  });
+});
+
+describe('onExecutePostLogin access-token claims', () => {
+  // A passkey login returns before any MFA branch, so the claims must be set first.
+  const passkeyLogin: PostLoginEvent = {
+    user: { email: 'any@example.com', email_verified: true, app_metadata: {} },
+    authentication: { methods: [{ name: 'passkey' }] },
+  };
+
+  it('puts the email and its verification on the access token, under the names the bearer path reads', async () => {
+    const api = buildApi();
+
+    await onExecutePostLogin(passkeyLogin, api);
+
+    expect(api.accessToken.setCustomClaim.mock.calls).toStrictEqual([
+      ['filone_email', 'any@example.com'],
+      ['filone_email_verified', true],
+    ]);
+  });
+
+  it('marks the email unverified when Auth0 does not say it is verified', async () => {
+    const api = buildApi();
+
+    await onExecutePostLogin({ user: { email: 'any@example.com', app_metadata: {} } }, api);
+
+    expect(api.accessToken.setCustomClaim).toHaveBeenCalledWith('filone_email_verified', false);
   });
 });
 
