@@ -246,12 +246,20 @@ function AgentSteps({ setup, instructions }: { setup: string; instructions: stri
 }
 
 /** A sentence of context between a step's title and its code. */
-function StepNote({ children }: { children: React.ReactNode }) {
+export function StepNote({ children }: { children: React.ReactNode }) {
   return <p className="mb-2 text-ui text-(--color-paragraph-text-subtle)">{children}</p>;
 }
 
 /** A numbered step: a small index chip and its title, above its code. */
-function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+export function Step({
+  n,
+  title,
+  children,
+}: {
+  n: number;
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="px-4 py-3.5">
       <div className="mb-2 flex items-center gap-2.5">
