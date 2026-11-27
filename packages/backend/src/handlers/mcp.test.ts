@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { S3Region } from '@filone/shared';
+import { OrgRole, S3Region } from '@filone/shared';
 import type { OrgMembership } from '../lib/org-membership.ts';
 
 vi.mock('sst', () => ({ Resource: {} }));
@@ -84,11 +84,13 @@ describe('mcp baseHandler', () => {
     expect(response).toStrictEqual({ statusCode: 202, body: undefined });
   });
 
-  it('lists list_buckets as its only tool, marked read-only', async () => {
+  it('lists its tools, marking the ones that only read', async () => {
     const response = await send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
 
     expect(response.body.result.tools).toMatchObject([
       { name: 'list_buckets', annotations: { readOnlyHint: true } },
+      { name: 'get_account', annotations: { readOnlyHint: true } },
+      { name: 'list_access_keys', annotations: { readOnlyHint: true } },
     ]);
   });
 
@@ -375,6 +377,110 @@ describe('mcp baseHandler', () => {
         statusCode: 200,
         body: { jsonrpc: '2.0', id: 3, result: {} },
       });
+    });
+  });
+});
+
+describe('MCP tools that run a console route', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns the caller’s identity, org and role from get_account, as GET /api/me reads them', async () => {
+    callConsoleRoute.mockResolvedValue({
+      statusCode: 200,
+      body: {
+        userId: 'any-user',
+        email: 'any@example.com',
+        name: 'Any Name',
+        emailVerified: true,
+        orgId: 'any-org',
+        orgName: 'Any Org',
+        role: OrgRole.Member,
+        permissions: ['buckets.read'],
+        // Fields the agent has no use for stay out of the result.
+        mfaEnrollments: [],
+        ragAccess: false,
+      },
+    });
+
+    const response = await callTool('get_account', {});
+
+    expect(callConsoleRoute).toHaveBeenCalledWith(
+      expect.objectContaining({ requestContext: expect.anything() }),
+      expect.objectContaining({ handler: 'get-me', accessLevel: AccessLevel.Read }),
+    );
+    // No name: an MCP access token carries none, so GET /api/me has none to give.
+    expect(response.body.result.structuredContent).toStrictEqual({
+      userId: 'any-user',
+      email: 'any@example.com',
+      emailVerified: true,
+      orgId: 'any-org',
+      orgName: 'Any Org',
+      role: OrgRole.Member,
+      permissions: ['buckets.read'],
+    });
+  });
+
+  it('lists access keys through GET /api/access-keys, narrowed to the region and bucket asked for', async () => {
+    callConsoleRoute.mockResolvedValue({ statusCode: 200, body: { keys: [{ id: 'any-key' }] } });
+
+    const response = await callTool('list_access_keys', {
+      region: S3Region.EuWest1,
+      bucket: 'any-bucket',
+    });
+
+    expect(callConsoleRoute).toHaveBeenCalledWith(expect.anything(), {
+      handler: 'list-access-keys',
+      baseHandler: expect.any(Function),
+      accessLevel: AccessLevel.Read,
+      queryStringParameters: { region: S3Region.EuWest1, bucket: 'any-bucket' },
+    });
+    expect(response.body.result.structuredContent).toStrictEqual({ keys: [{ id: 'any-key' }] });
+  });
+
+  it('returns the console’s refusal as a tool error', async () => {
+    callConsoleRoute.mockResolvedValue({
+      statusCode: 403,
+      body: { message: 'Your role in this organization does not permit this action.' },
+    });
+
+    const response = await callTool('list_access_keys', {});
+
+    expect(response.body.result).toStrictEqual({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            message: 'Your role in this organization does not permit this action.',
+          }),
+        },
+      ],
+      isError: true,
+    });
+  });
+
+  it.each([
+    // The tool takes no such argument.
+    [
+      'an argument the tool does not take',
+      'list_access_keys',
+      { keyId: 'any-key' },
+      'unknown argument: keyId',
+    ],
+    // The schema asks for a string.
+    ['an argument of the wrong type', 'list_access_keys', { bucket: 7 }, 'bucket must be a string'],
+    // Arguments are an object.
+    ['arguments that are not an object', 'get_account', 'any', 'arguments must be an object'],
+  ])('returns a tool error and runs no route for %s', async (_case, tool, args, problem) => {
+    const response = await callTool(tool, args);
+
+    expect(callConsoleRoute).not.toHaveBeenCalled();
+    expect(response.body.result).toStrictEqual({
+      content: [
+        { type: 'text', text: JSON.stringify({ message: `Invalid arguments: ${problem}` }) },
+      ],
+      isError: true,
     });
   });
 });

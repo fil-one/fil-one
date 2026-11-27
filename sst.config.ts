@@ -1227,19 +1227,6 @@ export default $config({
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
         memory: '1024 MB',
       },
-      // Its only tool lists buckets, so it takes list-buckets' grants.
-      mcp: {
-        extraEnv: {
-          AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
-          ...fthEnv,
-          ...forgeEnv,
-          MCP_RESOURCE_URL: mcpResourceUrl,
-          MCP_ENABLED: String(mcpEnabled),
-          // The console origins a browser may call it from.
-          ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
-        },
-        permissions: bucketReadPermissions,
-      },
       'mcp-get': { extraEnv: { MCP_ENABLED: String(mcpEnabled) } },
       'mcp-resource-metadata': {
         extraEnv: { MCP_RESOURCE_URL: mcpResourceUrl, MCP_ENABLED: String(mcpEnabled) },
@@ -1611,6 +1598,25 @@ export default $config({
           },
         ],
       },
+    };
+
+    // The MCP tools run these console routes inside the mcp Lambda, so it takes
+    // every grant, link and variable they have.
+    const mcpToolRoutes = [
+      'list-buckets',
+      'get-me',
+      'list-access-keys',
+    ] as const satisfies RouteHandler[];
+    const mcpToolInfra = mcpToolRoutes.map((handler) => ROUTE_INFRA_CONFIGS[handler] ?? {});
+    ROUTE_INFRA_CONFIGS.mcp = {
+      extraEnv: Object.assign({}, ...mcpToolInfra.map((infra) => infra.extraEnv), {
+        MCP_RESOURCE_URL: mcpResourceUrl,
+        MCP_ENABLED: String(mcpEnabled),
+        // The console origins a browser may call it from.
+        ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
+      }),
+      permissions: mcpToolInfra.flatMap((infra) => infra.permissions ?? []),
+      extraLink: [...new Set(mcpToolInfra.flatMap((infra) => infra.extraLink ?? []))],
     };
 
     for (const route of ROUTE_MANIFEST) {
