@@ -91,6 +91,9 @@ describe('mcp baseHandler', () => {
       { name: 'list_buckets', annotations: { readOnlyHint: true } },
       { name: 'get_account', annotations: { readOnlyHint: true } },
       { name: 'list_access_keys', annotations: { readOnlyHint: true } },
+      { name: 'get_bucket', annotations: { readOnlyHint: true } },
+      { name: 'create_bucket', annotations: { readOnlyHint: false, destructiveHint: false } },
+      { name: 'delete_bucket', annotations: { destructiveHint: true, idempotentHint: true } },
     ]);
   });
 
@@ -439,6 +442,118 @@ describe('MCP tools that run a console route', () => {
     expect(response.body.result.structuredContent).toStrictEqual({ keys: [{ id: 'any-key' }] });
   });
 
+  it('reads a bucket through GET /api/buckets/{name} in the region given', async () => {
+    callConsoleRoute.mockResolvedValue({
+      statusCode: 200,
+      body: { bucket: { name: 'any-bucket' } },
+    });
+
+    const response = await callTool('get_bucket', {
+      bucketName: 'any-bucket',
+      region: S3Region.UsEast1,
+    });
+
+    expect(callConsoleRoute).toHaveBeenCalledWith(expect.anything(), {
+      handler: 'get-bucket',
+      baseHandler: expect.any(Function),
+      accessLevel: AccessLevel.Read,
+      pathParameters: { name: 'any-bucket' },
+      queryStringParameters: { region: S3Region.UsEast1 },
+    });
+    expect(response.body.result.structuredContent).toStrictEqual({
+      bucket: { name: 'any-bucket' },
+    });
+  });
+
+  it('creates a bucket through POST /api/buckets, building its retention from the flat arguments', async () => {
+    callConsoleRoute.mockResolvedValue({
+      statusCode: 201,
+      body: { bucket: { name: 'any-bucket' } },
+    });
+
+    const response = await callTool('create_bucket', {
+      bucketName: 'any-bucket',
+      region: S3Region.UsEast1,
+      versioning: true,
+      lock: true,
+      retentionMode: 'governance',
+      retentionDuration: 30,
+      retentionDurationType: 'd',
+    });
+
+    expect(callConsoleRoute).toHaveBeenCalledWith(expect.anything(), {
+      handler: 'create-bucket',
+      baseHandler: expect.any(Function),
+      accessLevel: AccessLevel.Write,
+      body: {
+        bucketName: 'any-bucket',
+        region: S3Region.UsEast1,
+        versioning: true,
+        lock: true,
+        retention: { enabled: true, mode: 'governance', duration: 30, durationType: 'd' },
+      },
+    });
+    expect(response.body.result.structuredContent).toStrictEqual({
+      bucket: { name: 'any-bucket' },
+    });
+  });
+
+  it('creates a bucket with no retention when no retention argument is given', async () => {
+    callConsoleRoute.mockResolvedValue({ statusCode: 201, body: { bucket: {} } });
+
+    await callTool('create_bucket', { bucketName: 'any-bucket', region: S3Region.UsEast1 });
+
+    expect(callConsoleRoute).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        body: { bucketName: 'any-bucket', region: S3Region.UsEast1 },
+      }),
+    );
+  });
+
+  it('passes partial retention arguments on, for the route to refuse, rather than dropping them', async () => {
+    callConsoleRoute.mockResolvedValue({ statusCode: 400, body: { message: 'any' } });
+
+    // A duration with no mode: the console's schema needs all three.
+    await callTool('create_bucket', {
+      bucketName: 'any-bucket',
+      region: S3Region.UsEast1,
+      lock: true,
+      retentionDuration: 30,
+      retentionDurationType: 'd',
+    });
+
+    expect(callConsoleRoute).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        body: {
+          bucketName: 'any-bucket',
+          region: S3Region.UsEast1,
+          lock: true,
+          retention: { enabled: true, mode: undefined, duration: 30, durationType: 'd' },
+        },
+      }),
+    );
+  });
+
+  it('deletes a bucket through DELETE /api/buckets/{name} and names the bucket it deleted', async () => {
+    callConsoleRoute.mockResolvedValue({ statusCode: 204, body: undefined });
+
+    const response = await callTool('delete_bucket', {
+      bucketName: 'any-bucket',
+      region: S3Region.UsEast1,
+    });
+
+    expect(callConsoleRoute).toHaveBeenCalledWith(expect.anything(), {
+      handler: 'delete-bucket',
+      baseHandler: expect.any(Function),
+      accessLevel: AccessLevel.Write,
+      pathParameters: { name: 'any-bucket' },
+      queryStringParameters: { region: S3Region.UsEast1 },
+    });
+    expect(response.body.result.structuredContent).toStrictEqual({ deleted: 'any-bucket' });
+  });
+
   it('returns the console’s refusal as a tool error', async () => {
     callConsoleRoute.mockResolvedValue({
       statusCode: 403,
@@ -472,6 +587,20 @@ describe('MCP tools that run a console route', () => {
     ['an argument of the wrong type', 'list_access_keys', { bucket: 7 }, 'bucket must be a string'],
     // Arguments are an object.
     ['arguments that are not an object', 'get_account', 'any', 'arguments must be an object'],
+    // A bucket tool needs the bucket's region.
+    [
+      'a missing required argument',
+      'get_bucket',
+      { bucketName: 'any-bucket' },
+      'missing argument: region',
+    ],
+    // A duration is a whole number.
+    [
+      'a number that is not an integer',
+      'create_bucket',
+      { bucketName: 'any-bucket', region: S3Region.UsEast1, retentionDuration: 1.5 },
+      'retentionDuration must be an integer',
+    ],
   ])('returns a tool error and runs no route for %s', async (_case, tool, args, problem) => {
     const response = await callTool(tool, args);
 
