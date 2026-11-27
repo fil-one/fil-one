@@ -9,6 +9,11 @@ vi.mock('../lib/mcp/mcp-console-route.ts', () => ({
   callConsoleRoute: (...args: unknown[]) => callConsoleRoute(...args),
 }));
 
+const listBucketObjects = vi.fn();
+vi.mock('../lib/mcp/mcp-list-objects.ts', () => ({
+  listBucketObjects: (...args: unknown[]) => listBucketObjects(...args),
+}));
+
 import type { Context } from 'aws-lambda';
 import { MAX_BATCH_SIZE, baseHandler, handler as mcpHandler } from './mcp.ts';
 import { handler as mcpGetHandler } from './mcp-get.ts';
@@ -94,6 +99,10 @@ describe('mcp baseHandler', () => {
       { name: 'get_bucket', annotations: { readOnlyHint: true } },
       { name: 'create_bucket', annotations: { readOnlyHint: false, destructiveHint: false } },
       { name: 'delete_bucket', annotations: { destructiveHint: true, idempotentHint: true } },
+      { name: 'list_objects', annotations: { readOnlyHint: true } },
+      { name: 'get_download_url', annotations: { readOnlyHint: true } },
+      { name: 'get_upload_url', annotations: { readOnlyHint: false, destructiveHint: true } },
+      { name: 'delete_object', annotations: { destructiveHint: true, idempotentHint: true } },
     ]);
   });
 
@@ -554,6 +563,85 @@ describe('MCP tools that run a console route', () => {
     expect(response.body.result.structuredContent).toStrictEqual({ deleted: 'any-bucket' });
   });
 
+  it('lists a bucket’s objects with the arguments as checked', async () => {
+    listBucketObjects.mockResolvedValue({
+      statusCode: 200,
+      body: { objects: [{ key: 'any-key' }], isTruncated: false },
+    });
+    const args = {
+      bucketName: 'any-bucket',
+      region: S3Region.UsEast1,
+      prefix: 'any/',
+      maxKeys: 10,
+      continuationToken: 'any-token',
+    };
+
+    const response = await callTool('list_objects', args);
+
+    expect(listBucketObjects).toHaveBeenCalledWith(
+      expect.objectContaining({ requestContext: expect.anything() }),
+      args,
+    );
+    expect(response.body.result.structuredContent).toStrictEqual({
+      objects: [{ key: 'any-key' }],
+      isTruncated: false,
+    });
+  });
+
+  const SIGNED = {
+    url: 'https://s3.any-endpoint.invalid/any-bucket/any/key.txt?X-Amz-Signature=any',
+    expiresAt: '2026-01-01T00:05:00.000Z',
+  };
+
+  it.each([
+    [
+      'get_download_url',
+      { versionId: 'any-version' },
+      { op: 'getObject', versionId: 'any-version' },
+      { method: 'GET' },
+    ],
+    [
+      'get_upload_url',
+      { contentType: 'text/plain' },
+      { op: 'putObject', contentType: 'text/plain', fileName: 'key.txt' },
+      { method: 'PUT', headers: { 'Content-Type': 'text/plain' } },
+    ],
+    [
+      'get_upload_url',
+      {},
+      { op: 'putObject', contentType: 'application/octet-stream', fileName: 'key.txt' },
+      { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' } },
+    ],
+    ['delete_object', {}, { op: 'deleteObject' }, { method: 'DELETE' }],
+  ])(
+    'signs a URL for %s through POST /api/presign, given %o',
+    async (tool, extraArgs, expectedOp, expectedResult) => {
+      callConsoleRoute.mockResolvedValue({
+        statusCode: 200,
+        body: { items: [{ ...SIGNED, method: expectedResult.method }], endpoint: 'any' },
+      });
+
+      const response = await callTool(tool, {
+        bucketName: 'any-bucket',
+        region: S3Region.UsEast1,
+        key: 'any/key.txt',
+        ...extraArgs,
+      });
+
+      expect(callConsoleRoute).toHaveBeenCalledWith(expect.anything(), {
+        handler: 'presign',
+        baseHandler: expect.any(Function),
+        accessLevel: AccessLevel.Read,
+        queryStringParameters: { region: S3Region.UsEast1 },
+        body: [{ bucket: 'any-bucket', key: 'any/key.txt', ...expectedOp }],
+      });
+      expect(response.body.result.structuredContent).toStrictEqual({
+        ...SIGNED,
+        ...expectedResult,
+      });
+    },
+  );
+
   it('returns the console’s refusal as a tool error', async () => {
     callConsoleRoute.mockResolvedValue({
       statusCode: 403,
@@ -601,10 +689,25 @@ describe('MCP tools that run a console route', () => {
       { bucketName: 'any-bucket', region: S3Region.UsEast1, retentionDuration: 1.5 },
       'retentionDuration must be an integer',
     ],
+    // S3 lists at least one key a page.
+    [
+      'maxKeys below 1',
+      'list_objects',
+      { bucketName: 'any-bucket', region: S3Region.UsEast1, maxKeys: 0 },
+      'maxKeys must be from 1 to 1000',
+    ],
+    // S3 lists at most 1000 keys a page.
+    [
+      'maxKeys above 1000',
+      'list_objects',
+      { bucketName: 'any-bucket', region: S3Region.UsEast1, maxKeys: 1001 },
+      'maxKeys must be from 1 to 1000',
+    ],
   ])('returns a tool error and runs no route for %s', async (_case, tool, args, problem) => {
     const response = await callTool(tool, args);
 
     expect(callConsoleRoute).not.toHaveBeenCalled();
+    expect(listBucketObjects).not.toHaveBeenCalled();
     expect(response.body.result).toStrictEqual({
       content: [
         { type: 'text', text: JSON.stringify({ message: `Invalid arguments: ${problem}` }) },

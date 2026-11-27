@@ -31,7 +31,10 @@ async function callConsoleTool(tool: ConsoleTool, { event }: McpRequestContext, 
   if ('problem' in parsed) {
     return buildToolResult({ message: `Invalid arguments: ${parsed.problem}` }, true);
   }
-  const { statusCode, body } = await callConsoleRoute(event, tool.toRouteCall(parsed.args));
+  const { statusCode, body } =
+    'run' in tool
+      ? await tool.run(event, parsed.args)
+      : await callConsoleRoute(event, tool.toRouteCall(parsed.args));
   // A tool error rather than a JSON-RPC error, so the model reads a refusal or
   // an outage instead of the client reporting a broken server.
   if (statusCode >= 300) {

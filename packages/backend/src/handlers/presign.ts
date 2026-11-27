@@ -126,7 +126,7 @@ function getRequiredAction(op: PresignOp): PolicyAction {
  * distinct code would confirm it exists. An unscoped caller, and every region
  * serving service keys, skips the read.
  */
-async function checkMemberBucketAccess(
+export async function checkMemberBucketAccess(
   orchestrator: NetworkOrchestrator,
   tenantId: string,
   userId: string | undefined,

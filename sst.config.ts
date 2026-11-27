@@ -1609,6 +1609,8 @@ export default $config({
       'get-bucket',
       'create-bucket',
       'delete-bucket',
+      // Also the grants list_objects needs: it reads with the tenant's console S3 key.
+      'presign',
     ] as const satisfies RouteHandler[];
     const mcpToolInfra = mcpToolRoutes.map((handler) => ROUTE_INFRA_CONFIGS[handler] ?? {});
     ROUTE_INFRA_CONFIGS.mcp = {

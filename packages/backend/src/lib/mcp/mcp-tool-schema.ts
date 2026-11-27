@@ -4,6 +4,9 @@ import { isRecord } from './json-rpc.ts';
 export interface ToolInputProperty {
   type: 'string' | 'boolean' | 'integer';
   enum?: readonly string[];
+  /** Bounds on an integer, inclusive. */
+  minimum?: number;
+  maximum?: number;
   description: string;
 }
 
@@ -48,7 +51,15 @@ function checkValue(key: string, property: ToolInputProperty, value: unknown) {
     return allowed ? undefined : `${key} must be one of ${property.enum.join(', ')}`;
   }
   if (property.type === 'integer') {
-    return Number.isInteger(value) ? undefined : `${key} must be an integer`;
+    if (!Number.isInteger(value)) return `${key} must be an integer`;
+    // Number.isInteger does not narrow its argument; it just proved value a number.
+    return isInRange(value as number, property)
+      ? undefined
+      : `${key} must be from ${property.minimum} to ${property.maximum}`;
   }
   return typeof value === property.type ? undefined : `${key} must be a ${property.type}`;
+}
+
+function isInRange(value: number, { minimum = -Infinity, maximum = Infinity }: ToolInputProperty) {
+  return value >= minimum && value <= maximum;
 }
