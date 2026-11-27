@@ -29,6 +29,8 @@ interface SetupProperties {
    */
   SiteAliasUrls?: string;
   Stage: string;
+  /** MCP_ENABLED for the stage. Absent on stacks deployed before it, which means off. */
+  McpEnabled?: string;
 }
 
 type SetupEvent = CloudFormationCustomResourceEvent<SetupProperties>;
@@ -363,6 +365,7 @@ interface StageContext {
   stage: string;
   isStagingOrProd: boolean;
   isPreview: boolean;
+  mcpEnabled: boolean;
 }
 
 async function handleDelete(ctx: StageContext): Promise<void> {
@@ -414,7 +417,7 @@ async function handleSetup(
     tasks.push(setupAuth0EmailProvider(ctx.mgmtDomain, ctx.stage === 'production'));
     tasks.push(setupAuth0MfaAction(ctx.mgmtDomain));
     tasks.push(setupAuth0PasskeyAuth(ctx.mgmtDomain));
-    tasks.push(setupAuth0McpAuthorization(ctx.mgmtDomain, ctx.siteUrl));
+    if (ctx.mcpEnabled) tasks.push(setupAuth0McpAuthorization(ctx.mgmtDomain, ctx.siteUrl));
   }
 
   const [stripeResult] = await Promise.all(tasks);
@@ -437,7 +440,12 @@ function parseSiteAliasUrls(value: string | undefined): string[] {
   return value.split(',').map((url) => url.replace(/\/$/, ''));
 }
 
-function buildStageContext(stage: string, siteUrl: string, siteAliasUrls: string[]): StageContext {
+function buildStageContext(
+  stage: string,
+  siteUrl: string,
+  siteAliasUrls: string[],
+  mcpEnabled: boolean,
+): StageContext {
   const isProduction = stage === 'production';
   const isStagingOrProd = stage === 'staging' || isProduction;
   const isPreview = isPreviewStage(stage);
@@ -454,11 +462,12 @@ function buildStageContext(stage: string, siteUrl: string, siteAliasUrls: string
     stage,
     isStagingOrProd,
     isPreview,
+    mcpEnabled,
   };
 }
 
 export async function handler(event: SetupEvent): Promise<void> {
-  const { SiteUrl, SiteAliasUrls, Stage } = event.ResourceProperties;
+  const { SiteUrl, SiteAliasUrls, Stage, McpEnabled } = event.ResourceProperties;
   const siteUrl = SiteUrl.replace(/\/$/, '');
   const siteAliasUrls = parseSiteAliasUrls(SiteAliasUrls);
   const physicalResourceId =
@@ -466,7 +475,7 @@ export async function handler(event: SetupEvent): Promise<void> {
     `filone-setup-${Stage}`;
 
   try {
-    const ctx = buildStageContext(Stage, siteUrl, siteAliasUrls);
+    const ctx = buildStageContext(Stage, siteUrl, siteAliasUrls, McpEnabled === 'true');
 
     if (event.RequestType === 'Delete') {
       await handleDelete(ctx);

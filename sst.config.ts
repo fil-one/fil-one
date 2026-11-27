@@ -747,6 +747,8 @@ export default $config({
                 // must never be written into the shared Auth0 tenant.
                 SiteAliasUrls: aliasHosts.map((h) => `https://${h}`).join(','),
                 Stage: $app.stage,
+                // A property, not an env var, so turning MCP on re-runs the setup.
+                McpEnabled: mcpEnabled,
                 // Bump whenever the Auth0 client settings need re-registering: this
                 // custom resource only re-runs when a property changes.
                 Version: '2.14',
