@@ -91,7 +91,7 @@ process.env.MCP_RESOURCE_URL = 'https://console.test.com/api/mcp';
 
 // Import after all mocks are set up
 import { authMiddleware } from './auth.ts';
-import { authorize } from './authorize.ts';
+import { authorize, requireOrgMembershipMiddleware } from './authorize.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -2347,6 +2347,64 @@ describe('authMiddleware with bearerToken', () => {
       orgId: existingOrgId,
       email: MOCK_EMAIL,
       emailVerified: true,
+    });
+  });
+
+  describe('the org a bearer request acts in', () => {
+    const namedOrgId = '99999999-2222-4333-8444-555555555555';
+
+    function stubMemberOf(orgId: string, role: OrgRole) {
+      ddbMock
+        .on(GetItemCommand, {
+          TableName: 'OrgTable',
+          Key: { pk: { S: `ORG#${orgId}` }, sk: { S: `MEMBER#${existingUserId}` } },
+        })
+        .resolves({ Item: { role: { S: role }, joinedAt: { S: '2026-01-01T00:00:00.000Z' } } });
+    }
+
+    function verifiedRequestNaming(orgId?: string) {
+      mockAccessTokenPayload({ filone_email: MOCK_EMAIL, filone_email_verified: true });
+      const request = buildBearerRequest('Bearer access-token');
+      if (orgId) request.event.headers['x-org-id'] = orgId;
+      return request;
+    }
+
+    it('acts in the org X-Org-Id names, with the caller’s role there', async () => {
+      stubMemberOf(existingOrgId, OrgRole.Owner);
+      stubMemberOf(namedOrgId, OrgRole.ReadOnly);
+      const request = verifiedRequestNaming(namedOrgId);
+
+      expect(await authMiddleware({ bearerToken: true }).before(request)).toBeUndefined();
+      expect(getUserInfoFromEvent(request.event)).toMatchObject({
+        orgId: namedOrgId,
+        membership: { role: OrgRole.ReadOnly },
+      });
+    });
+
+    it('acts in the caller’s default org, with their role there, when no X-Org-Id is sent', async () => {
+      stubMemberOf(existingOrgId, OrgRole.Admin);
+      const request = verifiedRequestNaming();
+
+      expect(await authMiddleware({ bearerToken: true }).before(request)).toBeUndefined();
+      expect(getUserInfoFromEvent(request.event)).toMatchObject({
+        orgId: existingOrgId,
+        membership: { role: OrgRole.Admin },
+      });
+    });
+
+    it('is refused with 403 by the MCP chain when X-Org-Id names an org the caller is not in', async () => {
+      stubMemberOf(existingOrgId, OrgRole.Owner);
+      // No membership row in the named org.
+      const request = verifiedRequestNaming(namedOrgId);
+
+      expect(await authMiddleware({ bearerToken: true }).before(request)).toBeUndefined();
+      const refused = requireOrgMembershipMiddleware().before(
+        buildMiddyRequest(request.event),
+      ) as APIGatewayProxyStructuredResultV2;
+      expectErrorResponse(refused, 403, {
+        message: 'You are not a member of this organization.',
+        code: ApiErrorCode.NOT_A_MEMBER,
+      });
     });
   });
 
