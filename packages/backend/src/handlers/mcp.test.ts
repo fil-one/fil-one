@@ -10,7 +10,7 @@ vi.mock('../lib/mcp/mcp-console-route.ts', () => ({
 }));
 
 import type { Context } from 'aws-lambda';
-import { baseHandler, handler as mcpHandler } from './mcp.ts';
+import { MAX_BATCH_SIZE, baseHandler, handler as mcpHandler } from './mcp.ts';
 import { handler as mcpGetHandler } from './mcp-get.ts';
 import { handler as mcpResourceMetadataHandler } from './mcp-resource-metadata.ts';
 import { SUPPORTED_PROTOCOL_VERSIONS } from '../lib/mcp/mcp-server.ts';
@@ -283,6 +283,51 @@ describe('mcp baseHandler', () => {
     expect({ statusCode: result.statusCode, body: result.body }).toStrictEqual({
       statusCode: 202,
       body: '',
+    });
+  });
+
+  it('refuses with 400 a batch over the size limit, without running any of it', async () => {
+    const calls = Array.from({ length: MAX_BATCH_SIZE + 1 }, (_, i) => ({
+      jsonrpc: '2.0',
+      id: i,
+      method: 'tools/call',
+      params: { name: 'list_buckets' },
+    }));
+
+    const response = await send(calls);
+
+    expect(response).toStrictEqual({
+      statusCode: 400,
+      body: {
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32600, message: `A batch holds at most ${MAX_BATCH_SIZE} messages` },
+      },
+    });
+    expect(callConsoleRoute).not.toHaveBeenCalled();
+  });
+
+  it('runs the calls in a batch one at a time', async () => {
+    let running = 0;
+    let mostRunning = 0;
+    callConsoleRoute.mockImplementation(async () => {
+      mostRunning = Math.max(mostRunning, ++running);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      running--;
+      return { statusCode: 200, body: { buckets: [] } };
+    });
+    const calls = [1, 2, 3].map((id) => ({
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: { name: 'list_buckets' },
+    }));
+
+    const response = await send(calls);
+
+    expect({ mostRunning, ids: response.body.map((r: { id: number }) => r.id) }).toStrictEqual({
+      mostRunning: 1,
+      ids: [1, 2, 3],
     });
   });
 

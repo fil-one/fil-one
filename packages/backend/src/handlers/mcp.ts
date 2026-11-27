@@ -56,9 +56,17 @@ export async function baseHandler(
     Array.isArray(message) && message.length > 0 && version === BATCHING_VERSION
       ? message
       : undefined;
-  const replies = (
-    await Promise.all((batch ?? [message]).map((m) => answerMessage(m, event)))
-  ).filter((reply) => reply !== undefined);
+  if (batch && batch.length > MAX_BATCH_SIZE) {
+    return new ResponseBuilder()
+      .status(400)
+      .body({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32600, message: `A batch holds at most ${MAX_BATCH_SIZE} messages` },
+      })
+      .build();
+  }
+  const replies = await answerMessages(batch ?? [message], event);
   if (replies.length === 0) return new ResponseBuilder().status(202).emptyBody().build();
   return new ResponseBuilder()
     .status(200)
@@ -67,9 +75,20 @@ export async function baseHandler(
 }
 
 const BATCHING_VERSION = '2025-03-26';
+export const MAX_BATCH_SIZE = 20;
 
 function getAllowedOrigins(): string[] {
   return (process.env.ALLOWED_REDIRECT_ORIGINS ?? '').split(',').filter(Boolean);
+}
+
+// One at a time, so a batch costs downstream services no more at once than a single call.
+async function answerMessages(messages: unknown[], event: AuthenticatedEvent) {
+  const replies = [];
+  for (const message of messages) {
+    const reply = await answerMessage(message, event);
+    if (reply !== undefined) replies.push(reply);
+  }
+  return replies;
 }
 
 /** The JSON-RPC response to one message, or nothing for a notification. */
