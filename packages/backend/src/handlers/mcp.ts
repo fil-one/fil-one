@@ -1,7 +1,7 @@
 import middy from '@middy/core';
 import httpHeaderNormalizer from '@middy/http-header-normalizer';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { buildJsonRpcResponse, isJsonRpcRequest } from '../lib/mcp/json-rpc.ts';
+import { buildJsonRpcResponse, isJsonRpcRequest, toJsonRpcResponse } from '../lib/mcp/json-rpc.ts';
 import { mcpEnabledMiddleware } from '../lib/mcp/mcp-resource.ts';
 import { SUPPORTED_PROTOCOL_VERSIONS, dispatchMcpRequest } from '../lib/mcp/mcp-server.ts';
 import { ResponseBuilder } from '../lib/response-builder.ts';
@@ -21,8 +21,8 @@ export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
   // Streamable HTTP: an unsupported version is a 400; a missing header means 2025-03-26.
-  const version = event.headers['mcp-protocol-version'];
-  if (version !== undefined && !SUPPORTED_PROTOCOL_VERSIONS.includes(version)) {
+  const version = event.headers['mcp-protocol-version'] ?? BATCHING_VERSION;
+  if (!SUPPORTED_PROTOCOL_VERSIONS.includes(version)) {
     return new ResponseBuilder()
       .status(400)
       .body({
@@ -42,15 +42,31 @@ export async function baseHandler(
   } catch {
     return buildJsonRpcResponse(null, { error: { code: -32700, message: 'Parse error' } });
   }
-  // Batches are not part of the protocol since 2025-06-18.
+  // Only 2025-03-26 has batches; 2025-06-18 dropped them.
+  const batch: unknown[] | undefined =
+    Array.isArray(message) && message.length > 0 && version === BATCHING_VERSION
+      ? message
+      : undefined;
+  const replies = (
+    await Promise.all((batch ?? [message]).map((m) => answerMessage(m, event)))
+  ).filter((reply) => reply !== undefined);
+  if (replies.length === 0) return new ResponseBuilder().status(202).emptyBody().build();
+  return new ResponseBuilder()
+    .status(200)
+    .body(batch ? replies : replies[0])
+    .build();
+}
+
+const BATCHING_VERSION = '2025-03-26';
+
+/** The JSON-RPC response to one message, or nothing for a notification. */
+async function answerMessage(message: unknown, event: AuthenticatedEvent) {
   if (!isJsonRpcRequest(message)) {
-    return buildJsonRpcResponse(null, { error: { code: -32600, message: 'Invalid Request' } });
+    return toJsonRpcResponse(null, { error: { code: -32600, message: 'Invalid Request' } });
   }
   // A notification or a client's response to us expects no reply.
-  if (message.id === undefined) return new ResponseBuilder().status(202).emptyBody().build();
-
-  const outcome = await dispatchMcpRequest(message, { event });
-  return buildJsonRpcResponse(message.id, outcome);
+  if (message.id === undefined) return undefined;
+  return toJsonRpcResponse(message.id, await dispatchMcpRequest(message, { event }));
 }
 
 // Each tool checks its own permission, so the chain gates on membership only.

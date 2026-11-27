@@ -24,12 +24,13 @@ export function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
   );
 }
 
+export function toJsonRpcResponse(id: JsonRpcRequest['id'] | null, outcome: JsonRpcOutcome) {
+  return { jsonrpc: '2.0', id, ...outcome };
+}
+
 export function buildJsonRpcResponse(
   id: JsonRpcRequest['id'] | null,
   outcome: JsonRpcOutcome,
 ): APIGatewayProxyStructuredResultV2 {
-  return new ResponseBuilder()
-    .status(200)
-    .body({ jsonrpc: '2.0', id, ...outcome })
-    .build();
+  return new ResponseBuilder().status(200).body(toJsonRpcResponse(id, outcome)).build();
 }

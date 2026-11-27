@@ -182,12 +182,6 @@ describe('mcp baseHandler', () => {
         error: { code: -32601, message: 'Method not found: resources/list' },
       },
     ],
-    [
-      // Batches were removed from the protocol in 2025-06-18.
-      'Invalid Request for a batch',
-      [{ jsonrpc: '2.0', id: 5, method: 'ping' }],
-      { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } },
-    ],
   ])('returns %s', async (_case, request, expected) => {
     const response = await send(request);
 
@@ -245,6 +239,60 @@ describe('mcp baseHandler', () => {
       jsonrpc: '2.0',
       id: null,
       error: { code: -32700, message: 'Parse error' },
+    });
+  });
+
+  function batchEvent(version: string | undefined) {
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      method: 'POST',
+      body: JSON.stringify([
+        { jsonrpc: '2.0', id: 1, method: 'ping' },
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', id: 2, method: 'ping' },
+      ]),
+    });
+    if (version) event.headers['mcp-protocol-version'] = version;
+    return event;
+  }
+
+  it.each([
+    ['carrying MCP-Protocol-Version 2025-03-26', '2025-03-26'],
+    ['carrying no MCP-Protocol-Version, which means 2025-03-26', undefined],
+  ])('answers each request in a batch %s', async (_case, version) => {
+    const result = await baseHandler(batchEvent(version));
+
+    expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+      statusCode: 200,
+      body: [
+        { jsonrpc: '2.0', id: 1, result: {} },
+        { jsonrpc: '2.0', id: 2, result: {} },
+      ],
+    });
+  });
+
+  it('answers a batch of only notifications with 202 and no body', async () => {
+    const event = buildEvent({
+      userInfo: USER_INFO,
+      method: 'POST',
+      body: JSON.stringify([{ jsonrpc: '2.0', method: 'notifications/initialized' }]),
+    });
+
+    const result = await baseHandler(event);
+
+    expect({ statusCode: result.statusCode, body: result.body }).toStrictEqual({
+      statusCode: 202,
+      body: '',
+    });
+  });
+
+  it('refuses a batch under a protocol version that dropped batches', async () => {
+    const result = await baseHandler(batchEvent('2025-06-18'));
+
+    expect(JSON.parse(result.body!)).toStrictEqual({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32600, message: 'Invalid Request' },
     });
   });
 });
