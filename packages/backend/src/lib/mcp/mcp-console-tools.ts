@@ -269,7 +269,12 @@ export const CONSOLE_TOOLS: ConsoleTool[] = [
         properties: {
           ...BUCKET_IN_REGION.properties,
           prefix: { type: 'string', description: 'Only keys that start with this.' },
-          maxKeys: { type: 'integer', description: 'At most this many objects (up to 1000).' },
+          maxKeys: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 1000,
+            description: 'At most this many objects.',
+          },
           continuationToken: { type: 'string', description: 'nextToken from the page before.' },
         },
         required: ['bucketName', 'region'],

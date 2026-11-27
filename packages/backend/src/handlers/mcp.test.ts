@@ -689,10 +689,25 @@ describe('MCP tools that run a console route', () => {
       { bucketName: 'any-bucket', region: S3Region.UsEast1, retentionDuration: 1.5 },
       'retentionDuration must be an integer',
     ],
+    // S3 lists at least one key a page.
+    [
+      'maxKeys below 1',
+      'list_objects',
+      { bucketName: 'any-bucket', region: S3Region.UsEast1, maxKeys: 0 },
+      'maxKeys must be from 1 to 1000',
+    ],
+    // S3 lists at most 1000 keys a page.
+    [
+      'maxKeys above 1000',
+      'list_objects',
+      { bucketName: 'any-bucket', region: S3Region.UsEast1, maxKeys: 1001 },
+      'maxKeys must be from 1 to 1000',
+    ],
   ])('returns a tool error and runs no route for %s', async (_case, tool, args, problem) => {
     const response = await callTool(tool, args);
 
     expect(callConsoleRoute).not.toHaveBeenCalled();
+    expect(listBucketObjects).not.toHaveBeenCalled();
     expect(response.body.result).toStrictEqual({
       content: [
         { type: 'text', text: JSON.stringify({ message: `Invalid arguments: ${problem}` }) },
