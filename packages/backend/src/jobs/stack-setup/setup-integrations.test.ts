@@ -61,6 +61,7 @@ interface SetupProperties {
   SiteUrl: string;
   SiteAliasUrls?: string;
   Stage: string;
+  McpEnabled?: string;
 }
 
 const BASE_CFN_FIELDS = {
@@ -1127,6 +1128,7 @@ describe('setup-integrations', () => {
             ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
             SiteUrl: 'https://staging.fil.one/',
             Stage: 'staging',
+            McpEnabled: 'true',
           },
         }),
       );
@@ -1134,6 +1136,30 @@ describe('setup-integrations', () => {
       expect(mockSetupMcpAuthorization.mock.calls).toStrictEqual([
         [expect.any(String), 'https://staging.fil.one'],
       ]);
+    });
+
+    it.each([
+      ['MCP is off on the stage', 'false'],
+      ['the stack predates the MCP switch', undefined],
+    ])('leaves MCP sign-in unconfigured when %s', async (_case, mcpEnabled) => {
+      ssmMock.on(GetParameterCommand).rejects({ name: 'ParameterNotFound' });
+      ssmMock.on(PutParameterCommand).resolves({});
+      mockStripeWebhookEndpoints.list.mockResolvedValue({ data: [] });
+      mockStripeWebhookEndpoints.create.mockResolvedValue({ id: 'we_1', secret: 'whsec_1' });
+
+      await handler(
+        buildCfnEvent({
+          RequestType: 'Create',
+          ResourceProperties: {
+            ServiceToken: 'arn:aws:lambda:us-east-1:123:function:setup',
+            SiteUrl: 'https://any-site.example.com',
+            Stage: 'staging',
+            McpEnabled: mcpEnabled,
+          },
+        }),
+      );
+
+      expect(mockSetupMcpAuthorization).not.toHaveBeenCalled();
     });
   });
 

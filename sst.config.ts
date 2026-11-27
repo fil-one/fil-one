@@ -628,6 +628,11 @@ export default $config({
           url: api.url,
           cachePolicy: AWS_CACHING_DISABLED_POLICY,
         },
+        // Where MCP clients look up how to sign in to /api/mcp (RFC 9728).
+        '/.well-known/oauth-protected-resource/*': {
+          url: api.url,
+          cachePolicy: AWS_CACHING_DISABLED_POLICY,
+        },
       },
       // Local deploys have no cert or DNS, so they keep the generated CloudFront domain.
       domain: isLocal
@@ -687,6 +692,11 @@ export default $config({
     );
 
     const siteUrl = router.url;
+    // The MCP endpoint, and the audience of the tokens it accepts. Alias hosts
+    // are not separate resources: MCP is served on the canonical host only.
+    // Dark in production until launch; on everywhere else for testing.
+    const mcpEnabled = $app.stage !== 'production';
+    const mcpResourceUrl = siteUrl.apply((url) => `${url.replace(/\/$/, '')}/api/mcp`);
 
     const auth0Domain = getAuth0Domain($app.stage);
     // Auth0 Management API requires the canonical tenant domain — custom domains don't support /api/v2/
@@ -737,6 +747,8 @@ export default $config({
                 // must never be written into the shared Auth0 tenant.
                 SiteAliasUrls: aliasHosts.map((h) => `https://${h}`).join(','),
                 Stage: $app.stage,
+                // A property, not an env var, so turning MCP on re-runs the setup.
+                McpEnabled: String(mcpEnabled),
                 // Bump whenever the Auth0 client settings need re-registering: this
                 // custom resource only re-runs when a property changes.
                 Version: '2.14',
@@ -1214,6 +1226,23 @@ export default $config({
         permissions: bucketReadPermissions,
         provisionedConcurrency: criticalPathLambdaProvisionedConcurrency,
         memory: '1024 MB',
+      },
+      // Its only tool lists buckets, so it takes list-buckets' grants.
+      mcp: {
+        extraEnv: {
+          AURORA_PORTAL_URL: auroraEnv.AURORA_PORTAL_URL,
+          ...fthEnv,
+          ...forgeEnv,
+          MCP_RESOURCE_URL: mcpResourceUrl,
+          MCP_ENABLED: String(mcpEnabled),
+          // The console origins a browser may call it from.
+          ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
+        },
+        permissions: bucketReadPermissions,
+      },
+      'mcp-get': { extraEnv: { MCP_ENABLED: String(mcpEnabled) } },
+      'mcp-resource-metadata': {
+        extraEnv: { MCP_RESOURCE_URL: mcpResourceUrl, MCP_ENABLED: String(mcpEnabled) },
       },
       'create-bucket': {
         extraEnv: orchestratorEnv,
