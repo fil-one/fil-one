@@ -410,10 +410,10 @@ describe('MCP tools that run a console route', () => {
       expect.objectContaining({ requestContext: expect.anything() }),
       expect.objectContaining({ handler: 'get-me', accessLevel: AccessLevel.Read }),
     );
+    // No name: an MCP access token carries none, so GET /api/me has none to give.
     expect(response.body.result.structuredContent).toStrictEqual({
       userId: 'any-user',
       email: 'any@example.com',
-      name: 'Any Name',
       emailVerified: true,
       orgId: 'any-org',
       orgName: 'Any Org',

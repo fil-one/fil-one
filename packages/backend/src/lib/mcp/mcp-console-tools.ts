@@ -61,8 +61,8 @@ export const CONSOLE_TOOLS: ConsoleTool[] = [
     toRouteCall: () => ({ handler: 'get-me', baseHandler: getMe, accessLevel: AccessLevel.Read }),
     toResult: (body) => {
       if (!isRecord(body)) return {};
-      const { userId, email, name, emailVerified, orgId, orgName, role, permissions } = body;
-      return { userId, email, name, emailVerified, orgId, orgName, role, permissions };
+      const { userId, email, emailVerified, orgId, orgName, role, permissions } = body;
+      return { userId, email, emailVerified, orgId, orgName, role, permissions };
     },
   },
   {
