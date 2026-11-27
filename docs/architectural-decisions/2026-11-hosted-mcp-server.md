@@ -41,6 +41,8 @@ Stack setup configures each Auth0 tenant behind the MCP URL: Client ID Metadata 
 
 An MCP token carries the user's identity, not scopes of its own. Each tool runs the console route that does the same job, as the caller: the permission the route manifest names, the subscription guard at the route's access level, then the route's own handler, given an event built from the MCP request. The tool refuses, answers and audits exactly as that route does, so the MCP can never do more than the user can in the console. A tool with no matching route, such as listing objects, which the console does through a presigned URL, runs the checks of the route closest to it. The route itself requires no single permission, because one permission such as `buckets.read` would fit only read tools.
 
+The client names the org with the console's `X-Org-Id` header; a request without it acts in the user's default org. The token is not bound to an org. On every request the backend reads the caller's membership and role in the named org, refuses an org they are not in with 403, and runs each route's permission check for that role.
+
 ### 4. Fil One never reads object contents
 
 Every read and write of object data goes through a [presigned URL](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ShareObjectPreSignedURL.html) that the agent fetches itself. Tools return metadata and links, never object bytes.
@@ -77,6 +79,7 @@ The database, the OAuth server and the stored customer keys go away; the remaini
 - **A 30-second ceiling per request.** [API Gateway HTTP APIs cap an integration at 30 s](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html), and raising the Lambda timeout doesn't change that.
 - **Clients without Client ID Metadata Document support need a pasted client id.** Cursor and Gemini CLI connect through one pre-registered public Auth0 client.
 - **Two implementations.** Local and hosted tools can drift apart until they share code.
+- **One consent covers every org.** A token can act in any org the user belongs to, with their role there. Leaving an org or a role change applies on the next request. A client that can't send custom headers acts only in the default org.
 
 ### Follow-up work
 
@@ -101,6 +104,10 @@ Fil One stores no secret of a key a user creates, so the backend can't sign as t
 
 The [organizations ADR](2026-08-organizations-roles-m1.md) keeps orgs in DynamoDB. With [Auth0 Organizations](https://auth0.com/docs/manage-users/organizations), the picker always offers a personal account, the B2C plan caps them at 10, and every membership would be copied into Auth0.
 
+### Bind the token to one org chosen at sign-in
+
+A [post-login Auth0 Action](https://auth0.com/docs/customize/actions/explore-triggers/signup-and-login-triggers/login-trigger/redirect-with-actions) would send the user to a Fil One org picker and put the chosen org on the access token as a claim. It limits one consent to one org, but needs a redirect step and a secret shared between the Action and the backend, has to carry the org across token refresh, and makes switching org mean authorizing the agent again.
+
 ### Turn on dynamic client registration
 
 It opens an endpoint that creates applications in the tenant, creates a new client on every fresh connection, and the 2025-11-25 MCP spec makes it optional in favour of Client ID Metadata Documents.
@@ -109,7 +116,6 @@ It opens an endpoint that creates applications in the tenant, creates a new clie
 
 - **Request duration.** Which tools could need more than 30 s? A longer tool needs a [Lambda Function URL](https://docs.aws.amazon.com/lambda/latest/dg/urls-configuration.html) behind the Router, or an async job.
 - **Client support.** Claude (web and Desktop), Codex CLI and VS Code support Client ID Metadata Documents. Claude Code and ChatGPT need an end-to-end test: Claude Code uses a random loopback port, and ChatGPT defaults to `private_key_jwt`, which Auth0 limits to Enterprise. Auth0's dynamic registration of these clients is Early Access. Without `scopes_supported` in the resource metadata, some clients may not ask for a refresh token.
-- **Org selection.** Without a choice, a token acts for the user's home org. Proposed: a [post-login Auth0 Action](https://auth0.com/docs/customize/actions/explore-triggers/signup-and-login-triggers/login-trigger/redirect-with-actions), run only for the MCP audience, sends the user to a Fil One org picker and puts the chosen org on the access token as a claim. The backend treats that claim like the console's active-org header, so membership is still checked on every call. To confirm: the claim survives token refresh, and Actions run for these clients. Switching org means authorizing the agent again.
 
 ## References
 
