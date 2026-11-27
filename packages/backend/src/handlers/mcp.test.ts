@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { S3Region } from '@filone/shared';
 import type { OrgMembership } from '../lib/org-membership.ts';
 
@@ -293,6 +293,43 @@ describe('mcp baseHandler', () => {
       jsonrpc: '2.0',
       id: null,
       error: { code: -32600, message: 'Invalid Request' },
+    });
+  });
+
+  describe('the Origin of a browser request', () => {
+    beforeEach(() => {
+      process.env.ALLOWED_REDIRECT_ORIGINS = 'https://console.any.invalid';
+    });
+    afterEach(() => {
+      delete process.env.ALLOWED_REDIRECT_ORIGINS;
+    });
+
+    function pingFrom(origin: string) {
+      const event = buildEvent({
+        userInfo: USER_INFO,
+        method: 'POST',
+        body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'ping' }),
+      });
+      event.headers.origin = origin;
+      return baseHandler(event);
+    }
+
+    it('refuses with 403 an Origin that is not the console’s', async () => {
+      const result = await pingFrom('https://other.any.invalid');
+
+      expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+        statusCode: 403,
+        body: { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Origin not allowed' } },
+      });
+    });
+
+    it('serves a request from the console’s Origin', async () => {
+      const result = await pingFrom('https://console.any.invalid');
+
+      expect({ statusCode: result.statusCode, body: JSON.parse(result.body!) }).toStrictEqual({
+        statusCode: 200,
+        body: { jsonrpc: '2.0', id: 3, result: {} },
+      });
     });
   });
 });

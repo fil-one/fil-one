@@ -1233,6 +1233,8 @@ export default $config({
           ...forgeEnv,
           MCP_RESOURCE_URL: mcpResourceUrl,
           MCP_ENABLED: mcpEnabled,
+          // The console origins a browser may call it from.
+          ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
         },
         permissions: bucketReadPermissions,
       },

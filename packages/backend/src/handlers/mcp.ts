@@ -20,6 +20,15 @@ import { subscriptionGuardMiddleware, AccessLevel } from '../middleware/subscrip
 export async function baseHandler(
   event: AuthenticatedEvent,
 ): Promise<APIGatewayProxyStructuredResultV2> {
+  // Streamable HTTP's DNS-rebinding guard: a browser page other than the console is refused.
+  const origin = event.headers.origin;
+  if (origin !== undefined && !getAllowedOrigins().includes(origin)) {
+    return new ResponseBuilder()
+      .status(403)
+      .body({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Origin not allowed' } })
+      .build();
+  }
+
   // Streamable HTTP: an unsupported version is a 400; a missing header means 2025-03-26.
   const version = event.headers['mcp-protocol-version'] ?? BATCHING_VERSION;
   if (!SUPPORTED_PROTOCOL_VERSIONS.includes(version)) {
@@ -58,6 +67,10 @@ export async function baseHandler(
 }
 
 const BATCHING_VERSION = '2025-03-26';
+
+function getAllowedOrigins(): string[] {
+  return (process.env.ALLOWED_REDIRECT_ORIGINS ?? '').split(',').filter(Boolean);
+}
 
 /** The JSON-RPC response to one message, or nothing for a notification. */
 async function answerMessage(message: unknown, event: AuthenticatedEvent) {
