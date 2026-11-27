@@ -45,7 +45,10 @@ function toBucketAddress(args: Record<string, unknown>) {
 /** create_bucket's flat arguments as the console's create request, with retention as its object. */
 function toCreateBucketRequest(args: Record<string, unknown>) {
   const { retentionMode, retentionDuration, retentionDurationType, ...request } = args;
-  if (retentionMode === undefined) return request;
+  // Any one of them asks for retention; the route refuses a set that is not whole.
+  if ([retentionMode, retentionDuration, retentionDurationType].every((v) => v === undefined)) {
+    return request;
+  }
   return {
     ...request,
     retention: {

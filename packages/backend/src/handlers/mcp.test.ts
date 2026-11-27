@@ -498,7 +498,7 @@ describe('MCP tools that run a console route', () => {
     });
   });
 
-  it('creates a bucket with no retention when no retention mode is given', async () => {
+  it('creates a bucket with no retention when no retention argument is given', async () => {
     callConsoleRoute.mockResolvedValue({ statusCode: 201, body: { bucket: {} } });
 
     await callTool('create_bucket', { bucketName: 'any-bucket', region: S3Region.UsEast1 });
@@ -507,6 +507,31 @@ describe('MCP tools that run a console route', () => {
       expect.anything(),
       expect.objectContaining({
         body: { bucketName: 'any-bucket', region: S3Region.UsEast1 },
+      }),
+    );
+  });
+
+  it('passes partial retention arguments on, for the route to refuse, rather than dropping them', async () => {
+    callConsoleRoute.mockResolvedValue({ statusCode: 400, body: { message: 'any' } });
+
+    // A duration with no mode: the console's schema needs all three.
+    await callTool('create_bucket', {
+      bucketName: 'any-bucket',
+      region: S3Region.UsEast1,
+      lock: true,
+      retentionDuration: 30,
+      retentionDurationType: 'd',
+    });
+
+    expect(callConsoleRoute).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        body: {
+          bucketName: 'any-bucket',
+          region: S3Region.UsEast1,
+          lock: true,
+          retention: { enabled: true, mode: undefined, duration: 30, durationType: 'd' },
+        },
       }),
     );
   });
