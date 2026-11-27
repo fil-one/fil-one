@@ -133,8 +133,7 @@ export const CONSOLE_TOOLS: ConsoleTool[] = [
       name: 'get_bucket',
       title: 'Get bucket',
       description:
-        'Read one bucket: when it was created, whether it is public, versioning, Object Lock ' +
-        'and default retention.',
+        'Read one bucket: whether it is public, versioning, Object Lock and default retention.',
       inputSchema: BUCKET_IN_REGION,
       annotations: { readOnlyHint: true },
     },
