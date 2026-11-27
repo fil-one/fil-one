@@ -695,7 +695,7 @@ export default $config({
     // The MCP endpoint, and the audience of the tokens it accepts. Alias hosts
     // are not separate resources: MCP is served on the canonical host only.
     // Dark in production until launch; on everywhere else for testing.
-    const mcpEnabled = $app.stage === 'production' ? 'false' : 'true';
+    const mcpEnabled = $app.stage !== 'production';
     const mcpResourceUrl = siteUrl.apply((url) => `${url.replace(/\/$/, '')}/api/mcp`);
 
     const auth0Domain = getAuth0Domain($app.stage);
@@ -748,7 +748,7 @@ export default $config({
                 SiteAliasUrls: aliasHosts.map((h) => `https://${h}`).join(','),
                 Stage: $app.stage,
                 // A property, not an env var, so turning MCP on re-runs the setup.
-                McpEnabled: mcpEnabled,
+                McpEnabled: String(mcpEnabled),
                 // Bump whenever the Auth0 client settings need re-registering: this
                 // custom resource only re-runs when a property changes.
                 Version: '2.14',
@@ -1234,15 +1234,15 @@ export default $config({
           ...fthEnv,
           ...forgeEnv,
           MCP_RESOURCE_URL: mcpResourceUrl,
-          MCP_ENABLED: mcpEnabled,
+          MCP_ENABLED: String(mcpEnabled),
           // The console origins a browser may call it from.
           ALLOWED_REDIRECT_ORIGINS: allowedRedirectOrigins,
         },
         permissions: bucketReadPermissions,
       },
-      'mcp-get': { extraEnv: { MCP_ENABLED: mcpEnabled } },
+      'mcp-get': { extraEnv: { MCP_ENABLED: String(mcpEnabled) } },
       'mcp-resource-metadata': {
-        extraEnv: { MCP_RESOURCE_URL: mcpResourceUrl, MCP_ENABLED: mcpEnabled },
+        extraEnv: { MCP_RESOURCE_URL: mcpResourceUrl, MCP_ENABLED: String(mcpEnabled) },
       },
       'create-bucket': {
         extraEnv: orchestratorEnv,
