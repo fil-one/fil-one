@@ -7,6 +7,7 @@ export default $config({
     const isStaging = stage === 'staging';
     // LOCAL=true deploys to a local AWS emulator (floci); see bin/deploy-local.sh.
     const isLocal = process.env.LOCAL === 'true';
+
     if (isLocal && !process.env.AWS_ENDPOINT_URL) {
       throw new Error('LOCAL=true requires AWS_ENDPOINT_URL; run `eval "$(floci env)"` first');
     }
@@ -53,6 +54,23 @@ export default $config({
     const isStaging = stage === 'staging';
     const isEphemeralStage = !isProduction && !isStaging;
     const isLocal = process.env.LOCAL === 'true';
+
+    // A production rollout needs separate broker source bindings and acceptance.
+    const lifecyclePublisherEnabled = process.env.FILONE_LIFECYCLE_PUBLISHER_ENABLED === 'true';
+    const lifecycleCaptureEnabled = process.env.FILONE_LIFECYCLE_CAPTURE_ENABLED === 'true';
+    const lifecycleAlarmTopicArn = process.env.FILONE_LIFECYCLE_ALARM_TOPIC_ARN;
+    if (lifecycleCaptureEnabled && !lifecyclePublisherEnabled) {
+      throw new Error('Lifecycle capture requires the provisioned staging publisher');
+    }
+    if (lifecyclePublisherEnabled && (!isStaging || isLocal)) {
+      throw new Error('Lifecycle publishing is currently supported only in staging');
+    }
+    if (
+      lifecyclePublisherEnabled &&
+      !/^arn:aws:sns:us-east-2:654654381893:[A-Za-z0-9_-]+$/.test(lifecycleAlarmTopicArn ?? '')
+    ) {
+      throw new Error('Lifecycle publishing requires a reviewed staging alarm topic');
+    }
 
     // floci's UpdateFunction returns no ETag, so publishing an updated CloudFront
     // Function fails. floci never runs them, so local deploys leave them unpublished.
@@ -230,6 +248,32 @@ export default $config({
         },
       },
     });
+
+    // Only committed signup outcomes enter this separate outbox. The writer
+    // link grants PutItem, never deletion, mutation or reads of history.
+    const lifecycleOutbox = lifecyclePublisherEnabled
+      ? new sst.aws.Dynamo('LifecycleOutbox', {
+          fields: { event_id: 'string' },
+          primaryIndex: { hashKey: 'event_id' },
+          ttl: 'expires_at',
+          stream: 'new-image',
+          transform: {
+            table: {
+              pointInTimeRecovery: { enabled: true },
+              deletionProtectionEnabled: true,
+              serverSideEncryption: { enabled: true },
+            },
+          },
+        })
+      : undefined;
+    const lifecycleOutboxWriter = lifecycleOutbox
+      ? new sst.Linkable('LifecycleOutboxWriter', {
+          properties: { name: lifecycleOutbox.name },
+          include: [
+            sst.aws.permission({ actions: ['dynamodb:PutItem'], resources: [lifecycleOutbox.arn] }),
+          ],
+        })
+      : undefined;
 
     // How everything reaches AuditTable: the table's name, and the two actions
     // an append-only log needs. Linking the Dynamo component directly would
@@ -776,6 +820,7 @@ export default $config({
       bulkDeleteTable,
       orgTable,
       auditLog,
+      ...(lifecycleOutboxWriter ? [lifecycleOutboxWriter] : []),
       userFilesBucket,
       ragVectorBucket,
       auth0ClientId,
@@ -792,6 +837,9 @@ export default $config({
       FILONE_STAGE: $app.stage,
       AUTH0_DOMAIN: auth0Domain,
       AUTH0_AUDIENCE: isProduction ? 'https://app.fil.one' : 'https://staging.fil.one',
+      ...(lifecycleOutbox && lifecycleCaptureEnabled
+        ? { FILONE_LIFECYCLE_OUTBOX_TABLE: lifecycleOutbox.name }
+        : {}),
     };
 
     if (isProduction) {
@@ -889,6 +937,152 @@ export default $config({
 
     const createFn = (fnName: string, args: Omit<sst.aws.FunctionArgs, 'name'>) =>
       createFunction(fnName, args, { firehose, cwToFirehoseRole });
+
+    let lifecycleProducerRoleArn: $util.Output<string> | undefined;
+    if (lifecycleOutbox) {
+      const failureArchive = new aws.s3.Bucket('LifecycleFailureArchive', { forceDestroy: false });
+      new aws.s3.BucketPublicAccessBlock('LifecycleFailureArchivePublicBlock', {
+        bucket: failureArchive.id,
+        blockPublicAcls: true,
+        blockPublicPolicy: true,
+        ignorePublicAcls: true,
+        restrictPublicBuckets: true,
+      });
+      new aws.s3.BucketServerSideEncryptionConfigurationV2('LifecycleFailureArchiveEncryption', {
+        bucket: failureArchive.id,
+        rules: [{ applyServerSideEncryptionByDefault: { sseAlgorithm: 'AES256' } }],
+      });
+      new aws.s3.BucketLifecycleConfigurationV2('LifecycleFailureArchiveRetention', {
+        bucket: failureArchive.id,
+        rules: [
+          {
+            id: 'expire-failed-deliveries',
+            status: 'Enabled',
+            filter: { prefix: '' },
+            expiration: { days: 14 },
+          },
+        ],
+      });
+      new aws.s3.BucketPolicy('LifecycleFailureArchiveTls', {
+        bucket: failureArchive.id,
+        policy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Deny',
+              Principal: '*',
+              Action: 's3:*',
+              Resource: [failureArchive.arn, $interpolate`${failureArchive.arn}/*`],
+              Condition: { Bool: { 'aws:SecureTransport': 'false' } },
+            },
+          ],
+        }),
+      });
+      const brokerBusArn =
+        'arn:aws:events:us-east-1:654654381893:event-bus/s3-auditbroker-lifecycle';
+      const publisher = createFn('LifecyclePublisher', {
+        runtime: 'python3.12',
+        bundle: 'packages/lifecycle-publisher',
+        handler: 'handler.handler',
+        timeout: '30 seconds',
+        environment: {
+          LIFECYCLE_BUS_ARN: brokerBusArn,
+          LIFECYCLE_BROKER_REGION: 'us-east-1',
+          FILONE_STAGE: stage,
+        },
+        permissions: [
+          {
+            actions: [
+              'dynamodb:GetRecords',
+              'dynamodb:GetShardIterator',
+              'dynamodb:DescribeStream',
+            ],
+            resources: [lifecycleOutbox.nodes.table.streamArn],
+          },
+          // ListStreams has no resource-level authorization in the DynamoDB
+          // service authorization reference. Record reads remain stream-scoped.
+          { actions: ['dynamodb:ListStreams'], resources: ['*'] },
+        ],
+      });
+      // Bound source, destination and bucket owner prevent permission reuse.
+      const publisherPolicy = new aws.iam.RolePolicy('LifecyclePublisherDelivery', {
+        role: publisher.nodes.role.name,
+        policy: $jsonStringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Action: 'events:PutEvents',
+              Resource: brokerBusArn,
+              Condition: {
+                StringEquals: {
+                  'events:source': 'filone.identity',
+                  'events:detail-type': 'filone.lifecycle.v1',
+                },
+              },
+            },
+            {
+              Effect: 'Allow',
+              Action: 's3:ListBucket',
+              Resource: failureArchive.arn,
+              Condition: { StringEquals: { 's3:ResourceAccount': '654654381893' } },
+            },
+            {
+              Effect: 'Allow',
+              Action: 's3:PutObject',
+              Resource: $interpolate`${failureArchive.arn}/*`,
+              Condition: { StringEquals: { 's3:ResourceAccount': '654654381893' } },
+            },
+          ],
+        }),
+      });
+      new aws.lambda.EventSourceMapping(
+        'LifecycleOutboxDelivery',
+        {
+          eventSourceArn: lifecycleOutbox.nodes.table.streamArn,
+          functionName: publisher.arn,
+          startingPosition: 'TRIM_HORIZON',
+          batchSize: 10,
+          bisectBatchOnFunctionError: true,
+          functionResponseTypes: ['ReportBatchItemFailures'],
+          maximumRecordAgeInSeconds: 23 * 3600,
+          maximumRetryAttempts: 10,
+          filterCriteria: { filters: [{ pattern: JSON.stringify({ eventName: ['INSERT'] }) }] },
+          destinationConfig: { onFailure: { destinationArn: failureArchive.arn } },
+        },
+        { dependsOn: [publisherPolicy] },
+      );
+      for (const [metricName, threshold] of [
+        ['IteratorAge', 60000],
+        ['DestinationDeliveryFailures', 0],
+      ] as const) {
+        new aws.cloudwatch.MetricAlarm(`Lifecycle${metricName}`, {
+          namespace: 'AWS/Lambda',
+          metricName,
+          dimensions: { FunctionName: publisher.name },
+          statistic: metricName === 'IteratorAge' ? 'Maximum' : 'Sum',
+          period: 60,
+          evaluationPeriods: 1,
+          comparisonOperator: 'GreaterThanThreshold',
+          threshold,
+          treatMissingData: 'notBreaching',
+          alarmActions: [lifecycleAlarmTopicArn!],
+        });
+      }
+      new aws.cloudwatch.MetricAlarm('LifecyclePublishFailures', {
+        namespace: 'FilOne/Lifecycle',
+        metricName: 'PublishFailures',
+        dimensions: { Stage: stage },
+        statistic: 'Sum',
+        period: 60,
+        evaluationPeriods: 1,
+        comparisonOperator: 'GreaterThanThreshold',
+        threshold: 0,
+        treatMissingData: 'notBreaching',
+        alarmActions: [lifecycleAlarmTopicArn!],
+      });
+      lifecycleProducerRoleArn = publisher.nodes.role.arn;
+    }
 
     interface AddRouteProps {
       method: string;
@@ -2032,6 +2226,7 @@ export default $config({
       ...(isLocal ? { apiUrl: api.url } : {}),
       ...(s3abBillingReadRoleArn ? { s3abBillingReadRoleArn } : {}),
       ...(s3abRespondRoleArn ? { s3abRespondRoleArn } : {}),
+      ...(lifecycleProducerRoleArn ? { lifecycleProducerRoleArn } : {}),
     };
   },
 });
